@@ -2,11 +2,11 @@ use std::{cell::Cell, collections::HashSet, ops::Range, rc::Rc, sync::Arc, time:
 
 use gpui::{
     Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Hsla, ImageSource,
-    KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton, MouseDownEvent,
-    MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render, ScrollDelta,
-    ScrollWheelEvent, Subscription, Task, TextInputAction, TextInputConfiguration, UTF16Selection,
-    Window, anchored, canvas, deferred, div, img, point, prelude::*, px,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Font, Hsla,
+    ImageSource, KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
+    ScrollDelta, ScrollWheelEvent, Subscription, Task, TextInputAction, TextInputConfiguration,
+    UTF16Selection, Window, anchored, canvas, deferred, div, img, prelude::*, px,
 };
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
@@ -111,6 +111,15 @@ fn localize_font_stack(families: &mut Vec<String>, source: AppearanceSource, ava
     }
 }
 
+#[derive(Clone)]
+pub(crate) struct TerminalText {
+    pub origin: Point<Pixels>,
+    pub line_height: Pixels,
+    pub rows: u16,
+    pub font: Font,
+    pub font_size: Pixels,
+}
+
 pub struct TerminalPane {
     pane: PaneId,
     connection: Entity<Connection>,
@@ -120,6 +129,7 @@ pub struct TerminalPane {
     surface_bounds: Bounds<Pixels>,
     cell_width: Pixels,
     line_height: Pixels,
+    text_font: Option<(Font, Pixels)>,
     scale: f32,
     force_local_selection: bool,
     font_delta: f32,
@@ -127,7 +137,9 @@ pub struct TerminalPane {
     text_opacity: f32,
     pane_status: (Option<String>, bool, bool),
     corner_radii: Corners<Pixels>,
+    rows_above: bool,
     resize_suppressed: Rc<Cell<bool>>,
+    extra_height: Pixels,
     content_offset: Pixels,
     scroll_rows: f32,
     scroll: LocalScrollState,
@@ -175,9 +187,18 @@ impl TerminalPane {
             &connection,
             move |this, connection, event: &CoreEvent, cx| match event {
                 CoreEvent::ViewportChanged { pane: changed, .. } if *changed == pane => {
-                    if let Some(retained) = connection.read(cx).core.retained_viewport(pane) {
-                        this.scroll
-                            .observe(retained, false, zz_ui::compact::Instant::now());
+                    let restore =
+                        connection
+                            .read(cx)
+                            .core
+                            .retained_viewport(pane)
+                            .and_then(|retained| {
+                                this.scroll
+                                    .observe(retained, false, zz_ui::compact::Instant::now())
+                                    .restore
+                            });
+                    if let Some(target) = restore {
+                        this.view(TerminalViewAction::ScrollToOffset(target), cx);
                     }
                     cx.notify();
                 }
@@ -250,6 +271,7 @@ impl TerminalPane {
             surface_bounds: Bounds::default(),
             cell_width: px(8.),
             line_height: px(18.),
+            text_font: None,
             scale: 1.0,
             force_local_selection: false,
             font_delta: 0.,
@@ -257,7 +279,9 @@ impl TerminalPane {
             text_opacity: 1.0,
             pane_status: (None, false, false),
             corner_radii: Corners::default(),
+            rows_above: false,
             resize_suppressed: Rc::default(),
+            extra_height: Pixels::ZERO,
             content_offset: Pixels::ZERO,
             scroll_rows: 0.,
             scroll: LocalScrollState::default(),
@@ -343,6 +367,48 @@ impl TerminalPane {
     pub(crate) fn set_corner_radii(&mut self, radii: Corners<Pixels>, cx: &mut Context<Self>) {
         if self.corner_radii != radii {
             self.corner_radii = radii;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn text(&self) -> Option<TerminalText> {
+        let (font, font_size) = self.text_font.clone()?;
+        let (grid, _) = self.geometry?;
+        Some(TerminalText {
+            origin: self.bounds.origin,
+            line_height: self.line_height,
+            rows: grid.rows,
+            font,
+            font_size,
+        })
+    }
+
+    pub(crate) fn set_rows_above(&mut self, rows_above: bool, cx: &mut Context<Self>) {
+        if self.rows_above != rows_above {
+            self.rows_above = rows_above;
+            cx.notify();
+        }
+    }
+
+    pub(crate) fn rows_above_shown(&self, cx: &App) -> bool {
+        self.rows_above
+            && (self.overscroll.is_stretched()
+                || self.scroll.target().is_some()
+                || self.scroll.sub_row() > 0.0
+                || self
+                    .viewport(&self.connection.read(cx).core)
+                    .is_some_and(|viewport| {
+                        viewport
+                            .scrollbar
+                            .offset
+                            .saturating_add(viewport.scrollbar.len)
+                            < viewport.scrollbar.total
+                    }))
+    }
+
+    pub(crate) fn set_extra_height(&mut self, height: Pixels, cx: &mut Context<Self>) {
+        if self.extra_height != height {
+            self.extra_height = height;
             cx.notify();
         }
     }
@@ -1315,14 +1381,20 @@ impl TerminalPane {
 
     fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
         let delta = event.delta.pixel_delta(self.line_height);
-        let local = matches!(event.delta, ScrollDelta::Pixels(_))
-            && delta.y != Pixels::ZERO
-            && self.local_retained(cx).is_some();
+        let pixels = matches!(event.delta, ScrollDelta::Pixels(_));
+        let local = pixels && self.local_retained(cx).is_some();
         let stretched = self.overscroll.is_stretched();
+        let moved = delta.y != Pixels::ZERO;
         let delta = self.overscroll(delta.y, event.touch_phase, local, window, cx);
         if stretched || self.overscroll.is_stretched() {
             cx.notify();
             cx.stop_propagation();
+        }
+        if pixels && delta == Pixels::ZERO {
+            if moved {
+                cx.stop_propagation();
+            }
+            return;
         }
         if local && self.scroll_by_pixels(delta, cx) {
             self.scroll_rows = 0.;
@@ -1379,10 +1451,9 @@ impl TerminalPane {
         if self.overscroll.is_animating() {
             window.request_animation_frame();
         }
-        let shifted = Bounds::new(
-            bounds.origin + point(Pixels::ZERO, displacement),
-            bounds.size,
-        );
+        let rows_above = self
+            .rows_above_shown(cx)
+            .then(|| window.content_mask().bounds.origin.y);
         let connection = self.connection.clone();
         let (paint, attached, layout_generation) = connection.update(cx, |connection, cx| {
             for image in connection.take_retired_terminal_images() {
@@ -1416,6 +1487,8 @@ impl TerminalPane {
                     },
                     local_scroll_target: self.scroll.target(),
                     scroll_pixel_offset: px(self.scroll.sub_row()),
+                    overscroll: displacement,
+                    extra_height: self.extra_height,
                     command_output: self.surface == TerminalSurface::CommandOutput,
                     appearance: &appearance,
                     appearance_hash: appearance.stable_hash(),
@@ -1427,8 +1500,9 @@ impl TerminalPane {
                         .is_none()
                         .then_some(self.marked_text.as_deref())
                         .flatten(),
+                    rows_above,
                 },
-                shifted,
+                bounds,
                 window,
                 cx,
             );
@@ -1800,6 +1874,7 @@ impl Render for TerminalPane {
         );
         let font = terminal_font_for_style(&appearance, &cx.theme().mono_font_family, false, false);
         let font_size = px((appearance.font_size_points + self.font_delta).clamp(7., 48.));
+        self.text_font = Some((font.clone(), font_size));
         let prepare = cx.entity();
         let paint = cx.entity();
         let mut mode = None;
@@ -1837,7 +1912,7 @@ impl Render for TerminalPane {
             .id(("terminal", self.pane.0))
             .relative()
             .size_full()
-            .overflow_hidden()
+            .when(!self.rows_above, Styled::overflow_hidden)
             .bg(self.pane_background(cx))
             .rounded_bl(self.corner_radii.bottom_left)
             .rounded_br(self.corner_radii.bottom_right)

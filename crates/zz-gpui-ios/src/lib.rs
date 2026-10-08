@@ -25,7 +25,7 @@ pub use menu::MenuCommand;
 pub use platform::IosPlatform;
 pub(crate) use window::*;
 pub use window::{
-    Accessibility, accessibility, request_paste, set_compact_keyboard, set_number_pad,
+    Accessibility, accessibility, request_paste, set_compact_keyboard, set_status_bar_on_dark,
     show_edit_menu,
 };
 

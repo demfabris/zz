@@ -1,7 +1,4 @@
-use gpui::{
-    AnyElement, App, Div, ParentElement as _, Pixels, SharedString, Styled as _, div,
-    linear_color_stop, linear_gradient, prelude::*,
-};
+use gpui::{AnyElement, App, Div, ParentElement as _, SharedString, Styled as _, div, prelude::*};
 
 use crate::{ActiveTheme as _, Colorize as _, Icon, IconName, rems_from_px};
 
@@ -10,7 +7,6 @@ pub const COMPACT_PANE_HEADER_HEIGHT: f32 = 36.0;
 const PADDING_X: f32 = 12.0;
 const ACTIONS_RIGHT: f32 = 6.0;
 const ACTION_SLOT: f32 = 28.0;
-const SHADE_ALPHA: f32 = 0.6;
 
 pub fn compact_pane_header(
     icon: IconName,
@@ -70,20 +66,4 @@ pub fn compact_pane_header(
                     .children(actions),
             )
         })
-}
-
-pub fn top_shade(height: Pixels, cx: &App) -> Div {
-    let shade = cx.theme().background.opaque();
-    div()
-        .debug_selector(|| "compact-top-shade".to_owned())
-        .absolute()
-        .top_0()
-        .left_0()
-        .right_0()
-        .h(height)
-        .bg(linear_gradient(
-            180.0,
-            linear_color_stop(shade.alpha(SHADE_ALPHA), 0.0),
-            linear_color_stop(shade.alpha(0.0), 1.0),
-        ))
 }

@@ -11,8 +11,8 @@ pub use press::{PressFeedback, instant_press_highlight, press_feedback, press_hi
 
 pub const TOUCH_TARGET: f32 = 44.0;
 
-/// iOS body text is 17 points where the desktop chrome sets 13 pixels.
-pub const TOUCH_TYPE_SCALE: f32 = 17.0 / 13.0;
+/// Phone chrome reads at 15 points where the desktop sets 13 pixels.
+pub const TOUCH_TYPE_SCALE: f32 = 15.0 / 13.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct CoarsePointer(pub bool);

@@ -167,7 +167,7 @@ pub fn ui_font_select(
         .chain(
             families
                 .into_iter()
-                .map(|family| SettingsSelectItem::new(family.clone(), family)),
+                .map(|family| SettingsSelectItem::new(family.clone(), family).preview_font()),
         )
         .collect();
     let selected = selected.unwrap_or_default();
@@ -349,29 +349,32 @@ impl RenderOnce for PickerStrip {
             )
             .child(edge());
 
+        let coarse = crate::touch::CoarsePointer::get(cx);
         div()
             .flex()
             .flex_col()
             .mx(px(-STRIP_INSET))
-            .mb(px(-8.0))
+            .when(!coarse, |strip| strip.mb(px(-8.0)))
             .child(
                 div()
                     .relative()
                     .child(tiles)
                     .child(crate::compact::yield_back_swipe((id, 3usize), &scroll)),
             )
-            .child(
-                div()
-                    .relative()
-                    .flex_none()
-                    .h(GUTTER_WIDTH)
-                    .mx(px(STRIP_INSET))
-                    .child(
-                        Scrollbar::horizontal(&scroll)
-                            .id((id, 2usize))
-                            .scrollbar_show(ScrollbarShow::Always),
-                    ),
-            )
+            .when(!coarse, |strip| {
+                strip.child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .h(GUTTER_WIDTH)
+                        .mx(px(STRIP_INSET))
+                        .child(
+                            Scrollbar::horizontal(&scroll)
+                                .id((id, 2usize))
+                                .scrollbar_show(ScrollbarShow::Always),
+                        ),
+                )
+            })
     }
 }
 

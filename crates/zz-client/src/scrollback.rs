@@ -638,13 +638,23 @@ impl HistoryPacer {
         }
     }
 
-    pub fn is_deferred(&self, pane: PaneId) -> bool {
-        self.deferred.contains_key(&pane)
+    pub fn pending(&self, pane: PaneId) -> Option<Option<u32>> {
+        self.pending
+            .get(&pane)
+            .map(|request| request.prefetch_target)
+    }
+
+    pub fn deferred(&self, pane: PaneId) -> Option<u64> {
+        self.deferred.get(&pane).copied()
     }
 
     pub fn forget(&mut self, pane: PaneId) {
         self.pending.remove(&pane);
         self.deferred.remove(&pane);
+    }
+
+    pub fn clear_deferred(&mut self) {
+        self.deferred.clear();
     }
 
     pub fn clear(&mut self) {
@@ -1340,10 +1350,12 @@ mod tests {
             pacer.request(pane, Some(1_199), 600, Some(&retained), started),
             None
         );
+        assert_eq!(pacer.pending(pane), Some(Some(1_199)));
         assert_eq!(
             pacer.chunk_arrived(pane, Some(mutations)),
             (true, HistoryFollowUp::Prefetch(1_199))
         );
+        assert_eq!(pacer.pending(pane), None);
 
         assert_eq!(
             pacer.request(pane, None, 600, Some(&retained), started),
@@ -1365,6 +1377,7 @@ mod tests {
         );
         assert!(pacer.defer(pane, mutations + 1));
         assert!(!pacer.defer(pane, mutations + 1));
+        assert_eq!(pacer.deferred(pane), Some(mutations + 1));
         assert_eq!(
             pacer.request(pane, None, 600, Some(&retained), started),
             None
@@ -1381,13 +1394,48 @@ mod tests {
             pacer.resume_deferred(pane, Some(mutations + 2)),
             DeferredBackfill::Request
         );
-        assert!(!pacer.is_deferred(pane));
+        assert_eq!(pacer.deferred(pane), None);
         assert_eq!(
             pacer.chunk_arrived(PaneId(8), Some(mutations)),
             (false, HistoryFollowUp::Backfill)
         );
         pacer.clear();
         assert_eq!(pacer.request(pane, None, 0, Some(&retained), started), None);
+    }
+
+    #[test]
+    fn clearing_deferrals_releases_backfill_and_keeps_requests_in_flight() {
+        let pane = PaneId(7);
+        let other = PaneId(8);
+        let mut next_revision = 1;
+        let retained = new_retained_viewport(
+            history_fixture_viewport(&[1_200, 1_201, 1_202], 1, 1_203, 1_200),
+            &mut next_revision,
+        );
+        let started = Instant::now();
+        let mut pacer = HistoryPacer::default();
+        assert_eq!(
+            pacer.request(other, None, 600, Some(&retained), started),
+            Some((688, 512))
+        );
+        assert!(pacer.defer(pane, 3));
+        assert_eq!(
+            pacer.request(pane, None, 600, Some(&retained), started),
+            None
+        );
+
+        pacer.clear_deferred();
+        assert_eq!(pacer.deferred(pane), None);
+        assert_eq!(pacer.resume_deferred(pane, Some(3)), DeferredBackfill::Done);
+        assert_eq!(
+            pacer.request(pane, None, 600, Some(&retained), started),
+            Some((688, 512))
+        );
+        assert_eq!(pacer.pending(other), Some(None));
+        assert_eq!(
+            pacer.request(other, None, 600, Some(&retained), started),
+            None
+        );
     }
 
     #[test]

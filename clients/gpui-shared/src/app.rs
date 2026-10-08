@@ -448,6 +448,15 @@ impl AppShell {
     }
 
     fn toggle_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.compact_active(window, cx) {
+            if self.compact.overview {
+                let current = self.active_window(cx).map(|window| window.active_pane);
+                self.land_overview(current, cx);
+            } else {
+                self.open_overview(cx);
+            }
+            return;
+        }
         if Self::narrow(window) {
             if self.slideover {
                 self.release_sidebar_focus(window, cx);
@@ -465,6 +474,11 @@ impl AppShell {
     }
 
     fn focus_sidebar(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if Self::narrow(window) && self.active_window(cx).is_some() {
+            self.settings = None;
+            self.open_overview(cx);
+            return;
+        }
         self.slideover = !self.inline_sidebar(window);
         self.settings = None;
         self.focused_pane = self.active_window(cx).map(|window| window.active_pane);
@@ -1122,6 +1136,36 @@ impl AppShell {
             .clone()
     }
 
+    fn pane_terminal(
+        &mut self,
+        pane: PaneId,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Entity<TerminalPane> {
+        let core = &self.connection.read(cx).core;
+        let Some(id) = core.command_output_id().filter(|_| {
+            core.command_output()
+                .is_some_and(|(output, _)| output == pane)
+        }) else {
+            return self.terminal_entity(pane, cx);
+        };
+        if self
+            .output_terminal
+            .as_ref()
+            .is_none_or(|(previous, _)| *previous != id)
+        {
+            let connection = self.connection.clone();
+            let terminal = cx.new(|cx| TerminalPane::new_command_output(pane, connection, cx));
+            terminal.read(cx).focus_handle(cx).focus(window, cx);
+            self.output_terminal = Some((id, terminal));
+        }
+        self.output_terminal
+            .as_ref()
+            .expect("command output terminal")
+            .1
+            .clone()
+    }
+
     fn agent_entity(
         &mut self,
         pane: PaneId,
@@ -1592,30 +1636,7 @@ impl AppShell {
             });
             let content = match &pane.kind {
                 PaneKindSnapshot::Terminal => {
-                    let terminal = if let Some(id) = output
-                        .filter(|(_, pane)| *pane == pane_id)
-                        .map(|(id, _)| id)
-                    {
-                        if self
-                            .output_terminal
-                            .as_ref()
-                            .is_none_or(|(previous, _)| *previous != id)
-                        {
-                            let connection = self.connection.clone();
-                            let terminal = cx.new(|cx| {
-                                TerminalPane::new_command_output(pane_id, connection, cx)
-                            });
-                            terminal.read(cx).focus_handle(cx).focus(window, cx);
-                            self.output_terminal = Some((id, terminal));
-                        }
-                        self.output_terminal
-                            .as_ref()
-                            .expect("command output terminal")
-                            .1
-                            .clone()
-                    } else {
-                        self.terminal_entity(pane_id, cx)
-                    };
+                    let terminal = self.pane_terminal(pane_id, window, cx);
                     if can_focus
                         && pane_id == active_window.active_pane
                         && self.focused_pane != Some(pane_id)
@@ -1643,6 +1664,7 @@ impl AppShell {
                             },
                             cx,
                         );
+                        terminal.set_rows_above(false, cx);
                     });
                     terminal.clone().into_any_element()
                 }
@@ -2790,8 +2812,14 @@ impl Render for AppShell {
         } else {
             div().into_any_element()
         };
-        let titlebar = (!compact && self.settings.is_none() && !self.inline_sidebar(window))
-            .then(|| self.status_bar(window, cx));
+        let connect_screen = Self::narrow(window)
+            && !self.connection.read(cx).connected
+            && self.active_window(cx).is_none();
+        let titlebar = (!compact
+            && !connect_screen
+            && self.settings.is_none()
+            && !self.inline_sidebar(window))
+        .then(|| self.status_bar(window, cx));
         let workspace = (!compact).then(|| self.workspace(window, cx));
         #[cfg(target_os = "ios")]
         {

@@ -57499,6 +57499,12 @@ mod tests {
             assert!(Instant::now() < deadline, "the fixture title did not sync");
             thread::sleep(Duration::from_millis(5));
         }
+        wait_for_viewport(
+            &Arc::clone(&shared.inner.lock().terminals[&pane]),
+            TerminalViewId(client.0),
+            "the modal client's view never rendered",
+            |_| true,
+        );
         shared.refresh_status();
         let focus_state = || {
             let inner = shared.inner.lock();
@@ -115194,6 +115200,12 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(cleared_message_ids(&take_reliable_messages(&first_mailbox)).is_empty());
         assert!(first_mailbox.state.lock().terminals.is_empty());
 
+        wait_for_viewport(
+            &Arc::clone(&shared.inner.lock().terminals[&first]),
+            TerminalViewId(first_client.0),
+            "the first client's view never rendered",
+            |_| true,
+        );
         let live = ClientMessageDeadline {
             client: first_client,
             token: first_record.token,

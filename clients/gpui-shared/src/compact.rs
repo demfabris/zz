@@ -1,20 +1,27 @@
-use std::{collections::BTreeSet, sync::Arc, time::Duration};
+use std::{
+    cell::RefCell,
+    collections::{BTreeMap, BTreeSet},
+    rc::Rc,
+    sync::Arc,
+    time::Duration,
+};
 
 use gpui::{
-    AnyElement, App, Context, Corners, Entity, Focusable as _, IntoElement, Keystroke,
-    ParentElement as _, PinchEvent, Pixels, ScrollDelta, ScrollWheelEvent, SharedString, Stateful,
-    Styled as _, Subscription, TouchPhase, Window, div, prelude::*, px,
+    AnyElement, App, Bounds, Context, Corners, Entity, Focusable as _, IntoElement, Keystroke,
+    ParentElement as _, PinchEvent, Pixels, ScrollDelta, ScrollHandle, ScrollWheelEvent,
+    SharedString, Stateful, Styled as _, Subscription, TouchPhase, Window, div, linear_color_stop,
+    linear_gradient, prelude::*, px,
 };
 use zz_client::StatusBarModel;
 use zz_protocol::{InputMessage, PaneId, PaneKindSnapshot, WindowId};
 use zz_terminal::KeyAction;
 use zz_ui::{
-    ActiveTheme as _, IconName,
+    ActiveTheme as _, Colorize as _, IconName,
     compact::{
-        ArrowPadEvent, COMPACT_BAR_HEIGHT, Instant, KEY_ROW_HEIGHT, KeyRow, PageDot, Pager,
-        PagerEvent, PopoverKey, PopoverKeyEvent, PopoverKeyItem, ToolKeys, WhichKeyList,
-        bottom_sheet, compact_bar, compact_bar_button, compact_bar_title, compact_hud,
-        compact_pane_header, page_dots, top_shade,
+        ArrowPadEvent, COMPACT_BAR_HEIGHT, COMPACT_PANE_HEADER_HEIGHT, Instant, KEY_ROW_HEIGHT,
+        KeyRow, Lift, LiftEvent, PageDot, Pager, PagerEvent, PopoverKey, PopoverKeyEvent,
+        PopoverKeyItem, ToolKeys, WhichKeyList, bottom_sheet, compact_bar, compact_bar_button,
+        compact_bar_pill, compact_hud, compact_pane_header, page_dots, swipe_back,
     },
     kbd::Kbd,
     pane::pane_header_icon_button,
@@ -22,13 +29,21 @@ use zz_ui::{
     which_key::{WhichKeyCap, WhichKeyRow},
 };
 
-use super::{AppShell, sidebar};
-use crate::terminal::TerminalDisplayPreferences;
+use super::AppShell;
+use crate::terminal::{TerminalDisplayPreferences, TerminalText};
+
+#[path = "overview.rs"]
+mod overview;
 
 const PAGE_GAP: f32 = 12.0;
+const SCRIM_ALPHA: f32 = 0.8;
+const SCRIM_FADE: f32 = 12.0;
 const CARD_RADIUS: f32 = 22.0;
 const PINCH_STEPS: f32 = 20.0;
 const SCALE_HUD_LINGER: Duration = Duration::from_secs(1);
+const LANDING_WAIT: Duration = Duration::from_secs(1);
+const BAR_DROP: f32 = 15.0;
+const BAR_FADE: f32 = 2.2;
 
 const NEW_PANE: &str = "new-pane";
 const NEW_WINDOW: &str = "new-window";
@@ -53,6 +68,16 @@ pub(super) struct CompactState {
     safe_bottom: Pixels,
     keyboard_overlap: Pixels,
     keyboard_moving: bool,
+    extra_height: Pixels,
+    pub(super) overview: bool,
+    sessions: bool,
+    overview_reveal: bool,
+    overview_scroll: ScrollHandle,
+    overview_rows: BTreeMap<WindowId, ScrollHandle>,
+    lift: Lift,
+    landing: Option<(PaneId, Instant)>,
+    cards: Rc<RefCell<BTreeMap<PaneId, Bounds<Pixels>>>>,
+    text: Option<TerminalText>,
 }
 
 impl CompactState {
@@ -62,6 +87,7 @@ impl CompactState {
         self.last_current = None;
         self.previous = None;
         self.bindings = false;
+        self.sessions = false;
     }
 }
 
@@ -230,6 +256,10 @@ fn key_row_lift(safe_bottom: Pixels, bar: Pixels, overlap: Pixels) -> Pixels {
     (safe_bottom + bar - px(KEY_ROW_HEIGHT) - overlap).max(px(0.0))
 }
 
+fn key_row_top(safe_bottom: Pixels, bar: Pixels, overlap: Pixels) -> Pixels {
+    px(KEY_ROW_HEIGHT) + key_row_lift(safe_bottom, bar, overlap) + overlap
+}
+
 pub(super) fn keyboard_visible(window: &Window) -> bool {
     window.visual_viewport_bounds().size.height + px(1.0) < window.viewport_size().height
 }
@@ -254,7 +284,7 @@ fn binding_rows(core: &zz_client::ClientCore, prefix: &str) -> Arc<[WhichKeyRow]
         raw: keys.join(" ").into(),
         yours,
     };
-    zz_client::which_key::rows(core.key_tables(), "prefix", prefix)
+    zz_client::which_key::action_rows(core.key_tables(), "prefix", prefix)
         .into_iter()
         .filter(|row| tmux_keystroke(row.first_key()).is_some())
         .map(|row| WhichKeyRow {
@@ -297,6 +327,8 @@ impl AppShell {
             zz_gpui_ios::set_compact_keyboard(compact);
         }
         if !compact {
+            #[cfg(target_os = "ios")]
+            zz_gpui_ios::set_status_bar_on_dark(None);
             zz_ui::compact::StickyModifiers::take(cx);
             if self.compact.pinch.take().is_some() {
                 self.terminal_resize_suppressed.set(false);
@@ -306,19 +338,25 @@ impl AppShell {
     }
 
     pub(super) fn sync_keyboard_motion(&mut self, window: &mut Window) {
-        let overlap = window.viewport_size().height - window.visual_viewport_bounds().bottom();
-        if self.compact.keyboard_overlap != overlap {
+        let height = window.viewport_size().height;
+        let overlap = height - window.visual_viewport_bounds().bottom();
+        let closing = height - window.target_visual_viewport_bounds().bottom() < overlap;
+        let moved = self.compact.keyboard_overlap != overlap;
+        if moved {
             self.compact.keyboard_overlap = overlap;
-            self.compact.keyboard_moving = true;
-            self.terminal_resize_suppressed.set(true);
             window.request_animation_frame();
-        } else if std::mem::take(&mut self.compact.keyboard_moving)
+        }
+        let holding = moved && !closing;
+        if holding {
+            self.terminal_resize_suppressed.set(true);
+        } else if self.compact.keyboard_moving
             && self.split_drag.is_none()
             && self.compact.pinch.is_none()
             && !self.compact.pager.is_moving()
         {
             self.terminal_resize_suppressed.set(false);
         }
+        self.compact.keyboard_moving = holding;
     }
 
     fn compact_select(&mut self, page: &Page, cx: &mut Context<Self>) {
@@ -420,30 +458,17 @@ impl AppShell {
                 self.command("split-window", args, cx);
             }
             NEW_WINDOW => self.command("new-window", here(), cx),
-            RENAME_PANE => {
-                let title = self
-                    .connection
-                    .read(cx)
-                    .core
-                    .snapshot()
-                    .sessions
-                    .iter()
-                    .flat_map(|session| &session.windows)
-                    .find_map(|window| window.panes.get(&pane))
-                    .map(|pane| pane.title.clone())
-                    .unwrap_or_default();
-                self.command(
-                    "command-prompt",
-                    vec![
-                        "-I".into(),
-                        title,
-                        "-p".into(),
-                        "rename pane:".into(),
-                        format!("select-pane -t {target} -T '%%'"),
-                    ],
-                    cx,
-                );
-            }
+            RENAME_PANE => self.command(
+                "command-prompt",
+                vec![
+                    "-I".into(),
+                    "#{pane_title}".into(),
+                    "-p".into(),
+                    "rename pane:".into(),
+                    format!("select-pane -t {target} -T '%%'"),
+                ],
+                cx,
+            ),
             LAST_PANE => {
                 let model = self.status_model(cx);
                 let (pages, _) = pages(&model, &self.unseen_agents);
@@ -611,14 +636,16 @@ impl AppShell {
                 .map_or_else(|| "Dead".to_owned(), |status| format!("Dead · {status}"))
         });
         let mut background = cx.theme().background;
+        let mut rows_above = false;
         let content = match &pane.kind {
             PaneKindSnapshot::Terminal => {
-                let terminal = self.terminal_entity(pane_id, cx);
+                let terminal = self.pane_terminal(pane_id, window, cx);
                 if can_focus && self.focused_pane != Some(pane_id) {
                     terminal.read(cx).focus_handle(cx).focus(window, cx);
                     self.focused_pane = Some(pane_id);
                 }
                 terminal.update(cx, |terminal, cx| {
+                    terminal.set_extra_height(self.compact.extra_height, cx);
                     terminal.set_text_dimmed(false, 1.0, cx);
                     terminal.set_pane_status(dead.clone(), pane.synchronized_input, false, cx);
                     terminal.set_corner_radii(
@@ -630,8 +657,16 @@ impl AppShell {
                         },
                         cx,
                     );
+                    terminal.set_rows_above(true, cx);
                 });
-                background = terminal.read(cx).pane_background(cx);
+                background = terminal.read(cx).pane_background(cx).opaque();
+                rows_above = terminal.read(cx).rows_above_shown(cx);
+                if current
+                    && !self.compact.pager.is_moving()
+                    && let Some(text) = terminal.read(cx).text()
+                {
+                    self.compact.text = Some(text);
+                }
                 terminal.into_any_element()
             }
             PaneKindSnapshot::Agent(descriptor) => {
@@ -703,6 +738,10 @@ impl AppShell {
         });
         let header = matches!(pane.kind, PaneKindSnapshot::Terminal)
             .then(|| compact_pane_header(kind_icon(&pane.kind), slot.title.clone(), actions, cx));
+        #[cfg(target_os = "ios")]
+        if current {
+            zz_gpui_ios::set_status_bar_on_dark(Some(background.l < 0.5));
+        }
         div()
             .size_full()
             .flex()
@@ -710,8 +749,36 @@ impl AppShell {
             .pt(top_inset)
             .bg(background)
             .rounded(radius)
-            .children(header)
+            .when(header.is_some(), |page| {
+                page.child(
+                    div()
+                        .flex_none()
+                        .h(rems_from_px(COMPACT_PANE_HEADER_HEIGHT)),
+                )
+            })
             .child(div().flex_1().min_h_0().min_w_0().child(content))
+            .children(header.map(|header| {
+                let bar = top_inset
+                    + rems_from_px(COMPACT_PANE_HEADER_HEIGHT).to_pixels(window.rem_size());
+                let scrim = cx.theme().background.opaque().blend(background);
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .pt(top_inset)
+                    .when(rows_above && bar > px(0.0), |overlay| {
+                        overlay.bg(linear_gradient(
+                            180.0,
+                            linear_color_stop(
+                                scrim.alpha(SCRIM_ALPHA),
+                                1.0 - SCRIM_FADE / f32::from(bar),
+                            ),
+                            linear_color_stop(scrim.alpha(0.0), 1.0),
+                        ))
+                    })
+                    .child(header)
+            }))
             .into_any_element()
     }
 
@@ -719,6 +786,7 @@ impl AppShell {
         let core = &self.connection.read(cx).core;
         self.prompt.is_none()
             && !self.slideover
+            && !self.compact_lifted()
             && !self.sidebar_focus.is_focused(window)
             && core.choose_tree().is_none()
             && core.choose_buffer().is_none()
@@ -729,9 +797,53 @@ impl AppShell {
             && core.command_output().is_none()
     }
 
+    fn compact_lifted(&self) -> bool {
+        self.compact.overview
+            || self.compact.lift.progress() > 0.0
+            || self.compact.lift.is_moving()
+            || self.compact.landing.is_some()
+    }
+
+    fn compact_lift_scroll(
+        &mut self,
+        event: &ScrollWheelEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let delta = event.delta.pixel_delta(window.line_height());
+        let response =
+            self.compact
+                .lift
+                .scroll(f32::from(delta.y), event.touch_phase, Instant::now());
+        if !response.consumed {
+            return;
+        }
+        cx.stop_propagation();
+        if response.started {
+            self.compact.landing = None;
+            self.compact.overview_reveal = true;
+        }
+        if let Some(event) = response.event {
+            window.end_touch_momentum();
+            self.compact.overview = event == LiftEvent::Open;
+        }
+        cx.notify();
+    }
+
     fn focus_current_pane(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let output = self
+            .connection
+            .read(cx)
+            .core
+            .command_output()
+            .map(|(pane, _)| pane);
         if let Some(pane) = self.active_window(cx).map(|window| window.active_pane)
-            && let Some(terminal) = self.terminals.get(&pane)
+            && let Some(terminal) = self
+                .output_terminal
+                .as_ref()
+                .filter(|_| output == Some(pane))
+                .map(|(_, terminal)| terminal)
+                .or_else(|| self.terminals.get(&pane))
         {
             terminal.read(cx).focus_handle(cx).focus(window, cx);
             self.focused_pane = Some(pane);
@@ -740,7 +852,7 @@ impl AppShell {
 
     #[cfg(target_os = "ios")]
     pub(super) fn compact_visible_panes(&self, cx: &App) -> BTreeSet<PaneId> {
-        if self.compact.pager.is_moving() {
+        if self.compact.pager.is_moving() || self.compact_lifted() {
             return BTreeSet::new();
         }
         self.active_window(cx)
@@ -768,6 +880,10 @@ impl AppShell {
         let width = f32::from(window.viewport_size().width);
         self.compact.width = width;
         self.compact.pager.sync(current, pages.len());
+        if cx.reduce_motion() {
+            self.compact.pager.finish();
+            self.compact.lift.finish();
+        }
         let animating = self.compact.pager.tick(Instant::now());
         let event = self.compact.pager.take_event();
         self.commit_page(event, cx);
@@ -790,23 +906,54 @@ impl AppShell {
         if safe_bottom > overlap || overlap <= px(0.0) {
             self.compact.safe_bottom = safe_bottom;
         }
+        let bar = rems_from_px(COMPACT_BAR_HEIGHT).to_pixels(window.rem_size()) + px(1.0);
+        self.compact.extra_height = if keyboard {
+            let rest =
+                window.viewport_size().height - window.target_visual_viewport_bounds().bottom();
+            (key_row_top(self.compact.safe_bottom, bar, overlap)
+                - key_row_top(self.compact.safe_bottom, bar, rest))
+            .max(px(0.0))
+        } else {
+            px(0.0)
+        };
+        let now = Instant::now();
+        if self.compact.lift.tick(now) {
+            window.request_animation_frame();
+        }
+        if let Some((target, since)) = self.compact.landing
+            && !self.compact.lift.is_moving()
+        {
+            if current_pane == Some(target) || now.saturating_duration_since(since) >= LANDING_WAIT
+            {
+                self.compact.landing = None;
+            } else {
+                window.request_animation_frame();
+            }
+        }
+        let progress = self.compact.lift.progress();
+        let open = self.compact.overview && !self.compact.lift.is_moving();
+        let lifting = !open
+            && (progress > 0.0 || self.compact.lift.is_moving() || self.compact.landing.is_some());
         let shown = self.compact.pager.index();
         let mut strip = Vec::new();
-        for (index, x) in layout.pages {
-            let Some(page) = pages.get(index).cloned() else {
-                continue;
-            };
-            let element = self.compact_page(&page, index == shown, motion, top_inset, window, cx);
-            strip.push(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left(px(x))
-                    .w(px(width))
-                    .child(element)
-                    .into_any_element(),
-            );
+        if !lifting {
+            for (index, x) in layout.pages {
+                let Some(page) = pages.get(index).cloned() else {
+                    continue;
+                };
+                let element =
+                    self.compact_page(&page, index == shown, motion, top_inset, window, cx);
+                strip.push(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .left(px(x))
+                        .w(px(width))
+                        .child(element)
+                        .into_any_element(),
+                );
+            }
         }
         let pager_area = div()
             .id("compact-pager")
@@ -815,22 +962,20 @@ impl AppShell {
             .min_h_0()
             .w_full()
             .overflow_hidden()
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
-                this.compact_scroll(event, window, cx);
-            }))
-            .on_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
-                if event.phase == TouchPhase::Started {
-                    this.compact_pinch(event, window, cx);
-                }
-            }))
-            .capture_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
-                if event.phase != TouchPhase::Started {
-                    this.compact_pinch(event, window, cx);
-                }
-            }))
-            .children(strip)
-            .child(top_shade(top_inset, cx))
-            .children(terminal_overlays)
+            .when(!lifting, |area| {
+                area.on_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
+                    if event.phase == TouchPhase::Started {
+                        this.compact_pinch(event, window, cx);
+                    }
+                }))
+                .capture_pinch(cx.listener(|this, event: &PinchEvent, window, cx| {
+                    if event.phase != TouchPhase::Started {
+                        this.compact_pinch(event, window, cx);
+                    }
+                }))
+                .children(strip)
+                .children(terminal_overlays)
+            })
             .when(
                 self.compact.pinch.is_some()
                     || self
@@ -848,23 +993,27 @@ impl AppShell {
             keys.clone().close(cx);
         }
         let bottom = if keyboard {
-            let bar = rems_from_px(COMPACT_BAR_HEIGHT).to_pixels(window.rem_size()) + px(1.0);
             let lift = key_row_lift(self.compact.safe_bottom, bar, overlap);
             self.compact_key_area(lift, window, cx)
         } else {
             let page = pages.get(shown);
             let groups = dot_groups(&pages, shown);
-            let title = compact_bar_title(
-                "compact-title",
+            let (meta, warning) = self.pill_meta(&model, page, cx);
+            let pill = compact_bar_pill(
+                "compact-pill",
                 page.map_or(IconName::SquareTerminal, |page| kind_icon(&page.kind)),
                 page.map(|page| page.title.clone()).unwrap_or_default(),
+                meta,
+                warning,
                 page_dots(&groups, cx),
                 cx,
             )
-            .on_click(cx.listener(|this, _, _, cx| this.tmux_command("choose-tree -w", cx)));
-            let tree = compact_bar_button("compact-tree", IconName::PanelsTopLeft)
-                .tooltip("Workspace")
-                .on_click(cx.listener(|this, _, window, cx| this.focus_sidebar(window, cx)));
+            .on_click(cx.listener(|this, _, _, cx| this.open_overview(cx)))
+            .on_scroll_wheel(cx.listener(
+                |this, event: &ScrollWheelEvent, window, cx| {
+                    this.compact_scroll(event, window, cx);
+                },
+            ));
             let keys = compact_bar_button("compact-keyboard", IconName::Keyboard)
                 .tooltip("Keyboard")
                 .on_click(cx.listener(|this, _, window, cx| {
@@ -872,33 +1021,72 @@ impl AppShell {
                     window.request_virtual_keyboard();
                     cx.notify();
                 }));
+            let zone = bar + safe_bottom;
+            let drop = if lifting { progress } else { 0.0 };
             div()
+                .id("compact-bar-zone")
+                .relative()
                 .flex_none()
                 .w_full()
-                .pb(safe_bottom)
-                .bg(cx.theme().background)
-                .border_t_1()
-                .border_color(cx.theme().border())
-                .child(compact_bar(tree, title, keys, cx))
+                .h(zone)
+                .on_scroll_wheel(cx.listener(Self::compact_lift_scroll))
+                .child(
+                    div()
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .top((zone + px(BAR_DROP)) * drop)
+                        .opacity((1.0 - drop.min(1.0) * BAR_FADE).max(0.0))
+                        .pb(safe_bottom)
+                        .bg(cx.theme().background)
+                        .border_t_1()
+                        .border_color(cx.theme().border())
+                        .child(compact_bar(pill, keys, self.compact.lift.is_dragging(), cx)),
+                )
                 .into_any_element()
         };
         let mut sheets = Vec::new();
-        if self.slideover {
-            sheets.push(self.compact_tree_sheet(safe_bottom, window, cx));
-        }
         if self.compact.bindings {
             let inset = if keyboard { px(0.0) } else { safe_bottom };
             sheets.push(self.compact_bindings_sheet(inset, cx));
         }
+        let screen = div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .child(pager_area)
+            .child(bottom);
+        let content = if open {
+            if self.compact.sessions {
+                sheets.push(self.overview_sessions_sheet(safe_bottom, cx));
+            }
+            let view = cx.weak_entity();
+            swipe_back(
+                "overview-swipe-back",
+                self.compact_overview(&model, top_inset, safe_bottom, cx),
+                move |_, cx| {
+                    let _ = view.update(cx, AppShell::close_overview);
+                },
+            )
+            .under(screen)
+            .into_any_element()
+        } else if lifting {
+            let pane = Bounds::new(
+                gpui::point(px(0.0), px(0.0)),
+                gpui::size(px(width), window.viewport_size().height - bar - safe_bottom),
+            );
+            self.overview_lift(&model, pane, top_inset, safe_bottom, window, cx)
+                .child(div().absolute().inset_0().child(screen))
+                .into_any_element()
+        } else {
+            screen.into_any_element()
+        };
         div()
             .id("compact-shell")
             .relative()
             .size_full()
-            .flex()
-            .flex_col()
             .bg(cx.theme().background)
-            .child(pager_area)
-            .child(bottom)
+            .child(content)
             .children(sheets)
             .child(zz_ui::touch::touch_scale(
                 div()
@@ -912,6 +1100,37 @@ impl AppShell {
             ))
     }
 
+    fn pill_meta(
+        &self,
+        model: &StatusBarModel,
+        page: Option<&Page>,
+        cx: &App,
+    ) -> (SharedString, bool) {
+        let Some(page) = page else {
+            return (SharedString::default(), false);
+        };
+        let waiting = matches!(page.kind, PaneKindSnapshot::Agent(_))
+            && self
+                .connection
+                .read(cx)
+                .core
+                .agent_state(page.pane)
+                .is_some_and(|state| {
+                    zz_client::agent_attention_status(state)
+                        == zz_client::AgentAttentionStatus::NeedsInput
+                });
+        if waiting {
+            return ("Needs your permission".into(), true);
+        }
+        let label = model
+            .windows
+            .iter()
+            .find(|window| window.id == page.window)
+            .map(|window| format!("{} {}", window.index, window.name))
+            .unwrap_or_default();
+        (label.into(), false)
+    }
+
     fn compact_key_area(
         &mut self,
         bottom: Pixels,
@@ -922,6 +1141,7 @@ impl AppShell {
         let armed = self.connection.read(cx).core.prefix_armed();
         keys.prefix.update(cx, |key, cx| key.set_armed(armed, cx));
         let row = KeyRow::new(keys.row())
+            .track_scroll(&keys.scroll)
             .on_key(|keystroke, window, cx| dispatch_key(keystroke.clone(), window, cx))
             .on_hide(|window, _| window.dismiss_virtual_keyboard());
         div()
@@ -969,60 +1189,6 @@ impl AppShell {
         )
         .into_any_element()
     }
-
-    fn compact_tree_sheet(
-        &mut self,
-        bottom_inset: Pixels,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        sidebar::reconcile(self, window, cx);
-        let core = &self.connection.read(cx).core;
-        let tree = sidebar::session_tree(
-            core.snapshot(),
-            core.attached_session(),
-            sidebar::Runtime {
-                connection: self.connection.clone(),
-                focus: self.sidebar_focus.clone(),
-                focused: self.sidebar_focus.is_focused(window),
-                view: cx.entity(),
-                selected: (!self.sidebar_pointer_selection)
-                    .then_some(self.sidebar_selection)
-                    .flatten(),
-                unseen_agents: self.unseen_agents.clone(),
-            },
-            &self.collapsed_tree,
-            &self.sidebar_scroll,
-            cx,
-        );
-        let height = window.viewport_size().height * 0.62;
-        let settings = compact_bar_button("compact-sheet-settings", IconName::Settings)
-            .tooltip("Settings")
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.slideover = false;
-                this.settings = Some(zz_ui::settings::SettingsSection::Appearance);
-                this.focused_pane = None;
-                cx.notify();
-            }))
-            .into_any_element();
-        let view = cx.weak_entity();
-        bottom_sheet(
-            "compact-tree-sheet",
-            "Workspace",
-            [settings],
-            div()
-                .h(height)
-                .w_full()
-                .track_focus(&self.sidebar_focus)
-                .child(zz_ui::touch::touch_scale(tree, cx)),
-            bottom_inset,
-            move |window, cx| {
-                let _ = view.update(cx, |this, cx| this.release_sidebar_focus(window, cx));
-            },
-        )
-        .content_scroll(self.sidebar_scroll.0.borrow().base_handle.clone())
-        .into_any_element()
-    }
 }
 
 #[cfg(test)]
@@ -1066,8 +1232,7 @@ mod tests {
     #[test]
     fn the_key_row_rests_on_the_bar_line_until_the_keyboard_passes_it() {
         let (safe, bar) = (px(34.0), px(53.0));
-        let top =
-            |overlap: f32| px(KEY_ROW_HEIGHT) + key_row_lift(safe, bar, px(overlap)) + px(overlap);
+        let top = |overlap: f32| key_row_top(safe, bar, px(overlap));
         assert_eq!(top(0.0), safe + bar);
         assert_eq!(top(40.0), safe + bar);
         assert_eq!(top(300.0), px(KEY_ROW_HEIGHT + 300.0));

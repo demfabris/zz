@@ -4,14 +4,13 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ClickEvent, Decorations, Div, Hsla, InteractiveElement, IntoElement,
-    MouseButton, ParentElement, Pixels, RenderOnce, Stateful, StatefulInteractiveElement as _,
-    StyleRefinement, Styled, TitlebarOptions, Window, WindowControlArea, div, point,
-    prelude::FluentBuilder as _, px,
+    MouseButton, ParentElement, Pixels, Point, RenderOnce, Stateful,
+    StatefulInteractiveElement as _, StyleRefinement, Styled, TitlebarOptions, Window,
+    WindowControlArea, div, point, prelude::FluentBuilder as _, px,
 };
 use smallvec::SmallVec;
 
 use crate::Colorize as _;
-#[cfg(target_os = "macos")]
 use crate::UiZoom;
 use crate::{
     ActiveTheme as _, Icon, IconName, InteractiveElementExt as _, Sizable as _, StyledExt as _,
@@ -32,10 +31,17 @@ pub const TITLE_BAR_HEIGHT: Pixels = px(35.);
 pub const MACOS_TRAFFIC_LIGHT_GLYPH: f32 = 14.;
 pub const MACOS_TRAFFIC_LIGHT_SPAN: f32 = 60.;
 
-/// Leading margin the macOS traffic lights keep from the window edge. The
-/// strip's own controls keep the same margin from the cluster's far edge, so
-/// the gap on either side of the lights reads as one measurement.
+/// Leading margin the macOS traffic lights keep from the window edge at 100%
+/// zoom. The strip's own controls keep the same margin from the cluster's far
+/// edge, so the gap on either side of the lights reads as one measurement.
 pub const MACOS_TRAFFIC_LIGHT_INSET: f32 = 10.5;
+
+/// Space a strip reserves for the macOS traffic lights: both margins ride the
+/// zoom with the lights' placement, the native glyphs do not.
+#[must_use]
+pub fn macos_traffic_light_clearance(cx: &App) -> Pixels {
+    px(2. * MACOS_TRAFFIC_LIGHT_INSET) + UiZoom::unzoomed(px(MACOS_TRAFFIC_LIGHT_SPAN), cx)
+}
 
 /// Whether the app draws the window's minimize / maximize / close buttons:
 /// Windows outside fullscreen, and Linux under [`Decorations::Client`]. macOS
@@ -59,10 +65,7 @@ pub fn window_controls_width(window: &Window) -> Pixels {
 /// Left inset that clears the native macOS traffic lights, in window points.
 #[cfg(target_os = "macos")]
 fn title_bar_left_padding(cx: &App) -> Pixels {
-    UiZoom::unzoomed(
-        px(2. * MACOS_TRAFFIC_LIGHT_INSET + MACOS_TRAFFIC_LIGHT_SPAN),
-        cx,
-    )
+    macos_traffic_light_clearance(cx)
 }
 #[cfg(not(target_os = "macos"))]
 fn title_bar_left_padding(_cx: &App) -> Pixels {
@@ -98,12 +101,19 @@ impl TitleBar {
         TitlebarOptions {
             title: None,
             appears_transparent: true,
-            traffic_light_position: Some(point(
-                px(MACOS_TRAFFIC_LIGHT_INSET),
-                (TITLE_BAR_HEIGHT - px(MACOS_TRAFFIC_LIGHT_GLYPH)) / 2.,
-            )),
+            traffic_light_position: Some(Self::traffic_light_position(1.)),
             ..TitlebarOptions::default()
         }
+    }
+
+    /// Where the macOS traffic lights sit at `zoom`, in window points: on this
+    /// bar's zoomed centre line, behind its zoomed margin, at native size.
+    #[must_use]
+    pub fn traffic_light_position(zoom: f32) -> Point<Pixels> {
+        point(
+            px(MACOS_TRAFFIC_LIGHT_INSET * zoom),
+            (TITLE_BAR_HEIGHT * zoom - px(MACOS_TRAFFIC_LIGHT_GLYPH)) / 2.,
+        )
     }
 
     /// Run `f` instead of `Window::remove_window` when the close button is

@@ -8,15 +8,25 @@ from `clients/gpui-shared/src`.
 The sidebar is 256 points wide and respects the iOS safe area.
 
 On iPhone, and in any window narrower than 640 points, the attached session uses the
-phone shell instead: one pane fills the screen and a sideways swipe pages through every
-pane in window order. Landing on a pane zooms it (`resize-pane -Z`), so the daemon sizes
+phone shell instead: one pane fills the screen and a sideways drag on the bar's pill pages
+through every pane in window order. A sideways swipe on the pane itself stays with the pane. Each page paints its pane's color, opaque, from the top of the screen
+down: the status bar and the pane header are transparent over it, and the status bar text
+turns light or dark to match. Landing on a pane zooms it (`resize-pane -Z`), so the daemon sizes
 the window to that pane; terminal previews keep the neighbouring pane live while it
-slides in. The bottom bar has a tree button (the sidebar tree as a bottom sheet), the
-pane name with page dots grouped by window (tap it for the window chooser), and a
-keyboard button. The keyboard opens only from that button or a tap on the terminal.
-While it is up, a key row replaces the bar: hide, esc, tab, ctrl, alt, `|`, `~`, `/`,
-prefix, and an arrow pad. Keys with a dot share one gesture: tap for the key's own job,
-hold or slide up for a card, and release on an item to pick it. A tap latches ctrl or
+slides in. The bottom bar is a grabber, a pill, and a keyboard button. The pill shows the pane's
+icon, its name, and under it the window and page dots grouped by window; an agent waiting on a
+permission turns the icon and that line yellow. Drag the bar up and the pane shrinks into its card
+in the overview; past a third of the way or with a flick it opens, otherwise it springs back. A tap
+on the pill opens it too. The overview shows every
+pane of the session as a card with a live preview, one row per window, the current pane ringed
+in the accent. Tap a card and it grows back into the pane, or a row's New pane card to split that window. The
+top bar switches sessions (or starts one) from a sheet and opens Settings; New window sits
+under the last row. Close it with the X (the current card grows back) or a swipe right. The phone has no session tree:
+the sidebar toggle and `focus-sidebar` open the overview instead. The keyboard opens only from that button or a tap on the terminal.
+While it is up, a key row replaces the bar: prefix, ctrl, alt, tab, esc, `/`, `@`, an arrow
+pad, and hide, each 52 points wide. When they do not fit, the row scrolls sideways from any
+key but the arrow pad. Keys with a dot share one gesture: tap for the key's own job, hold or
+slide up for a card, slide sideways to scroll the row, and release on an item to pick it. A tap latches ctrl or
 alt for the next key; holding them offers common chords (^C, ^D, ^Z, ^R, M-b, M-f).
 Prefix opens a short menu (new pane, new window, rename pane, last pane, kill pane) and
 an All bindings sheet that sends any prefix binding through the daemon's key table. The
@@ -30,12 +40,17 @@ settings back, tree actions, reset and stepper buttons, switches, select menus),
 rows are 44 points tall, and each key in the key row answers across the whole row height and
 up to the middle of the gap to its neighbours.
 
-The phone sizes chrome like iOS: settings, the workspace tree, menus, dialogs, and daemon
-overlays render their text at 17 points instead of the desktop's 13 (everything sized in rems
-grows by 17/13), and settings get a 44-point navigation bar with a "‹ Settings" back button and a
-centred title. Switches and color wells sit at the right of their row; wider controls stay below
-the description. A rightward drag anywhere on a settings page goes back, as the iOS 26 content
-back gesture does, except on a horizontal strip (the palette tiles) that can still scroll back.
+The phone keeps the desktop's look and grows it for touch: settings, the workspace tree, menus,
+dialogs, and daemon overlays render their text at 15 points instead of the desktop's 13
+(everything sized in rems grows by 15/13). Settings keep the desktop cards, copy, and controls.
+Each row puts its control beside the title and the description underneath at full width; theme
+and palette tiles sit below. Switches grow to 44 by 26. A dropdown opens a bottom sheet of the
+desktop's menu rows at 44 points, check in front, with a search field once the list passes 12
+choices; fonts preview in their own face. A color well shows its hex and opens a sheet with the
+hex field and the desktop's ten-column swatches at touch size. The navigation bar is a back arrow
+and the page title, and the section list follows the desktop settings sidebar's groups. A
+rightward drag anywhere on a settings page goes back, except on a horizontal strip (the palette
+tiles) that can still scroll back.
 
 Buttons, rows, menu items, and keys show presses the way Flutter's CupertinoButton and React
 Native's Pressability do: a touch lights the control 100 ms after it lands unless it turns into a
@@ -125,7 +140,8 @@ opens the command palette without a hardware keyboard.
 
 The app does not connect on launch. Until it connects, the workspace shows the connection screen:
 saved hosts (most recent first) with Connect and Remove, a destination field (`user@host` or
-`user@host:port`), and the app's SSH key. Settings › Hosts shows the same list, plus Disconnect for
+`user@host:port`), and the app's SSH key. On iPhone it fills the screen under the status bar, with no
+toolbar above it. Settings › Hosts shows the same list, plus Disconnect for
 the current host. Hosts are saved in `Library/Application Support/zz-gpui/hosts.json`; a
 successful connection moves its host to the top. `ZZ_GPUI_ENDPOINT` (or `ZZ_SOCKET`) connects
 for that launch only, and opening a `zz://attach/<session>` link connects to the most recent host.
@@ -166,7 +182,7 @@ its pane's content, and display-panes labels keep their tmux styles and alignmen
 Notices preserve severity, duration, and explicit clearing; a failed command reports
 as `command: error`.
 
-The tree button opens navigation on iPhone.
+The bar's pill opens navigation on iPhone.
 
 ## Keyboard
 
@@ -189,12 +205,22 @@ backend reads the keyboard's own spring from the keyboard layout guide and evalu
 the display link at each frame's display time, so the phone key row, the terminal's bottom
 edge, popovers, and a focused settings field slide with the keys on open and close. In the
 phone shell the key row takes the bar's place where the bar's top edge was and rides on the
-keyboard once the keys pass it. Terminals keep their grid while the keyboard moves (the
-prompt row stays above the key row) and report their new size once it stops.
+keyboard once the keys pass it. While the keyboard opens, terminals keep their grid (the
+prompt row stays above the key row) and report their new size once it stops. While it closes,
+the backend reports where the keyboard will come to rest (`target_visual_viewport_bounds`),
+and the phone shell sizes the terminal for that resting place from the first frame: the shell
+gets its one resize at the start, the grid hangs past the top edge under the pane header, and
+the rows the keyboard uncovers slide into view already filled instead of arriving in one step
+after the keyboard lands.
 
-Number fields in Settings open a decimal pad with a Done button above it; a comma from the
-pad is typed as a point. Done, or Return in any settings field, commits the value and hides
-the keyboard. Return in the Hosts destination field connects and hides it too.
+A field picks its keyboard through gpui's text input mode (the HTML `inputmode` set), which
+the backend maps onto `keyboardType`: decimal and numeric pads, phone, email, URL, and web
+search keyboards; `None` keeps the field focused with no software keyboard, through an empty
+input view. Number fields in Settings ask for the decimal pad, and the browser client gets
+`inputmode="decimal"` from the same setting. Pads without a Return key (decimal, numeric,
+phone) get a Done button above them; a comma from the decimal pad is typed as a point. Done,
+or Return in any settings field, commits the value and hides the keyboard. Return in the Hosts
+destination field connects and hides it too.
 
 The view implements `UITextInput`, so IME composition (Japanese, Chinese, Korean),
 dead keys, dictation, and Pencil handwriting reach the focused field. While text is
@@ -260,10 +286,11 @@ each display link tick, and an idle `link:` line with few ticks means the displa
 
 `ZZ_GPUI_FRAME_LOG=1` prints, per burst of drawn frames, the interval between new frames (p50,
 p95, max), missed vsyncs, and the CPU time of each display link tick, plus link ticks and draws
-every five seconds. `ZZ_GPUI_BENCH=swipe`, `scroll`, or `drag` (optionally `:count`, default 16)
-waits eight seconds after launch and then plays horizontal pager swipes, vertical terminal flings,
-or slow 1.5 s terminal drags that hold still before letting go, each followed by a fling back, from
-the display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
+every five seconds. `ZZ_GPUI_BENCH=swipe`, `scroll`, `drag`, or `fling` (optionally `:count`,
+default 16) waits eight seconds after launch and then plays horizontal pager swipes, vertical
+terminal flings, slow 1.5 s terminal drags that hold still before letting go, each followed by a
+fling back, or one terminal fling every 4 s, two toward older output and then three toward newer,
+from the display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
 `tmp` directory. Device and simulator launches forward these variables and `ZZ_GPUI_SESSION`;
 `ZZ_GPUI_CARGO_PROFILE=testflight` builds the device app with line tables for Instruments.
 
@@ -348,11 +375,18 @@ saved by this example.
 - Terminal scrollback moves with the finger by pixels, and a fling coasts the same way. The app
   keeps up to 2000 rows above the screen (the `history-trickle` option) and draws scrolled rows
   from them without waiting for the daemon. The daemon's view trails the gesture by up to a
-  screen, more rows are fetched as the view nears the oldest kept row, and once the view stays on
-  one row for 120 ms the daemon's view is moved there. New output does not move a scrolled-back
+  screen, more rows are fetched as the view nears the oldest kept row, and once the view holds
+  still for 120 ms the daemon's view is moved there. New output does not move a scrolled-back
   view; scrolling back to the bottom follows output again. This is the desktop's trackpad
   scrolling (`LocalScrollState` and `HistoryPacer` in `zz-client`). `less`, `vim`, and other
   mouse-tracking or alternate-screen programs still get wheel events.
+- In the phone shell, rows of a scrolled-back terminal, or one bouncing at the bottom, keep
+  drawing above the top row, under the pane header and the status bar up to the top of the
+  screen, the way content runs under a translucent iOS navigation bar. A tint of the pane color
+  behind the header and status bar, fading out over the header's last 12 points, fades those rows
+  so the title and the close button stay readable. At the live bottom nothing draws above the top
+  row, so the resting layout is unchanged. The header floats over the terminal instead of sitting
+  above it in the layout, which keeps its button on top for taps.
 
 The standalone example displays one active terminal pane. The main app supports
 multiple terminal and agent panes; full mux overlays remain a later step.
@@ -400,6 +434,13 @@ Panes, Status bar, UI zoom, and Match system text size. Screen recordings on iPh
 Simulator then followed the key row, the terminal bottom, an Interface number field, and the
 color picker frame by frame while the keyboard opened and closed (one terminal resize per
 keyboard move), and covered the decimal pad, Done, and Return in the Hosts field.
+
+iPhone 17 Pro Simulator checks on 2026-10-07 covered the decimal pad and Done bar on an Interface
+number field asked for through the text input mode (the pad's comma typed as a point, Done
+committed and hid it), the plain keyboard on the Hosts field, and the terminal keyboard with the
+phone key row. Recordings of a keyboard close over a full scrollback showed the top rows already
+filled as they slid in and no change after the keys landed, and a close over a cleared screen kept
+the prompt at the top; the shell logged one SIGWINCH per open and per close.
 
 Copy/paste of text copied within the app was verified. Text injected through
 `simctl pbcopy` was not readable from UIKit in this simulator session; cross-app

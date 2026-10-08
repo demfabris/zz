@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable as _, IntoElement, Subscription,
-    Window, canvas, div, prelude::*, px,
+    TextInputMode, Window, canvas, div, prelude::*, px,
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, Sizable as _, StyledExt as _, Theme, ThemeMode,
@@ -14,7 +14,6 @@ use zz_ui::{
     },
     color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
     input::{InputEvent, InputState, NumberInput},
-    menu::{DropdownMenu as _, PopupMenuItem},
     select::{Select, SelectEvent, SelectState},
     settings::{
         SettingEntry, SettingsSection, SettingsSelectItem, SettingsStack, StackPosition,
@@ -36,6 +35,17 @@ use crate::{
 pub(super) use crate::preferences::Preferences;
 
 const NAV_BAR_HEIGHT: f32 = 44.0;
+const NAV_BACK: f32 = 40.0;
+const PALETTE_LAYOUTS: [(&str, &str); 2] = [("grouped", "Tree"), ("flat", "Flat")];
+const HOST_PREFIXES: [(&str, &str); 2] = [("~", "~"), ("#", "#")];
+
+fn palette_layout_value(preferences: &Preferences) -> &'static str {
+    if preferences.palette_grouped {
+        "grouped"
+    } else {
+        "flat"
+    }
+}
 
 pub(super) const SECTIONS: [SettingsSection; 7] = [
     SettingsSection::Appearance,
@@ -209,6 +219,8 @@ pub(super) struct Controls {
     ui_font: Entity<SelectState<Vec<SettingsSelectItem>>>,
     terminal_font: Entity<SelectState<Vec<SettingsSelectItem>>>,
     terminal_scale: Entity<InputState>,
+    palette_layout: Entity<SelectState<Vec<SettingsSelectItem>>>,
+    host_prefix: Entity<SelectState<Vec<SettingsSelectItem>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -220,6 +232,7 @@ impl Controls {
     ) -> Self {
         let zoom = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(format!("{:.0}", preferences.zoom * 100.0))
                 .step(10.0)
                 .min(50.0)
@@ -227,6 +240,7 @@ impl Controls {
         });
         let radius = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(format!("{:.0}", preferences.radius))
                 .step(1.0)
                 .min(0.0)
@@ -234,6 +248,7 @@ impl Controls {
         });
         let contrast = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(number_text(preferences.contrast * 100.0))
                 .step(5.0)
                 .min(50.0)
@@ -241,6 +256,7 @@ impl Controls {
         });
         let shadow_strength = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(number_text(preferences.shadow_strength * 100.0))
                 .step(5.0)
                 .min(0.0)
@@ -248,6 +264,7 @@ impl Controls {
         });
         let terminal_scale = cx.new(|cx| {
             InputState::new(window, cx)
+                .input_mode(TextInputMode::Decimal)
                 .default_value(number_text(preferences.terminal_font_scale * 100.0))
                 .step(10.0)
                 .min(50.0)
@@ -327,6 +344,7 @@ impl Controls {
             let value = pane_values[control as usize] * scale;
             let input = cx.new(|cx| {
                 InputState::new(window, cx)
+                    .input_mode(TextInputMode::Decimal)
                     .default_value(number_text(value))
                     .min(f64::from(min))
                     .max(f64::from(max))
@@ -401,7 +419,7 @@ impl Controls {
             .chain(
                 families
                     .into_iter()
-                    .map(|family| SettingsSelectItem::new(family.clone(), family)),
+                    .map(|family| SettingsSelectItem::new(family.clone(), family).preview_font()),
             )
             .collect::<Vec<_>>();
         let terminal_font = cx.new(|cx| SelectState::new(items, None, window, cx));
@@ -431,6 +449,40 @@ impl Controls {
                 },
             ));
         }
+        let choice =
+            |choices: &[(&str, &str)], current: &str, window: &mut Window, cx: &mut App| {
+                let items = choices
+                    .iter()
+                    .map(|(value, title)| SettingsSelectItem::new(*title, *value))
+                    .collect::<Vec<_>>();
+                let index = choices.iter().position(|(value, _)| *value == current);
+                cx.new(|cx| SelectState::new(items, index.map(zz_ui::IndexPath::new), window, cx))
+            };
+        let palette_layout = choice(
+            &PALETTE_LAYOUTS,
+            palette_layout_value(preferences),
+            window,
+            cx,
+        );
+        let host_prefix = choice(&HOST_PREFIXES, &preferences.palette_host_prefix, window, cx);
+        for (select, layout) in [(&palette_layout, true), (&host_prefix, false)] {
+            subscriptions.push(cx.subscribe_in(
+                select,
+                window,
+                move |this, _, event: &SelectEvent<Vec<SettingsSelectItem>>, _, cx| {
+                    let SelectEvent::Confirm(Some(value)) = event else {
+                        return;
+                    };
+                    if layout {
+                        this.preferences.palette_grouped = value == "grouped";
+                    } else {
+                        value.clone_into(&mut this.preferences.palette_host_prefix);
+                    }
+                    this.preferences.save();
+                    cx.notify();
+                },
+            ));
+        }
         Self {
             zoom,
             radius,
@@ -441,6 +493,8 @@ impl Controls {
             ui_font,
             terminal_font,
             terminal_scale,
+            palette_layout,
+            host_prefix,
             _subscriptions: subscriptions,
         }
     }
@@ -501,13 +555,13 @@ impl AppShell {
         let picked = self.settings_picked;
         zz_ui::compact::swipe_back(
             "settings-swipe-back",
-            self.settings_route(section, picked, cx),
+            self.settings_route(section, picked, window, cx),
             move |window, cx| {
                 let _ = view.update(cx, |this, cx| this.settings_back(window, cx));
             },
         )
         .when(picked, |swipe| {
-            swipe.under(self.settings_route(section, false, cx))
+            swipe.under(self.settings_route(section, false, window, cx))
         })
         .into_any_element()
     }
@@ -527,13 +581,27 @@ impl AppShell {
         &self,
         section: SettingsSection,
         picked: bool,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let content = if picked {
             self.settings_page(section, true, cx)
         } else {
+            #[cfg(target_os = "ios")]
+            let host = self
+                .connection
+                .read(cx)
+                .endpoint()
+                .map(super::hosts::host_title);
+            #[cfg(not(target_os = "ios"))]
+            let host: Option<String> = None;
             zz_ui::settings::settings_section_index(
                 &sections(),
+                move |section| match section {
+                    SettingsSection::Hosts => host.clone().map(Into::into),
+                    SettingsSection::About => Some(env!("CARGO_PKG_VERSION").into()),
+                    _ => None,
+                },
                 {
                     let view = cx.entity().downgrade();
                     move |choice, _, cx| {
@@ -544,15 +612,12 @@ impl AppShell {
                         });
                     }
                 },
+                window,
                 cx,
             )
             .into_any_element()
         };
-        let (title, back) = if picked {
-            (section.title(), "Settings")
-        } else {
-            ("Settings", "Back")
-        };
+        let title = if picked { section.title() } else { "Settings" };
         div()
             .flex()
             .flex_col()
@@ -561,50 +626,41 @@ impl AppShell {
             .min_h_0()
             .child(
                 div()
-                    .relative()
                     .flex()
                     .items_center()
+                    .gap(px(4.0))
                     .h(px(NAV_BAR_HEIGHT))
+                    .px(px(8.0))
                     .flex_none()
-                    .child(
-                        div()
-                            .absolute()
-                            .inset_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(17.0))
-                            .font_semibold()
-                            .child(title),
-                    )
                     .child(
                         div()
                             .id("settings-back")
                             .relative()
                             .flex()
+                            .flex_none()
                             .items_center()
-                            .h_full()
-                            .pl(px(6.0))
-                            .pr(px(12.0))
-                            .text_color(cx.theme().accent)
-                            .child(
-                                zz_ui::touch::press_highlight(
-                                    "settings-back-press",
-                                    cx.theme().foreground.opacity(0.1),
-                                    px(NAV_BAR_HEIGHT / 2.0),
-                                )
-                                .top(px(4.0))
-                                .bottom(px(4.0)),
-                            )
-                            .child(
-                                zz_ui::Icon::new(IconName::ChevronLeft)
-                                    .size(px(30.0))
-                                    .text_color(cx.theme().accent),
-                            )
-                            .child(div().text_size(px(17.0)).child(back))
+                            .justify_center()
+                            .size(px(NAV_BACK))
+                            .child(zz_ui::touch::press_highlight(
+                                "settings-back-press",
+                                cx.theme().foreground.opacity(0.08),
+                                cx.theme().radius,
+                            ))
+                            .child(zz_ui::Icon::new(IconName::ArrowLeft).size(px(18.0)))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.settings_back(window, cx);
                             })),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .text_size(px(17.0))
+                            .font_semibold()
+                            .child(title),
                     ),
             )
             .child(
@@ -649,6 +705,7 @@ impl AppShell {
                     .filter(|item| {
                         shown(Setting::UiZoom, phone) || !matches!(item, AppearancePageItem::UiZoom)
                     })
+                    .filter(|item| !narrow || !matches!(item, AppearancePageItem::Description))
                     .collect::<Vec<_>>();
                 let focus = items
                     .iter()
@@ -665,7 +722,7 @@ impl AppShell {
             }
             SettingsSection::Panes => {
                 let [background, inactive, glow, margin, radius, border] =
-                    PaneControl::ALL.map(|control| self.pane_setting(control, narrow, cx));
+                    PaneControl::ALL.map(|control| self.pane_setting(control, cx));
                 let gaps =
                     SettingEntry::new("Pane gaps", "Separate panes with spacing and borders.")
                         .title_actions(reset_button(
@@ -798,14 +855,14 @@ impl AppShell {
                     )
                 });
                 return settings_scroll_column("settings-page")
-                    .child(settings_heading(
+                    .children(settings_heading(
                         (!narrow).then_some(section.title()),
                         "Tune the command palette and display on this client.",
                         cx,
                     ))
                     .child(
                         SettingsStack::titled("Command palette")
-                            .children(self.palette_settings(narrow, cx)),
+                            .children(self.palette_settings(cx)),
                     )
                     .when(
                         !shown(Setting::Section(SettingsSection::Panes), phone),
@@ -951,7 +1008,7 @@ impl AppShell {
                     narrow,
                 )
             }
-            AppearancePageItem::UiFontFamily => with_control(
+            AppearancePageItem::UiFontFamily => {
                 SettingEntry::new("UI font", "Choose an available font for the interface.")
                     .title_actions(reset_button(
                         "settings-ui-font-reset",
@@ -964,34 +1021,30 @@ impl AppShell {
                             this.preferences.ui_font_family = family;
                         },
                         cx,
-                    )),
-                div().w(px(200.0)).max_w_full().flex_none().child(
-                    Select::new(&self.settings_controls.ui_font)
-                        .small()
-                        .placeholder("System default")
-                        .bg(settings_control_fill(cx)),
-                ),
-                narrow,
-            ),
-            AppearancePageItem::UiZoom => with_control(
-                SettingEntry::new(
-                    "UI zoom",
-                    "Scales application text, icons, and controls as a percentage of the default.",
+                    ))
+                    .control(font_select(
+                        &self.settings_controls.ui_font,
+                        "UI font",
+                        "System default",
+                        cx,
+                    ))
+            }
+            AppearancePageItem::UiZoom => SettingEntry::new(
+                "UI zoom",
+                "Scales application text, icons, and controls as a percentage of the default.",
+            )
+            .title_actions(
+                settings_reset_button(
+                    "settings-zoom-reset",
+                    "Reset UI zoom to 100%",
+                    self.preferences.zoom != 1.0,
                 )
-                .title_actions(
-                    settings_reset_button(
-                        "settings-zoom-reset",
-                        "Reset UI zoom to 100%",
-                        self.preferences.zoom != 1.0,
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.preferences.reset_zoom(&this.connection, window, cx);
-                        this.sync_zoom_input(window, cx);
-                    })),
-                ),
-                number_control(&self.settings_controls.zoom, cx),
-                narrow,
-            ),
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.preferences.reset_zoom(&this.connection, window, cx);
+                    this.sync_zoom_input(window, cx);
+                })),
+            )
+            .control(number_control(&self.settings_controls.zoom, cx)),
             AppearancePageItem::Preset(mode) => {
                 let dark = mode.is_dark();
                 let selected = self.preferences.preset(mode);
@@ -1072,29 +1125,26 @@ impl AppShell {
                         .small(),
                     )
             }
-            AppearancePageItem::ChromeContrast => with_control(
-                SettingEntry::new(
-                    "Contrast",
-                    "Adjust surface, text, and edge contrast from 50% to 200%.",
+            AppearancePageItem::ChromeContrast => SettingEntry::new(
+                "Contrast",
+                "Adjust surface, text, and edge contrast from 50% to 200%.",
+            )
+            .title_actions(
+                settings_reset_button(
+                    "settings-contrast-reset",
+                    "Reset contrast to 100%",
+                    self.preferences.contrast != 1.0,
                 )
-                .title_actions(
-                    settings_reset_button(
-                        "settings-contrast-reset",
-                        "Reset contrast to 100%",
-                        self.preferences.contrast != 1.0,
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.preferences.contrast = 1.0;
-                        this.settings_controls
-                            .contrast
-                            .update(cx, |input, cx| input.set_value("100", window, cx));
-                        this.preferences.save();
-                        this.preferences.apply(&this.connection, window, cx);
-                    })),
-                ),
-                number_control(&self.settings_controls.contrast, cx),
-                narrow,
-            ),
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.preferences.contrast = 1.0;
+                    this.settings_controls
+                        .contrast
+                        .update(cx, |input, cx| input.set_value("100", window, cx));
+                    this.preferences.save();
+                    this.preferences.apply(&this.connection, window, cx);
+                })),
+            )
+            .control(number_control(&self.settings_controls.contrast, cx)),
             AppearancePageItem::Animations => SettingEntry::new(
                 "Animations",
                 "Animate interface transitions, loading indicators, and image frames.",
@@ -1114,53 +1164,47 @@ impl AppShell {
                         this.preferences.apply(&this.connection, window, cx);
                     })),
             ),
-            AppearancePageItem::WidgetCornerRadius => with_control(
-                SettingEntry::new(
-                    if self.preferences.radius > 24.0 {
-                        "Widget corner radius (Full)"
-                    } else {
-                        "Widget corner radius"
-                    },
-                    "Set corners from 0 to 24px. At 25, controls become pills.",
+            AppearancePageItem::WidgetCornerRadius => SettingEntry::new(
+                if self.preferences.radius > 24.0 {
+                    "Widget corner radius (Full)"
+                } else {
+                    "Widget corner radius"
+                },
+                "Set corners from 0 to 24px. At 25, controls become pills.",
+            )
+            .title_actions(reset_button(
+                "settings-radius-reset",
+                self.preferences.radius != Preferences::default().radius,
+                |this, window, cx| {
+                    this.preferences.radius = Preferences::default().radius;
+                    let value = format!("{:.0}", this.preferences.radius);
+                    this.settings_controls
+                        .radius
+                        .update(cx, |input, cx| input.set_value(value, window, cx));
+                },
+                cx,
+            ))
+            .control(number_control(&self.settings_controls.radius, cx)),
+            AppearancePageItem::ShadowStrength => SettingEntry::new(
+                "Shadow strength",
+                "Strength of shadows around controls and gapped panes, from 0% (off) to 100%.",
+            )
+            .title_actions(
+                settings_reset_button(
+                    "settings-shadow-reset",
+                    "Reset shadow strength to 100%",
+                    self.preferences.shadow_strength != 1.0,
                 )
-                .title_actions(reset_button(
-                    "settings-radius-reset",
-                    self.preferences.radius != Preferences::default().radius,
-                    |this, window, cx| {
-                        this.preferences.radius = Preferences::default().radius;
-                        let value = format!("{:.0}", this.preferences.radius);
-                        this.settings_controls
-                            .radius
-                            .update(cx, |input, cx| input.set_value(value, window, cx));
-                    },
-                    cx,
-                )),
-                number_control(&self.settings_controls.radius, cx),
-                narrow,
-            ),
-            AppearancePageItem::ShadowStrength => with_control(
-                SettingEntry::new(
-                    "Shadow strength",
-                    "Strength of shadows around controls and gapped panes, from 0% (off) to 100%.",
-                )
-                .title_actions(
-                    settings_reset_button(
-                        "settings-shadow-reset",
-                        "Reset shadow strength to 100%",
-                        self.preferences.shadow_strength != 1.0,
-                    )
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.preferences.shadow_strength = 1.0;
-                        this.settings_controls
-                            .shadow_strength
-                            .update(cx, |input, cx| input.set_value("100", window, cx));
-                        this.preferences.save();
-                        this.preferences.apply(&this.connection, window, cx);
-                    })),
-                ),
-                number_control(&self.settings_controls.shadow_strength, cx),
-                narrow,
-            ),
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.preferences.shadow_strength = 1.0;
+                    this.settings_controls
+                        .shadow_strength
+                        .update(cx, |input, cx| input.set_value("100", window, cx));
+                    this.preferences.save();
+                    this.preferences.apply(&this.connection, window, cx);
+                })),
+            )
+            .control(number_control(&self.settings_controls.shadow_strength, cx)),
             _ => return div().into_any_element(),
         };
         entry.position(position).into_any_element()
@@ -1178,12 +1222,7 @@ impl AppShell {
         )
     }
 
-    fn pane_setting(
-        &self,
-        control: PaneControl,
-        narrow: bool,
-        cx: &mut Context<Self>,
-    ) -> SettingEntry {
+    fn pane_setting(&self, control: PaneControl, cx: &mut Context<Self>) -> SettingEntry {
         let value = *control.value(&mut self.preferences.clone());
         let default = *control.value(&mut Preferences::default());
         let entry = SettingEntry::new(control.title(), control.description())
@@ -1214,55 +1253,48 @@ impl AppShell {
                     this.preferences.apply(&this.connection, window, cx);
                 })),
             );
-        with_control(
-            entry,
-            number_control(&self.settings_controls.panes[control as usize], cx),
-            narrow,
-        )
+        entry.control(number_control(
+            &self.settings_controls.panes[control as usize],
+            cx,
+        ))
     }
 
     fn terminal_settings(&self, narrow: bool, cx: &mut Context<Self>) -> AnyElement {
         let available = cx.text_system().all_font_names();
         let appearance =
             localized_font_appearance(&self.connection.read(cx).core, &available, "Lilex", cx);
-        let font = with_control(
-            SettingEntry::new(
-                "Font",
-                "Use an available font on this client, or follow the host's configured font.",
-            ),
-            div().w(px(200.0)).max_w_full().flex_none().child(
-                Select::new(&self.settings_controls.terminal_font)
-                    .small()
-                    .placeholder("Follow host")
-                    .bg(settings_control_fill(cx)),
-            ),
-            narrow,
-        );
-        let scale = with_control(
-            SettingEntry::new(
-                "Font scale",
-                "Scale terminal text on this client from 50% to 300%.",
+        let font = SettingEntry::new(
+            "Font",
+            "Use an available font on this client, or follow the host's configured font.",
+        )
+        .control(font_select(
+            &self.settings_controls.terminal_font,
+            "Terminal font",
+            "Follow host",
+            cx,
+        ));
+        let scale = SettingEntry::new(
+            "Font scale",
+            "Scale terminal text on this client from 50% to 300%.",
+        )
+        .title_actions(
+            settings_reset_button(
+                "settings-terminal-scale-reset",
+                "Reset font scale to 100%",
+                self.preferences.terminal_font_scale != 1.0,
             )
-            .title_actions(
-                settings_reset_button(
-                    "settings-terminal-scale-reset",
-                    "Reset font scale to 100%",
-                    self.preferences.terminal_font_scale != 1.0,
-                )
-                .on_click(cx.listener(|this, _, window, cx| {
-                    this.preferences.terminal_font_scale = 1.0;
-                    this.settings_controls
-                        .terminal_scale
-                        .update(cx, |input, cx| input.set_value("100", window, cx));
-                    this.preferences.save();
-                    this.preferences.apply(&this.connection, window, cx);
-                })),
-            ),
-            number_control(&self.settings_controls.terminal_scale, cx),
-            narrow,
-        );
+            .on_click(cx.listener(|this, _, window, cx| {
+                this.preferences.terminal_font_scale = 1.0;
+                this.settings_controls
+                    .terminal_scale
+                    .update(cx, |input, cx| input.set_value("100", window, cx));
+                this.preferences.save();
+                this.preferences.apply(&this.connection, window, cx);
+            })),
+        )
+        .control(number_control(&self.settings_controls.terminal_scale, cx));
         settings_scroll_column("settings-terminal")
-            .child(settings_heading((!narrow).then_some("Terminal"), "Adjust terminal text on this client. Colors, cursor, and spacing follow the host configuration.", cx))
+            .children(settings_heading((!narrow).then_some("Terminal"), "Adjust terminal text on this client. Colors, cursor, and spacing follow the host configuration.", cx))
             .child(zz_ui::settings::settings_list_group_header("Preview", None, cx))
             .child(terminal_preview(appearance, cx))
             .child(SettingsStack::titled("Display").child(font).child(scale))
@@ -1273,92 +1305,54 @@ impl AppShell {
 }
 
 impl AppShell {
-    fn palette_settings(&self, narrow: bool, cx: &Context<Self>) -> Vec<SettingEntry> {
+    fn palette_settings(&self, cx: &Context<Self>) -> Vec<SettingEntry> {
         let defaults = Preferences::default();
-        let choice = |id: &'static str,
-                      label: &'static str,
-                      choices: &'static [(&'static str, &'static str)],
-                      current: String,
-                      apply: fn(&mut Preferences, &str)| {
-            let view = cx.entity().downgrade();
-            Button::new(id)
-                .small()
-                .label(
-                    choices
-                        .iter()
-                        .find(|(value, _)| *value == current)
-                        .map_or(label, |(_, label)| *label),
-                )
-                .dropdown_caret(true)
-                .bg(settings_control_fill(cx))
-                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-                    choices.iter().fold(menu, |menu, &(value, label)| {
-                        let view = view.clone();
-                        menu.item(
-                            PopupMenuItem::new(label)
-                                .checked(value == current)
-                                .on_click(move |_, _, cx| {
-                                    let _ = view.update(cx, |this, cx| {
-                                        apply(&mut this.preferences, value);
-                                        this.preferences.save();
-                                        cx.notify();
-                                    });
-                                }),
-                        )
-                    })
-                })
-        };
-        let layout = if self.preferences.palette_grouped {
-            "grouped"
-        } else {
-            "flat"
-        };
         vec![
-            with_control(
-                SettingEntry::new(
-                    "Navigation layout",
-                    "Show sessions, windows, and panes as a tree or a flat list.",
-                )
-                .title_actions(reset_button(
-                    "settings-palette-layout-reset",
-                    self.preferences.palette_grouped != defaults.palette_grouped,
-                    |this, _, _| {
-                        this.preferences.palette_grouped = Preferences::default().palette_grouped;
-                    },
-                    cx,
-                )),
-                choice(
-                    "settings-palette-layout",
-                    "Tree",
-                    &[("grouped", "Tree"), ("flat", "Flat")],
-                    layout.to_owned(),
-                    |preferences, value| preferences.palette_grouped = value == "grouped",
-                ),
-                narrow,
-            ),
-            with_control(
-                SettingEntry::new(
-                    "Host prefix",
-                    "Type this character in an empty palette to browse hosts.",
-                )
-                .title_actions(reset_button(
-                    "settings-palette-host-prefix-reset",
-                    self.preferences.palette_host_prefix != defaults.palette_host_prefix,
-                    |this, _, _| {
-                        this.preferences.palette_host_prefix =
-                            Preferences::default().palette_host_prefix;
-                    },
-                    cx,
-                )),
-                choice(
-                    "settings-palette-host-prefix",
-                    "~",
-                    &[("~", "~"), ("#", "#")],
-                    self.preferences.palette_host_prefix.clone(),
-                    |preferences, value| value.clone_into(&mut preferences.palette_host_prefix),
-                ),
-                narrow,
-            ),
+            SettingEntry::new(
+                "Navigation layout",
+                "Show sessions, windows, and panes as a tree or a flat list.",
+            )
+            .title_actions(reset_button(
+                "settings-palette-layout-reset",
+                self.preferences.palette_grouped != defaults.palette_grouped,
+                |this, window, cx| {
+                    this.preferences.palette_grouped = Preferences::default().palette_grouped;
+                    let value = palette_layout_value(&this.preferences).to_owned();
+                    this.settings_controls
+                        .palette_layout
+                        .update(cx, |select, cx| {
+                            select.set_selected_value(&value, window, cx);
+                        });
+                },
+                cx,
+            ))
+            .control(choice_select(
+                &self.settings_controls.palette_layout,
+                "Navigation layout",
+                cx,
+            )),
+            SettingEntry::new(
+                "Host prefix",
+                "Type this character in an empty palette to browse hosts.",
+            )
+            .title_actions(reset_button(
+                "settings-palette-host-prefix-reset",
+                self.preferences.palette_host_prefix != defaults.palette_host_prefix,
+                |this, window, cx| {
+                    this.preferences.palette_host_prefix =
+                        Preferences::default().palette_host_prefix;
+                    let value = this.preferences.palette_host_prefix.clone();
+                    this.settings_controls.host_prefix.update(cx, |select, cx| {
+                        select.set_selected_value(&value, window, cx);
+                    });
+                },
+                cx,
+            ))
+            .control(choice_select(
+                &self.settings_controls.host_prefix,
+                "Host prefix",
+                cx,
+            )),
             SettingEntry::new(
                 "Command shortcuts",
                 "Show keyboard shortcuts beside commands.",
@@ -1474,13 +1468,8 @@ fn status_field<'a>(preferences: &'a mut Preferences, id: &str) -> &'a mut bool 
 }
 
 fn number_field_event(event: &InputEvent, window: &mut Window, cx: &mut App) {
-    match event {
-        #[cfg(target_os = "ios")]
-        InputEvent::Focus | InputEvent::Blur => {
-            zz_gpui_ios::set_number_pad(matches!(event, InputEvent::Focus));
-        }
-        InputEvent::PressEnter { .. } => finish_field(window, cx),
-        _ => {}
+    if matches!(event, InputEvent::PressEnter { .. }) {
+        finish_field(window, cx);
     }
 }
 
@@ -1496,9 +1485,40 @@ fn number_text(value: f32) -> String {
     if text == "-0" { "0" } else { text }.to_owned()
 }
 
+fn font_select(
+    select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
+    title: &'static str,
+    placeholder: &'static str,
+    cx: &App,
+) -> gpui::Div {
+    div().w(px(200.0)).max_w_full().flex_none().child(
+        Select::new(select)
+            .small()
+            .title(title)
+            .placeholder(placeholder)
+            .bg(settings_control_fill(cx)),
+    )
+}
+
+fn choice_select(
+    select: &Entity<SelectState<Vec<SettingsSelectItem>>>,
+    title: &'static str,
+    cx: &App,
+) -> Select<Vec<SettingsSelectItem>> {
+    Select::new(select)
+        .small()
+        .title(title)
+        .bg(settings_control_fill(cx))
+}
+
 fn number_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
+    let width = if zz_ui::touch::CoarsePointer::get(cx) {
+        110.0
+    } else {
+        120.0
+    };
     div()
-        .w(zz_ui::rems_from_px(120.0))
+        .w(zz_ui::rems_from_px(width))
         .max_w_full()
         .flex_none()
         .child(
@@ -1512,25 +1532,26 @@ pub(super) fn settings_heading(
     title: Option<&'static str>,
     description: &'static str,
     cx: &App,
-) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(4.0))
-        .when_some(title, |this, title| {
-            this.child(
+) -> Option<gpui::Div> {
+    let title = title?;
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(4.0))
+            .child(
                 div()
                     .font_medium()
                     .text_size(zz_ui::rems_from_px(20.0))
                     .child(title),
             )
-        })
-        .child(
-            div()
-                .text_size(zz_ui::rems_from_px(11.0))
-                .text_color(cx.theme().foreground.muted())
-                .child(description),
-        )
+            .child(
+                div()
+                    .text_size(zz_ui::rems_from_px(11.0))
+                    .text_color(cx.theme().foreground.muted())
+                    .child(description),
+            ),
+    )
 }
 
 fn terminal_preview(appearance: zz_terminal::TerminalAppearance, _: &App) -> AnyElement {
@@ -1623,6 +1644,8 @@ impl gpui::RenderOnce for TerminalPreview {
                                         images: None,
                                         local_scroll_target: None,
                                         scroll_pixel_offset: px(0.0),
+                                        overscroll: px(0.0),
+                                        extra_height: px(0.0),
                                         command_output: true,
                                         appearance: &appearance,
                                         appearance_hash: appearance.stable_hash(),
@@ -1630,6 +1653,7 @@ impl gpui::RenderOnce for TerminalPreview {
                                         focused: true,
                                         cursor_blink_visible: true,
                                         marked_text: None,
+                                        rows_above: None,
                                     },
                                     bounds,
                                     window,

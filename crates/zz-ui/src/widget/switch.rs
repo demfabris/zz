@@ -24,8 +24,15 @@ struct Metrics {
 }
 
 impl Metrics {
-    fn for_compact(compact: bool) -> Self {
-        if compact {
+    fn for_compact(compact: bool, coarse: bool) -> Self {
+        if coarse && !compact {
+            Self {
+                track_w: px(44.),
+                track_h: px(26.),
+                thumb: px(22.),
+                inset: px(2.),
+            }
+        } else if compact {
             Self {
                 track_w: px(28.),
                 track_h: px(16.),
@@ -164,7 +171,8 @@ fn thumb(
 impl RenderOnce for Switch {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let checked = self.checked;
-        let m = Metrics::for_compact(matches!(self.size, Size::XSmall | Size::Small));
+        let coarse = crate::touch::CoarsePointer::get(cx);
+        let m = Metrics::for_compact(matches!(self.size, Size::XSmall | Size::Small), coarse);
 
         let toggle_state = window.use_keyed_state(self.id.clone(), cx, |_, _| checked);
 
@@ -225,7 +233,6 @@ impl RenderOnce for Switch {
                                 let () = toggle_state.update(cx, |this, _| *this = checked);
                                 on_click(&!checked, window, cx);
                             };
-                        let coarse = crate::touch::CoarsePointer::get(cx);
                         this.on_mouse_down(MouseButton::Left, toggle.clone())
                             .when(coarse, |this| {
                                 this.child(

@@ -1362,10 +1362,11 @@ impl TerminalDiffScratch {
             }
         }
         let changed = &changed[..count];
+        let hint = offset_shift(previous, current);
         let scroll = if resume < current.rows {
-            best_row_shift(previous, current, self)
+            best_row_shift(previous, current, hint, self)
         } else {
-            self.shift_after_changed_rows(previous, current, changed)
+            self.shift_after_changed_rows(previous, current, changed, hint)
         };
         let start = if scroll == 0 {
             for &row in changed {
@@ -1396,6 +1397,7 @@ impl TerminalDiffScratch {
         previous: &TerminalViewport,
         current: &TerminalViewport,
         changed: &[u16],
+        hint: i16,
     ) -> i16 {
         let rows = usize::from(current.rows);
         let cached = |scratch: &Self, cells: &Arc<[PackedCell]>| {
@@ -1419,9 +1421,9 @@ impl TerminalDiffScratch {
         }
         let (known, derived) = self.row_fingerprints.split_at(rows);
         let shift = if current_cached {
-            best_row_shift_from_fingerprints(derived, known)
+            best_row_shift_from_fingerprints(derived, known, hint)
         } else {
-            best_row_shift_from_fingerprints(known, derived)
+            best_row_shift_from_fingerprints(known, derived, hint)
         };
         if !current_cached {
             self.row_fingerprints.copy_within(rows.., 0);
@@ -2080,9 +2082,24 @@ fn append_grapheme_offsets(current: &[u32], lengths: &[u32], mut offset: u32) ->
         .collect()
 }
 
+fn offset_shift(previous: &TerminalViewport, current: &TerminalViewport) -> i16 {
+    if previous.rows != current.rows
+        || previous.columns != current.columns
+        || previous.scrollbar.total != current.scrollbar.total
+    {
+        return 0;
+    }
+    let shift = i64::from(previous.scrollbar.offset) - i64::from(current.scrollbar.offset);
+    if shift.unsigned_abs() >= u64::from(current.rows) {
+        return 0;
+    }
+    i16::try_from(shift).unwrap_or(0)
+}
+
 fn best_row_shift(
     previous: &TerminalViewport,
     current: &TerminalViewport,
+    hint: i16,
     scratch: &mut TerminalDiffScratch,
 ) -> i16 {
     let rows = usize::from(current.rows);
@@ -2097,7 +2114,7 @@ fn best_row_shift(
     if current_cached {
         scratch.row_fingerprints.extend(row_fingerprints(previous));
         let (current, previous) = scratch.row_fingerprints.split_at(rows);
-        let shift = best_row_shift_from_fingerprints(previous, current);
+        let shift = best_row_shift_from_fingerprints(previous, current, hint);
         scratch.row_fingerprints.truncate(rows);
         return shift;
     }
@@ -2111,7 +2128,7 @@ fn best_row_shift(
     scratch.row_fingerprints.extend(row_fingerprints(current));
     let shift = {
         let (previous, current) = scratch.row_fingerprints.split_at(rows);
-        best_row_shift_from_fingerprints(previous, current)
+        best_row_shift_from_fingerprints(previous, current, hint)
     };
     scratch
         .row_fingerprints
@@ -2153,7 +2170,7 @@ fn row_fingerprint(cells: &[PackedCell]) -> u64 {
     hash ^ (hash >> 33)
 }
 
-fn best_row_shift_from_fingerprints(previous: &[u64], current: &[u64]) -> i16 {
+fn best_row_shift_from_fingerprints(previous: &[u64], current: &[u64], hint: i16) -> i16 {
     debug_assert_eq!(previous.len(), current.len());
     let rows = current.len();
     if rows < 2 {
@@ -2166,6 +2183,17 @@ fn best_row_shift_from_fingerprints(previous: &[u64], current: &[u64]) -> i16 {
             .filter(|(source, destination)| source == destination)
             .count()
     };
+    let distance = usize::from(hint.unsigned_abs());
+    if hint != 0 && distance < rows {
+        let overlap = if hint < 0 {
+            matches(&previous[distance..], &current[..rows - distance])
+        } else {
+            matches(&previous[..rows - distance], &current[distance..])
+        };
+        if overlap == rows - distance {
+            return hint;
+        }
+    }
     let mut best_shift = 0_isize;
     let mut best_matches = matches(previous, current);
     for distance in 1..rows {
@@ -2497,6 +2525,39 @@ mod tests {
         let mut retained = previous;
         retained.apply_patch(patch).expect("valid patch");
         assert_eq!(retained, current);
+    }
+
+    #[test]
+    fn a_view_moved_past_half_its_rows_still_patches_as_a_scroll() {
+        let rows = 12_u16;
+        let line =
+            |index: u32| [PackedCell::new(u32::from('a') + index % 26, 0, CellWidth::Narrow); 2];
+        let view = |offset: u32, generation: u64| {
+            let mut viewport = TerminalViewport::blank(2, rows, SessionStatus::Running);
+            viewport.generation = generation;
+            viewport.view_generation = generation;
+            viewport.scrollbar = ScrollbarState {
+                total: 100,
+                offset,
+                len: u32::from(rows),
+            };
+            let cells = Arc::make_mut(&mut viewport.cells);
+            for row in 0..u32::from(rows) {
+                let start = row as usize * 2;
+                cells[start..start + 2].copy_from_slice(&line(offset + row));
+            }
+            viewport
+        };
+
+        for (from, to) in [(60, 51), (51, 60)] {
+            let previous = view(from, 1);
+            let current = view(to, 2);
+            let patch = TerminalViewport::diff(&previous, &current).expect("compatible viewport");
+            assert_eq!(i64::from(patch.scroll), i64::from(from) - i64::from(to));
+            let mut retained = previous;
+            retained.apply_patch(patch).expect("valid patch");
+            assert_eq!(retained, current);
+        }
     }
 
     #[test]

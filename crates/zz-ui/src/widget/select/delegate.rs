@@ -12,6 +12,11 @@ pub trait SelectItem: Clone {
     fn title(&self) -> SharedString;
 
     fn value(&self) -> &Self::Value;
+
+    /// A family to draw the row in, for a list of fonts.
+    fn font_family(&self) -> Option<SharedString> {
+        None
+    }
 }
 
 impl SelectItem for String {

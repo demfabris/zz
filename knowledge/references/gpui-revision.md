@@ -4,7 +4,7 @@ title: GPUI revision pin
 description: Where the demfabris/gpui revision zz builds against is pinned, how to move it, and what zz's GPUI changes do. gpui-component is not a dependency.
 resource: Cargo.toml
 tags: [gpui, pin, reference, git-dependency]
-timestamp: 2026-10-06T00:00:00Z
+timestamp: 2026-10-07T00:00:00Z
 ---
 
 # Overview
@@ -97,6 +97,11 @@ Five fixes from building the iPhone client (`67e9cbc` to `01d7c9a`):
   closes the stream with a zero-delta `Ended`. The pager calls it after a release it handled, and
   `coast_guard` calls it for sheets and the swipe back, so the display link can pause instead of
   ticking through a 2 to 3 s fling.
+
+Two APIs for the phone keyboard (`99114cc`): `TextInputConfiguration::input_mode` (`TextInputMode`,
+the HTML `inputmode` set; the web backend writes it as the `inputmode` attribute, the iOS backend
+maps it onto `UIKeyboardType`), and `Window::target_visual_viewport_bounds`, where the visible
+viewport comes to rest once a keyboard transition ends (default: the current visual viewport).
 
 # zz changes to GPUI
 

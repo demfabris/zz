@@ -73,6 +73,8 @@ pub struct TerminalRenderInput<'a> {
     pub images: Option<&'a dyn TerminalImageSource>,
     pub local_scroll_target: Option<u32>,
     pub scroll_pixel_offset: Pixels,
+    pub overscroll: Pixels,
+    pub extra_height: Pixels,
     pub command_output: bool,
     pub appearance: &'a TerminalAppearance,
     pub appearance_hash: u64,
@@ -80,6 +82,7 @@ pub struct TerminalRenderInput<'a> {
     pub focused: bool,
     pub cursor_blink_visible: bool,
     pub marked_text: Option<&'a str>,
+    pub rows_above: Option<Pixels>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -453,6 +456,7 @@ pub struct PaintState {
     focused: bool,
     buffers: PaintBuffers,
     row_clip: Option<Bounds<Pixels>>,
+    rows_above_top: Option<Pixels>,
     scrollbar: Option<PaintQuad>,
     cursor_glyph: Option<PositionedLine>,
     composition: Option<PositionedLine>,
@@ -750,12 +754,13 @@ fn grid_placement(
 
 fn peek_row_source(
     top_offset: u32,
+    distance: u32,
     server_offset: u32,
     live_rows: u16,
     history_rows: usize,
 ) -> Option<LocalRowSource> {
     let source = local_row_source(
-        top_offset.checked_sub(1)?,
+        top_offset.checked_sub(distance)?,
         server_offset,
         live_rows,
         history_rows,
@@ -773,6 +778,11 @@ impl RowRenderCache {
     ) -> PaintState {
         let started = log::log_enabled!(target: DIAGNOSTIC_TARGET, log::Level::Trace)
             .then(web_time::Instant::now);
+        let track = bounds;
+        let bounds = Bounds::new(
+            bounds.origin + point(px(0.0), input.overscroll),
+            bounds.size,
+        );
         let viewport = input.viewport;
         let row_revisions = input.row_revisions;
         let row_revision_epoch = input.revision_epoch;
@@ -807,10 +817,18 @@ impl RowRenderCache {
             .apply(f32::from(natural_line_height))
             .max(1.0));
         let line_height = snap_length(raw_line_height, scale);
-        let measured = terminal_grid_size(bounds.size, cell_width, line_height, scale);
+        let extra_height = input.extra_height.max(px(0.0));
+        let measured = terminal_grid_size(
+            size(bounds.size.width, bounds.size.height + extra_height),
+            cell_width,
+            line_height,
+            scale,
+        );
         let columns = measured.columns;
         let rows = measured.rows;
-        let spare_height = (bounds.size.height - line_height * usize::from(rows)).max(px(0.0));
+        let spare_height = (bounds.size.height + extra_height - line_height * usize::from(rows))
+            .max(px(0.0))
+            - extra_height;
         let scroll_shift = if input.scroll_pixel_offset > px(0.0) {
             snap(input.scroll_pixel_offset.min(line_height), scale)
         } else {
@@ -825,23 +843,6 @@ impl RowRenderCache {
             local_scroll_target.is_some() || scroll_shift > px(0.0),
         );
         let history_rows = input.history.map_or(0, TerminalHistorySource::row_count);
-        let peek = (scroll_shift > px(0.0))
-            .then(|| {
-                peek_row_source(
-                    local_scroll_target.unwrap_or(viewport.scrollbar.offset),
-                    viewport.scrollbar.offset,
-                    viewport.rows,
-                    history_rows,
-                )
-            })
-            .flatten();
-        let peek_revision = match peek {
-            Some(LocalRowSource::History(index)) => input
-                .history
-                .and_then(|history| history.row(index))
-                .map(|row| row.revision),
-            _ => None,
-        };
         let row_projection = RowProjection::new(viewport.rows, rows, project_from_bottom);
         let live_row_projection = local_scroll_target.map_or(row_projection, |target_offset| {
             local_live_projection(
@@ -865,12 +866,40 @@ impl RowRenderCache {
         );
         let grid_bounds = terminal_grid_bounds(origin, columns, rows, cell_width, line_height);
         let content_origin = point(origin.x, origin.y + scroll_shift);
-        let row_clip = (scroll_shift > px(0.0)).then(|| {
-            Bounds::new(
-                point(bounds.origin.x, grid_bounds.origin.y),
-                size(bounds.size.width, grid_bounds.size.height),
-            )
+        let rows_above_top = input
+            .rows_above
+            .filter(|top| bottom_anchored && *top < grid_bounds.origin.y);
+        let row_clip = match rows_above_top {
+            Some(top) => Some(Bounds::new(
+                point(bounds.origin.x, top),
+                size(
+                    bounds.size.width,
+                    grid_bounds.origin.y + grid_bounds.size.height - top,
+                ),
+            )),
+            None => (scroll_shift > px(0.0)).then(|| {
+                Bounds::new(
+                    point(bounds.origin.x, grid_bounds.origin.y),
+                    size(bounds.size.width, grid_bounds.size.height),
+                )
+            }),
+        };
+        let above_count = rows_above_top.map_or(u32::from(scroll_shift > px(0.0)), |top| {
+            (f32::from(content_origin.y - top) / f32::from(line_height)).ceil() as u32
         });
+        let above_top_offset = local_scroll_target.unwrap_or(viewport.scrollbar.offset);
+        let above = || {
+            (1..=above_count).filter_map(move |distance| {
+                peek_row_source(
+                    above_top_offset,
+                    distance,
+                    viewport.scrollbar.offset,
+                    viewport.rows,
+                    history_rows,
+                )
+                .map(|source| (distance, source))
+            })
+        };
         let cursor = viewport.cursor;
         let cursor_cell =
             cursor.and_then(|cursor| cursor_cell(viewport, cursor, columns, live_row_projection));
@@ -948,7 +977,15 @@ impl RowRenderCache {
                     .filter_map(|index| input.history.and_then(|history| history.row(index)))
                     .map(|row| row.revision)
                     .chain(row_revisions.iter().copied())
-                    .chain(peek_revision),
+                    .chain(above().filter_map(|(_, source)| {
+                        match source {
+                            LocalRowSource::History(index) => input
+                                .history
+                                .and_then(|history| history.row(index))
+                                .map(|row| row.revision),
+                            _ => None,
+                        }
+                    })),
             );
             let projected_rows = (0..row_projection.count).map(|offset| {
                 let source_row = row_projection
@@ -964,17 +1001,25 @@ impl RowRenderCache {
                             history_rows,
                         )
                     });
-                (Some(row_index), source)
+                (
+                    Some(row_index),
+                    point(content_origin.x, content_origin.y + line_height * row_index),
+                    source,
+                )
             });
-            for (row_index, source) in peek
-                .map(|source| (None, source))
-                .into_iter()
+            for (row_index, row_origin, source) in above()
+                .map(|(distance, source)| {
+                    (
+                        None,
+                        point(
+                            content_origin.x,
+                            content_origin.y - line_height * distance as f32,
+                        ),
+                        source,
+                    )
+                })
                 .chain(projected_rows)
             {
-                let row_origin = row_index.map_or(
-                    point(content_origin.x, content_origin.y - line_height),
-                    |row_index| point(content_origin.x, content_origin.y + line_height * row_index),
-                );
                 let resolved = match source {
                     LocalRowSource::Live(live_row) => Some((
                         viewport.row(live_row).unwrap_or_default(),
@@ -1148,7 +1193,7 @@ impl RowRenderCache {
                 offset: target_offset,
                 len: viewport.scrollbar.len,
             });
-        let scrollbar = scrollbar_quad(scrollbar, bounds, cx);
+        let scrollbar = scrollbar_quad(scrollbar, track, input.overscroll, cx);
         let focused = input.focused;
         let cursor_visible =
             cursor_visible_for_paint(cursor, composing, focused, input.cursor_blink_visible);
@@ -1251,6 +1296,7 @@ impl RowRenderCache {
             focused,
             buffers,
             row_clip,
+            rows_above_top,
             scrollbar,
             cursor_glyph,
             composition,
@@ -1278,9 +1324,17 @@ impl RowRenderCache {
         let text_count = paint.buffers.text.len();
         let decoration_count = paint.buffers.decorations.len();
         let had_composition = paint.composition.is_some();
-        let row_clip = paint
-            .row_clip
-            .map_or(bounds, |row_clip| row_clip.intersect(&bounds));
+        let row_clip = paint.row_clip.map_or(bounds, |row_clip| {
+            row_clip.intersect(&paint.rows_above_top.map_or(bounds, |top| {
+                Bounds::new(
+                    point(bounds.origin.x, top),
+                    size(
+                        bounds.size.width,
+                        bounds.origin.y + bounds.size.height - top,
+                    ),
+                )
+            }))
+        });
         window.with_content_mask(Some(ContentMask { bounds: row_clip }), |window| {
             paint_kitty_images(&mut paint.buffers.kitty_below_bg, window);
             for quad in paint.buffers.backgrounds.drain(..) {
@@ -1640,6 +1694,7 @@ fn copy_cursor_line_color(appearance: &TerminalAppearance) -> Hsla {
 fn scrollbar_quad(
     scrollbar: ScrollbarState,
     bounds: Bounds<Pixels>,
+    overscroll: Pixels,
     cx: &App,
 ) -> Option<PaintQuad> {
     if scrollbar.total <= scrollbar.len || scrollbar.total == 0 {
@@ -1651,10 +1706,17 @@ fn scrollbar_quad(
     let travel = (track_height - thumb_height).max(px(0.0));
     let denominator = scrollbar.total.saturating_sub(scrollbar.len).max(1);
     let progress = scrollbar.offset as f32 / denominator as f32;
-    let origin = point(
-        bounds.right() - THUMB_WIDTH - THUMB_INSET,
-        bounds.origin.y + THUMB_INSET + travel * progress,
-    );
+    let squeezed = (thumb_height - overscroll.abs()).max(px(MIN_THUMB_SIZE));
+    let top = bounds.origin.y
+        + THUMB_INSET
+        + travel * progress
+        + if overscroll < px(0.0) {
+            thumb_height - squeezed
+        } else {
+            px(0.0)
+        };
+    let thumb_height = squeezed;
+    let origin = point(bounds.right() - THUMB_WIDTH - THUMB_INSET, top);
     Some(
         fill(
             Bounds::new(origin, size(THUMB_WIDTH, thumb_height)),
@@ -4462,16 +4524,21 @@ mod tests {
     #[test]
     fn the_peek_row_comes_from_the_ring_and_never_shimmers() {
         assert_eq!(
-            peek_row_source(100, 100, 4, 3),
+            peek_row_source(100, 1, 100, 4, 3),
             Some(LocalRowSource::History(2))
         );
         assert_eq!(
-            peek_row_source(98, 100, 4, 3),
+            peek_row_source(98, 1, 100, 4, 3),
             Some(LocalRowSource::History(0))
         );
-        assert_eq!(peek_row_source(97, 100, 4, 3), None);
-        assert_eq!(peek_row_source(100, 100, 4, 0), None);
-        assert_eq!(peek_row_source(0, 0, 4, 3), None);
+        assert_eq!(
+            peek_row_source(100, 3, 100, 4, 3),
+            Some(LocalRowSource::History(0))
+        );
+        assert_eq!(peek_row_source(97, 1, 100, 4, 3), None);
+        assert_eq!(peek_row_source(100, 4, 100, 4, 3), None);
+        assert_eq!(peek_row_source(100, 1, 100, 4, 0), None);
+        assert_eq!(peek_row_source(0, 1, 0, 4, 3), None);
     }
 
     struct RingRows(Vec<Vec<PackedCell>>, TerminalDictionary);
@@ -4488,6 +4555,62 @@ mod tests {
                 revision: 1_000 + index as u64,
             })
         }
+    }
+
+    #[gpui::test]
+    fn extra_height_adds_rows_past_the_edge_the_grid_is_not_anchored_to(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        let filled = filled_viewport(8, 4, 'x');
+        let blank = TerminalViewport::blank(8, 4, zz_terminal::SessionStatus::Running);
+        let revisions = [1, 2, 3, 4];
+        let appearance = TerminalAppearance::default();
+        cx.update(|window, cx| {
+            let mut cache = RowRenderCache::default();
+            let mut prepaint = |viewport: &TerminalViewport,
+                                height: Pixels,
+                                extra_height: Pixels,
+                                window: &mut Window| {
+                cache
+                    .prepaint(
+                        TerminalRenderInput {
+                            viewport,
+                            row_revisions: &revisions,
+                            revision_epoch: 1,
+                            history: None,
+                            images: None,
+                            local_scroll_target: None,
+                            scroll_pixel_offset: px(0.0),
+                            overscroll: px(0.0),
+                            extra_height,
+                            command_output: false,
+                            appearance: &appearance,
+                            appearance_hash: 0,
+                            text_opacity: 1.0,
+                            focused: false,
+                            cursor_blink_visible: true,
+                            marked_text: None,
+                            rows_above: None,
+                        },
+                        Bounds::new(point(px(0.0), px(10.0)), size(px(400.0), height)),
+                        window,
+                        cx,
+                    )
+                    .geometry
+            };
+            let line_height = prepaint(&filled, px(400.0), px(0.0), window).line_height;
+            let height = line_height * 4.0 + px(3.0);
+            let anchored = prepaint(&filled, height, line_height * 2.0, window);
+            let top = prepaint(&blank, height, line_height * 2.0, window);
+
+            assert_eq!(anchored.grid.rows, 6);
+            assert_eq!(anchored.grid_bounds.bottom(), px(10.0) + height);
+            assert_eq!(anchored.surface_bounds.size.height, height);
+            assert_eq!(top.grid.rows, 6);
+            assert_eq!(top.grid_bounds.origin.y, px(10.0));
+        });
     }
 
     #[gpui::test]
@@ -4518,6 +4641,8 @@ mod tests {
                         images: None,
                         local_scroll_target: None,
                         scroll_pixel_offset: offset,
+                        overscroll: px(0.0),
+                        extra_height: px(0.0),
                         command_output: false,
                         appearance: &appearance,
                         appearance_hash: 0,
@@ -4525,6 +4650,7 @@ mod tests {
                         focused: false,
                         cursor_blink_visible: true,
                         marked_text: None,
+                        rows_above: None,
                     },
                     Bounds::new(point(px(0.0), px(0.0)), size(px(400.0), height)),
                     window,
@@ -4567,6 +4693,119 @@ mod tests {
             );
             assert!(shifted.scrollbar.is_some());
             assert!(cache.rows.contains_key(&1_001));
+        });
+    }
+
+    #[gpui::test]
+    fn rows_above_the_grid_reach_the_given_top(cx: &mut gpui::TestAppContext) {
+        cx.update(crate::init);
+        let cx = cx.add_empty_window();
+        let mut live = filled_viewport(8, 4, 'x');
+        live.scrollbar = ScrollbarState {
+            total: 40,
+            offset: 36,
+            len: 4,
+        };
+        let mut view = live.clone();
+        view.mode = zz_terminal::TerminalMode::View {
+            position: 30,
+            total: 40,
+        };
+        let ring = RingRows(
+            vec![vec![PackedCell::new(u32::from('h'), 0, CellWidth::Narrow); 8]; 6],
+            TerminalDictionary::default(),
+        );
+        let revisions = [1, 2, 3, 4];
+        let appearance = TerminalAppearance::default();
+        cx.update(|window, cx| {
+            let mut cache = RowRenderCache::default();
+            let mut prepaint = |viewport: &TerminalViewport,
+                                offset: Pixels,
+                                rows_above: Option<Pixels>,
+                                bounds: Bounds<Pixels>,
+                                window: &mut Window| {
+                cache.prepaint(
+                    TerminalRenderInput {
+                        viewport,
+                        row_revisions: &revisions,
+                        revision_epoch: 1,
+                        history: Some(&ring),
+                        images: None,
+                        local_scroll_target: None,
+                        scroll_pixel_offset: offset,
+                        overscroll: px(0.0),
+                        extra_height: px(0.0),
+                        command_output: false,
+                        appearance: &appearance,
+                        appearance_hash: 0,
+                        text_opacity: 1.0,
+                        focused: false,
+                        cursor_blink_visible: true,
+                        marked_text: None,
+                        rows_above,
+                    },
+                    bounds,
+                    window,
+                    cx,
+                )
+            };
+            let line_height = prepaint(
+                &live,
+                px(0.0),
+                None,
+                Bounds::new(point(px(0.0), px(0.0)), size(px(400.0), px(400.0))),
+                window,
+            )
+            .geometry
+            .line_height;
+            let bounds = Bounds::new(
+                point(px(0.0), line_height * 2.0),
+                size(px(400.0), line_height * 4.0 + px(3.0)),
+            );
+            let rows = |paint: &PaintState| {
+                paint
+                    .buffers
+                    .text
+                    .iter()
+                    .map(|row| row.origin.y)
+                    .collect::<Vec<_>>()
+            };
+
+            let rest = prepaint(&live, px(0.0), None, bounds, window);
+            assert_eq!(rows(&rest).len(), 4);
+            assert!(rest.row_clip.is_none());
+
+            let shifted = prepaint(&live, px(5.0), Some(px(0.0)), bounds, window);
+            let grid = shifted.geometry.grid_bounds;
+            assert_eq!(grid.origin.y, line_height * 2.0 + px(3.0));
+            let top = grid.origin.y + px(5.0);
+            assert_eq!(
+                rows(&shifted)[..4],
+                [
+                    top - line_height,
+                    top - line_height * 2.0,
+                    top - line_height * 3.0,
+                    top,
+                ]
+            );
+            assert_eq!(rows(&shifted).len(), 7);
+            assert_eq!(
+                shifted.row_clip,
+                Some(Bounds::new(
+                    point(px(0.0), px(0.0)),
+                    size(px(400.0), grid.origin.y + grid.size.height),
+                ))
+            );
+
+            let unshifted = prepaint(&live, px(0.0), Some(px(0.0)), bounds, window);
+            assert_eq!(rows(&unshifted).len(), 7);
+            let clipped = prepaint(&live, px(0.0), Some(line_height), bounds, window);
+            assert_eq!(rows(&clipped).len(), 6);
+            let below = prepaint(&live, px(0.0), Some(grid.origin.y), bounds, window);
+            assert_eq!(rows(&below).len(), 4);
+            assert!(below.row_clip.is_none());
+            let unanchored = prepaint(&view, px(0.0), Some(px(0.0)), bounds, window);
+            assert_eq!(rows(&unanchored).len(), 4);
         });
     }
 }

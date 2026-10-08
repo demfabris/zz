@@ -79,8 +79,9 @@ answer first. Surfaces without a PTY (agent pane projections and output views) l
   owns (`program_status_panes`): a full reset or `respawn-pane` on such a pane writes `idle`,
   hands it back to the heuristics, and drops the peer sampler's memo so its next sample lands.
 - Desktop sidebar: every terminal pane feeds the same `AgentAttentionTracker` as Agent panes,
-  idle until it reports, so a first `blocked` rings, so `blocked` shows the needs-input badge and rings, `error` shows failed, and
-  `working` to `done` or `idle` rings and leaves the finished badge until the pane is watched.
+  idle until it reports. `blocked` shows the needs-input badge and rings, even on a pane's first
+  report; `error` shows failed; and `working` to `done` or `idle` rings and leaves the finished
+  badge until the pane is watched.
   Chimes closer than two seconds apart are dropped, since any program can flip its state as
   fast as it writes.
 

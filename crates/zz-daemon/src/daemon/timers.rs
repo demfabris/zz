@@ -429,16 +429,21 @@ impl LoopTimers {
                     TimerInput::Hooks(events) => self.hooks.events(shared, events),
                     #[cfg(feature = "agent")]
                     TimerInput::PeerSample { pane, value } => {
-                        if !shared.inner.lock().program_status_panes.contains(&pane) {
-                            self.hooks.command(
-                                shared,
-                                ExecutionContext::default(),
-                                CommandInvocation::new(
-                                    "set-option",
-                                    ["-p", "-t", &pane.to_string(), "@agent_state", &value],
-                                ),
-                            );
-                        }
+                        let target = pane.to_string();
+                        self.hooks.command(
+                            shared,
+                            ExecutionContext::default(),
+                            CommandInvocation::new(
+                                "if-shell",
+                                [
+                                    "-F",
+                                    "-t",
+                                    &target,
+                                    "#{?pane_status_reported,,1}",
+                                    &format!("set-option -p -t {target} @agent_state {value}"),
+                                ],
+                            ),
+                        );
                     }
                     TimerInput::MonitorHook {
                         context,

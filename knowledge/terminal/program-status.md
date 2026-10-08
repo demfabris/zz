@@ -68,7 +68,10 @@ answer first. Surfaces without a PTY (agent pane projections and output views) l
   `#{pane_status_app}`, `#{pane_status_title}` and `#{pane_status_message}` read the headline
   straight from the pane's terminal. They are daemon hook variables, so they also appear in
   `inspect` and `list-panes --json`. Title and message come back with every `#` doubled, so a
-  status line or border format shows them as text instead of reading `#[...]` as style.
+  status line or border format shows them as text instead of reading `#[...]` as style, the
+  way tmux escapes `window_flags`. Scripts read `#{pane_status_raw_title}` and
+  `#{pane_status_raw_message}`, the unescaped twins, as with `window_raw_flags`.
+  `#{pane_status_reported}` is `1` once the pane has reported since its last full reset.
 - The tree: the daemon's pane watcher copies the headline into `Pane::status`, which rides
   `PaneSnapshot.status` and `TreeOp::PaneStatus` (wire v108).
 - `@agent_state`: `working`, `blocked`, `error` as `failed`, and `idle` for `idle`, `done` or
@@ -78,6 +81,9 @@ answer first. Surfaces without a PTY (agent pane projections and output views) l
   a full reset, as the spec asks of OSC 9;4. The daemon remembers which panes the protocol
   owns (`program_status_panes`): a full reset or `respawn-pane` on such a pane writes `idle`,
   hands it back to the heuristics, and drops the peer sampler's memo so its next sample lands.
+  A peer sample waits in the loop's hook queue as
+  `if-shell -F '#{?pane_status_reported,,1}' 'set-option … @agent_state …'`, so a report that
+  lands while it waits still wins.
 - Desktop sidebar: every terminal pane feeds the same `AgentAttentionTracker` as Agent panes,
   idle until it reports. `blocked` shows the needs-input badge and rings, even on a pane's first
   report; `error` shows failed; and `working` to `done` or `idle` rings and leaves the finished

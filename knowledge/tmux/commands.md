@@ -72,7 +72,7 @@ for one JSON object per row in the same order as text output. Keys are the forma
 variable names for that entity; values are strings with the same expansion as
 `#{name}`, including empty strings for unavailable values. Pane rows include
 `pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
-`pane_pb_state`, `pane_pb_progress`, and the six `pane_status*` program status
+`pane_pb_state`, `pane_pb_progress`, and the `pane_status*` program status
 variables. Use `show-options --json` for one object
 mapping option names to value strings in the selected scope. Combining `-F` and
 `--json` is a usage error.

@@ -4247,6 +4247,9 @@ const INSPECT_FIELDS: &[&str] = &[
     "pane_status_app",
     "pane_status_title",
     "pane_status_message",
+    "pane_status_raw_title",
+    "pane_status_raw_message",
+    "pane_status_reported",
     "agent_state",
     "agent_pending_permission",
     "permission",
@@ -47234,7 +47237,10 @@ impl StatusFactSelection {
                 | "pane_status_progress"
                 | "pane_status_app"
                 | "pane_status_title"
-                | "pane_status_message" => selection.terminals = true,
+                | "pane_status_message"
+                | "pane_status_raw_title"
+                | "pane_status_raw_message"
+                | "pane_status_reported" => selection.terminals = true,
                 "pane_pipe" | "pane_pipe_pid" => selection.pane_pipes = true,
                 "session_attached" | "session_attached_list" | "session_many_attached" => {
                     selection.session_attachments = true;
@@ -50962,7 +50968,7 @@ for one JSON object per row in the same order as text output. Keys are the forma
 variable names for that entity; values are strings with the same expansion as
 `#{name}`, including empty strings for unavailable values. Pane rows include
 `pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
-`pane_pb_state`, `pane_pb_progress`, and the six `pane_status*` program status
+`pane_pb_state`, `pane_pb_progress`, and the `pane_status*` program status
 variables. Use `show-options --json` for one object
 mapping option names to value strings in the selected scope. Combining `-F` and
 `--json` is a usage error.
@@ -51040,7 +51046,7 @@ Read one `key: value` line per field, or use `--json` for one object with string
 zz inspect -a --json | jq -c 'select(.pane_kind=="agent") | {pane_id,agent_state}'
 ```
 
-The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `pane_status`, `pane_status_kind`, `pane_status_progress`, `pane_status_app`, `pane_status_title`, `pane_status_message`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `pane_status`, `pane_status_kind`, `pane_status_progress`, `pane_status_app`, `pane_status_title`, `pane_status_message`, `pane_status_raw_title`, `pane_status_raw_message`, `pane_status_reported`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
 
 `permission` is a nested `{"request_id":7,"tool_call":{...},"options":[...]}` object or `null` in JSON output; text output prints compact JSON on the `permission:` line, or an empty value.
 
@@ -80111,6 +80117,9 @@ set-option -g @alias-mixed-next yes
                 "pane_status_app",
                 "pane_status_title",
                 "pane_status_message",
+                "pane_status_raw_title",
+                "pane_status_raw_message",
+                "pane_status_reported",
                 "agent_state",
                 "agent_pending_permission",
                 "permission",
@@ -81805,8 +81814,8 @@ set-option -g @alias-mixed-next yes
             "Enter",
         ]);
         settle(
-            "#{pane_status}|#{pane_status_kind}|#{pane_status_progress}|#{pane_status_app}|#{pane_status_title}|#{pane_status_message}|#{agent_state}",
-            "blocked|permission|40|tf|Plan|Apply ##1?|blocked",
+            "#{pane_status}|#{pane_status_kind}|#{pane_status_progress}|#{pane_status_app}|#{pane_status_title}|#{pane_status_message}|#{pane_status_raw_message}|#{pane_status_reported}|#{agent_state}",
+            "blocked|permission|40|tf|Plan|Apply ##1?|Apply #1?|1|blocked",
         );
         assert_eq!(
             tree_status(),
@@ -81819,6 +81828,16 @@ set-option -g @alias-mixed-next yes
                 message: "Apply #1?".to_owned(),
             })
         );
+
+        run(&[
+            "if-shell",
+            "-F",
+            "-t",
+            &target,
+            "#{?pane_status_reported,,1}",
+            &format!("set-option -p -t {target} @agent_state working"),
+        ]);
+        settle("#{agent_state}", "blocked");
 
         run(&[
             "send-keys",
@@ -81857,7 +81876,10 @@ set-option -g @alias-mixed-next yes
         ]);
         settle("#{pane_status}|#{agent_state}", "working|working");
         run(&["send-keys", "-t", &target, "printf '\\033c'", "Enter"]);
-        settle("#{pane_status}|#{agent_state}", "|idle");
+        settle(
+            "#{pane_status}|#{pane_status_reported}|#{agent_state}",
+            "|0|idle",
+        );
         assert_eq!(tree_status(), None);
 
         run(&[

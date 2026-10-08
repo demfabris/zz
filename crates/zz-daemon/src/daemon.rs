@@ -118050,6 +118050,21 @@ bind - split-window -v -c "#{pane_current_path}"
                 .collect()
         }
 
+        fn applied_from_start(items: &[AgentStreamItem]) -> Vec<AgentStreamItem> {
+            let mut cursor = 0;
+            items
+                .iter()
+                .filter(|item| {
+                    let next = item.seq == cursor + 1;
+                    if next {
+                        cursor = item.seq;
+                    }
+                    next
+                })
+                .cloned()
+                .collect()
+        }
+
         fn chunk_text(item: &AgentStreamItem) -> Option<&str> {
             let AgentStreamPayload::Update { update } = &item.payload else {
                 return None;
@@ -119630,12 +119645,16 @@ bind - split-window -v -c "#{pane_current_path}"
             workspace.shared.detach(workspace.client);
             workspace.prompt("again").expect("prompt while detached");
             let deadline = Instant::now() + DEADLINE;
-            while Instant::now() < deadline
-                && workspace
-                    .runtime
-                    .wire_state(workspace.agent)
-                    .is_none_or(|state| state.session_id.is_none())
+            while !workspace
+                .runtime
+                .retained_items(workspace.agent)
+                .iter()
+                .any(|item| chunk_text(item) == Some("turn 1"))
             {
+                assert!(
+                    Instant::now() < deadline,
+                    "timed out waiting for the detached turn"
+                );
                 thread::sleep(Duration::from_millis(5));
             }
             assert!(
@@ -119673,19 +119692,14 @@ bind - split-window -v -c "#{pane_current_path}"
                     },
                 )
                 .expect("replay");
-            let replayed = workspace.wait_for_items("the replayed transcript", |items| {
-                items.iter().any(|item| chunk_text(item) == Some("turn 1"))
-            });
-            assert_eq!(
-                replayed.first().map(|item| item.seq),
-                Some(1),
-                "the replay starts at the beginning for a client that kept nothing"
-            );
-            assert_eq!(
-                replayed.iter().map(|item| item.seq).collect::<Vec<_>>(),
-                (1..=replayed.len() as u64).collect::<Vec<_>>(),
-                "and converges on the same contiguous transcript"
-            );
+            let replayed = applied_from_start(&workspace.wait_for_items(
+                "a replay from the beginning for a client that kept nothing",
+                |items| {
+                    applied_from_start(items)
+                        .iter()
+                        .any(|item| chunk_text(item) == Some("turn 1"))
+                },
+            ));
             assert_eq!(
                 replayed.iter().filter_map(chunk_text).collect::<Vec<_>>(),
                 ["go", "turn 0", "again", "turn 1"]

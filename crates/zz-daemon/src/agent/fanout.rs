@@ -319,6 +319,21 @@ impl AgentRuntime {
     pub(crate) fn set_runner_factory(&self, factory: crate::agent::host::PaneRunnerFactory) {
         self.host.set_runner_factory(factory);
     }
+
+    #[cfg(test)]
+    pub(crate) fn retained_items(&self, pane: PaneId) -> Vec<AgentStreamItem> {
+        self.fanout
+            .lanes
+            .lock()
+            .get(&pane)
+            .map(|lane| {
+                lane.ring
+                    .iter()
+                    .filter_map(|(_, encoded)| serde_json::from_slice(encoded).ok())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
 }
 
 impl Drop for AgentRuntime {

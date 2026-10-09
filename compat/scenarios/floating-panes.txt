@@ -205,3 +205,37 @@ err: move-pane -P centre -t sl.1
 resize-pane -t sl.1 -y 5
 out: display-message -p -t sl #{window_zoomed_flag}
 out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# split-window on a float ignores the tiled -l size, as tmux does.
+new-session -d -s fl
+new-pane -t fl
+split-window -h -l bad -t fl.1
+out: list-panes -t fl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# Layouts printed after a float resize, a float kill and the last tile's
+# removal restore the same panes through select-layout.
+new-session -d -s rt
+split-window -h -t rt.0
+new-pane -t rt.0
+new-pane -t rt.0
+resize-pane -t rt.2 -x 30 -y 8
+out: display-message -p -t rt #{window_layout}
+move-pane -X 0 -Y 0 -t rt.2
+resize-pane -t rt.0 -x 20
+select-layout -t rt '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"l":2,"i":0,"I":"%35"},{"t":"p","w":40,"h":6,"x":8,"y":4,"a":true,"i":3,"z":0,"I":"%38"},{"t":"p","w":28,"h":6,"x":4,"y":2,"l":0,"i":2,"z":1,"I":"%37"},{"t":"p","w":39,"h":24,"x":41,"y":0,"l":1,"i":1,"I":"%36"}]}}'
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}
+kill-pane -t rt.3
+out: display-message -p -t rt #{window_layout}
+move-pane -P centre -t rt.2
+select-layout -t rt '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"l":1,"i":0,"I":"%35"},{"t":"p","w":28,"h":6,"x":4,"y":2,"a":true,"i":2,"z":0,"I":"%37"},{"t":"p","w":39,"h":24,"x":41,"y":0,"l":0,"i":1,"I":"%36"}]}}'
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}
+kill-pane -t rt.1
+kill-pane -t rt.0
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}
+move-pane -P top-left -t rt.0
+select-layout -t rt '{"V":2,"L":{"t":"p","w":28,"h":6,"x":4,"y":2,"a":true,"i":0,"z":0,"I":"%37"}}'
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}

@@ -38959,7 +38959,12 @@ fn prompt_cursors(inner: &ServerState, session: Option<SessionId>) -> [PromptCur
         .prompt_cursor_options(session)
         .map(|(style, colour)| PromptCursor {
             style,
-            colour: zz_protocol::parse_tmux_colour(&colour).filter(|colour| {
+            colour: zz_protocol::parse_tmux_colour(&if colour.contains("#{") {
+                chooser_presentation::expand_without_context(inner, &colour)
+            } else {
+                colour
+            })
+            .filter(|colour| {
                 !matches!(
                     colour,
                     zz_protocol::TmuxColour::Default | zz_protocol::TmuxColour::Terminal
@@ -45128,9 +45133,6 @@ fn command_prompt_key(
     let translated = prompt.vi_keys.then(|| prompt_translate_key(prompt, input));
     let action = match translated {
         None => command_prompt_edit_key(prompt, input, text_follows, history),
-        Some(PromptViKey::Handled) if (prompt.command_mode, prompt.cursor) != before => {
-            return PromptKeyAction::Updated;
-        }
         Some(PromptViKey::Handled) => PromptKeyAction::Handled,
         Some(PromptViKey::Motion(motion)) => {
             if motion.apply(prompt) {
@@ -45168,6 +45170,9 @@ fn command_prompt_key(
         },
     };
     match action {
+        PromptKeyAction::Handled if (prompt.command_mode, prompt.cursor) != before => {
+            PromptKeyAction::Updated
+        }
         PromptKeyAction::Updated if incremental => PromptKeyAction::Incremental('='),
         PromptKeyAction::Submit if incremental => PromptKeyAction::SubmitIncremental,
         other => other,
@@ -115663,10 +115668,12 @@ bind - split-window -v -c "#{pane_current_path}"
             shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
         let mut context = ExecutionContext::default();
         for (name, value) in [
+            ("@cursor", "red"),
+            ("@command-cursor", "#00ff00"),
             ("prompt-cursor-style", "bar"),
-            ("prompt-cursor-colour", "red"),
+            ("prompt-cursor-colour", "#{@cursor}"),
             ("prompt-command-cursor-style", "blinking-underline"),
-            ("prompt-command-cursor-colour", "#00ff00"),
+            ("prompt-command-cursor-colour", "#{@command-cursor}"),
             ("status-keys", "vi"),
         ] {
             shared
@@ -115747,6 +115754,27 @@ bind - split-window -v -c "#{pane_current_path}"
                     }) if published.command_mode && published.cursor == 2
                 )),
             "entering command mode republishes the prompt"
+        );
+        key(&mut context, KeyCode::Character('0'), false);
+        assert_eq!(state(&shared).cursor, 0);
+        take_reliable_messages(&mailbox);
+        key(&mut context, KeyCode::Character('I'), false);
+        assert!(!state(&shared).command_mode);
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::CommandPrompt {
+                            state: Some(published),
+                        },
+                        ..
+                    }) if !published.command_mode
+                        && published.cursor == 0
+                        && published.prompt_cursor.style == 6
+                )),
+            "leaving command mode at column zero republishes the prompt"
         );
         assert_eq!(
             command.prompt_cursor,

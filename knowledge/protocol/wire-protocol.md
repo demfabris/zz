@@ -857,7 +857,9 @@ is what `prompt_set_options` reads from the session when the prompt opens: `styl
 when empty or `default`. A command prompt in command mode carries the
 `prompt-command-cursor-*` pair instead. The raw TUI sends DECSCUSR and OSC 12 while a client
 prompt or confirm is up and `\e[2 q` and OSC 112 once it is gone, the way `tty_update_cursor`
-does, gated on the terminal's `cstyle` and `ccolour` features.
+does, gated on the terminal's `cstyle` and `ccolour` features. `ChooserPreview::Client` appends `border_style`, the
+`tree-mode-border-style` of the previewed client's current window, which `window_client_draw` draws
+the rule above the client's status rows in.
 
 # Versioning & compatibility
 

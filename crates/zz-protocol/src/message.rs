@@ -2960,6 +2960,7 @@ pub enum ChooserPreview {
         /// The previewed client's own width, which its status screen was
         /// composed at before the box copies the first columns of it.
         status_width: u32,
+        border_style: String,
     },
     /// `window_client_draw_info`: the info view `i` raises, already expanded
     /// into the pin's own styled lines.

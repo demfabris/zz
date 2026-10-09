@@ -268,7 +268,10 @@ pub(crate) struct Renderer {
     default_blank: PaneMap<Rect>,
     tty: Option<(TtyState, usize)>,
     settled: Option<TtyState>,
-    terminal_cursor: (u8, Option<u32>),
+    cursor_style: Option<u8>,
+    cursor_colour: Option<u32>,
+    cursor_colour_known: bool,
+    cursor_written: bool,
 }
 
 impl Renderer {
@@ -320,7 +323,10 @@ impl Renderer {
             default_blank: PaneMap::default(),
             tty: None,
             settled: None,
-            terminal_cursor: (0, None),
+            cursor_style: Some(0),
+            cursor_colour: None,
+            cursor_colour_known: true,
+            cursor_written: false,
         }
     }
 
@@ -661,6 +667,7 @@ impl Renderer {
             }
             if self.writer.borrow_mut().submit(&mut self.output)? == Submission::Dropped {
                 self.invalidate();
+                self.forget_terminal_cursor();
             }
             return Ok(());
         }
@@ -689,6 +696,7 @@ impl Renderer {
                     self.queued_control.splice(0..0, control);
                 }
                 self.invalidate();
+                self.forget_terminal_cursor();
                 Ok(())
             }
         }
@@ -705,7 +713,17 @@ impl Renderer {
         self.output.clear();
         self.writer.borrow_mut().pause(paused);
         self.invalidate();
-        self.terminal_cursor = (0, None);
+        self.cursor_style = Some(0);
+        self.cursor_colour = None;
+        self.cursor_colour_known = true;
+        self.cursor_written = false;
+    }
+
+    fn forget_terminal_cursor(&mut self) {
+        if self.cursor_written {
+            self.cursor_style = None;
+            self.cursor_colour_known = false;
+        }
     }
 
     fn update_terminal_cursor(&mut self, model: &Model) {
@@ -721,30 +739,29 @@ impl Renderer {
         let colour = wanted
             .colour
             .and_then(|colour| cursor_colour_rgb(colour, &model.status.theme));
-        if colour != self.terminal_cursor.1 {
-            if writes_colour {
-                match colour {
-                    Some(rgb) => {
-                        let _ = write!(
-                            self.output,
-                            "\x1b]12;rgb:{:02x}/{:02x}/{:02x}\x07",
-                            rgb >> 16 & 0xff,
-                            rgb >> 8 & 0xff,
-                            rgb & 0xff
-                        );
-                    }
-                    None => self.output.extend_from_slice(b"\x1b]112\x07"),
+        if writes_colour && (!self.cursor_colour_known || self.cursor_colour != colour) {
+            match colour {
+                Some(rgb) => {
+                    let _ = write!(
+                        self.output,
+                        "\x1b]12;rgb:{:02x}/{:02x}/{:02x}\x07",
+                        rgb >> 16 & 0xff,
+                        rgb >> 8 & 0xff,
+                        rgb & 0xff
+                    );
                 }
+                None => self.output.extend_from_slice(b"\x1b]112\x07"),
             }
-            self.terminal_cursor.1 = colour;
+            self.cursor_colour = colour;
+            self.cursor_colour_known = true;
+            self.cursor_written = true;
         }
         let style = wanted.style.min(6);
-        if style != self.terminal_cursor.0 {
-            if writes_style {
-                let _ = write!(self.output, "\x1b[{} q", if style == 0 { 2 } else { style });
-                crate::tty::note_cursor_style(style != 0);
-            }
-            self.terminal_cursor.0 = style;
+        if writes_style && self.cursor_style != Some(style) {
+            let _ = write!(self.output, "\x1b[{} q", if style == 0 { 2 } else { style });
+            crate::tty::note_cursor_style(style != 0);
+            self.cursor_style = Some(style);
+            self.cursor_written = true;
         }
     }
 
@@ -5639,7 +5656,63 @@ mod tests {
         model.command_prompt = Some(prompt);
         renderer.write_terminal_cursor(&model, false, false);
         assert!(renderer.output.is_empty());
-        assert_eq!(renderer.terminal_cursor, (6, Some(0x80_00_00)));
+        assert_eq!(
+            written(&mut renderer, &model),
+            "\x1b]12;rgb:80/00/00\x07\x1b[6 q",
+            "a cursor the terminal could not take yet is sent once it can"
+        );
+    }
+
+    #[test]
+    fn a_dropped_paint_sends_the_prompt_cursor_again() {
+        let mut model = block_model(40, 10);
+        model.set_status(block_status(vec!["ROW"], false));
+        model.command_prompt = Some(zz_protocol::CommandPromptState {
+            prompt: ":".to_owned(),
+            input: String::new(),
+            cursor: 0,
+            kind: zz_protocol::CommandPromptKind::Command,
+            history: Vec::new(),
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: zz_protocol::CommandPromptMode::Text,
+            no_freeze: false,
+            pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor {
+                style: 6,
+                colour: Some(TmuxColour::Basic(1)),
+            },
+        });
+        let sent = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut renderer = Renderer::with_sink(Box::new({
+            let sent = Arc::clone(&sent);
+            move |bytes| {
+                sent.lock().unwrap().extend_from_slice(bytes);
+                Ok(())
+            }
+        }));
+        let paint = |renderer: &mut Renderer, model: &Model| {
+            renderer.output.extend_from_slice(PAINT_BEGIN);
+            renderer.write_terminal_cursor(model, true, true);
+            renderer.output.extend_from_slice(PAINT_END);
+            renderer.flush_output().unwrap();
+            String::from_utf8(std::mem::take(&mut *sent.lock().unwrap())).unwrap()
+        };
+
+        renderer.writer.borrow_mut().pause(true);
+        assert_eq!(paint(&mut renderer, &model), "");
+        renderer.writer.borrow_mut().pause(false);
+        let opened = paint(&mut renderer, &model);
+        assert!(opened.contains("\x1b[6 q"), "{opened:?}");
+        assert!(opened.contains("\x1b]12;rgb:80/00/00\x07"), "{opened:?}");
+
+        model.command_prompt = None;
+        renderer.writer.borrow_mut().pause(true);
+        assert_eq!(paint(&mut renderer, &model), "");
+        renderer.writer.borrow_mut().pause(false);
+        let closed = paint(&mut renderer, &model);
+        assert!(closed.contains("\x1b[2 q"), "{closed:?}");
+        assert!(closed.contains("\x1b]112\x07"), "{closed:?}");
     }
 
     #[test]

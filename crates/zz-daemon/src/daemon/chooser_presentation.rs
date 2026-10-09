@@ -454,7 +454,19 @@ impl StatusHooks for ScopedHooks<'_> {
     }
 
     fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
-        self.engine.format_option_value(context, name)
+        self.engine.format_option_value(context, name).or_else(|| {
+            name.starts_with('@')
+                .then(|| {
+                    self.engine.format_user_option(
+                        &context.pane_id,
+                        &context.window_id,
+                        &context.session_id,
+                        name,
+                    )
+                })
+                .flatten()
+                .map(str::to_owned)
+        })
     }
 
     fn variable(&mut self, name: &str, _context: &zz_mux::StatusContext) -> Option<String> {
@@ -513,13 +525,7 @@ impl Styles<'_> {
         let session =
             window.and_then(|window| state.windows.get(&window).map(|entry| entry.session));
         let value = self.expand(&format!("#{{{name}}}"), session, window, Some(pane));
-        let engine = &self.inner.engine;
-        let context = server_format_context(engine, &self.inner.config_files, None, None, None);
-        let mut hooks = ScopedHooks {
-            engine,
-            variables: BTreeMap::new(),
-        };
-        expand_format_values(&value, &context, &mut hooks)
+        expand_without_context(self.inner, &value)
     }
 
     fn selection(&self, pane: PaneId) -> String {
@@ -663,6 +669,16 @@ pub(super) fn switch_match_style(inner: &ServerState, pane: PaneId) -> String {
     Styles { inner }.expand("#{E:switch-mode-match-style}", session, window, Some(pane))
 }
 
+pub(super) fn expand_without_context(inner: &ServerState, value: &str) -> String {
+    let engine = &inner.engine;
+    let context = server_format_context(engine, &inner.config_files, None, None, None);
+    let mut hooks = ScopedHooks {
+        engine,
+        variables: BTreeMap::new(),
+    };
+    expand_format_values(value, &context, &mut hooks)
+}
+
 pub(super) fn mode_style_for_pane(inner: &ServerState, pane: PaneId) -> String {
     let state = &inner.engine.state;
     let window = state.window_for_pane(pane);
@@ -792,6 +808,9 @@ fn tree_preview(
                 status,
                 status_style,
                 status_width: u32::from(row.width),
+                border_style: row
+                    .pane
+                    .map_or_else(String::new, |pane| styles.border(pane)),
             })
         }
         ChooseTreeTarget::Session(session_id) => {

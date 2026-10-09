@@ -45,7 +45,7 @@
       "id": "fix.tui-regressions",
       "track": "fix",
       "title": "Regressions the 3.8 fixture rebaseline found on main",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-tui/src",
@@ -70,7 +70,8 @@
         "2026-10-09: TUI-009 extended-keys rows pass on catchup/fix.tui-colour (set -s extended-keys now published to the TUI); clause 2 closes when fix.tui-colour merges.",
         "2026-10-09: fix.tui-colour merged (8c952fd16); clause 2 (TUI-009 extended keys) should now pass on main: confirm with tui-caps and drop its 4 TUI-009 records when pin.tui-fixtures lands.",
         "2026-10-09: pin.tui-fixtures merged: TUI-009's 4 tui-caps records are closed on main (clause 2 done by fix.tui-colour); TUI-014's 4 tui-client-commands records remain and must be deleted when clause 1 lands.",
-        "2026-10-09 from pin.display-panes: one manual repro (outer tmux status bar on at attach) left the zz window at 78x23 for an 80x24 client after two resize-pane -Z; likely the same bug as TUI-014."
+        "2026-10-09 from pin.display-panes: one manual repro (outer tmux status bar on at attach) left the zz window at 78x23 for an 80x24 client after two resize-pane -Z; likely the same bug as TUI-014.",
+        "2026-10-09: lane done at 5e9ab7774: clauses 1,3,4,5,6 fixed (TUI-014 from 095151f19/d9a36e312 stale size write-back; TUI-018 from e43308848; TUI-005 fixture timing; TUI-012 fixture wrong; chain attach bug found via launch-diff); integration pass merging main + fixing zz-cli test broken by 82dca06a9"
       ]
     },
     {

@@ -201,6 +201,15 @@ plus the ledger item as the prompt, from the lane's worktree. If Codex is out
 subagent instead and note it in the ledger. Killing the orchestrator leaves a running `codex` child;
 check `pgrep -af codex` on resume.
 
+## Paused 2026-10-09
+
+fabrico paused the campaign. Nothing is running. Merged: float.design, pin.move, fix.streams,
+fix.capture-links, pin.layout-v2, pin.formats-options, fix.small-semantics, pin.contract-breaks,
+fix.tui-colour, pin.tui-fixtures, pin.hooks-events. Each in-flight item's ledger notes end with a
+`PAUSED` line saying exactly what is left (review to rerun, checks to run, then merge). All lane
+branches are pushed to `origin/catchup/<id>`; worktrees `zz-cu-a`..`zz-cu-e` on alienware are
+clean. Resume with the steps above, starting from those PAUSED notes.
+
 ## Decisions
 
 - 2026-10-09 fabrico: build floating panes; move the pin to 3.8; `zz share` and desktop menu input

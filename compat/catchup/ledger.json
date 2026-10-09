@@ -406,7 +406,7 @@
       "id": "pin.display-panes",
       "track": "pin",
       "title": "display-panes as a pane mode",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -425,7 +425,7 @@
         "Raw TUI matches the pin's mode screen; desktop keeps its native overlay.",
         "compat/attached-client.sh passes at 3.8: today it stops tmux-side in probe_display_panes_target_no_select ('can't find pane: missing', display-panes -t is a pane now), so the probes after it (probe_requested_client_flags and others) never run. This fixture restamps CI's summary at milestones."
       ],
-      "branch": null,
+      "branch": "catchup/pin.display-panes",
       "sha": null,
       "notes": []
     },

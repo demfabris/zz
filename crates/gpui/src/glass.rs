@@ -479,7 +479,7 @@ pub struct GlassUniform {
     pub shape: [f32; 4],
     /// Glow center, radius, strength.
     pub glow: [f32; 4],
-    /// Viewport size, padding.
+    /// Viewport size, then where the chain's level 0 starts in the frame.
     pub viewport: [f32; 4],
 }
 
@@ -583,15 +583,20 @@ impl Glass {
         })
     }
 
-    /// The uniform block for drawing this glass over a backdrop that holds
-    /// `region` at level 0 and, when `blurred_level` is nonzero, its blur at
-    /// that level.
+    /// The uniform block for drawing this glass over a blur chain whose
+    /// level 0 starts at `origin` in the frame and holds `region` of it,
+    /// blurred at `blurred_level` when that is nonzero.
     pub fn uniform(
         &self,
         region: Bounds<i32>,
+        origin: Point<i32>,
         blurred_level: u32,
         viewport: Size<i32>,
     ) -> GlassUniform {
+        let region = Bounds {
+            origin: region.origin - origin,
+            size: region.size,
+        };
         let material = &self.material;
         let mut shapes = [[[0.; 4]; 2]; GLASS_MAX_SHAPES];
         let mut half_minor = f32::MAX;
@@ -680,7 +685,12 @@ impl Glass {
                 material.glow_radius.as_f32().max(1.),
                 material.glow.max(0.),
             ],
-            viewport: [viewport.width as f32, viewport.height as f32, 0., 0.],
+            viewport: [
+                viewport.width as f32,
+                viewport.height as f32,
+                origin.x as f32,
+                origin.y as f32,
+            ],
         }
     }
 
@@ -693,6 +703,183 @@ impl Glass {
             .reduce(|union, bounds| union.union(&bounds))
             .unwrap_or_default()
     }
+}
+
+/// One run of a glass batch, worked out for a renderer to carry out in
+/// order: copy each frame rectangle into level 0 of the blur chain, run the
+/// blur passes, then draw each glass over the frame.
+///
+/// The chain is addressed in device pixels relative to [`Self::origin`],
+/// scaled down by `2^level`, so every region keeps its place at every level.
+#[derive(Clone, Debug, Default)]
+pub struct GlassRun {
+    /// Where level 0 of the chain starts in the frame.
+    pub origin: Point<i32>,
+    /// The level 0 texels the chain must span.
+    pub extent: Size<i32>,
+    /// How many levels below 0 the blur passes reach.
+    pub depth: u32,
+    /// Frame rectangles to copy, each with where it lands in level 0.
+    pub copies: Vec<(Bounds<i32>, Point<i32>)>,
+    /// The blur passes, in order.
+    pub passes: Vec<GlassBlurPass>,
+    /// One draw per glass: its uniform block and its scissor in the frame.
+    pub draws: Vec<(GlassUniform, Bounds<i32>)>,
+}
+
+/// A render pass over one level of the blur chain.
+#[derive(Clone, Debug)]
+pub struct GlassBlurPass {
+    /// The level read.
+    pub source: u32,
+    /// The level written.
+    pub destination: u32,
+    /// Down passes halve the resolution and write every texel later passes
+    /// read, so the destination's old contents can be dropped. Up passes
+    /// double it and must keep what they do not cover.
+    pub down: bool,
+    /// One draw per region: its uniform block and its scissor in the
+    /// destination level.
+    pub draws: Vec<(GlassBlurUniform, Bounds<i32>)>,
+}
+
+/// Plans a batch of glass drawn into a frame of `viewport` device pixels.
+///
+/// Glass whose backdrop overlaps an earlier one's goes in a later run, so
+/// that it sees the earlier glass and the chain holds one region per texel.
+pub fn plan_glass(glasses: &[Glass], viewport: Size<i32>) -> Vec<GlassRun> {
+    struct Planned<'a> {
+        glass: &'a Glass,
+        region: Bounds<i32>,
+        scissor: Bounds<i32>,
+        blur: GlassBlurPlan,
+    }
+    let planned: Vec<Planned> = glasses
+        .iter()
+        .filter_map(|glass| {
+            Some(Planned {
+                glass,
+                region: glass.backdrop_region(viewport)?,
+                scissor: glass.scissor(viewport)?,
+                blur: glass.blur_plan(GLASS_MAX_BLUR_LEVELS),
+            })
+        })
+        .collect();
+
+    let mut runs = Vec::new();
+    let mut start = 0;
+    for end in 1..=planned.len() {
+        let overlaps = end < planned.len()
+            && planned[start..end]
+                .iter()
+                .any(|other| intersects(other.region, planned[end].region));
+        if end < planned.len() && !overlaps {
+            continue;
+        }
+        let run = &planned[start..end];
+        start = end;
+
+        let align = 1 << GLASS_MAX_BLUR_LEVELS;
+        let low = run
+            .iter()
+            .map(|p| p.region.origin)
+            .reduce(|a, b| point(a.x.min(b.x), a.y.min(b.y)))
+            .unwrap_or_default();
+        let high = run
+            .iter()
+            .map(|p| p.region.origin + point(p.region.size.width, p.region.size.height))
+            .reduce(|a, b| point(a.x.max(b.x), a.y.max(b.y)))
+            .unwrap_or_default();
+        let origin = point(
+            low.x.div_euclid(align) * align,
+            low.y.div_euclid(align) * align,
+        );
+        let local = |region: Bounds<i32>| Bounds {
+            origin: region.origin - origin,
+            size: region.size,
+        };
+        let depth = run.iter().map(|p| p.blur.levels).max().unwrap_or(0);
+
+        let mut passes = Vec::new();
+        for level in 0..depth {
+            passes.push(GlassBlurPass {
+                source: level,
+                destination: level + 1,
+                down: true,
+                draws: run
+                    .iter()
+                    .filter(|p| p.blur.levels > level)
+                    .map(|p| {
+                        let region = local(p.region);
+                        (
+                            GlassBlurUniform::new(glass_level_rect(region, level), p.blur.offset),
+                            glass_level_rect(region, level + 1),
+                        )
+                    })
+                    .collect(),
+            });
+        }
+        for level in (1..depth).rev() {
+            passes.push(GlassBlurPass {
+                source: level + 1,
+                destination: level,
+                down: false,
+                draws: run
+                    .iter()
+                    .filter(|p| p.blur.levels > level)
+                    .map(|p| {
+                        let region = local(p.region);
+                        (
+                            GlassBlurUniform::new(
+                                glass_level_rect(region, level + 1),
+                                p.blur.offset,
+                            ),
+                            glass_level_rect(region, level),
+                        )
+                    })
+                    .collect(),
+            });
+        }
+
+        runs.push(GlassRun {
+            origin,
+            extent: size(high.x - origin.x, high.y - origin.y),
+            depth,
+            copies: run
+                .iter()
+                .map(|p| (p.region, p.region.origin - origin))
+                .collect(),
+            passes,
+            draws: run
+                .iter()
+                .map(|p| {
+                    let blurred_level = if p.blur.levels > 0 { 1 } else { 0 };
+                    (
+                        p.glass.uniform(p.region, origin, blurred_level, viewport),
+                        p.scissor,
+                    )
+                })
+                .collect(),
+        });
+    }
+    runs
+}
+
+fn intersects(a: Bounds<i32>, b: Bounds<i32>) -> bool {
+    a.origin.x < b.origin.x + b.size.width
+        && b.origin.x < a.origin.x + a.size.width
+        && a.origin.y < b.origin.y + b.size.height
+        && b.origin.y < a.origin.y + a.size.height
+}
+
+/// The size of blur chain level `level` for a chain spanning `extent` at
+/// level 0.
+pub fn glass_level_size(extent: Size<i32>, level: u32) -> Size<i32> {
+    let scale = 1 << level;
+    size(
+        (extent.width + scale - 1).div_euclid(scale).max(1),
+        (extent.height + scale - 1).div_euclid(scale).max(1),
+    )
 }
 
 /// A rectangle whose center and size each chase their target on a spring,
@@ -943,6 +1130,20 @@ pub fn check_glass_rendering(
         middle == plain.get_pixel(32, 32).0,
         "the flat face should not bend, got {middle:?}"
     );
+
+    let frost = GlassMaterial::regular().vanished().blur(px(3.));
+    let frosted = render(&glass_test_scene(Some(frost)))?;
+    let seam = frosted.get_pixel(12, 32).0;
+    anyhow::ensure!(
+        seam[0] > 40 && seam[2] > 40,
+        "frost should mix red and blue across the seam, got {seam:?}"
+    );
+    let far = frosted.get_pixel(40, 32).0;
+    let expected = plain.get_pixel(40, 32).0;
+    anyhow::ensure!(
+        far.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2),
+        "frost should leave flat color alone, got {far:?} for {expected:?}"
+    );
     Ok(())
 }
 
@@ -968,6 +1169,50 @@ mod tests {
                 "{sigma}: {plan:?} spreads {spread}"
             );
         }
+    }
+
+    fn test_glass(x: f32, blur: f32) -> Glass {
+        let bounds = Bounds::new(
+            point(ScaledPixels(x), ScaledPixels(100.)),
+            size(ScaledPixels(40.), ScaledPixels(40.)),
+        );
+        let mut shapes: [(Bounds<ScaledPixels>, Corners<ScaledPixels>); GLASS_MAX_SHAPES] =
+            Default::default();
+        shapes[0] = (bounds, Corners::default());
+        let material = GlassMaterial::regular().blur(px(blur));
+        Glass {
+            order: 0,
+            bounds,
+            backdrop_bounds: bounds.dilate(ScaledPixels(material.backdrop_reach().as_f32())),
+            content_mask: crate::ContentMask {
+                bounds: Bounds::new(
+                    point(ScaledPixels(0.), ScaledPixels(0.)),
+                    size(ScaledPixels(1000.), ScaledPixels(1000.)),
+                ),
+            },
+            shapes,
+            shape_count: 1,
+            corner_smoothing: 2.,
+            material,
+        }
+    }
+
+    #[test]
+    fn glass_plans_split_where_backdrops_overlap() {
+        let viewport = size(1000, 1000);
+        let apart = plan_glass(&[test_glass(100., 4.), test_glass(400., 12.)], viewport);
+        assert_eq!(apart.len(), 1);
+        let run = &apart[0];
+        assert_eq!(run.draws.len(), 2);
+        assert_eq!(run.origin.x % (1 << GLASS_MAX_BLUR_LEVELS), 0);
+        assert!(run.extent.width < 500 && run.extent.height < 200);
+        let deepest = GlassBlurPlan::new(12., GLASS_MAX_BLUR_LEVELS).levels;
+        assert_eq!(run.depth, deepest);
+        assert_eq!(run.passes.len() as u32, 2 * deepest - 1);
+        assert!(run.passes.iter().all(|pass| !pass.draws.is_empty()));
+
+        let stacked = plan_glass(&[test_glass(100., 4.), test_glass(120., 4.)], viewport);
+        assert_eq!(stacked.len(), 2);
     }
 
     #[test]

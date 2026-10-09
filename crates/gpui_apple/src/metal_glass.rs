@@ -1,8 +1,5 @@
 use anyhow::{Context as _, Result};
-use gpui::{
-    Bounds, GLASS_MAX_BLUR_LEVELS, GLASS_SHADER, Glass, GlassBlurPlan, GlassBlurUniform, Size,
-    glass_level_rect,
-};
+use gpui::{Bounds, GLASS_SHADER, Glass, GlassBlurPass, Size, glass_level_size, plan_glass};
 use metal::MTLPixelFormat;
 use std::ffi::c_void;
 
@@ -15,16 +12,13 @@ pub(crate) struct MetalGlass {
     up_pipeline: metal::RenderPipelineState,
     sampler: metal::SamplerState,
     levels: Vec<metal::Texture>,
-    drawn: bool,
+    /// The largest chain any run needed this frame, in level 0 texels.
+    peak: Size<i32>,
 }
 
-/// A glass draw with its backdrop region and blur worked out.
-struct Planned<'a> {
-    glass: &'a Glass,
-    region: Bounds<i32>,
-    scissor: Bounds<i32>,
-    blur: GlassBlurPlan,
-}
+/// The chain grows in steps of this many level 0 texels, so a glass that
+/// moves or springs does not reallocate it every frame.
+const CHAIN_STEP: u32 = 256;
 
 impl MetalGlass {
     pub(crate) fn new(device: &metal::DeviceRef) -> Result<Self> {
@@ -150,33 +144,52 @@ impl MetalGlass {
             up_pipeline: pipeline("glass_up", "vs_glass_blur", "fs_glass_up", false)?,
             sampler: device.new_sampler(&sampler_descriptor),
             levels: Vec::new(),
-            drawn: false,
+            peak: Size::default(),
         })
     }
 
     pub(crate) fn begin_frame(&mut self) {
-        self.drawn = false;
+        self.peak = Size::default();
     }
 
-    /// Frees the blur chain after a frame without glass.
+    /// Frees a chain the frame did not use, or used little of.
     pub(crate) fn end_frame(&mut self) {
-        if !self.drawn {
-            self.levels.clear();
+        if let Some(level) = self.levels.first() {
+            let area = level.width() as i64 * level.height() as i64;
+            let peak = self.peak.width as i64 * self.peak.height as i64;
+            if area > peak * 4 {
+                self.levels.clear();
+            }
         }
     }
 
-    fn ensure_levels(&mut self, device: &metal::DeviceRef, size: Size<i32>, depth: u32) {
+    /// Makes the chain span `extent` level 0 texels and reach `depth` levels.
+    fn ensure_chain(&mut self, device: &metal::DeviceRef, extent: Size<i32>, depth: u32) {
+        self.peak = Size {
+            width: self.peak.width.max(extent.width),
+            height: self.peak.height.max(extent.height),
+        };
         let fits = self.levels.first().is_some_and(|level| {
-            level.width() == size.width as u64 && level.height() == size.height as u64
+            level.width() as i32 >= extent.width && level.height() as i32 >= extent.height
         });
         if !fits {
             self.levels.clear();
         }
+        let capacity = match self.levels.first() {
+            Some(level) => Size {
+                width: level.width() as i32,
+                height: level.height() as i32,
+            },
+            None => Size {
+                width: (extent.width.max(1) as u32).next_multiple_of(CHAIN_STEP) as i32,
+                height: (extent.height.max(1) as u32).next_multiple_of(CHAIN_STEP) as i32,
+            },
+        };
         while self.levels.len() <= depth.max(1) as usize {
-            let level = self.levels.len() as u32;
+            let size = glass_level_size(capacity, self.levels.len() as u32);
             let descriptor = metal::TextureDescriptor::new();
-            descriptor.set_width((size.width as u64).div_ceil(1 << level).max(1));
-            descriptor.set_height((size.height as u64).div_ceil(1 << level).max(1));
+            descriptor.set_width(size.width as u64);
+            descriptor.set_height(size.height as u64);
             descriptor.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
             descriptor.set_storage_mode(metal::MTLStorageMode::Private);
             descriptor.set_usage(
@@ -199,175 +212,83 @@ impl MetalGlass {
             width: target.width() as i32,
             height: target.height() as i32,
         };
-        let max_levels = (viewport.width.min(viewport.height).max(1) as u32)
-            .ilog2()
-            .saturating_sub(2)
-            .min(GLASS_MAX_BLUR_LEVELS);
-        let planned: Vec<Planned> = glasses
-            .iter()
-            .filter_map(|glass| {
-                Some(Planned {
-                    glass,
-                    region: glass.backdrop_region(viewport)?,
-                    scissor: glass.scissor(viewport)?,
-                    blur: glass.blur_plan(max_levels),
-                })
-            })
-            .collect();
-        if planned.is_empty() {
-            return;
-        }
-        self.drawn = true;
+        for run in plan_glass(glasses, viewport) {
+            self.ensure_chain(device, run.extent, run.depth);
 
-        // Glass whose backdrop overlaps another's must see it drawn first, and
-        // the chain keeps one region's data per texel, so overlapping regions
-        // go in separate runs.
-        let mut start = 0;
-        for end in 1..=planned.len() {
-            let overlaps = end < planned.len()
-                && planned[start..end]
-                    .iter()
-                    .any(|other| intersects(other.region, planned[end].region));
-            if end == planned.len() || overlaps {
-                self.draw_run(
-                    device,
-                    command_buffer,
-                    &planned[start..end],
+            let blit = command_buffer.new_blit_command_encoder();
+            for (region, destination) in &run.copies {
+                blit.copy_from_texture(
                     target,
-                    viewport,
+                    0,
+                    0,
+                    metal::MTLOrigin {
+                        x: region.origin.x as u64,
+                        y: region.origin.y as u64,
+                        z: 0,
+                    },
+                    metal::MTLSize {
+                        width: region.size.width as u64,
+                        height: region.size.height as u64,
+                        depth: 1,
+                    },
+                    &self.levels[0],
+                    0,
+                    0,
+                    metal::MTLOrigin {
+                        x: destination.x as u64,
+                        y: destination.y as u64,
+                        z: 0,
+                    },
                 );
-                start = end;
             }
+            blit.end_encoding();
+
+            for pass in &run.passes {
+                self.blur_pass(command_buffer, pass);
+            }
+
+            let encoder = render_encoder(command_buffer, target, metal::MTLLoadAction::Load);
+            encoder.set_render_pipeline_state(&self.glass_pipeline);
+            encoder.set_fragment_sampler_state(0, Some(&self.sampler));
+            encoder.set_fragment_texture(0, Some(&self.levels[0]));
+            encoder.set_fragment_texture(1, Some(&self.levels[1]));
+            for (uniform, scissor) in &run.draws {
+                let bytes = uniform.as_bytes();
+                encoder.set_vertex_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
+                encoder.set_fragment_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
+                if set_scissor(encoder, *scissor, viewport) {
+                    encoder.draw_primitives(metal::MTLPrimitiveType::TriangleStrip, 0, 4);
+                }
+            }
+            encoder.end_encoding();
         }
     }
 
-    fn draw_run(
-        &mut self,
-        device: &metal::DeviceRef,
-        command_buffer: &metal::CommandBufferRef,
-        run: &[Planned],
-        target: &metal::TextureRef,
-        viewport: Size<i32>,
-    ) {
-        let depth = run.iter().map(|p| p.blur.levels).max().unwrap_or(0);
-        self.ensure_levels(device, viewport, depth);
-
-        let blit = command_buffer.new_blit_command_encoder();
-        for planned in run {
-            let region = planned.region;
-            let origin = metal::MTLOrigin {
-                x: region.origin.x as u64,
-                y: region.origin.y as u64,
-                z: 0,
-            };
-            blit.copy_from_texture(
-                target,
-                0,
-                0,
-                origin,
-                metal::MTLSize {
-                    width: region.size.width as u64,
-                    height: region.size.height as u64,
-                    depth: 1,
-                },
-                &self.levels[0],
-                0,
-                0,
-                origin,
-            );
-        }
-        blit.end_encoding();
-
-        for level in 0..depth {
-            let passes: Vec<(GlassBlurUniform, Bounds<i32>)> = run
-                .iter()
-                .filter(|planned| planned.blur.levels > level)
-                .map(|planned| {
-                    (
-                        GlassBlurUniform::new(
-                            glass_level_rect(planned.region, level),
-                            planned.blur.offset,
-                        ),
-                        glass_level_rect(planned.region, level + 1),
-                    )
-                })
-                .collect();
-            // Every texel a later pass reads is written here first, so the
-            // level's old contents never need loading.
-            self.blur_pass(
-                command_buffer,
-                level,
-                level + 1,
-                metal::MTLLoadAction::DontCare,
-                &passes,
-                &self.down_pipeline,
-            );
-        }
-        for level in (1..depth).rev() {
-            let passes: Vec<(GlassBlurUniform, Bounds<i32>)> = run
-                .iter()
-                .filter(|planned| planned.blur.levels > level)
-                .map(|planned| {
-                    (
-                        GlassBlurUniform::new(
-                            glass_level_rect(planned.region, level + 1),
-                            planned.blur.offset,
-                        ),
-                        glass_level_rect(planned.region, level),
-                    )
-                })
-                .collect();
-            self.blur_pass(
-                command_buffer,
-                level + 1,
-                level,
-                metal::MTLLoadAction::Load,
-                &passes,
-                &self.up_pipeline,
-            );
-        }
-
-        let encoder = render_encoder(command_buffer, target, metal::MTLLoadAction::Load);
-        encoder.set_render_pipeline_state(&self.glass_pipeline);
-        encoder.set_fragment_sampler_state(0, Some(&self.sampler));
-        encoder.set_fragment_texture(0, Some(&self.levels[0]));
-        encoder.set_fragment_texture(1, Some(&self.levels[1]));
-        for planned in run {
-            let blurred_level = if planned.blur.levels > 0 { 1 } else { 0 };
-            let uniform = planned
-                .glass
-                .uniform(planned.region, blurred_level, viewport);
-            let bytes = uniform.as_bytes();
-            encoder.set_vertex_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
-            encoder.set_fragment_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
-            set_scissor(encoder, planned.scissor, viewport);
-            encoder.draw_primitives(metal::MTLPrimitiveType::TriangleStrip, 0, 4);
-        }
-        encoder.end_encoding();
-    }
-
-    fn blur_pass(
-        &self,
-        command_buffer: &metal::CommandBufferRef,
-        source: u32,
-        destination: u32,
-        load: metal::MTLLoadAction,
-        passes: &[(GlassBlurUniform, Bounds<i32>)],
-        pipeline: &metal::RenderPipelineStateRef,
-    ) {
-        if passes.is_empty() {
+    fn blur_pass(&self, command_buffer: &metal::CommandBufferRef, pass: &GlassBlurPass) {
+        if pass.draws.is_empty() {
             return;
         }
-        let target = &self.levels[destination as usize];
+        let target = &self.levels[pass.destination as usize];
         let size = Size {
             width: target.width() as i32,
             height: target.height() as i32,
         };
+        // A down pass writes every texel a later pass reads, so on a tiled GPU
+        // its level never needs loading.
+        let load = if pass.down {
+            metal::MTLLoadAction::DontCare
+        } else {
+            metal::MTLLoadAction::Load
+        };
         let encoder = render_encoder(command_buffer, target, load);
-        encoder.set_render_pipeline_state(pipeline);
+        encoder.set_render_pipeline_state(if pass.down {
+            &self.down_pipeline
+        } else {
+            &self.up_pipeline
+        });
         encoder.set_fragment_sampler_state(0, Some(&self.sampler));
-        encoder.set_fragment_texture(0, Some(&self.levels[source as usize]));
-        for (uniform, rect) in passes {
+        encoder.set_fragment_texture(0, Some(&self.levels[pass.source as usize]));
+        for (uniform, rect) in &pass.draws {
             let bytes = uniform.as_bytes();
             encoder.set_fragment_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
             if set_scissor(encoder, *rect, size) {
@@ -411,13 +332,6 @@ fn set_scissor(
         height: (bottom - top) as u64,
     });
     true
-}
-
-fn intersects(a: Bounds<i32>, b: Bounds<i32>) -> bool {
-    a.origin.x < b.origin.x + b.size.width
-        && b.origin.x < a.origin.x + a.size.width
-        && a.origin.y < b.origin.y + b.size.height
-        && b.origin.y < a.origin.y + a.size.height
 }
 
 /// Whether a scene paints glass, its shader layers' included.

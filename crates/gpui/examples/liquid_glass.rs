@@ -20,7 +20,7 @@ use web_time::Instant;
 
 const PANEL_WIDTH: f32 = 300.;
 const TABS: [&str; 4] = ["Home", "Browse", "Radio", "Library"];
-const TOOLS: [&str; 4] = ["◀", "▶", "＋", "⋯"];
+const TOOLS: [&str; 4] = ["◀", "▶", "+", "•••"];
 
 struct Knob {
     name: &'static str,
@@ -588,9 +588,11 @@ impl LiquidGlassDemo {
 impl Render for LiquidGlassDemo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport = Bounds::new(point(px(0.), px(0.)), window.viewport_size());
-        if self.pill.target() == Bounds::default() {
-            self.pill.snap(self.tab_slot(self.tab));
+        let slot = self.tab_slot(self.tab);
+        if self.pill.target().size != slot.size {
+            self.pill.snap(slot);
         }
+        self.pill.set_target(slot);
         if self.tick() {
             window.request_animation_frame();
         }

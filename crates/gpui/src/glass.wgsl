@@ -2,11 +2,11 @@
 // translates it through naga.
 //
 // A glass batch runs in three steps. The frame under each glass region is
-// copied into level 0 of a chain of viewport-sized textures, dual Kawase
-// passes blur it down the chain and back up to level 1, and one draw per
-// glass refracts, tints, and lights what the chain holds. Every texture is
-// addressed in device pixels scaled by its level, so regions keep their
-// screen positions at every level and need no per-region mapping.
+// copied into level 0 of a chain of textures that spans just those regions,
+// dual Kawase passes blur them down the chain and back up to level 1, and
+// one draw per glass refracts, tints, and lights what the chain holds. The
+// chain is addressed in device pixels from its origin, scaled down by its
+// level, so regions keep their places at every level.
 
 struct GlassShape {
     // origin.xy, size.zw in device pixels
@@ -19,7 +19,7 @@ struct Glass {
     shapes: array<GlassShape, 4>,
     // The rectangle drawn: origin.xy, size.zw.
     quad: vec4<f32>,
-    // Level 0 texels holding this frame's backdrop: min.xy, max.zw.
+    // Level 0 texels holding this glass's backdrop: min.xy, max.zw.
     backdrop: vec4<f32>,
     // Straight color mixed over the backdrop, alpha as its strength.
     tint: vec4<f32>,
@@ -35,7 +35,7 @@ struct Glass {
     shape: vec4<f32>,
     // touch glow center xy, radius, strength
     glow: vec4<f32>,
-    // viewport size, pad
+    // viewport size, then where level 0 of the chain starts in the frame
     viewport: vec4<f32>,
 }
 
@@ -166,7 +166,8 @@ fn glass_field(point: vec2<f32>) -> vec3<f32> {
     return field;
 }
 
-fn backdrop(position: vec2<f32>) -> vec4<f32> {
+fn backdrop(frame_position: vec2<f32>) -> vec4<f32> {
+    let position = frame_position - glass.viewport.zw;
     let level = glass.optics.w;
     if (level < 0.5) {
         let clamped = clamp(position, glass.backdrop.xy + 0.5, glass.backdrop.zw - 0.5);

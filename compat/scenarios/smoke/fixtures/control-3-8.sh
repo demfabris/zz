@@ -121,6 +121,25 @@ drive read-only readonly \
     'switch-client -r' \
     'display-message -p "#{client_readonly} #{client_control_mode}"'
 
+set +e
+printf '%s\n' 'new-window -d -n ro-made' |
+    main_client -C attach-session -r -t '=c38' >"$work/ruled.raw" 2>&1
+set -e
+made=$(main_client list-windows -t c38 -F '#{window_name}' | grep -c '^ro-made$' || true)
+refused=$(grep -c '^client is read-only$' "$work/ruled.raw" || true)
+case "$side:$made:$refused" in
+tmux:1:0 | zz:0:1) verdict=as-ruled ;;
+*) verdict="unexpected made=$made refused=$refused" ;;
+esac
+printf 'read-only-new-window %s (control-mode.read-only-commands: 3.8 runs it, zz refuses)\n' "$verdict"
+main_client kill-window -t c38:ro-made >/dev/null 2>&1 || true
+
+main_client set-option -w -t c38:0 window-size manual
+manual_window=$(main_client display-message -p -t c38:0 '#{window_id}')
+drive manual paced \
+    "refresh-client -C $manual_window:" \
+    'display-message -p manual'
+
 main_client delete-buffer -b c38 >/dev/null 2>&1 || true
 main_client kill-session -t '=c38'
 main_client set-environment -g CONTROL_3_8 reached-end

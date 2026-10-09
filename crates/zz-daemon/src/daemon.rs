@@ -10042,7 +10042,7 @@ impl Shared {
                             .filter_map(|c| c.subscriber.as_ref())
                             .filter_map(|subscriber| subscriber.control_feed())
                         {
-                            feed.clear_pane(*pane);
+                            feed.reset_pane(*pane);
                         }
                         inner.preview_watched.remove(pane);
                         respawned_terminals = true;
@@ -41239,10 +41239,11 @@ fn client_sized_windows(inner: &ServerState) -> Vec<WindowId> {
         .state
         .windows
         .iter()
-        .filter(|(_, window)| {
-            window.panes.keys().any(|pane| {
-                pane_geometry_from(inner, *pane, GeometrySource::ClientReport).is_some()
-            })
+        .filter(|(id, window)| {
+            inner.engine.window_size(**id) == WindowSize::Manual
+                || window.panes.keys().any(|pane| {
+                    pane_geometry_from(inner, *pane, GeometrySource::ClientReport).is_some()
+                })
         })
         .map(|(window, _)| *window)
         .collect()
@@ -42279,9 +42280,25 @@ fn prepare_command_request(
     }
     let guarded = read_only_guard_client(inner, client, &command);
     let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
-        && !command_is_read_only_safe(&command)
-        && !control_command_is_read_only_safe(inner, client, &command);
+        && !read_only_client_may_run(inner, client, &command);
     Ok((command, blocked))
+}
+
+fn read_only_client_may_run(
+    inner: &ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+) -> bool {
+    if MuxEngine::is_command_alias_group(command) {
+        return MuxEngine::command_alias_group_commands(command).is_ok_and(|commands| {
+            commands.is_some_and(|commands| {
+                commands
+                    .iter()
+                    .all(|command| read_only_client_may_run(inner, client, command))
+            })
+        });
+    }
+    command_is_read_only_safe(command) || control_command_is_read_only_safe(inner, client, command)
 }
 
 fn control_command_is_read_only_safe(
@@ -42291,15 +42308,6 @@ fn control_command_is_read_only_safe(
 ) -> bool {
     if inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Control) {
         return false;
-    }
-    if MuxEngine::is_command_alias_group(command) {
-        return MuxEngine::command_alias_group_commands(command).is_ok_and(|commands| {
-            commands.is_some_and(|commands| {
-                commands
-                    .iter()
-                    .all(|command| control_command_is_read_only_safe(inner, client, command))
-            })
-        });
     }
     let name = canonical_command(&command.name);
     if name == "refresh-client" {
@@ -66614,6 +66622,19 @@ mod tests {
                 "{name} {args:?} answered {response:?}"
             );
         }
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[41]", "romix=copy-mode ; list-windows"],
+                ),
+            )
+            .expect("mixed alias");
+        let response = run(viewer, ClientKind::Control, "romix", &[]);
+        assert!(!read_only(&response), "mixed alias answered {response:?}");
         let response = run(interactive, ClientKind::Interactive, "list-windows", &[]);
         assert!(
             read_only(&response),
@@ -66645,6 +66666,8 @@ mod tests {
         shared.attach(control, session).unwrap();
         let feed = mailbox.ensure_control_feed(&shared.control_wake);
         feed.queue_at(pane, b"OLD-PROCESS-OUTPUT", Instant::now());
+        assert!(feed.order(&mailbox, shard_sink::ControlOrder::AfterOutput, |_| true));
+        assert_eq!(feed.queued_lines(), 1);
         assert!(
             feed.queued_bytes(pane)
                 .windows(18)
@@ -66666,6 +66689,78 @@ mod tests {
                 .windows(18)
                 .any(|bytes| bytes == b"OLD-PROCESS-OUTPUT")
         );
+    }
+
+    #[test]
+    fn control_resize_fires_manual_windows_no_client_sizes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-manual", "manual");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("set-option", ["-w", "window-size", "manual"]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-resized",
+                    "set-option -gF @resized '#{@resized}r'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-manual".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        shared
+            .set_control_client_size(control, &format!("{window}:"))
+            .unwrap();
+        let notices = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed"
+                        && variables.get("hook_window") == Some(&window.to_string())
+                )
+            })
+            .count();
+        assert_eq!(notices, 1);
+        let resized = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gv", "@resized"]),
+            )
+            .expect("hook readback")
+            .output
+            .to_string();
+        assert_eq!(resized.trim_end(), "r");
     }
 
     #[test]

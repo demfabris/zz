@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
-Tracked gap groups: **50**. Classified items: **378**.
+Tracked gap groups: **51**. Classified items: **379**.
 
-- Status: open: 6, accepted: 44.
-- Decision: adopt: 6, native: 35, never: 9.
-- Priority: now: 1, next: 5, none: 44.
+- Status: open: 6, accepted: 45.
+- Decision: adopt: 6, native: 36, never: 9.
+- Priority: now: 1, next: 5, none: 45.
 - Closed history entries: 219.
-- Surface: command: 3, flag: 32, extension-flag: 10, native-command: 26, option: 28, format: 47, hook: 4, key: 29, binding: 37, native-key: 92, semantic: 61, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 32, extension-flag: 10, native-command: 26, option: 28, format: 47, hook: 4, key: 29, binding: 37, native-key: 92, semantic: 62, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -79,6 +79,7 @@ structure as proof.
 | `commands.native-client-tools` | Use native client tools | native | accepted | none | gui | daily, gui | none |
 | `commands.native-superset` | Keep the zz-native command namespace explicit | native | accepted | none | protocol | daily, gui, scripts | none |
 | `config.background-if-shell-race` | Accept that zz picks one branch where the pin's own race picks either | native | accepted | none | daemon | daily, scripts | none |
+| `control-mode.read-only-commands` | Keep read-only control clients read-only | native | accepted | none | daemon | remote, scripts | none |
 | `formats.expansion-budgets` | Keep format expansion deterministic | native | accepted | none | mux | scripts | none |
 | `formats.mouse-context` | Expose mouse event formats | native | accepted | none | protocol | scripts, gui | none |
 | `formats.native-modes` | Keep native mode row formats | native | accepted | none | client | daily, gui | none |
@@ -350,6 +351,26 @@ Opened and accepted 2026-09-07 by the cycle-18 integration gate on its reviewer'
   - `scenario:compat/scenarios/smoke/plugin-runtime-oh-my-tmux.txt`
 - Acceptance:
   - `ACCEPTED: when two background `if -b` branches bind the same key behind conditions that both succeed and cost about the same, zz applies them in the order the file gives them and so always ends on the last line's bind, while the pin ends on whichever job its event loop happened to collect last. Measured on both binaries on this box on 2026-09-07 by the cycle-18 reviewer, outside the harness on throwaway `-L zzprobe-$$ -f /dev/null` sockets: two lines, `if -b 'command -v fakepbcopy' 'bind-key y run-shell "pbcopy-branch"'` and `if -b 'command -v fakexsel' 'bind-key y run-shell "xsel-branch"'` with both fakes first on PATH, loaded with -f at server start, 1 s settle, read with `list-keys -T prefix`, then the two lines swapped. zz answered the last line's bind 8 of 8 in both orderings. The pin answered pbcopy 5 of 8 and xsel 3 of 8 with pbcopy second, and pbcopy 7 of 8 and xsel 1 of 8 with pbcopy first. There is no behaviour to match here: the pin's answer is not a rule, it is a race, and a deterministic answer is the better one to ship.`
+
+### `control-mode.read-only-commands`: Keep read-only control clients read-only
+
+Ruled by fabrico on 2026-10-09 (compat/catchup/README.md, Decisions): read-only control clients keep refusing state changes. tmux 3.8's control.c parses each line a control client sends with cmd_parse_and_append and never checks CLIENT_READONLY; the only CMD_READONLY gates are in server_client_dispatch_command and server_client_default_command (command clients) and key-bindings.c (keys), so a read-only -C client runs everything except what a command refuses for itself: send-keys without -X (cmd-send-keys.c tests the target client's flag) and detach-client -a, -s or another client. Measured on 3.8 (7f2a35ad) with tmux -C attach-session -r: display-message -p, list-windows, capture-pane -p, show-options, refresh-client -C and -B ran; new-window -d -n made, rename-window -t :1 renamed, set-option -g @x 1, set-buffer -b b hi and kill-window -t :1 ran and changed the server; send-keys answered client is read-only; refresh-client -f '!read-only' left the flag set; switch-client -r cleared it. Interactive and command clients that are read-only are refused in both: the pin and zz allow them only the CMD_READONLY roster (attach-session, copy-mode, detach-client, list-clients, send-keys -X, switch-client). zz now runs for a read-only control client what changes nothing shared: the catalog's queries (has-session, list-*, show-*, display-message without -I or -d, capture-pane -p) and refresh-client aimed at itself, each child of an alias judged on its own. It keeps client is read-only for new-window, rename-window, set-option, set-buffer, kill-window, kill-session, capture-pane without -p, display-message -I or -d, refresh-client -t another client, and every other command that changes state. The ruling reads 3.8's behaviour as an upstream oversight and keeps read-only meaning read-only on every client type, which zz share viewers will build on. Format jobs (#()) still run for read-only clients, as they already do through list-clients -F on both. Reopen if upstream gates control-mode commands on the flag.
+
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
+- Owner: `daemon`
+- User impact: remote, scripts
+- Items: `semantic:read-only-control-mutations`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `resource:compat/catchup/README.md`
+  - `resource:knowledge/tmux/divergences.md`
+  - `scenario:compat/scenarios/smoke/control-3-8.txt`
+  - `file:compat/scenarios/smoke/fixtures/control-3-8.sh`
+- Acceptance:
+  - `A read-only control client runs the catalog's queries and refresh-client aimed at itself as 3.8 does, and every command that changes shared state answers client is read-only; smoke/control-3-8 records new-window from a read-only control client as run on the pin and refused on zz.`
 
 ### `desktop.overlay-consumers`: Give every daemon overlay payload a desktop consumer
 

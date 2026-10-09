@@ -377,6 +377,34 @@
       "reason": "Opened and accepted 2026-09-07 by the cycle-18 integration gate on its reviewer's must-fix, so that the observable config.background-if-shell-order was opened on stops living in prose inside a closed record. That group's own clause claimed the pin keeps the FIRST matching branch and zz the LAST, with oh-my-tmux's clipboard detection as the example; the mux lane's worker could not reproduce it (both binaries ended on the same .tmux.conf:136 pbcopy binding 3 of 3) and closed the group on a different, real divergence - zz applied each finished branch on the job's own thread, so six equal-cost branches landed in whatever order the threads were scheduled, where the pin applies them on one command queue. That is fixed. What is left is this: the pin's collect-then-dispatch pass is deterministic only when the conditions are trivially equal, and with two real forked feature tests it is jitter-dominated, so a config that races them lands on a different binding on the two binaries in roughly a third of runs. zz's order is the file's order, which is what a reader of the config expects and what makes the campaign's own differentials reproducible. Nothing is owed on this front; it is registered so the next reader of the oh-my-tmux clipboard idiom finds the measurement instead of rediscovering it."
     },
     {
+      "id": "control-mode.read-only-commands",
+      "title": "Keep read-only control clients read-only",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "remote",
+        "scripts"
+      ],
+      "owner": "daemon",
+      "items": [
+        "semantic:read-only-control-mutations"
+      ],
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:compat/catchup/README.md",
+        "resource:knowledge/tmux/divergences.md",
+        "scenario:compat/scenarios/smoke/control-3-8.txt",
+        "file:compat/scenarios/smoke/fixtures/control-3-8.sh"
+      ],
+      "acceptance": [
+        "A read-only control client runs the catalog's queries and refresh-client aimed at itself as 3.8 does, and every command that changes shared state answers client is read-only; smoke/control-3-8 records new-window from a read-only control client as run on the pin and refused on zz."
+      ],
+      "depends_on": [],
+      "reason": "Ruled by fabrico on 2026-10-09 (compat/catchup/README.md, Decisions): read-only control clients keep refusing state changes. tmux 3.8's control.c parses each line a control client sends with cmd_parse_and_append and never checks CLIENT_READONLY; the only CMD_READONLY gates are in server_client_dispatch_command and server_client_default_command (command clients) and key-bindings.c (keys), so a read-only -C client runs everything except what a command refuses for itself: send-keys without -X (cmd-send-keys.c tests the target client's flag) and detach-client -a, -s or another client. Measured on 3.8 (7f2a35ad) with tmux -C attach-session -r: display-message -p, list-windows, capture-pane -p, show-options, refresh-client -C and -B ran; new-window -d -n made, rename-window -t :1 renamed, set-option -g @x 1, set-buffer -b b hi and kill-window -t :1 ran and changed the server; send-keys answered client is read-only; refresh-client -f '!read-only' left the flag set; switch-client -r cleared it. Interactive and command clients that are read-only are refused in both: the pin and zz allow them only the CMD_READONLY roster (attach-session, copy-mode, detach-client, list-clients, send-keys -X, switch-client). zz now runs for a read-only control client what changes nothing shared: the catalog's queries (has-session, list-*, show-*, display-message without -I or -d, capture-pane -p) and refresh-client aimed at itself, each child of an alias judged on its own. It keeps client is read-only for new-window, rename-window, set-option, set-buffer, kill-window, kill-session, capture-pane without -p, display-message -I or -d, refresh-client -t another client, and every other command that changes state. The ruling reads 3.8's behaviour as an upstream oversight and keeps read-only meaning read-only on every client type, which zz share viewers will build on. Format jobs (#()) still run for read-only clients, as they already do through list-clients -F on both. Reopen if upstream gates control-mode commands on the flag."
+    },
+    {
       "id": "desktop.overlay-consumers",
       "title": "Give every daemon overlay payload a desktop consumer",
       "decision": "adopt",

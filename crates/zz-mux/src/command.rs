@@ -1397,7 +1397,7 @@ pub enum MuxEffect {
     },
     DisplayPanes {
         pane: PaneId,
-        duration_ms: u32,
+        delay: Option<String>,
         selectable: bool,
         template: Option<CommandPromptTemplate>,
         source: Option<SourceSpan>,
@@ -2438,6 +2438,7 @@ impl CommandAliasResolution {
 #[derive(Debug)]
 pub struct MuxEngine {
     pub state: MuxState,
+    pane_status_hidden: BTreeSet<PaneId>,
     swept_removals: u64,
     pub keys: KeyTables,
     global_mode_keys: ModeKeys,
@@ -2795,6 +2796,7 @@ impl Default for MuxEngine {
     fn default() -> Self {
         Self {
             state: MuxState::default(),
+            pane_status_hidden: BTreeSet::new(),
             swept_removals: 0,
             keys: KeyTables::default(),
             global_mode_keys: ModeKeys::default(),
@@ -3895,6 +3897,20 @@ impl MuxEngine {
         Ok(panes)
     }
 
+    pub fn display_panes_delay(
+        &self,
+        window: WindowId,
+        delay: Option<&str>,
+    ) -> Result<u32, ServerError> {
+        delay.map_or_else(
+            || Ok(self.window_knobs(window).display_panes_time_ms),
+            |value| {
+                parse_strtonum(value, 0, i64::from(u32::MAX), "delay")
+                    .map(|value| u32::try_from(value).expect("delay is bounded"))
+            },
+        )
+    }
+
     #[must_use]
     pub fn display_panes_options(&self, window: WindowId) -> DisplayPanesOptions {
         let target = TmuxOptionTarget::Window(window);
@@ -3966,6 +3982,32 @@ impl MuxEngine {
     pub fn pane_border_status(&self, window: WindowId) -> PaneBorderStatus {
         self.scalar_option_effective(TmuxOptionTarget::Window(window), "pane-border-status")
             .map_or(PaneBorderStatus::Off, PaneBorderStatus::parse)
+    }
+
+    #[must_use]
+    pub fn displayed_pane_border_status(&self, window: WindowId) -> PaneBorderStatus {
+        let hidden = self
+            .state
+            .windows
+            .get(&window)
+            .and_then(|window| window.zoomed_pane)
+            .is_some_and(|pane| self.pane_status_hidden.contains(&pane));
+        if hidden {
+            PaneBorderStatus::Off
+        } else {
+            self.pane_border_status(window)
+        }
+    }
+
+    pub fn set_pane_status_hidden(&mut self, pane: PaneId, hidden: bool) {
+        let changed = if hidden {
+            self.pane_status_hidden.insert(pane)
+        } else {
+            self.pane_status_hidden.remove(&pane)
+        };
+        if changed {
+            self.state.bump_generation();
+        }
     }
 
     /// `window_pane_get_pane_lines` reads `wp->window->options` for every pane
@@ -8710,7 +8752,7 @@ impl MuxEngine {
     #[must_use]
     pub fn pane_geometry(&self, pane: PaneId) -> Option<(u16, u16)> {
         let window = self.state.window_for_pane(pane)?;
-        let status = self.pane_border_status(window);
+        let status = self.displayed_pane_border_status(window);
         self.state
             .windows
             .get(&window)?
@@ -10147,16 +10189,9 @@ impl MuxEngine {
         } else {
             self.state.windows[&source_window].session
         };
-        let duration_ms = options.value("-d").map_or_else(
-            || Ok(self.window_knobs(target_window).display_panes_time_ms),
-            |value| {
-                parse_strtonum(value, 0, i64::from(u32::MAX), "delay")
-                    .map(|value| u32::try_from(value).expect("delay is bounded"))
-            },
-        )?;
         Ok(Execution::effect(MuxEffect::DisplayPanes {
             pane,
-            duration_ms,
+            delay: options.value("-d").map(str::to_owned),
             selectable: !options.has("-N"),
             template,
             source: invocation.source.clone(),
@@ -43005,10 +43040,10 @@ mod tests {
         let pane = context.pane.unwrap();
         let window = context.window.unwrap();
         let session = context.session.unwrap();
-        let effect =
-            |duration_ms, selectable, template, kill_source, zoom| MuxEffect::DisplayPanes {
+        let effect = |delay: Option<&str>, selectable, template, kill_source, zoom| {
+            MuxEffect::DisplayPanes {
                 pane,
-                duration_ms,
+                delay: delay.map(str::to_owned),
                 selectable,
                 template,
                 source: None,
@@ -43016,28 +43051,29 @@ mod tests {
                 source_session: session,
                 kill_source,
                 zoom,
-            };
+            }
+        };
 
         for (name, args, expected) in [
             (
                 "display-panes",
                 Vec::new(),
-                effect(1_000, true, None, false, true),
+                effect(None, true, None, false, true),
             ),
             (
                 "displayp",
                 vec!["-d2500", "-k"],
-                effect(2_500, true, None, true, true),
+                effect(Some("2500"), true, None, true, true),
             ),
             (
                 "display-panes",
                 vec!["-d", "0", "-Z"],
-                effect(0, true, None, false, false),
+                effect(Some("0"), true, None, false, false),
             ),
             (
                 "display-panes",
                 vec!["-N", "-t", "work:0.0", "-s", "work:0"],
-                effect(1_000, false, None, false, true),
+                effect(None, false, None, false, true),
             ),
         ] {
             assert_eq!(
@@ -43063,7 +43099,7 @@ mod tests {
                 .unwrap()
                 .effects,
             vec![effect(
-                1200,
+                None,
                 true,
                 Some(CommandPromptTemplate::String(
                     "select-pane -t %%%".to_owned()
@@ -43072,10 +43108,22 @@ mod tests {
                 true,
             )]
         );
+        assert_eq!(engine.display_panes_delay(window, None).unwrap(), 1200);
+        assert_eq!(engine.display_panes_delay(window, Some("0")).unwrap(), 0);
+        for (value, message) in [
+            ("forever", "delay invalid"),
+            ("-5", "delay too small"),
+            ("99999999999", "delay too large"),
+        ] {
+            assert_eq!(
+                engine
+                    .display_panes_delay(window, Some(value))
+                    .unwrap_err()
+                    .tmux_message(),
+                message
+            );
+        }
         for (args, message) in [
-            (vec!["-d", "forever"], "delay invalid"),
-            (vec!["-d", "-5"], "delay too small"),
-            (vec!["-d", "99999999999"], "delay too large"),
             (
                 vec!["-t", "missing", "-d", "forever"],
                 "can't find pane: missing",

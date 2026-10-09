@@ -562,7 +562,10 @@ The mode zooms its pane unless `-Z`, runs the template with the chosen `%pane` f
 its timer, on `q` or Escape, and on any other non-index key unless `-N` swallows it, kills the pane
 under `-k`, and needs no client. Differential coverage is `smoke/display-panes-template` (29 checks) and
 `smoke/args-parse-display-panes` (23). The template runs in the context of the client that pressed
-the key, as the pin's `cmdq_append(c, ...)` does.
+the key, as the pin's `cmdq_append(c, ...)` does. One presentation choice is zz's: a GUI, iOS or web
+client viewing the pane's window gets a native overlay that drives the mode instead of the mode
+screen, and when every viewer is such a client the mode does not zoom, since the overlay labels the
+panes in place.
 
 ## `display-message` client aliases
 

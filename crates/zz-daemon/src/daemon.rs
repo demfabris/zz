@@ -4857,18 +4857,6 @@ impl MuxHookSnapshot {
     }
 }
 
-#[derive(Clone, Copy)]
-struct DisplayPanesDeadline {
-    client: ClientId,
-    token: u64,
-    deadline: Instant,
-}
-
-enum DisplayPanesDeadlineCommand {
-    Schedule(DisplayPanesDeadline),
-    Cancel { client: ClientId, token: u64 },
-}
-
 enum KeyTableDeadlineCommand {
     Schedule(ClientId, Option<Instant>),
 }
@@ -8975,7 +8963,9 @@ impl Shared {
         event: PendingHookEvent,
     ) -> Option<InsertedQueueChild> {
         if state.publish_control && !event.control_notified {
-            state.notifications.push(self.event_control_notification(&event));
+            state
+                .notifications
+                .push(self.event_control_notification(&event));
         }
         if self
             .command_item
@@ -9157,8 +9147,8 @@ impl Shared {
         let mut refresh_armed = false;
         let mut unfocused_copy_mode_exits = Vec::new();
         let mut pipes_to_close = Vec::new();
-        let mut display_panes_deadline = None;
         let mut panes_mode_deadline: Option<(PaneId, u64, Instant)> = None;
+        let mut panes_mode_overlays: Vec<(ClientId, DisplayPanesState)> = Vec::new();
         let mut client_message_retires = Vec::new();
         let mut client_message_schedule = None;
         let mut resume_client_terminals = false;
@@ -10047,6 +10037,7 @@ impl Shared {
                             inner.pane_modes.remove(pane);
                             inner.pane_mode_zooms.remove(pane);
                             inner.panes_mode_frames.remove(pane);
+                            inner.engine.set_pane_status_hidden(*pane, false);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
                             removed_panes.push(*pane);
                         }
@@ -10768,7 +10759,7 @@ impl Shared {
                     }
                     MuxEffect::DisplayPanes {
                         pane,
-                        duration_ms,
+                        delay,
                         selectable,
                         template,
                         source,
@@ -10777,102 +10768,96 @@ impl Shared {
                         kill_source,
                         zoom,
                     } => {
-                        if !client_draws_native_display_panes(&inner, client, kind) {
-                            inner.next_display_panes_token =
-                                inner.next_display_panes_token.wrapping_add(1).max(1);
-                            let token = inner.next_display_panes_token;
-                            let mode = PanesMode {
-                                source_session: *source_session,
-                                source_window: *source_window,
-                                duration_ms: *duration_ms,
-                                ignore_keys: !*selectable,
-                                template: template.clone(),
-                                source: source.clone(),
-                                kill_source: *kill_source,
-                                zoom: *zoom,
-                                token,
-                            };
-                            if push_pane_mode(
-                                &mut inner,
-                                *pane,
-                                PaneModeRequest::Panes(Box::new(mode)),
-                            ) {
-                                snapshot_changed = true;
-                                if *duration_ms != 0 {
-                                    panes_mode_deadline = Some((
-                                        *pane,
-                                        token,
-                                        Instant::now()
-                                            + Duration::from_millis(u64::from(*duration_ms)),
-                                    ));
-                                }
-                            }
+                        if matches!(
+                            inner.pane_modes.get(pane).and_then(|modes| modes.last()),
+                            Some(PaneModeRequest::Panes(_))
+                        ) {
                             continue;
                         }
-                        let source_pane =
-                            if inner.engine.state.window_for_pane(*pane) == Some(*source_window) {
-                                *pane
-                            } else {
-                                inner.engine.state.windows[source_window].active_pane
-                            };
-                        let pane = &source_pane;
-                        let display_panes_facts = borrowed_format_hook_facts(&inner);
-                        let format_client_session = client_attached_session(&inner, client)
-                            .ok_or(ServerError::PaneNotAttached(*pane))?;
-                        let (source_session, source_window, state) = build_display_panes_state(
-                            &inner.engine,
-                            &inner.config_files,
-                            &display_panes_facts,
-                            *pane,
-                            *duration_ms,
-                            format_client_session,
-                        )?;
-                        if format_client_session != source_session {
-                            return Err(ServerError::PaneNotAttached(*pane).into());
-                        }
-                        dismiss_overlays(
-                            &mut inner,
-                            client,
-                            Some(Overlay::DisplayPanes),
-                            &mut direct_events,
-                            &mut retired_command_outputs,
-                            &mut retired_popups,
-                            &mut resume_client_terminals,
-                        );
-                        let _ = take_display_panes(&mut inner, client);
-                        inner
-                            .client_mut(client)
-                            .and_then(|c| c.swallowed_keys.take());
+                        let host_window = inner
+                            .engine
+                            .state
+                            .window_for_pane(*pane)
+                            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                        let duration_ms = inner
+                            .engine
+                            .display_panes_delay(host_window, delay.as_deref())?;
+                        let viewers = panes_mode_viewers(&inner, host_window);
+                        let native_only =
+                            !viewers.is_empty() && viewers.iter().all(|(_, native)| *native);
+                        let source_pane = if host_window == *source_window {
+                            *pane
+                        } else {
+                            inner.engine.state.windows[source_window].active_pane
+                        };
+                        let overlays = {
+                            let facts = borrowed_format_hook_facts(&inner);
+                            viewers
+                                .iter()
+                                .filter(|(_, native)| *native)
+                                .filter_map(|(viewer, _)| {
+                                    let session = client_attached_session(&inner, *viewer)?;
+                                    build_display_panes_state(
+                                        &inner.engine,
+                                        &inner.config_files,
+                                        &facts,
+                                        source_pane,
+                                        duration_ms,
+                                        session,
+                                    )
+                                    .ok()
+                                    .map(|(_, _, state)| (*viewer, session, state))
+                                })
+                                .collect::<Vec<_>>()
+                        };
                         inner.next_display_panes_token =
                             inner.next_display_panes_token.wrapping_add(1).max(1);
                         let token = inner.next_display_panes_token;
-                        let deadline = (*duration_ms != 0).then(|| {
-                            Instant::now() + Duration::from_millis(u64::from(*duration_ms))
-                        });
-                        inner
-                            .client_entry(client)
-                            .display_panes
-                            .replace(DisplayPanesSession {
-                                token,
-                                source_pane: *pane,
-                                source_session,
-                                source_window,
-                                selectable: *selectable,
-                                state: state.clone(),
-                                deadline,
-                                cancel: deadline.map(|_| self.timer_tx.clone()),
-                                template: template.clone(),
-                                source: source.clone(),
-                                waiter: None,
-                            });
-                        if let Some(deadline) = deadline {
-                            display_panes_deadline = Some(DisplayPanesDeadline {
-                                client,
-                                token,
-                                deadline,
-                            });
+                        let mode = PanesMode {
+                            source_session: *source_session,
+                            source_window: *source_window,
+                            duration_ms,
+                            ignore_keys: !*selectable,
+                            template: template.clone(),
+                            source: source.clone(),
+                            kill_source: *kill_source,
+                            zoom: *zoom && !native_only,
+                            token,
+                        };
+                        if !push_pane_mode(
+                            &mut inner,
+                            *pane,
+                            PaneModeRequest::Panes(Box::new(mode)),
+                        ) {
+                            continue;
                         }
-                        direct_events.push(EventPayload::DisplayPanes { state: Some(state) });
+                        snapshot_changed = true;
+                        if duration_ms != 0 {
+                            panes_mode_deadline = Some((
+                                *pane,
+                                token,
+                                Instant::now() + Duration::from_millis(u64::from(duration_ms)),
+                            ));
+                        }
+                        for (viewer, session, state) in overlays {
+                            let _ = take_display_panes(&mut inner, viewer);
+                            inner
+                                .client_entry(viewer)
+                                .display_panes
+                                .replace(DisplayPanesSession {
+                                    token,
+                                    source_pane,
+                                    source_session: session,
+                                    source_window: *source_window,
+                                    selectable: *selectable,
+                                    state: state.clone(),
+                                    template: template.clone(),
+                                    source: source.clone(),
+                                    waiter: None,
+                                    mode: Some(*pane),
+                                });
+                            panes_mode_overlays.push((viewer, state));
+                        }
                     }
                     MuxEffect::DisplayMessage {
                         pane,
@@ -11740,6 +11725,9 @@ impl Shared {
                 ClientMessageDeadlineCommand::Schedule(deadline),
             ));
         }
+        for (viewer, state) in panes_mode_overlays {
+            self.publish_to_client(viewer, EventPayload::DisplayPanes { state: Some(state) });
+        }
         if let Some((pane, token, deadline)) = panes_mode_deadline {
             let shared = Arc::downgrade(&self.server_owner());
             let _ = self.timer_tx.send(timers::TimerInput::Callback {
@@ -11750,15 +11738,6 @@ impl Shared {
                     }
                 }),
             });
-        }
-        if let Some(deadline) = display_panes_deadline {
-            self.timer_tx
-                .send(timers::TimerInput::DisplayPanes(
-                    DisplayPanesDeadlineCommand::Schedule(deadline),
-                ))
-                .map_err(|_| {
-                    DaemonError::Thread("display-panes deadline dispatcher stopped".to_owned())
-                })?;
         }
         if monitor_silence_changed {
             self.reset_all_silence_timers();
@@ -23286,22 +23265,48 @@ impl Shared {
                 let Some(chosen) = chosen else {
                     return true;
                 };
-                pop_pane_mode(&mut self.inner.lock(), pane);
-                self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
-                if let Some(target) = chosen {
-                    let _ = self.select_display_pane(
-                        client,
-                        ClientKind::Interactive,
-                        context,
-                        target,
-                        mode.template.clone(),
-                        mode.source.clone(),
-                    );
-                }
-                self.publish_snapshot();
+                self.finish_panes_mode(client, context, pane, &mode, chosen);
                 true
             }
         }
+    }
+
+    fn finish_panes_mode(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        host: PaneId,
+        mode: &PanesMode,
+        chosen: Option<PaneId>,
+    ) {
+        {
+            let mut inner = self.inner.lock();
+            if chosen.is_some()
+                && let Some(window) = inner.engine.state.window_for_pane(host)
+                && let Some(zoomed) = inner.engine.state.windows[&window].zoomed_pane
+            {
+                inner.pane_mode_zooms.remove(&host);
+                let _ = inner.engine.state.toggle_zoom(zoomed);
+            }
+            pop_pane_mode(&mut inner, host);
+        }
+        self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
+        if let Some(target) = chosen {
+            self.submit_template(
+                client,
+                ClientKind::Interactive,
+                context,
+                &CommandPromptSubmission {
+                    inputs: vec![target.to_string()],
+                    template: Some(mode.template.clone().unwrap_or_else(|| {
+                        CommandPromptTemplate::String(DISPLAY_PANES_DEFAULT_TEMPLATE.to_owned())
+                    })),
+                    source: mode.source.clone(),
+                },
+                "display-panes",
+            );
+        }
+        self.publish_snapshot();
     }
 
     fn expire_panes_mode(self: &Arc<Self>, pane: PaneId, token: u64) {
@@ -24623,6 +24628,44 @@ impl Shared {
             return Ok(());
         }
 
+        let linked = self
+            .inner
+            .lock()
+            .client(client)
+            .and_then(|c| c.display_panes.as_ref())
+            .and_then(|overlay| overlay.mode);
+        if let Some(host) = linked {
+            match action {
+                DisplayPanesAction::Dismiss => {}
+                DisplayPanesAction::Close => {
+                    self.pane_mode_key_name(client, context, host, "Escape");
+                }
+                DisplayPanesAction::Key(input) => {
+                    self.pane_mode_key_name(client, context, host, &input_key_name(&input));
+                }
+                DisplayPanesAction::Select(target) => {
+                    let mode = match self
+                        .inner
+                        .lock()
+                        .pane_modes
+                        .get(&host)
+                        .and_then(|modes| modes.last())
+                    {
+                        Some(PaneModeRequest::Panes(mode)) => Some(mode.clone()),
+                        _ => None,
+                    };
+                    if let Some(mode) = mode
+                        && !mode.ignore_keys
+                        && self.inner.lock().engine.state.window_for_pane(target)
+                            == Some(mode.source_window)
+                    {
+                        self.finish_panes_mode(client, context, host, &mode, Some(target));
+                    }
+                }
+            }
+            self.publish_snapshot();
+            return Ok(());
+        }
         let Some(overlay) = ({
             let mut inner = self.inner.lock();
             take_display_panes(&mut inner, client)
@@ -24812,31 +24855,6 @@ impl Shared {
             },
         );
         Err(error)
-    }
-
-    fn expire_display_panes(&self, scheduled: DisplayPanesDeadline, now: Instant) -> bool {
-        let mut inner = self.inner.lock();
-        let due = inner
-            .client(scheduled.client)
-            .and_then(|c| c.display_panes.as_ref())
-            .is_some_and(|overlay| {
-                overlay.token == scheduled.token
-                    && overlay.deadline == Some(scheduled.deadline)
-                    && scheduled.deadline <= now
-            });
-        if !due {
-            return false;
-        }
-        inner
-            .client_mut(scheduled.client)
-            .and_then(|c| c.display_panes.take());
-        if let Some(outbound) = inner
-            .client(scheduled.client)
-            .and_then(|c| c.subscriber.as_ref())
-        {
-            Self::send_event(outbound, EventPayload::DisplayPanes { state: None });
-        }
-        true
     }
 
     fn activate_choose_tree_target(
@@ -28639,7 +28657,34 @@ impl Shared {
 
     fn publish_snapshot(self: &Arc<Self>) {
         self.detach_removed_sessions();
+        self.retire_panes_mode_overlays();
         self.publish_snapshot_state();
+    }
+
+    fn retire_panes_mode_overlays(&self) {
+        let retired = {
+            let mut inner = self.inner.lock();
+            let retired = inner
+                .clients
+                .iter()
+                .filter_map(|(id, c)| {
+                    let overlay = c.display_panes.as_ref()?;
+                    let host = overlay.mode?;
+                    let live = matches!(
+                        inner.pane_modes.get(&host).and_then(|modes| modes.last()),
+                        Some(PaneModeRequest::Panes(mode)) if mode.token == overlay.token
+                    );
+                    (!live).then_some(*id)
+                })
+                .collect::<Vec<_>>();
+            for client in &retired {
+                let _ = take_display_panes(&mut inner, *client);
+            }
+            retired
+        };
+        for client in retired {
+            self.publish_to_client(client, EventPayload::DisplayPanes { state: None });
+        }
     }
 
     fn publish_snapshot_state(&self) {
@@ -28876,7 +28921,6 @@ impl Shared {
                 if attached_session != Some(overlay.source_session)
                     || active_window != Some(overlay.source_window)
                 {
-                    overlay.cancel_deadline(client);
                     updates.push((client, None));
                     continue;
                 }
@@ -28890,14 +28934,12 @@ impl Shared {
                     attached_session.expect("matching overlay attachment exists"),
                 );
                 let Ok((source_session, source_window, state)) = rebuilt else {
-                    overlay.cancel_deadline(client);
                     updates.push((client, None));
                     continue;
                 };
                 if source_session != overlay.source_session
                     || source_window != overlay.source_window
                 {
-                    overlay.cancel_deadline(client);
                     updates.push((client, None));
                     continue;
                 }
@@ -35927,8 +35969,6 @@ struct DisplayPanesSession {
     source_window: WindowId,
     selectable: bool,
     state: DisplayPanesState,
-    deadline: Option<Instant>,
-    cancel: Option<timers::TimerSender>,
     /// `cdata->state`: the optional template, kept whole so a selection can run
     /// `args_make_commands` against the chosen pane the way
     /// `cmd_display_panes_key` does.
@@ -35937,27 +35977,13 @@ struct DisplayPanesSession {
     /// `cdata->item`: the queue parked on the overlay, released when the
     /// session is dropped, which `cmd_display_panes_free` mirrors exactly.
     waiter: Option<OverlayWait>,
-}
-
-impl DisplayPanesSession {
-    fn cancel_deadline(&self, client: ClientId) {
-        if let Some(cancel) = &self.cancel {
-            let _ = cancel.send(timers::TimerInput::DisplayPanes(
-                DisplayPanesDeadlineCommand::Cancel {
-                    client,
-                    token: self.token,
-                },
-            ));
-        }
-    }
+    mode: Option<PaneId>,
 }
 
 fn take_display_panes(inner: &mut ServerState, client: ClientId) -> Option<DisplayPanesSession> {
-    let overlay = inner
+    inner
         .client_mut(client)
-        .and_then(|c| c.display_panes.take())?;
-    overlay.cancel_deadline(client);
-    Some(overlay)
+        .and_then(|c| c.display_panes.take())
 }
 
 fn build_display_panes_state(
@@ -43993,7 +44019,12 @@ fn panes_mode_snapshot(
         .get(&mode.source_window)
         .map(|window| window.active_pane);
     let captured = inner.panes_mode_frames.get(&pane);
-    let resized = captured.is_none_or(|captured| captured.size != Some((columns, rows)));
+    let resized = captured.is_none_or(|captured| {
+        if captured.size != Some((columns, rows)) {
+            captured.resized.set(true);
+        }
+        captured.resized.get()
+    });
     let live = if resized {
         panes_mode_live_frames(inner, mode.source_window)
     } else {
@@ -44014,17 +44045,35 @@ fn panes_mode_snapshot(
         }
         live.get(&area.pane)
     };
-    let expand = |format: &str, shown: PaneId| {
+    let expand_in = |format: &str, session: SessionId, window: WindowId, shown: PaneId| {
         let mut context = engine.format_status_context_for_client(
-            Some(mode.source_session),
-            Some(mode.source_window),
+            Some(session),
+            Some(window),
             Some(shown),
-            mode.source_session,
+            session,
         );
         context.set_format_value("config_files", &inner.config_files);
         let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
         expand_format_values(format, &context, &mut hooks)
     };
+    let expand = |format: &str, shown: PaneId| {
+        expand_in(format, mode.source_session, mode.source_window, shown)
+    };
+    let border_style = engine
+        .state
+        .window_for_pane(pane)
+        .and_then(|window| engine.state.windows.get(&window))
+        .map_or_else(
+            || options.border_style.clone(),
+            |window| {
+                let current = engine
+                    .state
+                    .sessions
+                    .get(&window.session)
+                    .map_or(window.id, |session| session.active_window);
+                expand_in(&options.border_style, window.session, current, pane)
+            },
+        );
     let areas = geometry
         .areas
         .into_iter()
@@ -44058,7 +44107,7 @@ fn panes_mode_snapshot(
             .into_iter()
             .map(|(x, y, cell)| PanesModeBorder { x, y, cell })
             .collect(),
-        border_style: options.border_style,
+        border_style,
         copy: geometry.copy,
         format: !options.format.is_empty(),
     }
@@ -44110,7 +44159,7 @@ fn stamp_pane_border_chrome(
 ) {
     for session in &mut snapshot.sessions {
         for window in &mut session.windows {
-            window.pane_border_status = engine.pane_border_status(window.id);
+            window.pane_border_status = engine.displayed_pane_border_status(window.id);
             window.pane_border_lines = engine.pane_border_lines(window.id);
             window.pane_border_indicators = engine.pane_border_indicators(window.id);
             if !window.pane_border_status.is_on() {
@@ -47126,19 +47175,19 @@ fn panes_mode_hit(
     })
 }
 
-fn client_draws_native_display_panes(
-    inner: &ServerState,
-    client: ClientId,
-    kind: ClientKind,
-) -> bool {
-    kind == ClientKind::Interactive
-        && inner
-            .client(client)
-            .is_some_and(|c| c.subscriber.is_some() && !c.exits_on_detach)
+fn panes_mode_viewers(inner: &ServerState, window: WindowId) -> Vec<(ClientId, bool)> {
+    inner
+        .clients
+        .iter()
+        .filter(|(_, c)| c.subscriber.is_some() && c.kind == Some(ClientKind::Interactive))
+        .filter(|(id, _)| client_focused_window_for_attachment(inner, **id) == Some(window))
+        .map(|(id, c)| (*id, !c.exits_on_detach))
+        .collect()
 }
 
 struct PanesModeFrames {
     size: Option<(u16, u16)>,
+    resized: std::cell::Cell<bool>,
     frames: BTreeMap<PaneId, Arc<zz_terminal::TerminalViewport>>,
 }
 
@@ -47214,10 +47263,16 @@ fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeReque
     }
     inner.pane_modes.entry(pane).or_default().push(mode);
     if let Some(frames) = frames {
+        inner.engine.set_pane_status_hidden(pane, true);
         let size = inner.engine.pane_geometry(pane);
-        inner
-            .panes_mode_frames
-            .insert(pane, PanesModeFrames { size, frames });
+        inner.panes_mode_frames.insert(
+            pane,
+            PanesModeFrames {
+                size,
+                resized: std::cell::Cell::new(false),
+                frames,
+            },
+        );
     }
     true
 }
@@ -47241,6 +47296,7 @@ fn pop_pane_mode(inner: &mut ServerState, pane: PaneId) -> bool {
     }
     if matches!(mode, Some(PaneModeRequest::Panes(_))) {
         inner.panes_mode_frames.remove(&pane);
+        inner.engine.set_pane_status_hidden(pane, false);
     }
     if let Some((kill_source, _)) = mode
         .as_ref()
@@ -58458,16 +58514,11 @@ mod tests {
             .expect("close the untimed display overlay");
         take_reliable_messages(&mailbox);
         open_display(&mut context, &["-d", "60000"]);
-        let scheduled = {
+        {
             let mut inner = shared.inner.lock();
             assert!(inner.engine.state.set_pane_bell(pane, true));
-            let overlay = inner.clients[&client].display_panes.as_ref().unwrap();
-            DisplayPanesDeadline {
-                client,
-                token: overlay.token,
-                deadline: overlay.deadline.expect("display deadline"),
-            }
-        };
+            assert!(inner.clients[&client].display_panes.is_some());
+        }
         drain_terminal_lane(&mailbox);
         let before = focus_state();
         shared
@@ -58493,7 +58544,6 @@ mod tests {
             assert!(inner.client(client).is_none_or(|c| c.message.is_none()));
             assert!(!client_terminal_publication_frozen(&inner, client));
         }
-        assert!(!shared.expire_display_panes(scheduled, scheduled.deadline));
         let messages = take_reliable_messages(&mailbox);
         assert_eq!(cleared_message_ids(&messages), [disabled_message.token]);
         assert!(messages.iter().any(|message| matches!(
@@ -100898,433 +100948,6 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn daemon_display_panes_routes_keys_and_expires_reliably() {
-        let shared = Arc::new(Shared::new(1));
-        let mailbox = OutboundMailbox::new();
-        let (client, _) =
-            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
-        let mut context = ExecutionContext::default();
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("new-session", ["-s", "work"]),
-            )
-            .expect("new session");
-        let session = context.session.expect("session");
-        let terminal = context.pane.expect("terminal pane");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new(
-                    "split-window",
-                    ["--kind", "browser", "-h", "https://example.com"],
-                ),
-            )
-            .expect("browser pane");
-        let browser = context.pane.expect("browser pane");
-        shared.attach(client, session).expect("attach session");
-        take_reliable_messages(&mailbox);
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-panes", ["-d", "1000"]),
-            )
-            .expect("open pane indicators");
-        let opened = take_reliable_messages(&mailbox);
-        assert!(opened.iter().any(|message| matches!(
-            message,
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::DisplayPanes { state: Some(state) },
-                ..
-            }) if state.indicators.len() == 2
-                && state.indicators.iter().any(|indicator| {
-                    indicator.pane == browser && indicator.active() && indicator.select_key == b'1'
-                })
-        )));
-
-        shared.send_resync(client, &mailbox);
-        assert!(
-            take_reliable_messages(&mailbox)
-                .iter()
-                .any(|message| matches!(
-                    message,
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::DisplayPanes { state: Some(_) },
-                        ..
-                    })
-                ))
-        );
-
-        let motion_before = {
-            let mut inner = shared.inner.lock();
-            assert!(inner.engine.state.set_pane_bell(terminal, true));
-            (
-                inner.activity_sequence,
-                inner.terminal_input_sequence,
-                terminal_geometry_owner(&inner, terminal),
-                inner.clients[&client].display_panes.as_ref().unwrap().token,
-            )
-        };
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::TerminalView {
-                    pane: terminal,
-                    action: TerminalViewAction::Mouse(TerminalMouseInput::new(
-                        TerminalMousePhase::Motion,
-                        None,
-                        PointerCellEvent {
-                            column: 1,
-                            row: 1,
-                            click_count: 0,
-                            rectangle: false,
-                        },
-                        8,
-                        16,
-                        80,
-                        24,
-                        8,
-                        16,
-                        Modifiers::default(),
-                        false,
-                    )),
-                },
-            )
-            .expect("consume display-panes mouse motion");
-        {
-            let inner = shared.inner.lock();
-            assert_eq!(inner.activity_sequence, motion_before.0);
-            assert_eq!(inner.terminal_input_sequence, motion_before.1);
-            assert_eq!(terminal_geometry_owner(&inner, terminal), motion_before.2);
-            assert_eq!(
-                inner.clients[&client].display_panes.as_ref().unwrap().token,
-                motion_before.3
-            );
-            assert!(inner.engine.state.pane(terminal).expect("motion pane").bell);
-        }
-        assert!(!take_reliable_messages(&mailbox).iter().any(|message| {
-            matches!(
-                message,
-                ProtocolMessage::Event(Event {
-                    payload: EventPayload::DisplayPanes { state: None },
-                    ..
-                })
-            )
-        }));
-
-        let press_before = {
-            let inner = shared.inner.lock();
-            (inner.activity_sequence, inner.terminal_input_sequence)
-        };
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::TerminalView {
-                    pane: terminal,
-                    action: TerminalViewAction::Mouse(TerminalMouseInput::new(
-                        TerminalMousePhase::Press,
-                        Some(TerminalMouseButton::Left),
-                        PointerCellEvent {
-                            column: 1,
-                            row: 1,
-                            click_count: 1,
-                            rectangle: false,
-                        },
-                        8,
-                        16,
-                        80,
-                        24,
-                        8,
-                        16,
-                        Modifiers::default(),
-                        false,
-                    )),
-                },
-            )
-            .expect("fall through display-panes mouse press");
-        {
-            let inner = shared.inner.lock();
-            assert!(
-                inner
-                    .client(client)
-                    .is_none_or(|c| c.display_panes.is_none())
-            );
-            assert_eq!(inner.activity_sequence, press_before.0 + 1);
-            assert_eq!(inner.terminal_input_sequence, press_before.1 + 1);
-            assert!(!inner.engine.state.pane(terminal).expect("press pane").bell);
-        }
-        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
-            matches!(
-                message,
-                ProtocolMessage::Event(Event {
-                    payload: EventPayload::DisplayPanes { state: None },
-                    ..
-                })
-            )
-        }));
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-panes", ["-d", "1000"]),
-            )
-            .expect("reopen pane indicators for wheel input");
-        take_reliable_messages(&mailbox);
-        let wheel_before = {
-            let mut inner = shared.inner.lock();
-            assert!(inner.engine.state.set_pane_bell(terminal, true));
-            (inner.activity_sequence, inner.terminal_input_sequence)
-        };
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::TerminalView {
-                    pane: terminal,
-                    action: TerminalViewAction::ScrollWheel {
-                        lines: -1,
-                        input: TerminalMouseInput::new(
-                            TerminalMousePhase::Press,
-                            Some(TerminalMouseButton::ScrollUp),
-                            PointerCellEvent {
-                                column: 1,
-                                row: 1,
-                                click_count: 1,
-                                rectangle: false,
-                            },
-                            8,
-                            16,
-                            80,
-                            24,
-                            8,
-                            16,
-                            Modifiers::default(),
-                            false,
-                        ),
-                    },
-                },
-            )
-            .expect("fall through display-panes mouse wheel");
-        {
-            let inner = shared.inner.lock();
-            assert!(
-                inner
-                    .client(client)
-                    .is_none_or(|c| c.display_panes.is_none())
-            );
-            assert_eq!(inner.activity_sequence, wheel_before.0 + 1);
-            assert_eq!(inner.terminal_input_sequence, wheel_before.1 + 1);
-            assert!(!inner.engine.state.pane(terminal).expect("wheel pane").bell);
-        }
-        assert!(take_reliable_messages(&mailbox).iter().any(|message| {
-            matches!(
-                message,
-                ProtocolMessage::Event(Event {
-                    payload: EventPayload::DisplayPanes { state: None },
-                    ..
-                })
-            )
-        }));
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-panes", ["-d", "1000"]),
-            )
-            .expect("reopen pane indicators for key input");
-        take_reliable_messages(&mailbox);
-
-        let invalid = test_key(KeyCode::Character('x'), Modifiers::default(), Some("x"));
-        let invalid_before = {
-            let inner = shared.inner.lock();
-            (inner.activity_sequence, inner.terminal_input_sequence)
-        };
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::DisplayPanes {
-                    action: DisplayPanesAction::Key(invalid.clone()),
-                },
-            )
-            .expect("fall through invalid key");
-        let invalid_messages = take_reliable_messages(&mailbox);
-        assert!(invalid_messages.iter().any(|message| matches!(
-            message,
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::DisplayPanes { state: None },
-                ..
-            })
-        )));
-        assert!(invalid_messages.iter().any(|message| matches!(
-            message,
-            ProtocolMessage::Event(Event {
-                payload: EventPayload::BrowserCommand {
-                    pane,
-                    command: BrowserCommand::Key(input),
-                },
-                ..
-            }) if *pane == browser && input == &invalid
-        )));
-        {
-            let inner = shared.inner.lock();
-            assert_eq!(inner.activity_sequence, invalid_before.0 + 1);
-            assert_eq!(inner.terminal_input_sequence, invalid_before.1);
-        }
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("displayp", ["-d1000"]),
-            )
-            .expect("reopen pane indicators");
-        take_reliable_messages(&mailbox);
-        let selection_before = {
-            let inner = shared.inner.lock();
-            (inner.activity_sequence, inner.terminal_input_sequence)
-        };
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::DisplayPanes {
-                    action: DisplayPanesAction::Key(test_key(
-                        KeyCode::Character('0'),
-                        Modifiers::default(),
-                        Some("0"),
-                    )),
-                },
-            )
-            .expect("select pane zero");
-        assert_eq!(context.pane, Some(terminal));
-        {
-            let inner = shared.inner.lock();
-            assert!(
-                inner
-                    .client(client)
-                    .is_none_or(|c| c.display_panes.is_none())
-            );
-            assert_eq!(inner.activity_sequence, selection_before.0);
-            assert_eq!(inner.terminal_input_sequence, selection_before.1);
-        }
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-panes", ["-d", "1000"]),
-            )
-            .expect("open pane indicators for Escape");
-        take_reliable_messages(&mailbox);
-        let escape_before = {
-            let inner = shared.inner.lock();
-            (inner.activity_sequence, inner.terminal_input_sequence)
-        };
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::DisplayPanes {
-                    action: DisplayPanesAction::Close,
-                },
-            )
-            .expect("fall through Escape");
-        {
-            let inner = shared.inner.lock();
-            assert!(
-                inner
-                    .client(client)
-                    .is_none_or(|c| c.display_panes.is_none())
-            );
-            assert_eq!(inner.activity_sequence, escape_before.0 + 1);
-            assert_eq!(inner.terminal_input_sequence, escape_before.1 + 1);
-            assert!(
-                !inner
-                    .client(client)
-                    .and_then(|c| c.swallowed_keys.as_ref())
-                    .is_some_and(|keys| keys.contains("Escape"))
-            );
-        }
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-panes", ["-d", "20"]),
-            )
-            .expect("open timed pane indicators");
-        let scheduled = {
-            let inner = shared.inner.lock();
-            let overlay = inner.clients[&client].display_panes.as_ref().unwrap();
-            DisplayPanesDeadline {
-                client,
-                token: overlay.token,
-                deadline: overlay.deadline.expect("timed pane deadline"),
-            }
-        };
-        let timeout_before = {
-            let inner = shared.inner.lock();
-            (inner.activity_sequence, inner.terminal_input_sequence)
-        };
-        assert!(shared.expire_display_panes(scheduled, scheduled.deadline));
-        {
-            let inner = shared.inner.lock();
-            assert!(
-                inner
-                    .client(client)
-                    .is_none_or(|c| c.display_panes.is_none())
-            );
-            assert_eq!(inner.activity_sequence, timeout_before.0);
-            assert_eq!(inner.terminal_input_sequence, timeout_before.1);
-        }
-        let messages = take_reliable_messages(&mailbox);
-        let opened = messages.iter().position(|message| {
-            matches!(
-                message,
-                ProtocolMessage::Event(Event {
-                    payload: EventPayload::DisplayPanes { state: Some(_) },
-                    ..
-                })
-            )
-        });
-        let closed = opened.and_then(|opened| {
-            messages.iter().skip(opened + 1).position(|message| {
-                matches!(
-                    message,
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::DisplayPanes { state: None },
-                        ..
-                    })
-                )
-            })
-        });
-        assert!(closed.is_some());
-    }
-
-    #[test]
     fn read_only_display_panes_bypasses_overlay_consumption_and_preserves_bell() {
         let shared = Arc::new(Shared::new(1));
         let (session, pane, _) =
@@ -101704,12 +101327,276 @@ bind - split-window -v -c "#{pane_current_path}"
                 .and_then(|modes| modes.last()),
             Some(PaneModeRequest::Panes(_))
         ));
-        assert!(shared.read_client(target, |c| c.is_some_and(|c| c.display_panes.is_none())));
+        assert!(shared.read_client(target, |c| {
+            c.and_then(|c| c.display_panes.as_ref())
+                .is_some_and(|overlay| overlay.mode == Some(pane))
+        }));
+    }
+
+    #[test]
+    fn display_panes_selection_follows_the_pin_order_of_template_kill_and_unzoom() {
+        let (shared, client, _, mut context) = popup_test_workspace("panes-order");
+        let run = |context: &mut ExecutionContext, name: &str, args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new(name, args.iter().copied()),
+                )
+                .unwrap_or_else(|error| panic!("{name} {args:?}: {error:?}"))
+        };
+        run(&mut context.clone(), "split-window", &["-d"]);
+        let window = context.window.expect("window");
+        let host = context.pane.expect("host");
+        run(
+            &mut context.clone(),
+            "display-panes",
+            &["-k", "-d", "0", "set-environment -g PICKED %%%"],
+        );
+        assert!(shared.pane_mode_input(client, &mut context, host, PaneModeInput::Key("0")));
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .global_environment_variable("PICKED"),
+            Some(host.to_string())
+        );
+        assert!(
+            !shared.inner.lock().engine.state.windows[&window]
+                .pane_order()
+                .contains(&host)
+        );
+
+        let host = shared.inner.lock().engine.state.windows[&window].pane_order()[0];
+        run(
+            &mut context.clone(),
+            "split-window",
+            &["-d", "-t", &host.to_string()],
+        );
+        run(&mut context.clone(), "new-window", &["-d", "-n", "other"]);
+        run(
+            &mut context.clone(),
+            "split-window",
+            &["-d", "-t", ":other"],
+        );
+        run(
+            &mut context.clone(),
+            "resize-pane",
+            &["-Z", "-t", &host.to_string()],
+        );
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&window].zoomed_pane,
+            Some(host)
+        );
+        run(
+            &mut context.clone(),
+            "display-panes",
+            &["-d", "0", "-t", &host.to_string(), "-s", ":other"],
+        );
+        run(
+            &mut context.clone(),
+            "display-panes",
+            &["-d", "nonsense", "-t", &host.to_string()],
+        );
+        assert!(shared.pane_mode_input(client, &mut context, host, PaneModeInput::Key("1")));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&window].zoomed_pane,
+            None
+        );
+    }
+
+    #[test]
+    fn display_panes_hides_the_zoomed_pane_status_row_and_expands_its_border_style() {
+        let (shared, client, _, mut context) = popup_test_workspace("panes-status");
+        shared.inner.lock().client_entry(client).exits_on_detach = true;
+        let run = |context: &mut ExecutionContext, name: &str, args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new(name, args.iter().copied()),
+                )
+                .unwrap_or_else(|error| panic!("{name} {args:?}: {error:?}"))
+        };
+        run(&mut context.clone(), "split-window", &["-d"]);
+        run(
+            &mut context.clone(),
+            "set-option",
+            &["-w", "pane-border-status", "top"],
+        );
+        run(
+            &mut context.clone(),
+            "set-option",
+            &[
+                "-w",
+                "display-panes-border-style",
+                "fg=#{?pane_active,red,blue}",
+            ],
+        );
+        let window = context.window.expect("window");
+        let host = context.pane.expect("host");
+        run(&mut context.clone(), "display-panes", &["-d", "0"]);
+        let (extent, geometry, mode) = {
+            let inner = shared.inner.lock();
+            let facts = format_hook_facts(&inner);
+            let Some(PaneModeRequest::Panes(mode)) =
+                inner.pane_modes.get(&host).and_then(|modes| modes.last())
+            else {
+                panic!("panes mode");
+            };
+            (
+                (
+                    inner
+                        .engine
+                        .window_extent(window, zz_protocol::Axis::Horizontal)
+                        .unwrap_or_default(),
+                    inner
+                        .engine
+                        .window_extent(window, zz_protocol::Axis::Vertical)
+                        .unwrap_or_default(),
+                ),
+                inner.engine.pane_geometry(host),
+                panes_mode_snapshot(&inner, &facts, host, mode),
+            )
+        };
+        assert_eq!(geometry, Some(extent));
+        let PaneMode::Panes {
+            border_style, copy, ..
+        } = mode
+        else {
+            panic!("panes snapshot");
+        };
+        assert_eq!(border_style, "fg=red");
+        assert!(copy);
+        assert!(shared.pane_mode_input(client, &mut context, host, PaneModeInput::Key("q")));
+        assert_eq!(
+            shared
+                .inner
+                .lock()
+                .engine
+                .displayed_pane_border_status(window),
+            zz_protocol::PaneBorderStatus::Top
+        );
+    }
+
+    #[test]
+    fn display_panes_resized_back_keeps_the_live_frames() {
+        let (shared, _, _, context) = popup_test_workspace("panes-frames");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context.clone(),
+                &CommandInvocation::new("display-panes", ["-d", "0"]),
+            )
+            .expect("display-panes");
+        let host = context.pane.expect("host");
+        let mut inner = shared.inner.lock();
+        let size = inner.engine.pane_geometry(host);
+        let frames = inner.panes_mode_frames.get_mut(&host).expect("frames");
+        assert_eq!(frames.size, size);
+        frames.size = Some((1, 1));
+        let facts = format_hook_facts(&inner);
+        let Some(PaneModeRequest::Panes(mode)) = inner
+            .pane_modes
+            .get(&host)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("panes mode");
+        };
+        let _ = panes_mode_snapshot(&inner, &facts, host, &mode);
+        let frames = inner.panes_mode_frames.get_mut(&host).expect("frames");
+        assert!(frames.resized.get());
+        frames.size = size;
+        drop(facts);
+        let facts = format_hook_facts(&inner);
+        let _ = panes_mode_snapshot(&inner, &facts, host, &mode);
+        assert!(inner.panes_mode_frames[&host].resized.get());
+    }
+
+    #[test]
+    fn display_panes_routes_by_the_clients_viewing_the_pane() {
+        let (shared, desktop, desktop_mailbox, mut context) = popup_test_workspace("panes-desk");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context.clone(),
+                &CommandInvocation::new("split-window", ["-d"]),
+            )
+            .expect("split");
+        let window = context.window.expect("window");
+        let host = context.pane.expect("host");
+        let second = shared.inner.lock().engine.state.windows[&window].pane_order()[1];
+        take_reliable_messages(&desktop_mailbox);
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context.clone(),
+                &CommandInvocation::new(
+                    "display-panes",
+                    ["-k", "-d", "0", "-t", &second.to_string()],
+                ),
+            )
+            .expect("display-panes from a command client");
+        {
+            let inner = shared.inner.lock();
+            assert!(matches!(
+                inner.pane_modes.get(&second).and_then(|modes| modes.last()),
+                Some(PaneModeRequest::Panes(_))
+            ));
+            assert_eq!(inner.engine.state.windows[&window].zoomed_pane, None);
+            let overlay = inner.clients[&desktop]
+                .display_panes
+                .as_ref()
+                .expect("overlay");
+            assert_eq!(overlay.mode, Some(second));
+        }
+        assert!(
+            take_reliable_messages(&desktop_mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::DisplayPanes { state: Some(_) },
+                        ..
+                    })
+                ))
+        );
+        shared
+            .input(
+                desktop,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::DisplayPanes {
+                    action: DisplayPanesAction::Close,
+                },
+            )
+            .expect("close");
+        let inner = shared.inner.lock();
+        assert!(inner.clients[&desktop].display_panes.is_none());
+        assert!(!inner.pane_modes.contains_key(&second));
+        assert!(
+            !inner.engine.state.windows[&window]
+                .pane_order()
+                .contains(&second)
+        );
+        assert!(
+            inner.engine.state.windows[&window]
+                .pane_order()
+                .contains(&host)
+        );
     }
 
     #[test]
     fn display_panes_is_a_mode_of_its_target_pane() {
         let (shared, client, _, mut context) = popup_test_workspace("panes");
+        shared.inner.lock().client_entry(client).exits_on_detach = true;
         shared
             .execute(
                 client,
@@ -104756,10 +104643,7 @@ bind - split-window -v -c "#{pane_current_path}"
             "attached,focused,ignore-size,no-detach-on-destroy,read-only"
         );
         let flags = shared.inner.lock().client_flags.get(client);
-        assert_eq!(
-            flags.reconnect_flags(),
-            "ignore-size,no-detach-on-destroy"
-        );
+        assert_eq!(flags.reconnect_flags(), "ignore-size,no-detach-on-destroy");
         let messages = take_reliable_messages(&mailbox);
         assert!(messages.iter().any(|message| matches!(
             message,

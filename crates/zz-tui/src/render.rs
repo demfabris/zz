@@ -235,6 +235,7 @@ pub(crate) struct Renderer {
     overlay_mask: Vec<bool>,
     match_mask: Vec<u8>,
     match_styles: [Option<TmuxStyle>; 2],
+    current_line: Option<(u16, TmuxStyle)>,
     selection_mask: Vec<bool>,
     selection_style: Option<TmuxStyle>,
     selection_trim: Option<(u16, u16)>,
@@ -295,6 +296,7 @@ impl Renderer {
             overlay_mask: Vec::new(),
             match_mask: Vec::new(),
             match_styles: [None, None],
+            current_line: None,
             selection_mask: Vec::new(),
             selection_style: None,
             selection_trim: None,
@@ -977,6 +979,9 @@ impl Renderer {
                             crate::mode_view::resolved_style(style, &model.status.theme)
                         })
                     });
+                    self.current_line = mode.and_then(|mode| {
+                        crate::mode_view::current_line(mode, viewport, &model.status.theme)
+                    });
                     let gutter =
                         mode.and_then(|mode| crate::mode_view::line_number_gutter(mode, viewport));
                     let body = gutter.map_or(content, |gutter| gutter.body(content));
@@ -991,6 +996,7 @@ impl Renderer {
                     self.selection_style = None;
                     self.selection_trim = None;
                     self.match_styles = [None, None];
+                    self.current_line = None;
                 } else if floating {
                     self.painted.remove(&entry.pane);
                     if force {
@@ -1323,6 +1329,11 @@ impl Renderer {
             }
         }
         let selection_style = self.selection_style.take();
+        let line_style = self
+            .current_line
+            .as_ref()
+            .filter(|(line, _)| *line == row)
+            .map(|(_, style)| style.clone());
 
         let default_style = viewport.styles().first().copied().unwrap_or_else(|| {
             PackedStyle::new(
@@ -1335,7 +1346,7 @@ impl Renderer {
         });
         let grounded_defaults =
             self.terminal_defaults.fg.is_some() || self.terminal_defaults.bg.is_some();
-        let clear_from = if grounded_defaults || columns.end < rect.width {
+        let clear_from = if grounded_defaults || columns.end < rect.width || line_style.is_some() {
             None
         } else {
             trailing_clear(
@@ -1384,6 +1395,10 @@ impl Renderer {
                     }
                     if current_style != Some((style, reverse, selected, matched)) {
                         sgr_reset = self.write_terminal_sgr(style, reverse, viewport, sgr_reset);
+                        if let Some(line) = &line_style {
+                            write_line_sgr(&mut self.output, line);
+                            sgr_reset = false;
+                        }
                         if self.write_match_sgr(matched) {
                             sgr_reset = false;
                         }
@@ -1407,6 +1422,10 @@ impl Renderer {
             }
             if current_style != Some((style, reverse, selected, matched)) {
                 sgr_reset = self.write_terminal_sgr(style, reverse, viewport, sgr_reset);
+                if let Some(line) = &line_style {
+                    write_line_sgr(&mut self.output, line);
+                    sgr_reset = false;
+                }
                 if self.write_match_sgr(matched) {
                     sgr_reset = false;
                 }
@@ -4045,6 +4064,36 @@ fn trailing_clear(
     (width - start >= 10 && last_background == viewport.background).then_some(start)
 }
 
+fn write_line_sgr(output: &mut Vec<u8>, line: &TmuxStyle) {
+    let attributes = &line.attributes;
+    for (state, sequence) in [
+        (attributes.bold, b"\x1b[1m".as_slice()),
+        (attributes.dim, b"\x1b[2m".as_slice()),
+        (attributes.italics, b"\x1b[3m".as_slice()),
+        (attributes.underscore, b"\x1b[4m".as_slice()),
+        (attributes.double_underscore, b"\x1b[4:2m".as_slice()),
+        (attributes.curly_underscore, b"\x1b[4:3m".as_slice()),
+        (attributes.dotted_underscore, b"\x1b[4:4m".as_slice()),
+        (attributes.dashed_underscore, b"\x1b[4:5m".as_slice()),
+        (attributes.blink, b"\x1b[5m".as_slice()),
+        (attributes.reverse, b"\x1b[7m".as_slice()),
+        (attributes.hidden, b"\x1b[8m".as_slice()),
+        (attributes.strikethrough, b"\x1b[9m".as_slice()),
+        (attributes.overline, b"\x1b[53m".as_slice()),
+    ] {
+        if state == TmuxAttributeState::On {
+            output.extend_from_slice(sequence);
+        }
+    }
+    for (colour, ground) in [(line.fg, Ground::Foreground), (line.bg, Ground::Background)] {
+        if let Some(colour) =
+            colour.filter(|colour| !matches!(colour, TmuxColour::Default | TmuxColour::Terminal))
+        {
+            write_ground(output, Some(colour), Color::default(), ground);
+        }
+    }
+}
+
 fn write_selection_sgr(output: &mut Vec<u8>, selection: &TmuxStyle) {
     let attributes = &selection.attributes;
     for (state, sequence) in [
@@ -4297,6 +4346,7 @@ mod tests {
             line_numbers: 1,
             line_number_style: String::new(),
             current_line_number_style: String::new(),
+            current_line_style: String::new(),
         };
         let gutter = crate::mode_view::line_number_gutter(&mode, &viewport);
         let rect = Rect {
@@ -4310,6 +4360,71 @@ mod tests {
         renderer.paint_copy_chrome(&mode, gutter, &viewport, rect, &model);
         let output = String::from_utf8(renderer.output).unwrap();
         assert!(output.rfind('$').unwrap() > output.rfind("POS").unwrap());
+    }
+
+    #[test]
+    fn the_copy_cursor_line_takes_copy_mode_current_line_style_to_the_edge() {
+        let mut viewport = styled_viewport();
+        viewport.mode = TerminalMode::Copy {
+            position: 0,
+            total: 0,
+            hide_position: false,
+        };
+        viewport.overlays = Arc::from([OverlaySpan::new(0, 1, 2, OverlayKind::CopyCursor)]);
+        let mut mode = zz_protocol::ModePresentation {
+            pane: PaneId(1),
+            view: false,
+            position: String::new(),
+            position_style: String::new(),
+            selection_style: String::new(),
+            vi_keys: false,
+            match_style: String::new(),
+            current_match_style: String::new(),
+            line_numbers: 0,
+            line_number_style: String::new(),
+            current_line_number_style: String::new(),
+            current_line_style: String::new(),
+        };
+        let theme = zz_protocol::ThemeColours::default();
+        assert_eq!(
+            crate::mode_view::current_line(&mode, &viewport, &theme),
+            None
+        );
+        mode.current_line_style = "bg=red,bold".to_owned();
+        let line = crate::mode_view::current_line(&mode, &viewport, &theme);
+        assert_eq!(line.as_ref().map(|(row, _)| *row), Some(0));
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 6,
+            height: 1,
+        };
+        let mut plain = Renderer::new();
+        plain.blit_row(&viewport, 0, rect);
+        let plain = String::from_utf8(plain.output).unwrap();
+        assert!(!plain.contains("\x1b[41m"), "{plain:?}");
+
+        let mut renderer = Renderer::new();
+        renderer.current_line = line;
+        renderer.blit_row(&viewport, 0, rect);
+        let output = String::from_utf8(renderer.output.clone()).unwrap();
+        assert!(output.contains("\x1b[1m\x1b[41m"), "{output:?}");
+        assert!(!output.contains('X'), "{output:?}");
+
+        renderer.output.clear();
+        renderer.blit_row(&viewport, 1, rect);
+        assert!(
+            !String::from_utf8(renderer.output.clone())
+                .unwrap()
+                .contains("\x1b[41m")
+        );
+
+        mode.current_line_style = "curly-underscore".to_owned();
+        let mut renderer = Renderer::new();
+        renderer.current_line = crate::mode_view::current_line(&mode, &viewport, &theme);
+        renderer.blit_row(&viewport, 0, rect);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains("\x1b[4:3m"), "{output:?}");
     }
 
     #[test]

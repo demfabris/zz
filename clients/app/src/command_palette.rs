@@ -1,9 +1,9 @@
 use std::{rc::Rc, sync::Arc};
 
-use zpui::{App, Entity, KeyDownEvent, SharedString};
 use zz_client::completion::PaneKindAvailability;
 use zz_client::navigation::{ordered_panes, pane_label, session_label};
 use zz_client::{AgentAttentionStatus, ClientCore, agent_attention_status};
+use zz_gpui::{App, Entity, KeyDownEvent, SharedString};
 use zz_protocol::{
     CommandInvocation, InputMessage, MuxOptionKey, MuxSnapshot, PaneId, PaneKindSnapshot,
     ProtocolMessage,

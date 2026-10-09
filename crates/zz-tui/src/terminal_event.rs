@@ -33,6 +33,7 @@ pub(crate) enum Event {
     Mouse(MouseEvent),
     Paste(String),
     SecondaryDeviceAttributes(u8),
+    SynchronizedOutput(bool),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -501,6 +502,17 @@ fn clipboard_reply_end(body: &[u8]) -> Option<(usize, usize)> {
         })
 }
 
+fn parse_synchronized_output_report(parameters: &str) -> Option<Event> {
+    let status = parameters.strip_prefix("?2026;")?.strip_suffix('$')?;
+    match status.as_bytes() {
+        [digit @ b'0'..=b'4'] => Some(Event::SynchronizedOutput(matches!(
+            digit,
+            b'1' | b'2' | b'3'
+        ))),
+        _ => None,
+    }
+}
+
 fn parse_clipboard_reply(payload: &[u8]) -> Option<Event> {
     let separator = payload.iter().position(|byte| *byte == b';')?;
     let data = &payload[separator + 1..];
@@ -536,6 +548,9 @@ fn parse_csi(parameters: &str, final_byte: u8) -> Option<Event> {
                 .and_then(|field| field.parse::<u32>().ok())
                 .unwrap_or_default() as u8;
             return Some(Event::SecondaryDeviceAttributes(kind));
+        }
+        (parameters, b'y') if parameters.starts_with("?2026;") => {
+            return parse_synchronized_output_report(parameters);
         }
         ("?997;1", b'n') => return Some(Event::DarkTheme),
         ("?997;2", b'n') => return Some(Event::LightTheme),
@@ -1331,6 +1346,31 @@ mod tests {
                 Event::ExtendedDeviceAttributes("tmux 3.8".to_owned()),
             ]
         );
+    }
+
+    #[test]
+    fn a_synchronized_output_report_is_read_and_never_typed() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(
+            b"\x1b[?2026;2$y\x1b[?2026;0$y\x1b[?2026;4$y\x1b[?2026;1$y\x1b[?2026;3$y\x1b[?2026;5$y",
+            &mut events,
+        );
+        assert_eq!(
+            events,
+            vec![
+                Event::SynchronizedOutput(true),
+                Event::SynchronizedOutput(false),
+                Event::SynchronizedOutput(false),
+                Event::SynchronizedOutput(true),
+                Event::SynchronizedOutput(true),
+            ]
+        );
+        events.clear();
+        parser.push(b"\x1b[?2026;", &mut events);
+        assert!(events.is_empty());
+        parser.push(b"2$y", &mut events);
+        assert_eq!(events, vec![Event::SynchronizedOutput(true)]);
     }
 
     #[test]

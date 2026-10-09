@@ -11,6 +11,6 @@ pub use view::AppView;
 pub(crate) use view::ClosePane;
 pub(crate) use view::maybe_prompt_stale_daemon;
 
-pub fn init(cx: &mut zpui::App) {
+pub fn init(cx: &mut zz_gpui::App) {
     sidebar::init(cx);
 }

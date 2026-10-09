@@ -10,7 +10,7 @@ use objc2_core_foundation::CFRetained;
 #[cfg(target_os = "macos")]
 use objc2_io_surface::IOSurfaceRef;
 #[cfg(target_os = "windows")]
-use zpui::windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext};
+use zz_gpui::windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11DeviceContext};
 
 const BYTES_PER_PIXEL: usize = 4;
 const MAX_FRAME_BYTES: usize = 512 * 1024 * 1024;
@@ -50,7 +50,7 @@ impl BrowserGpuContext {
     /// refcounts.
     #[cfg(target_os = "windows")]
     #[must_use]
-    pub fn from_directx(context: zpui::DirectXDeviceContext) -> Self {
+    pub fn from_directx(context: zz_gpui::DirectXDeviceContext) -> Self {
         Self {
             device: context.device,
             device_context: context.device_context,
@@ -210,10 +210,10 @@ pub struct MacGpuFrame {
 }
 
 /// A zz-owned D3D11 destination texture on GPUI's device, ready for
-/// `zpui::external_texture`. GPUI's `windows` crate version, not zz's: only the
+/// `zz_gpui::external_texture`. GPUI's `windows` crate version, not zz's: only the
 /// re-exported one is type-compatible with the renderer.
 #[cfg(target_os = "windows")]
-pub type WinGpuTexture = zpui::windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
+pub type WinGpuTexture = zz_gpui::windows::Win32::Graphics::Direct3D11::ID3D11Texture2D;
 
 /// A browser frame living in a zz-owned texture on GPUI's DirectX device.
 #[cfg(target_os = "windows")]

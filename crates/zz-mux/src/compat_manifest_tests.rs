@@ -601,7 +601,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(mux_literals.len(), 102);
+    assert_eq!(mux_literals.len(), 107);
     assert!(mux_literals.is_subset(&upstream_literals));
 
     let mut accepted_native_literals = BTreeSet::new();
@@ -630,7 +630,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(missing_literals.len(), 19);
+    assert_eq!(missing_literals.len(), 14);
     assert!(missing_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&missing_literals));
     assert!(accepted_native_literals.is_disjoint(&missing_literals));
@@ -813,18 +813,6 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
     );
     let missing_literal_items = BTreeMap::from([
         (
-            ("cmd-show-options.c", "cmd_show_hooks_print_monitor"),
-            "semantic:show-options-format-contexts",
-        ),
-        (
-            ("cmd-show-options.c", "cmd_show_options_print"),
-            "semantic:show-options-format-contexts",
-        ),
-        (
-            ("window-client.c", "window_client_draw_info"),
-            "semantic:mode-format-contexts-3-8",
-        ),
-        (
             ("window-customize.c", "window_customize_build"),
             "semantic:mode-format-contexts-3-8",
         ),
@@ -911,11 +899,10 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         groups.get("sessions.linked-groups").copied(),
         Some(("never", "accepted"))
     );
-    let mut owned_items = missing_literal_items
+    let owned_items = missing_literal_items
         .values()
         .map(|item| (*item, "pin.formats-options"))
         .collect::<Vec<_>>();
-    owned_items.push(("semantic:format-modifier-animation", "pin.formats-options"));
     for (item, owner) in owned_items {
         assert_eq!(
             items.get(item).map(String::as_str),
@@ -951,6 +938,8 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             "semantic:tracker-open-context-format-vocabulary",
             "semantic:format-modifier-repeat",
             "semantic:format-context-producer-fidelity",
+            "semantic:format-modifier-animation",
+            "semantic:show-options-format-contexts",
         ]
         .iter()
         .all(|item| !items.contains_key(*item)),
@@ -1250,10 +1239,10 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 165);
+    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 167);
     assert_eq!(
         consumers.len(),
-        165,
+        167,
         "option consumer roster contains duplicates"
     );
     assert!(
@@ -1272,13 +1261,13 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         };
         scope_counts[index] += 1;
     }
-    assert_eq!(scope_counts, [40, 48, 56, 21]);
+    assert_eq!(scope_counts, [41, 48, 57, 21]);
 
     let tracked = items
         .keys()
         .filter_map(|item| item.strip_prefix("option:"))
         .collect::<BTreeSet<_>>();
-    assert_eq!(tracked.len(), 18, "active option gap count changed");
+    assert_eq!(tracked.len(), 16, "active option gap count changed");
     assert!(
         consumers.is_disjoint(&tracked),
         "consumed and tracked option names overlap"

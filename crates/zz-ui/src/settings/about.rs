@@ -1,4 +1,6 @@
-use zpui::{App, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _, div, px};
+use zz_gpui::{
+    App, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _, div, px,
+};
 
 use super::{
     SettingEntry, SettingsSection, SettingsStack, settings_control_fill, settings_provenance_badge,
@@ -15,7 +17,7 @@ pub const ISSUES_URL: &str = "https://github.com/demfabris/zz/issues/new";
 pub const ABOUT_LOGO_SIZE: f32 = 88.0;
 
 #[must_use]
-pub fn about_hero(logo: impl IntoElement, cx: &App) -> zpui::Div {
+pub fn about_hero(logo: impl IntoElement, cx: &App) -> zz_gpui::Div {
     div()
         .flex()
         .flex_col()
@@ -50,7 +52,7 @@ pub fn about_hero(logo: impl IntoElement, cx: &App) -> zpui::Div {
 }
 
 #[must_use]
-pub fn about_value(value: impl Into<SharedString>, cx: &App) -> zpui::Div {
+pub fn about_value(value: impl Into<SharedString>, cx: &App) -> zz_gpui::Div {
     div()
         .flex_none()
         .font_family(cx.theme().mono_font_family.clone())

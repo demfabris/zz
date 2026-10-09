@@ -11,7 +11,6 @@ use std::{
 
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 use parking_lot::RwLock;
-use zpui::{ClipboardItem, Context, EventEmitter, Image, RenderImage, Task};
 use zz_browser::{diagnostic_url, normalize_url};
 pub(crate) use zz_client::scrollback::{HistoryRing, RetainedTerminalViewport};
 use zz_client::{
@@ -26,6 +25,7 @@ use zz_daemon_client::{
     AskpassPrompt, AskpassReply, DaemonError, Endpoint, EndpointError, InteractiveClient,
     terminate_incompatible_daemon,
 };
+use zz_gpui::{ClipboardItem, Context, EventEmitter, Image, RenderImage, Task};
 #[cfg(test)]
 use zz_protocol::StatusLine;
 use zz_protocol::{
@@ -392,12 +392,12 @@ fn pasted_image_number(uri: &str) -> Option<u32> {
         .ok()
 }
 
-const fn gpui_image_format(format: PastedImageFormat) -> zpui::ImageFormat {
+const fn gpui_image_format(format: PastedImageFormat) -> zz_gpui::ImageFormat {
     match format {
-        PastedImageFormat::Png => zpui::ImageFormat::Png,
-        PastedImageFormat::Jpeg => zpui::ImageFormat::Jpeg,
-        PastedImageFormat::Gif => zpui::ImageFormat::Gif,
-        PastedImageFormat::Webp => zpui::ImageFormat::Webp,
+        PastedImageFormat::Png => zz_gpui::ImageFormat::Png,
+        PastedImageFormat::Jpeg => zz_gpui::ImageFormat::Jpeg,
+        PastedImageFormat::Gif => zz_gpui::ImageFormat::Gif,
+        PastedImageFormat::Webp => zz_gpui::ImageFormat::Webp,
     }
 }
 
@@ -4630,8 +4630,8 @@ mod tests {
         },
     };
 
-    use zpui::{AppContext as _, TestAppContext};
     use zz_client::scrollback::{HISTORY_REQUEST_RETRY, MAX_HISTORY_CHUNK_ROWS};
+    use zz_gpui::{AppContext as _, TestAppContext};
     use zz_protocol::{
         Axis, BrowserDescriptor, MuxOptions, PaneSnapshot, SessionSnapshot, SplitId, WindowId,
         WindowSnapshot,
@@ -4716,10 +4716,10 @@ mod tests {
     }
 
     fn record_notifications(
-        mux: &zpui::Entity<MuxClient>,
-        cx: &mut zpui::App,
+        mux: &zz_gpui::Entity<MuxClient>,
+        cx: &mut zz_gpui::App,
     ) -> (
-        zpui::Entity<()>,
+        zz_gpui::Entity<()>,
         Rc<RefCell<Vec<(ClientMessageKind, String)>>>,
     ) {
         let events = Rc::new(RefCell::new(Vec::new()));
@@ -4909,7 +4909,7 @@ mod tests {
 
     fn wait_for_mux(
         cx: &mut TestAppContext,
-        mux: &zpui::Entity<MuxClient>,
+        mux: &zz_gpui::Entity<MuxClient>,
         description: &str,
         mut predicate: impl FnMut(&MuxClient) -> bool,
     ) {
@@ -4997,7 +4997,7 @@ mod tests {
         Some((client, server))
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn initial_connection_stays_pending_until_completion(cx: &mut TestAppContext) {
         let completed = std::rc::Rc::new(std::cell::Cell::new(false));
         let mux = cx.update(|cx| {
@@ -5054,7 +5054,7 @@ mod tests {
         assert!(completed.get());
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn initial_connection_cannot_report_errors_after_detach(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
@@ -5190,7 +5190,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn focus_follows_mouse_follows_the_published_option(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
@@ -5240,7 +5240,7 @@ mod tests {
     /// alone. The two are told apart by the v99 `producer` field, not by
     /// `request_id`: `deliver_buffer_clipboard_write` publishes a server write
     /// with `request_id` zero as well, so the id was never the distinction.
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_copy_selection_reaches_the_clipboard_unless_set_clipboard_is_off(cx: &mut TestAppContext) {
         fn clipboard_write(
             mux: &mut MuxClient,
@@ -5372,7 +5372,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn initial_stale_daemon_state_is_structured_and_dismissal_adds_the_manual_hint(
         cx: &mut TestAppContext,
     ) {
@@ -5400,7 +5400,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn handle_connect_result_maps_success_unreachable_and_version_skew(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         assert_eq!(
@@ -5509,7 +5509,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn non_attached_host_disconnect_starts_a_capped_reconnect_loop(cx: &mut TestAppContext) {
         let (mux, remote, _sink, notifications) = cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -5557,7 +5557,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attached_remote_disconnect_freezes_the_frame_and_remembers_the_session(
         cx: &mut TestAppContext,
     ) {
@@ -5633,7 +5633,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn client_window_focus_waits_for_initial_attach_and_deduplicates(cx: &mut TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
@@ -5670,7 +5670,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn rejected_session_attach_recovers_focus_on_the_retained_session(cx: &mut TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
@@ -5729,7 +5729,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn successful_session_attach_replays_focus_for_the_new_epoch(cx: &mut TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
@@ -5779,7 +5779,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn unrelated_request_zero_error_does_not_close_the_ready_focus_epoch(cx: &mut TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
@@ -5824,7 +5824,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn unrelated_request_zero_error_does_not_close_a_pending_focus_epoch(cx: &mut TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
@@ -5885,7 +5885,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn sidebar_target_attachment_sends_one_request_on_local_and_remote_hosts(
         cx: &mut TestAppContext,
     ) {
@@ -5933,7 +5933,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn client_window_focus_replays_latest_pending_state_after_host_switch(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -5997,7 +5997,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn client_window_focus_replays_after_reconnect_attach(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -6055,7 +6055,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attached_remote_disconnect_reconnects_even_when_local_is_down(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -6101,7 +6101,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn reconnect_reingests_hello_and_reattaches_the_remembered_session(cx: &mut TestAppContext) {
         let (mux, remote, fake, _sink, notifications) = cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -6192,7 +6192,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn missing_remembered_session_falls_back_to_default_without_an_error_banner(
         cx: &mut TestAppContext,
     ) {
@@ -6242,7 +6242,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn non_attached_reconnect_stops_after_three_failures_and_manual_retry_rearms(
         cx: &mut TestAppContext,
     ) {
@@ -6298,7 +6298,7 @@ mod tests {
         drop(mux);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_dismissed_ssh_prompt_parks_the_host_until_reconnect_is_picked(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         let mux = cx.update(|cx| {
@@ -6374,7 +6374,7 @@ mod tests {
         assert_eq!(label("ssh://[fe80::1]:2222"), "[fe80::1]:2222");
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attaching_elsewhere_cancels_the_pending_reconnect_generation(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -6413,7 +6413,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attached_remote_reconnect_never_gives_up(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -6459,7 +6459,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn abrupt_local_disconnect_preserves_snapshot_and_reconnects_unless_shutting_down(
         cx: &mut TestAppContext,
     ) {
@@ -6518,7 +6518,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attached_remote_stream_eof_reconnects_and_reattaches_the_same_session(
         cx: &mut TestAppContext,
     ) {
@@ -6783,7 +6783,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attached_remote_daemon_process_restart_reconnects_and_receives_new_frames(
         cx: &mut TestAppContext,
     ) {
@@ -6922,7 +6922,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn fleet_attach_two_real_daemons_keeps_remote_frames_on_server_stopping(
         cx: &mut TestAppContext,
     ) {
@@ -6991,7 +6991,7 @@ mod tests {
         local_daemon.stop();
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn chooser_close_revision_survives_following_open_and_tracks_resets(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let mux = cx.new(|cx| {
@@ -7074,7 +7074,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn non_attached_hosts_cache_snapshots_and_ignore_attached_only_events(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -7171,7 +7171,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn ensure_connected_is_a_noop_while_connecting_or_connected(cx: &mut TestAppContext) {
         let mux = cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -7219,7 +7219,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_published_fleet_host_registers_and_starts_connecting(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         let mux = cx.update(|cx| {
@@ -7256,7 +7256,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn host_state_access_reconciles_changed_fleet_hosts_by_name(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         let (mux, server_id) = cx.update(|cx| {
@@ -7344,7 +7344,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn reconcile_retains_a_removed_attached_host_until_it_is_no_longer_attached(
         cx: &mut TestAppContext,
     ) {
@@ -7415,7 +7415,7 @@ mod tests {
     }
 
     #[cfg(feature = "agent-pane")]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn the_agent_stream_is_filtered_by_seq_and_a_gap_asks_for_a_replay(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
@@ -7494,7 +7494,7 @@ mod tests {
     }
 
     #[cfg(feature = "agent-pane")]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_hole_asks_for_one_replay_until_the_stream_lands_again(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
@@ -7553,7 +7553,7 @@ mod tests {
     }
 
     #[cfg(feature = "agent-pane")]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_journal_floor_replay_clears_the_outstanding_ask(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
@@ -7592,7 +7592,7 @@ mod tests {
     }
 
     #[cfg(feature = "agent-pane")]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_reattach_forgets_that_a_pane_was_waiting_on_a_replay(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
@@ -7629,7 +7629,7 @@ mod tests {
     }
 
     #[cfg(feature = "agent-pane")]
-    #[zpui::test]
+    #[zz_gpui::test]
     fn an_undecodable_agent_item_is_consumed_rather_than_left_as_a_hole(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
@@ -7668,7 +7668,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn releasing_the_attached_host_lets_its_removal_end_the_connection(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(vec![test_host("remote", "ssh://remote")], cx);
@@ -7709,7 +7709,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn removing_an_attached_reconnecting_host_cancels_its_route_and_gives_up_to_local(
         cx: &mut TestAppContext,
     ) {
@@ -7750,7 +7750,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attach_to_non_connected_host_is_a_noop(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(vec![test_host("remote", "ssh://remote")], cx);
@@ -7792,7 +7792,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn compact_machine_row_attach_asks_the_daemon_for_its_default_session(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(vec![test_host("remote", "ssh://remote")], cx);
@@ -7819,7 +7819,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attaching_remote_preserves_local_snapshot_and_connection(cx: &mut TestAppContext) {
         cx.executor().allow_parking();
         cx.update(|cx| {
@@ -7870,7 +7870,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn attach_to_connected_host_clears_old_pane_state_before_remote_attach(
         cx: &mut TestAppContext,
     ) {
@@ -7951,7 +7951,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_switched_to_host_projects_its_cache_until_its_daemon_attaches(cx: &mut TestAppContext) {
         fn projected(mux: &MuxClient) -> Vec<(HostId, Option<u64>)> {
             mux.fleet_hosts()
@@ -8029,7 +8029,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn switching_hosts_uses_the_latest_background_appearance(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -8073,7 +8073,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn snapshot_handles_share_one_allocation_until_replaced(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let client = cx.new(|cx| {
@@ -8111,7 +8111,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn focus_sidebar_events_advance_the_client_revision(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let client = cx.new(|cx| {
@@ -8139,7 +8139,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn bell_events_from_attached_and_background_hosts_advance_the_client_revision(
         cx: &mut TestAppContext,
     ) {
@@ -8278,7 +8278,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn new_session_routes_to_the_requested_host_and_keeps_remote_creation_detached(
         cx: &mut TestAppContext,
     ) {
@@ -8319,7 +8319,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn an_empty_daemon_attach_miss_recovers_through_resync(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let client = cx.new(|cx| {
@@ -8359,7 +8359,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn late_input_for_an_exited_last_pane_does_not_mask_the_empty_workspace(
         cx: &mut TestAppContext,
     ) {
@@ -8424,7 +8424,7 @@ mod tests {
             .collect()
     }
 
-    fn test_mux(cx: &mut zpui::App) -> zpui::Entity<MuxClient> {
+    fn test_mux(cx: &mut zz_gpui::App) -> zz_gpui::Entity<MuxClient> {
         cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("test client".to_owned())),
@@ -8435,28 +8435,33 @@ mod tests {
     }
 
     struct KittyPaneLifecycleRoot {
-        terminal: Option<zpui::Entity<crate::terminal::view::TerminalView>>,
-        other: Option<zpui::Entity<crate::terminal::view::TerminalView>>,
+        terminal: Option<zz_gpui::Entity<crate::terminal::view::TerminalView>>,
+        other: Option<zz_gpui::Entity<crate::terminal::view::TerminalView>>,
         shown: bool,
     }
 
-    impl zpui::Render for KittyPaneLifecycleRoot {
+    impl zz_gpui::Render for KittyPaneLifecycleRoot {
         fn render(
             &mut self,
-            _window: &mut zpui::Window,
-            _cx: &mut zpui::Context<Self>,
-        ) -> impl zpui::IntoElement {
-            use zpui::prelude::*;
-            zpui::div()
+            _window: &mut zz_gpui::Window,
+            _cx: &mut zz_gpui::Context<Self>,
+        ) -> impl zz_gpui::IntoElement {
+            use zz_gpui::prelude::*;
+            zz_gpui::div()
                 .size_full()
                 .flex()
                 .child(
-                    zpui::div()
+                    zz_gpui::div()
                         .flex_1()
                         .h_full()
                         .children(self.shown.then(|| self.terminal.clone()).flatten()),
                 )
-                .child(zpui::div().flex_1().h_full().children(self.other.clone()))
+                .child(
+                    zz_gpui::div()
+                        .flex_1()
+                        .h_full()
+                        .children(self.other.clone()),
+                )
         }
     }
 
@@ -8498,25 +8503,25 @@ mod tests {
     }
 
     struct KittyPaneHandoffRoot {
-        terminal: zpui::Entity<crate::terminal::view::TerminalView>,
+        terminal: zz_gpui::Entity<crate::terminal::view::TerminalView>,
     }
 
-    impl zpui::Render for KittyPaneHandoffRoot {
+    impl zz_gpui::Render for KittyPaneHandoffRoot {
         fn render(
             &mut self,
-            _window: &mut zpui::Window,
-            _cx: &mut zpui::Context<Self>,
-        ) -> impl zpui::IntoElement {
-            use zpui::prelude::*;
-            zpui::div().size_full().child(
+            _window: &mut zz_gpui::Window,
+            _cx: &mut zz_gpui::Context<Self>,
+        ) -> impl zz_gpui::IntoElement {
+            use zz_gpui::prelude::*;
+            zz_gpui::div().size_full().child(
                 self.terminal
                     .clone()
-                    .cached(zpui::StyleRefinement::default().size_full()),
+                    .cached(zz_gpui::StyleRefinement::default().size_full()),
             )
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn kitty_atlas_image_survives_overlapping_view_handoff(cx: &mut TestAppContext) {
         use crate::terminal::view::TerminalView;
         use std::cell::Cell;
@@ -8571,7 +8576,7 @@ mod tests {
         cx.update(|window, _| assert!(window.has_image_atlas_entry(&image)));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn kitty_atlas_cache_replacement_survives_overlapping_view_handoff(cx: &mut TestAppContext) {
         use crate::terminal::view::TerminalView;
         use std::cell::Cell;
@@ -8631,14 +8636,14 @@ mod tests {
         cx.update(|window, _| assert!(window.has_image_atlas_entry(&second)));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn kitty_atlas_view_registration_releases_after_window_close(cx: &mut TestAppContext) {
         use crate::terminal::view::TerminalView;
         use std::cell::Cell;
 
         let (mux, image, cache) = cx.update(|cx| {
             zz_ui::init(cx);
-            cx.set_quit_mode(zpui::QuitMode::Explicit);
+            cx.set_quit_mode(zz_gpui::QuitMode::Explicit);
             let mux = test_mux(cx);
             let image = mux.update(cx, |mux, _| {
                 install_kitty_lifecycle_image(mux, PaneId(7), 1)
@@ -8666,7 +8671,7 @@ mod tests {
         assert_eq!(cache.read().view_count, 0);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn kitty_atlas_entries_follow_pane_and_cache_lifetimes(cx: &mut TestAppContext) {
         use crate::terminal::view::TerminalView;
         use std::cell::Cell;
@@ -8897,7 +8902,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn kitty_image_chunks_assemble_replace_remove_and_deduplicate(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let mux = test_mux(cx);
@@ -8949,7 +8954,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_rejected_command_toasts_instead_of_setting_the_connection_error(cx: &mut TestAppContext) {
         let (_mux, _sink, notifications) = cx.update(|cx| {
             let mux = test_mux(cx);
@@ -8992,7 +8997,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_close_racing_the_panes_own_exit_stays_silent(cx: &mut TestAppContext) {
         let (_mux, _sink, notifications) = cx.update(|cx| {
             let mux = test_mux(cx);
@@ -9027,7 +9032,7 @@ mod tests {
         assert!(notifications.borrow().is_empty());
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn command_tracking_prunes_on_success_and_stays_bounded(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let mux = test_mux(cx);
@@ -9066,7 +9071,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn successful_commands_only_notify_when_clearing_a_visible_error(cx: &mut TestAppContext) {
         let mux = cx.update(|cx| {
             let mux = test_mux(cx);
@@ -9141,7 +9146,7 @@ mod tests {
         assert_eq!(notifications.get(), 3);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_rejected_command_on_a_non_attached_host_is_reported(cx: &mut TestAppContext) {
         let (_mux, _sink, notifications) = cx.update(|cx| {
             crate::config::set_fleet_hosts_for_test(
@@ -9381,11 +9386,11 @@ mod tests {
         let mut snapshots = PaneImageSnapshots::default();
         snapshots.insert(
             12,
-            Arc::new(Image::from_bytes(zpui::ImageFormat::Png, vec![12])),
+            Arc::new(Image::from_bytes(zz_gpui::ImageFormat::Png, vec![12])),
         );
         snapshots.insert(
             1,
-            Arc::new(Image::from_bytes(zpui::ImageFormat::Png, vec![1])),
+            Arc::new(Image::from_bytes(zz_gpui::ImageFormat::Png, vec![1])),
         );
 
         assert_eq!(snapshots.get(12).expect("observed number").bytes, [12]);
@@ -9397,7 +9402,7 @@ mod tests {
             capped.insert(
                 number,
                 Arc::new(Image::from_bytes(
-                    zpui::ImageFormat::Png,
+                    zz_gpui::ImageFormat::Png,
                     vec![u8::try_from(number).unwrap()],
                 )),
             );
@@ -9407,7 +9412,7 @@ mod tests {
         assert_eq!(capped.images.len(), MAX_PANE_IMAGE_SNAPSHOTS);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn pasted_image_chunks_populate_replace_and_invalidate_the_daemon_number(
         cx: &mut TestAppContext,
     ) {
@@ -9482,10 +9487,10 @@ mod tests {
     }
 
     fn history_backfill_debounce_fixture(
-        cx: &mut zpui::App,
+        cx: &mut zz_gpui::App,
         pane: PaneId,
     ) -> (
-        zpui::Entity<MuxClient>,
+        zz_gpui::Entity<MuxClient>,
         Arc<FakeConnectedHost>,
         TerminalViewport,
     ) {
@@ -9526,8 +9531,8 @@ mod tests {
     }
 
     fn apply_history_output_scroll(
-        mux: &zpui::Entity<MuxClient>,
-        cx: &mut zpui::App,
+        mux: &zz_gpui::Entity<MuxClient>,
+        cx: &mut zz_gpui::App,
         pane: PaneId,
         previous: &TerminalViewport,
         generation: u64,
@@ -9552,8 +9557,8 @@ mod tests {
     }
 
     fn defer_initial_history_backfill(
-        mux: &zpui::Entity<MuxClient>,
-        cx: &mut zpui::App,
+        mux: &zz_gpui::Entity<MuxClient>,
+        cx: &mut zz_gpui::App,
         pane: PaneId,
         initial: &TerminalViewport,
     ) -> TerminalViewport {
@@ -9585,7 +9590,7 @@ mod tests {
         assert_eq!(mux.attached_connection().history.deferred(pane), Some(1));
         current
     }
-    #[zpui::test]
+    #[zz_gpui::test]
     fn discarded_history_backfill_defers_and_suppresses_patch_retries(cx: &mut TestAppContext) {
         let pane = PaneId(74);
         let (mux, fake, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
@@ -9604,7 +9609,7 @@ mod tests {
         assert_eq!(&*fake.history_requests.borrow(), &[(pane, 688, 512)]);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn quiet_history_backfill_debounce_resumes_and_applies_chunk(cx: &mut TestAppContext) {
         let pane = PaneId(75);
         let (mux, fake, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
@@ -9656,7 +9661,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn history_backfill_debounce_rearms_while_mutations_continue(cx: &mut TestAppContext) {
         let pane = PaneId(76);
         let (mux, fake, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
@@ -9698,7 +9703,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_batch_keeps_terminal_patches_on_the_retained_history_path(cx: &mut TestAppContext) {
         let pane = PaneId(78);
         let (mux, _, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
@@ -9731,7 +9736,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_tree_change_keeps_the_history_chunk_in_flight(cx: &mut TestAppContext) {
         let pane = PaneId(78);
         let (mux, fake, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
@@ -9780,7 +9785,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_history_reply_that_never_came_is_requested_again(cx: &mut TestAppContext) {
         let pane = PaneId(79);
         let (mux, fake, _) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
@@ -9801,7 +9806,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn history_prefetch_bypasses_deferred_backfill(cx: &mut TestAppContext) {
         let pane = PaneId(77);
         let (mux, fake, initial) = cx.update(|cx| history_backfill_debounce_fixture(cx, pane));
@@ -9824,7 +9829,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn history_trickle_requests_nearest_chunks_until_budget_and_zero_disables(
         cx: &mut TestAppContext,
     ) {
@@ -9973,7 +9978,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn local_scroll_prefetch_is_bounded_and_coalesces_while_in_flight(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let mux = cx.new(|cx| {

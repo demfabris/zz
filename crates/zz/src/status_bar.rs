@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
-use zpui::{
+use zz_client::{StatusBarModel, StatusBarWindow};
+use zz_gpui::{
     AnyElement, App, Entity, IntoElement, MouseButton, Pixels, SharedString, Stateful, Window, div,
     prelude::*, px,
 };
-use zz_client::{StatusBarModel, StatusBarWindow};
 use zz_ui::{
     ActiveTheme as _, IconName, StyledExt as _,
     navigation::{
@@ -36,7 +36,7 @@ pub(crate) fn render_gui_status_bar(
     window_controls: Option<AnyElement>,
     _window: &mut Window,
     cx: &mut App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     let (snapshot, attached_host, attached, connected) = {
         let mux = mux.read(cx);
         (
@@ -205,7 +205,8 @@ fn render_update(show: bool, cx: &App) -> Option<AnyElement> {
         .px(px(6.0))
         .rounded(cx.theme().control_radius())
         .when(cx.theme().shadow, |item| {
-            item.border(px(0.5)).border_color(zpui::transparent_white())
+            item.border(px(0.5))
+                .border_color(zz_gpui::transparent_white())
         })
         .cursor_pointer()
         .hover(move |item| {

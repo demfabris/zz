@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use zpui::{App, Div, SharedString, Window, div, prelude::*, px};
+use zz_gpui::{App, Div, SharedString, Window, div, prelude::*, px};
 use zz_protocol::AgentTaskWire;
 
 use crate::{

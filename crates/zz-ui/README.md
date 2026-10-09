@@ -1,10 +1,10 @@
 # zz-ui
 
-zz's application UI on [`zpui-kit`](../zpui-kit): panes, terminal painting, the agent
+zz's application UI on [`zz-gpui-kit`](../zz-gpui-kit): panes, terminal painting, the agent
 interface, the command palette, settings, navigation, and the compact (phone) shell.
 The desktop app and the thin clients (web, iOS) share it. It re-exports the kit, so
 zz code imports UI from `zz_ui` alone; anything another app could reuse belongs in
-`zpui-kit` instead, which depends on nothing from zz.
+`zz-gpui-kit` instead, which depends on nothing from zz.
 
 The app-owned `shell`, `navigation`, and `pane` modules share one background at
 `app_shell_surface`. The Linux client-decorated window paints that background at

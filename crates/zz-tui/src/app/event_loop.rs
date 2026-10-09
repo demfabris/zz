@@ -223,7 +223,7 @@ pub(super) struct EventLoop {
     stdin: OwnedFd,
     signals: SignalInbox,
     parser: EventParser,
-    negotiation: Option<(Vec<String>, Vec<String>)>,
+    negotiation: Option<(Vec<String>, Vec<String>, Vec<String>)>,
     escape_deadline: Option<Instant>,
     terminal_events: VecDeque<TerminalEvent>,
     prefer_terminal: bool,
@@ -387,7 +387,7 @@ impl EventLoop {
             return;
         }
         self.parser.set_user_keys(&negotiation.1);
-        crate::tty::adopt_negotiated_features(&negotiation.0);
+        crate::tty::adopt_negotiated_features(&negotiation.0, &negotiation.2);
         self.negotiation = Some(negotiation.clone());
     }
 
@@ -821,6 +821,7 @@ mod tests {
                 payload: zz_protocol::EventPayload::TerminalNegotiation {
                     features: Vec::new(),
                     user_keys: vec!["\x1b[99~".to_owned()],
+                    application_escape: Vec::new(),
                 },
             }),
             &core,

@@ -294,7 +294,7 @@ pub struct ClientCore {
     appearance: Option<Box<TerminalAppearance>>,
     appearance_provenance: AppearanceProvenance,
     mux_options: MuxOptions,
-    terminal_negotiation: Option<(Vec<String>, Vec<String>)>,
+    terminal_negotiation: Option<(Vec<String>, Vec<String>, Vec<String>)>,
     prefix_keys: PrefixKeys,
     key_tables: Vec<KeyTableSnapshot>,
     key_tables_hash: u64,
@@ -509,7 +509,7 @@ impl ClientCore {
     }
 
     #[must_use]
-    pub const fn terminal_negotiation(&self) -> Option<&(Vec<String>, Vec<String>)> {
+    pub const fn terminal_negotiation(&self) -> Option<&(Vec<String>, Vec<String>, Vec<String>)> {
         self.terminal_negotiation.as_ref()
     }
 
@@ -910,8 +910,9 @@ impl ClientCore {
             EventPayload::TerminalNegotiation {
                 features,
                 user_keys,
+                application_escape,
             } => {
-                self.terminal_negotiation = Some((features, user_keys));
+                self.terminal_negotiation = Some((features, user_keys, application_escape));
                 self.events.push_back(CoreEvent::MuxOptionsChanged);
             }
             EventPayload::StatusChanged { status } => {
@@ -2847,11 +2848,16 @@ mod tests {
         core.handle_message(event(EventPayload::TerminalNegotiation {
             features: vec!["RGB".to_owned()],
             user_keys: vec!["\x1b[99~".to_owned()],
+            application_escape: Vec::new(),
         }));
         assert_eq!(drain(&mut core), [CoreEvent::MuxOptionsChanged]);
         assert_eq!(
             core.terminal_negotiation(),
-            Some(&(vec!["RGB".to_owned()], vec!["\x1b[99~".to_owned()]))
+            Some(&(
+                vec!["RGB".to_owned()],
+                vec!["\x1b[99~".to_owned()],
+                Vec::new()
+            ))
         );
     }
 

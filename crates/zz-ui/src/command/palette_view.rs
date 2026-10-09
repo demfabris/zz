@@ -1,13 +1,13 @@
 use std::{ops::Range, rc::Rc, sync::Arc, time::Duration};
 
-use zpui::{
-    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyDownEvent,
-    MouseButton, Render, ScrollStrategy, SharedString, UniformListScrollHandle, Window, div,
-    prelude::*, px, uniform_list,
-};
 use zz_client::completion::{
     CompletionKind, CompletionSuggestion, PaneKindAvailability, apply_completion, complete_command,
     completion_insertion,
+};
+use zz_gpui::{
+    App, Context, Entity, EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyDownEvent,
+    MouseButton, Render, ScrollStrategy, SharedString, UniformListScrollHandle, Window, div,
+    prelude::*, px, uniform_list,
 };
 use zz_protocol::{
     ChooseTreeAction, ChooseTreeState, ChooseTreeTarget, CommandInvocation, CommandPromptAction,
@@ -830,7 +830,11 @@ impl CommandPaletteView {
         );
     }
 
-    fn render_unified(&mut self, window: &mut Window, cx: &mut Context<Self>) -> zpui::AnyElement {
+    fn render_unified(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> zz_gpui::AnyElement {
         let Some(unified) = &self.unified else {
             return div().into_any_element();
         };
@@ -1411,7 +1415,7 @@ impl CommandPaletteView {
         palette: Entity<Self>,
         font: SharedString,
         cx: &App,
-    ) -> zpui::Div {
+    ) -> zz_gpui::Div {
         let hover_palette = palette.clone();
         let click_palette = palette;
         let kind = suggestion.kind;

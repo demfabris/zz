@@ -1,5 +1,5 @@
 use web_time::Duration;
-use zpui::{
+use zz_gpui::{
     AnyElement, App, Context, EventEmitter, IntoElement, ParentElement as _, Pixels, Point, Render,
     Styled as _, Task, Window, div, prelude::*,
 };
@@ -247,7 +247,7 @@ impl Render for ArrowPad {
 
 #[cfg(test)]
 mod tests {
-    use zpui::{
+    use zz_gpui::{
         Entity, MouseButton, Subscription, TestAppContext, TouchDragEvent, TouchPhase,
         VisualTestContext, point, px,
     };
@@ -342,7 +342,7 @@ mod tests {
         host.read_with(cx, |host, _| host.arrows.clone())
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_touch_drag_emits_arrows_and_repeats_while_held(cx: &mut TestAppContext) {
         let (host, cx) = host(cx);
         let pad = host.read_with(cx, |host, _| host.pad.clone());
@@ -399,7 +399,7 @@ mod tests {
         assert_eq!(arrows(&host, cx).len(), 7);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn returning_to_the_center_stops_the_repeat(cx: &mut TestAppContext) {
         let (host, cx) = host(cx);
         let center = cx.debug_bounds("arrow-pad").expect("pad").center();
@@ -422,7 +422,7 @@ mod tests {
         touch(cx, TouchPhase::Cancelled, center, center);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_touch_outside_the_pad_is_not_claimed(cx: &mut TestAppContext) {
         let (host, cx) = host(cx);
         let pad = host.read_with(cx, |host, _| host.pad.clone());
@@ -431,25 +431,25 @@ mod tests {
         assert!(!pad.read_with(cx, |pad, _| pad.held()));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn the_mouse_drives_the_pad_too(cx: &mut TestAppContext) {
         let (host, cx) = host(cx);
         let pad = host.read_with(cx, |host, _| host.pad.clone());
         let center = cx.debug_bounds("arrow-pad").expect("pad").center();
-        cx.simulate_mouse_down(center, MouseButton::Left, zpui::Modifiers::none());
+        cx.simulate_mouse_down(center, MouseButton::Left, zz_gpui::Modifiers::none());
         redraw(cx);
         assert!(pad.read_with(cx, |pad, _| pad.held()));
         cx.simulate_mouse_move(
             center + point(px(0.0), px(15.0)),
             Some(MouseButton::Left),
-            zpui::Modifiers::none(),
+            zz_gpui::Modifiers::none(),
         );
         redraw(cx);
         assert_eq!(arrows(&host, cx), [ArrowDirection::Down]);
         cx.simulate_mouse_up(
             center + point(px(0.0), px(15.0)),
             MouseButton::Left,
-            zpui::Modifiers::none(),
+            zz_gpui::Modifiers::none(),
         );
         redraw(cx);
         assert!(!pad.read_with(cx, |pad, _| pad.held()));

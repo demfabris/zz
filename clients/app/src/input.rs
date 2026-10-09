@@ -1,4 +1,4 @@
-use zpui::Keystroke;
+use zz_gpui::Keystroke;
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers};
 
 pub fn key_input(keystroke: &Keystroke, action: KeyAction) -> KeyInput {
@@ -44,7 +44,7 @@ pub fn key_input(keystroke: &Keystroke, action: KeyAction) -> KeyInput {
 }
 
 #[must_use]
-pub fn wire_modifiers(modifiers: zpui::Modifiers) -> Modifiers {
+pub fn wire_modifiers(modifiers: zz_gpui::Modifiers) -> Modifiers {
     Modifiers::new(
         modifiers.shift,
         modifiers.control,
@@ -54,9 +54,9 @@ pub fn wire_modifiers(modifiers: zpui::Modifiers) -> Modifiers {
 }
 
 #[must_use]
-pub fn raw_key_bindings() -> [zpui::KeyBinding; 2] {
+pub fn raw_key_bindings() -> [zz_gpui::KeyBinding; 2] {
     [
-        zpui::KeyBinding::new("tab", zpui::NoAction, Some("Terminal")),
-        zpui::KeyBinding::new("shift-tab", zpui::NoAction, Some("Terminal")),
+        zz_gpui::KeyBinding::new("tab", zz_gpui::NoAction, Some("Terminal")),
+        zz_gpui::KeyBinding::new("shift-tab", zz_gpui::NoAction, Some("Terminal")),
     ]
 }

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, Div, ElementId, EntityId, FontWeight, IntoElement, SharedString, Stateful,
     Transformation, div, ease_in_out, percentage, prelude::*, px,
 };

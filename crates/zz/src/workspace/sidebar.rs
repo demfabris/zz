@@ -4,14 +4,14 @@ use std::{
     sync::Arc,
 };
 
-use zpui::{
+use zz_client::{ChromeAction, SIDEBAR_TABLE};
+use zz_gpui::{
     AnyElement, App, AppContext as _, Context, CursorStyle, Entity, EventEmitter, FocusHandle,
     Hsla, InteractiveElement as _, IntoElement, KeyBinding, ListSizingBehavior, MouseButton,
     ParentElement as _, Render, ScrollStrategy, SharedString, StatefulInteractiveElement as _,
     Styled as _, UniformListScrollHandle, Window, WindowControlArea, div,
     prelude::FluentBuilder as _, px, uniform_list,
 };
-use zz_client::{ChromeAction, SIDEBAR_TABLE};
 use zz_protocol::{
     Axis, CommandInvocation, MuxSnapshot, PaneId, PaneStatusState, SessionId, WindowId,
 };
@@ -72,7 +72,7 @@ const TREE_INDENT_GUIDE_OFFSET: f32 = TREE_MARKER_SLOT_WIDTH / 2.0;
 const TREE_INDENT_GUIDE_PADDING: f32 = 4.0;
 const TREE_KEY_CONTEXT: &str = "WorkspaceTree";
 
-zpui::actions!(
+zz_gpui::actions!(
     workspace_tree,
     [
         TreeCancel,
@@ -827,7 +827,7 @@ impl Render for WorkspaceSidebar {
             let shell = corners.round_div(
                 workspace_sidebar_surface("workspace-sidebar", width, titlebar, navigation, cx)
                     .when(divider_hidden, |this| {
-                        this.border_color(zpui::transparent_black())
+                        this.border_color(zz_gpui::transparent_black())
                     }),
                 frame_content_corner_radius(cx),
             );
@@ -1245,7 +1245,7 @@ fn render_tree_row(
         div()
             .flex_none()
             .invisible()
-            .group_hover(row_group.clone(), zpui::Styled::visible)
+            .group_hover(row_group.clone(), zz_gpui::Styled::visible)
             .child(actions)
             .into_any_element()
     } else {
@@ -1345,7 +1345,7 @@ fn render_host_indicator(index: usize, indicator: HostIndicator, cx: &mut App) -
 }
 
 fn render_tree_row_context_menu(
-    row: zpui::Stateful<zpui::Div>,
+    row: zz_gpui::Stateful<zz_gpui::Div>,
     entry: &VisibleTreeEntry,
     runtime: &TreeRowRuntime,
 ) -> AnyElement {
@@ -1613,8 +1613,8 @@ mod tests {
         collections::{BTreeMap, BTreeSet},
     };
 
-    use zpui::TestAppContext;
     use zz_daemon_client::DaemonError;
+    use zz_gpui::TestAppContext;
     use zz_protocol::{
         Axis, BrowserDescriptor, LayoutNode, PaneKindSnapshot, PaneSnapshot, SessionSnapshot,
         SplitId, WindowSnapshot,
@@ -1623,12 +1623,12 @@ mod tests {
     use super::*;
     use crate::config::AgentConfig;
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn workspace_tree_key_bindings_register(cx: &mut TestAppContext) {
         cx.update(init);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn tree_model_tracks_snapshot_focus_and_attachment_revisions(cx: &mut TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
@@ -1698,7 +1698,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn settings_view_is_lazy_and_retained(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
         let captured = Rc::new(RefCell::new(None));
@@ -1744,10 +1744,10 @@ mod tests {
             });
         });
         cx.draw(
-            zpui::Point::default(),
-            zpui::size(
-                zpui::AvailableSpace::Definite(px(800.0)),
-                zpui::AvailableSpace::Definite(px(600.0)),
+            zz_gpui::Point::default(),
+            zz_gpui::size(
+                zz_gpui::AvailableSpace::Definite(px(800.0)),
+                zz_gpui::AvailableSpace::Definite(px(600.0)),
             ),
             |_, _| first.clone().into_any_element(),
         );
@@ -1772,10 +1772,10 @@ mod tests {
         });
         assert_eq!(first.entity_id(), reopened.entity_id());
         cx.draw(
-            zpui::Point::default(),
-            zpui::size(
-                zpui::AvailableSpace::Definite(px(800.0)),
-                zpui::AvailableSpace::Definite(px(600.0)),
+            zz_gpui::Point::default(),
+            zz_gpui::size(
+                zz_gpui::AvailableSpace::Definite(px(800.0)),
+                zz_gpui::AvailableSpace::Definite(px(600.0)),
             ),
             |_, _| reopened.clone().into_any_element(),
         );
@@ -1812,7 +1812,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn raising_the_slideover_mid_draw_schedules_the_frame_that_mounts_it(cx: &mut TestAppContext) {
         let slideover_frames = Rc::new(Cell::new(0));
         let pending_focus = Rc::new(Cell::new(true));
@@ -1849,17 +1849,17 @@ mod tests {
 
     #[test]
     fn plain_keys_bind_only_inside_the_focused_workspace_tree() {
-        let keymap = zpui::Keymap::new(workspace_tree_key_bindings(&crate::keymap::test_chords(
-            SIDEBAR_TABLE,
-        )));
+        let keymap = zz_gpui::Keymap::new(workspace_tree_key_bindings(
+            &crate::keymap::test_chords(SIDEBAR_TABLE),
+        ));
         let tree_context =
-            zpui::KeyContext::parse(TREE_KEY_CONTEXT).expect("valid workspace tree context");
-        let root_context = zpui::KeyContext::parse("Root").expect("valid root context");
+            zz_gpui::KeyContext::parse(TREE_KEY_CONTEXT).expect("valid workspace tree context");
+        let root_context = zz_gpui::KeyContext::parse("Root").expect("valid root context");
         for (key, action) in [
             ("r", std::any::TypeId::of::<TreeRename>()),
             (":", std::any::TypeId::of::<TreeCommandPalette>()),
         ] {
-            let key = zpui::Keystroke::parse(key).expect("valid tree key");
+            let key = zz_gpui::Keystroke::parse(key).expect("valid tree key");
 
             let (tree_bindings, pending) = keymap.bindings_for_input(
                 std::slice::from_ref(&key),

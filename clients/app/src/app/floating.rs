@@ -1,13 +1,13 @@
 use std::{cell::Cell, rc::Rc};
 
-use zpui::{
-    AnyElement, Bounds, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
-    ScrollWheelEvent, Window, div, point, prelude::*, px, size,
-};
 use zz_client::{
     MenuBox, MenuKeyResult, MenuPointerKind,
     floating::{FloatCells, float_pixels},
     resolve_menu_mouse,
+};
+use zz_gpui::{
+    AnyElement, Bounds, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
+    ScrollWheelEvent, Window, div, point, prelude::*, px, size,
 };
 use zz_protocol::{
     FloatingPaneSnapshot, InputMessage, MenuState, PaneBorderLines, PopupBorderLines,
@@ -25,7 +25,7 @@ use super::AppShell;
 use crate::preferences::Preferences;
 
 impl AppShell {
-    pub(super) fn floating_canvas_size(&self, window: &Window) -> zpui::Size<Pixels> {
+    pub(super) fn floating_canvas_size(&self, window: &Window) -> zz_gpui::Size<Pixels> {
         let viewport = window.fully_visible_bounds().size;
         size(
             (viewport.width
@@ -321,7 +321,7 @@ impl AppShell {
                         .occlude()
                         .bg(cx.theme().background.opacity(0.4))
                         .on_mouse_down(
-                            zpui::MouseButton::Left,
+                            zz_gpui::MouseButton::Left,
                             cx.listener(move |this, _: &MouseDownEvent, _, cx| {
                                 if modal.close_on_click {
                                     this.command(
@@ -429,7 +429,7 @@ pub(super) struct FloatPlacement {
 pub(super) fn float_placement(
     float: &FloatingPaneSnapshot,
     cell: (f32, f32),
-    canvas: zpui::Size<Pixels>,
+    canvas: zz_gpui::Size<Pixels>,
 ) -> Option<FloatPlacement> {
     let bordered = float.border_lines != PaneBorderLines::None;
     if canvas.width > Pixels::ZERO
@@ -495,7 +495,7 @@ pub(super) fn native_panes_shown(
 
 #[cfg(test)]
 mod tests {
-    use zpui::{Bounds, point, px, size};
+    use zz_gpui::{Bounds, point, px, size};
     use zz_protocol::{FloatingPaneSnapshot, PaneBorderLines, PaneBorderStatus, PaneId};
 
     use super::{FloatPlacement, float_placement, float_title, native_panes_shown, pane_frame};
@@ -514,7 +514,7 @@ mod tests {
         }
     }
 
-    fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<zpui::Pixels> {
+    fn rect(x: f32, y: f32, width: f32, height: f32) -> Bounds<zz_gpui::Pixels> {
         Bounds::new(point(px(x), px(y)), size(px(width), px(height)))
     }
 

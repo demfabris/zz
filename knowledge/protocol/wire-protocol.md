@@ -898,6 +898,16 @@ writes for a UTF-8 client instead of U+FFFD. postcard encodes a byte string and 
 the same way, so a UTF-8 guard's frame is unchanged; one holding other bytes now decodes.
 `control_command_guard_output_round_trips_bytes_that_are_not_utf8` pins it.
 
+v108 also carries the rest of tmux 3.8's formats and options (catch-up item
+`pin.formats-options-2`). `MuxOptionKey` appends `ClearOnAttach` after `FocusEvents`: the server
+`clear-on-attach` flag, which the raw TUI reads when it takes the terminal (alternate screen and a
+clear when on; the old screen scrolled into the terminal's history when off). `ModePresentation`
+appends `current_line_style` after `current_line_number_style`: the expanded
+`copy-mode-current-line-style`, empty while the option is `default`, which the raw TUI lays over
+the copy cursor's row. `EventPayload::TerminalNegotiation` appends `application_escape`: the
+client's effective `Enesc` and `Dsesc`, in that order, each empty when its term has none; the raw
+TUI writes the first when it takes the terminal and the second when it lets go, as `tty.c` does.
+
 v108 also carries the mode prompts' cursor (catch-up item `fix.followups`).
 `ChooserPresentation` appends `prompt_cursor: PromptCursor`, and `PaneMode::Switch` appends
 `prompt_shape: PromptCursor`: what `mode_tree_set_prompt` and the switch mode's prompt read through

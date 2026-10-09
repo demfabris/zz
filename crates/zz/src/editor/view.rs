@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use zpui::{
+use zz_gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, KeyBinding, MouseButton,
     MouseDownEvent, ParentElement as _, Render, Styled as _, Subscription, Window, div, prelude::*,
     px,
@@ -30,7 +30,7 @@ use crate::{
 const EDITOR_KEY_CONTEXT: &str = "Editor";
 const MAX_EDITOR_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
-zpui::actions!(editor_pane, [OpenFile, SaveFile]);
+zz_gpui::actions!(editor_pane, [OpenFile, SaveFile]);
 
 pub fn init(cx: &mut App) {
     cx.bind_keys(editor_key_bindings());
@@ -560,7 +560,7 @@ impl Render for EditorView {
             .when_some(error, |this, error| {
                 this.child(self.render_error(error, cx))
             })
-            .when_some(self.picker.clone(), zpui::ParentElement::child);
+            .when_some(self.picker.clone(), zz_gpui::ParentElement::child);
         round_div_radii(root, radii)
     }
 }

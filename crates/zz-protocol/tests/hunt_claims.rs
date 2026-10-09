@@ -258,13 +258,14 @@ fn target_lookup_errors_use_tmux_wording() {
 }
 
 #[test]
-fn mux_option_key_has_twenty_daemon_owned_keys() {
-    assert_eq!(MuxOptionKey::ALL.len(), 20);
+fn mux_option_key_has_twenty_one_daemon_owned_keys() {
+    assert_eq!(MuxOptionKey::ALL.len(), 21);
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::HistoryTrickle));
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::Prefix2));
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::FocusFollowsMouse));
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::ExtendedKeys));
     assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::FocusEvents));
+    assert!(MuxOptionKey::ALL.contains(&MuxOptionKey::ClearOnAttach));
 }
 
 #[cfg(unix)]

@@ -1,14 +1,14 @@
 use std::{collections::HashMap, rc::Rc};
 
 use web_time::Instant;
-use zpui::{
+use zz_gpui::{
     AnyElement, App, BoxShadow, Context, DispatchPhase, ElementId, Global, Hitbox, HitboxBehavior,
     IntoElement, ParentElement as _, Pixels, Point, RenderOnce, ScrollHandle, ScrollWheelEvent,
     Styled as _, TouchPhase, Window, canvas, div, point, prelude::*, px,
 };
 
 use crate::{ActiveTheme as _, Colorize as _};
-use zpui_kit::dismissal::{Dismissal, Overdrag, Tick, coast, coasting};
+use zz_gpui_kit::dismissal::{Dismissal, Overdrag, Tick, coast, coasting};
 
 const EDGE: f32 = 20.0;
 const FLING_WIDTHS: f32 = 1.0;
@@ -277,7 +277,7 @@ mod tests {
     use std::{cell::Cell, rc::Rc};
 
     use web_time::Duration;
-    use zpui::{
+    use zz_gpui::{
         Bounds, Context, Modifiers, Render, ScrollDelta, TestAppContext, VisualTestContext,
     };
 
@@ -366,7 +366,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn an_edge_drag_past_half_pops_and_a_short_one_returns(cx: &mut TestAppContext) {
         let (backs, _, cx) = host(cx);
         let rest = page(cx);
@@ -404,7 +404,7 @@ mod tests {
         assert_eq!(page(cx).left(), px(0.0));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_drag_that_catches_a_fling_can_still_go_back(cx: &mut TestAppContext) {
         let (_, _, cx) = host(cx);
         let edge = point(px(8.0), page(cx).center().y);
@@ -420,7 +420,7 @@ mod tests {
         assert_eq!(page(cx).left(), px(100.0));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_flick_from_the_edge_pops(cx: &mut TestAppContext) {
         let (backs, _, cx) = host(cx);
         let edge = point(px(8.0), page(cx).center().y);
@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(backs.get(), 1);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_drag_from_the_middle_of_the_page_pops(cx: &mut TestAppContext) {
         let (backs, _, cx) = host(cx);
         let rest = page(cx);
@@ -463,7 +463,7 @@ mod tests {
         assert_eq!(backs.get(), 1);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_horizontal_scroller_keeps_the_drag_while_it_can_scroll_back(cx: &mut TestAppContext) {
         let (backs, strip, cx) = host(cx);
         let bounds = cx.debug_bounds("strip").expect("strip");
@@ -512,7 +512,7 @@ mod tests {
         assert_eq!(backs.get(), 0);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn leftward_drags_are_ignored(cx: &mut TestAppContext) {
         let (backs, _, cx) = host(cx);
         let rest = page(cx);

@@ -19,8 +19,8 @@ revisions, and GPUI caches shaped rows by revision. The work raises typography, 
 selection/links, and fractional-scale geometry to Zed's standard without discarding that path. One
 client-only layer paints on top of it so a remote pane feels local: local scroll sources rows from the
 pane's history ring. It builds on
-`zpui` + `zpui-platform` from our own `crates/zpui*`; the list of zz changes lives in
-[zpui](/references/zpui.md).
+`zz-gpui` + `zz-gpui-platform` from our own `crates/zz-gpui*`; the list of zz changes lives in
+[zz-gpui](/references/zz-gpui.md).
 
 # How frames map to GPUI painting
 
@@ -123,7 +123,7 @@ desktop and the other thin-client layouts pass `None` and paint exactly as befor
   disagreed with Ghostty for most faces (at BerkeleyMono 13pt @2x it strokes 2 device pixels where
   Ghostty strokes 3), which made box-drawn art read lighter. Reading the metric needed a
   `TextSystem::underline_thickness` accessor, carried patch 13 in
-  [zpui](/references/zpui.md). Underline, strikethrough, and overline still paint one
+  [zz-gpui](/references/zz-gpui.md). Underline, strikethrough, and overline still paint one
   device pixel rather than this thickness.
 - In Live mode spare vertical pixels sit above the grid so the bottom row stays anchored, both when the
   viewport follows live output with a filled last row and whenever it is scrolled back (by the server,
@@ -169,7 +169,7 @@ While a copy shimmer runs, all eight go through one shader layer.
 
 # Shader layers and the copy flash
 
-`Window::paint_shader_layer` (a carried [gpui patch](/references/zpui.md)) draws what a
+`Window::paint_shader_layer` (a carried [gpui patch](/references/zz-gpui.md)) draws what a
 closure paints into a texture and composites it through a WGSL fragment shader. zz writes its
 terminal shaders in Ghostty's Shadertoy dialect: `crates/zz/src/terminal/shaders/prelude.glsl` holds
 Ghostty's uniform block (with `iChannelTime` as a `vec4`, since WGSL rejects float arrays in uniforms)
@@ -205,4 +205,4 @@ blink is preserved in the model but not painted this milestone.
   which also drives local scroll; its client state (`HistoryRing`, `LocalScrollState`) lives in
   [`zz-client`](/crates/zz-client.md).
 - Frames arrive over the [terminal lanes](/protocol/terminal-lanes.md); painting lives in [`/crates/zz.md`](/crates/zz.md).
-- GPUI pin and carried patches: [zpui](/references/zpui.md).
+- GPUI pin and carried patches: [zz-gpui](/references/zz-gpui.md).

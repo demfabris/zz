@@ -1,8 +1,8 @@
 use std::{collections::HashMap, sync::Arc};
 
 use image::{Frame, ImageBuffer, Rgba};
-use zpui::RenderImage;
 use zz_client::CoreEvent;
+use zz_gpui::RenderImage;
 use zz_protocol::{MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES, PaneId};
 
 const MAX_CACHE_BYTES: usize = 64 * 1024 * 1024;

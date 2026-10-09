@@ -1,6 +1,6 @@
 //! Where toasts land: always the workspace window, whichever window raised them.
 
-use zpui::{App, Global, WindowHandle};
+use zz_gpui::{App, Global, WindowHandle};
 use zz_ui::{Root, notification::Notification};
 
 struct ToastHost(WindowHandle<Root>);
@@ -27,7 +27,7 @@ pub(crate) fn push(notification: Notification, cx: &mut App) {
 
 #[cfg(test)]
 mod tests {
-    use zpui::{AppContext as _, Context, Render, TestAppContext, Window, div};
+    use zz_gpui::{AppContext as _, Context, Render, TestAppContext, Window, div};
     use zz_ui::WindowExt as _;
 
     use super::*;
@@ -35,12 +35,12 @@ mod tests {
     struct Content;
 
     impl Render for Content {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl zpui::IntoElement {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl zz_gpui::IntoElement {
             div()
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn notifications_survive_an_active_host_window_update(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
         let (_, cx) = cx.add_window_view(|window, cx| {

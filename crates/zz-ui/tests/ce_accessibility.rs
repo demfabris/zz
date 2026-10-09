@@ -1,5 +1,5 @@
 use std::{cell::Cell, rc::Rc};
-use zpui::{
+use zz_gpui::{
     Context, Entity, IntoElement, Modifiers, Render, Role, TestAppContext, VisualTestContext,
     Window, div, prelude::*, px,
 };
@@ -65,7 +65,7 @@ impl Render for DisabledFixture {
     }
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn disabled_zz_controls_expose_and_clear_accessibility_state(cx: &mut TestAppContext) {
     cx.update(zz_ui::init);
     let clicks = Rc::new(Cell::new(0));
@@ -137,7 +137,7 @@ fn disabled_zz_controls_expose_and_clear_accessibility_state(cx: &mut TestAppCon
     assert_eq!(clicks.get(), 1);
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn forced_accessibility_inspects_existing_zz_widgets_without_a_screen_reader(
     cx: &mut TestAppContext,
 ) {
@@ -165,7 +165,7 @@ fn forced_accessibility_inspects_existing_zz_widgets_without_a_screen_reader(
     cx.update(|window, _| assert!(!window.is_a11y_active()));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn accessibility_snapshot_drives_reasoning_effort_and_tracks_fresh_geometry(
     cx: &mut TestAppContext,
 ) {

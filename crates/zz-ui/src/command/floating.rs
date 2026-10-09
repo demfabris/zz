@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     App, Bounds, Div, ElementId, Hsla, Keystroke, Pixels, Point, SharedString, Size, Stateful, div,
     point, prelude::*, px, size,
 };
@@ -142,11 +142,11 @@ pub fn menu_grid_cell(offset: Pixels, cell_px: u32, scale: f32, origin: u16, out
 pub const RELEASE_BUTTONS: u8 = 3;
 pub const WHEEL_BUTTONS: u8 = 64;
 
-pub const fn menu_press_buttons(button: zpui::MouseButton) -> u8 {
+pub const fn menu_press_buttons(button: zz_gpui::MouseButton) -> u8 {
     match button {
-        zpui::MouseButton::Left => 0,
-        zpui::MouseButton::Middle => 1,
-        zpui::MouseButton::Right => 2,
-        zpui::MouseButton::Navigate(_) => 128,
+        zz_gpui::MouseButton::Left => 0,
+        zz_gpui::MouseButton::Middle => 1,
+        zz_gpui::MouseButton::Right => 2,
+        zz_gpui::MouseButton::Navigate(_) => 128,
     }
 }

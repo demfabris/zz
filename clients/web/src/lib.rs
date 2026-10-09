@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use zz_app::app;
 
-use zpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, point, px, size};
+use zz_gpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, point, px, size};
 use zz_ui::{Root, Theme, UiZoom};
 
 fn launch(cx: &mut App) {
@@ -49,7 +49,7 @@ fn launch(cx: &mut App) {
 
 #[cfg(target_family = "wasm")]
 thread_local! {
-    static APPLICATION: std::cell::RefCell<Option<zpui::ApplicationHandle>> = const {
+    static APPLICATION: std::cell::RefCell<Option<zz_gpui::ApplicationHandle>> = const {
         std::cell::RefCell::new(None)
     };
     static READY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
@@ -61,8 +61,8 @@ pub fn run() -> Result<(), wasm_bindgen::JsValue> {
     if APPLICATION.with(|application| application.borrow().is_some()) {
         return Err(wasm_bindgen::JsValue::from_str("zz is already running"));
     }
-    zpui_platform::web_init();
-    let application = zpui_platform::single_threaded_web().with_assets(zz_ui::Assets);
+    zz_gpui_platform::web_init();
+    let application = zz_gpui_platform::single_threaded_web().with_assets(zz_ui::Assets);
     let handle = application.run_embedded(launch);
     APPLICATION.with(|application| application.replace(Some(handle)));
     Ok(())
@@ -76,7 +76,7 @@ pub fn is_ready() -> bool {
 
 #[cfg(not(target_family = "wasm"))]
 pub fn run_native() {
-    zpui_platform::application()
+    zz_gpui_platform::application()
         .with_assets(zz_ui::Assets)
         .run(launch);
 }

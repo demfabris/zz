@@ -463,18 +463,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "async-compression"
-version = "0.4.46"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f10dafd0c8d2e51ae9a748805777613ed0bbe17bf586b76c8311f45c020a32f"
-dependencies = [
- "compression-codecs",
- "compression-core",
- "futures-io",
- "pin-project-lite",
-]
-
-[[package]]
 name = "async-executor"
 version = "1.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1511,24 +1499,6 @@ name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
-
-[[package]]
-name = "compression-codecs"
-version = "0.4.41"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "58a6d0db8759036a783bc7c3f7a07f8cef3bf9470eb1db3bc86e8bcd1c5d0fe8"
-dependencies = [
- "bzip2",
- "compression-core",
- "flate2",
- "memchr",
-]
-
-[[package]]
-name = "compression-core"
-version = "0.4.33"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e8ccc4ea9f6acc32d102c0f6d471d11d913ad15f20c04de743374861fa1d414"
 
 [[package]]
 name = "concurrent-queue"
@@ -11061,483 +11031,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
-name = "zpui"
-version = "0.2.2"
-dependencies = [
- "accesskit",
- "anyhow",
- "async-channel",
- "async-task",
- "backtrace",
- "bindgen",
- "bitflags 2.13.2",
- "chrono",
- "core-video",
- "criterion",
- "ctor",
- "derive_more",
- "embed-resource",
- "env_logger",
- "etagere",
- "futures",
- "futures-concurrency",
- "getrandom 0.3.4",
- "hdrhistogram",
- "heapless",
- "image",
- "inventory",
- "itertools 0.14.0",
- "libc",
- "log",
- "lyon",
- "num_cpus",
- "objc2 0.6.4",
- "objc2-core-foundation",
- "objc2-metal 0.3.2",
- "parking",
- "parking_lot",
- "pin-project",
- "pollster 1.0.1",
- "postage",
- "profiling",
- "proptest",
- "rand 0.9.5",
- "raw-window-handle",
- "regex",
- "resvg",
- "schemars 1.2.2",
- "seahash",
- "serde",
- "serde_json",
- "slotmap",
- "smallvec",
- "spin 0.10.1",
- "stacksafe",
- "strum",
- "taffy",
- "thiserror 2.0.20",
- "ttf-parser",
- "unicode-segmentation",
- "url",
- "usvg",
- "uuid",
- "waker-fn",
- "wasm-bindgen",
- "web-sys",
- "web-time",
- "wgpu",
- "windows 0.62.2",
- "zed-font-kit",
- "zpui-collections",
- "zpui-http-client",
- "zpui-macros",
- "zpui-platform",
- "zpui-refineable",
- "zpui-scheduler",
- "zpui-shared-string",
- "zpui-sum-tree",
- "zpui-util",
- "zpui-util-macros",
-]
-
-[[package]]
-name = "zpui-apple"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "block2 0.6.2",
- "cbindgen",
- "cocoa",
- "core-foundation",
- "core-video",
- "derive_more",
- "etagere",
- "foreign-types",
- "image",
- "log",
- "metal",
- "naga",
- "objc",
- "objc2 0.6.4",
- "parking_lot",
- "zpui",
-]
-
-[[package]]
-name = "zpui-collections"
-version = "0.1.0"
-dependencies = [
- "indexmap 2.14.2",
- "rustc-hash 2.1.3",
- "zpui-util",
-]
-
-[[package]]
-name = "zpui-http-client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-compression",
- "bytes",
- "derive_more",
- "futures",
- "http",
- "http-body",
- "log",
- "parking_lot",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "url",
-]
-
-[[package]]
-name = "zpui-ios"
-version = "0.1.0"
-dependencies = [
- "accesskit_ios",
- "anyhow",
- "async-task",
- "block2 0.6.2",
- "dispatch2",
- "futures",
- "image",
- "log",
- "memmap2",
- "objc",
- "parking_lot",
- "raw-window-handle",
- "uuid",
- "zpui",
- "zpui-wgpu",
-]
-
-[[package]]
-name = "zpui-kit"
-version = "0.16.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "image",
- "log",
- "markdown",
- "ropey",
- "rust-embed",
- "serde",
- "smallvec",
- "tree-sitter",
- "tree-sitter-json",
- "tree-sitter-language",
- "tree-sitter-md",
- "tree-sitter-rust",
- "tree-sitter-tmux",
- "tree-sitter-toml-ng",
- "unicode-segmentation",
- "url",
- "web-time",
- "zpui",
- "zpui-sum-tree",
-]
-
-[[package]]
-name = "zpui-linux"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_unix",
- "anyhow",
- "as-raw-xcb-connection",
- "ashpd",
- "bitflags 2.13.2",
- "bytemuck",
- "calloop",
- "calloop-wayland-source",
- "filedescriptor",
- "futures",
- "libc",
- "log",
- "notify-rust",
- "oo7",
- "open",
- "parking_lot",
- "raw-window-handle",
- "smallvec",
- "smol",
- "strum",
- "url",
- "uuid",
- "wayland-backend",
- "wayland-client",
- "wayland-cursor",
- "wayland-protocols",
- "wayland-protocols-plasma",
- "wayland-protocols-wlr",
- "x11-clipboard",
- "x11rb",
- "xkbcommon",
- "zed-xim",
- "zpui",
- "zpui-collections",
- "zpui-http-client",
- "zpui-util",
- "zpui-wgpu",
-]
-
-[[package]]
-name = "zpui-log"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "log",
- "tempfile",
- "zpui-collections",
-]
-
-[[package]]
-name = "zpui-macos"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_macos",
- "anyhow",
- "async-task",
- "block2 0.6.2",
- "cocoa",
- "core-foundation",
- "core-foundation-sys",
- "core-graphics",
- "core-text",
- "ctor",
- "dispatch2",
- "foreign-types",
- "futures",
- "image",
- "itertools 0.14.0",
- "libc",
- "log",
- "mach2",
- "objc",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "objc2-user-notifications 0.3.2",
- "parking_lot",
- "pathfinder_geometry",
- "raw-window-handle",
- "semver",
- "smallvec",
- "strum",
- "uuid",
- "zed-font-kit",
- "zpui",
- "zpui-apple",
- "zpui-collections",
- "zpui-util",
-]
-
-[[package]]
-name = "zpui-macros"
-version = "0.1.0"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
- "syn 2.0.119",
- "zpui",
-]
-
-[[package]]
-name = "zpui-platform"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "console_error_panic_hook",
- "criterion",
- "zpui",
- "zpui-linux",
- "zpui-macos",
- "zpui-web",
- "zpui-wgpu",
- "zpui-windows",
-]
-
-[[package]]
-name = "zpui-refineable"
-version = "0.1.0"
-dependencies = [
- "zpui-refineable-derive",
-]
-
-[[package]]
-name = "zpui-refineable-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "zpui-scheduler"
-version = "0.1.0"
-dependencies = [
- "async-task",
- "backtrace",
- "chrono",
- "flume",
- "futures",
- "parking_lot",
- "rand 0.9.5",
- "wasm_thread",
- "web-time",
-]
-
-[[package]]
-name = "zpui-shared-string"
-version = "0.1.0"
-dependencies = [
- "schemars 1.2.2",
- "serde",
- "smol_str",
-]
-
-[[package]]
-name = "zpui-sum-tree"
-version = "0.1.0"
-dependencies = [
- "ctor",
- "heapless",
- "log",
- "proptest",
- "rand 0.9.5",
- "rayon",
- "tracing",
- "zpui-log",
- "zpui-tracing",
-]
-
-[[package]]
-name = "zpui-tracing"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "js-sys",
- "tracing",
- "tracing-subscriber",
- "wasm-bindgen",
- "web-sys",
- "zpui-log",
- "zpui-tracing-macros",
-]
-
-[[package]]
-name = "zpui-tracing-macros"
-version = "0.1.0"
-
-[[package]]
-name = "zpui-util"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "log",
- "which",
-]
-
-[[package]]
-name = "zpui-util-macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn 2.0.119",
-]
-
-[[package]]
-name = "zpui-web"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "console_error_panic_hook",
- "futures",
- "js-sys",
- "log",
- "parking_lot",
- "raw-window-handle",
- "smallvec",
- "unicode-properties",
- "unicode-script",
- "unicode-segmentation",
- "uuid",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm_thread",
- "web-sys",
- "web-time",
- "zpui",
- "zpui-http-client",
- "zpui-scheduler",
- "zpui-wgpu",
-]
-
-[[package]]
-name = "zpui-wgpu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "cosmic-text",
- "criterion",
- "etagere",
- "image",
- "itertools 0.14.0",
- "log",
- "naga",
- "parking_lot",
- "profiling",
- "raw-window-handle",
- "smallvec",
- "swash",
- "unicode-bidi",
- "unicode-segmentation",
- "wayland-backend",
- "wayland-client",
- "wayland-protocols",
- "web-sys",
- "wgpu",
- "zed-font-kit",
- "zpui",
- "zpui-collections",
- "zpui-util",
-]
-
-[[package]]
-name = "zpui-windows"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_windows",
- "anyhow",
- "dunce",
- "etagere",
- "futures",
- "image",
- "itertools 0.14.0",
- "log",
- "parking_lot",
- "rand 0.9.5",
- "raw-window-handle",
- "smallvec",
- "uuid",
- "windows 0.62.2",
- "windows-core 0.62.2",
- "windows-numerics 0.3.1",
- "windows-registry",
- "zpui",
- "zpui-collections",
- "zpui-util",
-]
-
-[[package]]
 name = "zune-core"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11643,8 +11136,6 @@ dependencies = [
  "wgpu",
  "windows 0.62.2",
  "x11rb",
- "zpui",
- "zpui-platform",
  "zz-browser",
  "zz-chrome-import",
  "zz-cli",
@@ -11652,6 +11143,8 @@ dependencies = [
  "zz-config",
  "zz-daemon",
  "zz-daemon-client",
+ "zz-gpui",
+ "zz-gpui-platform",
  "zz-mux",
  "zz-protocol",
  "zz-terminal",
@@ -11679,10 +11172,10 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "zpui",
- "zpui-ios",
  "zz-client",
  "zz-daemon-client",
+ "zz-gpui",
+ "zz-gpui-platform",
  "zz-protocol",
  "zz-terminal",
  "zz-ui",
@@ -11710,8 +11203,8 @@ dependencies = [
  "thiserror 2.0.20",
  "url",
  "wgpu",
- "zpui",
  "zz-client",
+ "zz-gpui",
  "zz-protocol",
  "zz-terminal",
 ]
@@ -11858,6 +11351,219 @@ dependencies = [
 ]
 
 [[package]]
+name = "zz-gpui"
+version = "0.2.2"
+dependencies = [
+ "accesskit",
+ "anyhow",
+ "async-channel",
+ "async-task",
+ "backtrace",
+ "bindgen",
+ "bitflags 2.13.2",
+ "bytes",
+ "chrono",
+ "core-video",
+ "criterion",
+ "ctor",
+ "derive_more",
+ "embed-resource",
+ "env_logger",
+ "etagere",
+ "flume",
+ "futures",
+ "futures-concurrency",
+ "getrandom 0.3.4",
+ "hdrhistogram",
+ "heapless",
+ "http",
+ "http-body",
+ "image",
+ "indexmap 2.14.2",
+ "inventory",
+ "itertools 0.14.0",
+ "libc",
+ "log",
+ "lyon",
+ "num_cpus",
+ "objc2 0.6.4",
+ "objc2-core-foundation",
+ "objc2-metal 0.3.2",
+ "parking",
+ "parking_lot",
+ "pin-project",
+ "pollster 1.0.1",
+ "postage",
+ "profiling",
+ "proptest",
+ "rand 0.9.5",
+ "raw-window-handle",
+ "rayon",
+ "regex",
+ "resvg",
+ "rustc-hash 2.1.3",
+ "schemars 1.2.2",
+ "seahash",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "slotmap",
+ "smallvec",
+ "smol_str",
+ "spin 0.10.1",
+ "stacksafe",
+ "strum",
+ "taffy",
+ "thiserror 2.0.20",
+ "ttf-parser",
+ "unicode-segmentation",
+ "url",
+ "usvg",
+ "uuid",
+ "waker-fn",
+ "wasm-bindgen",
+ "wasm_thread",
+ "web-sys",
+ "web-time",
+ "wgpu",
+ "which",
+ "windows 0.62.2",
+ "zed-font-kit",
+ "zz-gpui-macros",
+ "zz-gpui-platform",
+]
+
+[[package]]
+name = "zz-gpui-kit"
+version = "0.16.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "image",
+ "log",
+ "markdown",
+ "ropey",
+ "rust-embed",
+ "serde",
+ "smallvec",
+ "tree-sitter",
+ "tree-sitter-json",
+ "tree-sitter-language",
+ "tree-sitter-md",
+ "tree-sitter-rust",
+ "tree-sitter-tmux",
+ "tree-sitter-toml-ng",
+ "unicode-segmentation",
+ "url",
+ "web-time",
+ "zz-gpui",
+]
+
+[[package]]
+name = "zz-gpui-macros"
+version = "0.1.0"
+dependencies = [
+ "heck 0.5.0",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+ "zz-gpui",
+]
+
+[[package]]
+name = "zz-gpui-platform"
+version = "0.1.0"
+dependencies = [
+ "accesskit",
+ "accesskit_ios",
+ "accesskit_macos",
+ "accesskit_unix",
+ "accesskit_windows",
+ "anyhow",
+ "as-raw-xcb-connection",
+ "ashpd",
+ "async-task",
+ "bitflags 2.13.2",
+ "block2 0.6.2",
+ "bytemuck",
+ "calloop",
+ "calloop-wayland-source",
+ "cbindgen",
+ "cocoa",
+ "console_error_panic_hook",
+ "core-foundation",
+ "core-foundation-sys",
+ "core-graphics",
+ "core-text",
+ "core-video",
+ "cosmic-text",
+ "criterion",
+ "ctor",
+ "derive_more",
+ "dispatch2",
+ "dunce",
+ "etagere",
+ "filedescriptor",
+ "foreign-types",
+ "futures",
+ "image",
+ "itertools 0.14.0",
+ "js-sys",
+ "libc",
+ "log",
+ "mach2",
+ "memmap2",
+ "metal",
+ "naga",
+ "notify-rust",
+ "objc",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-user-notifications 0.3.2",
+ "oo7",
+ "open",
+ "parking_lot",
+ "pathfinder_geometry",
+ "profiling",
+ "rand 0.9.5",
+ "raw-window-handle",
+ "semver",
+ "smallvec",
+ "smol",
+ "strum",
+ "swash",
+ "unicode-bidi",
+ "unicode-properties",
+ "unicode-script",
+ "unicode-segmentation",
+ "url",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm_thread",
+ "wayland-backend",
+ "wayland-client",
+ "wayland-cursor",
+ "wayland-protocols",
+ "wayland-protocols-plasma",
+ "wayland-protocols-wlr",
+ "web-sys",
+ "web-time",
+ "wgpu",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+ "windows-numerics 0.3.1",
+ "windows-registry",
+ "x11-clipboard",
+ "x11rb",
+ "xkbcommon",
+ "zed-font-kit",
+ "zed-xim",
+ "zz-gpui",
+]
+
+[[package]]
 name = "zz-hotreload"
 version = "0.16.0"
 dependencies = [
@@ -11872,11 +11578,11 @@ dependencies = [
  "env_logger",
  "futures",
  "image",
- "zpui",
- "zpui-ios",
  "zz-app",
  "zz-client",
  "zz-daemon-client",
+ "zz-gpui",
+ "zz-gpui-platform",
  "zz-protocol",
  "zz-terminal",
  "zz-ui",
@@ -11972,9 +11678,9 @@ dependencies = [
  "smallvec",
  "url",
  "web-time",
- "zpui",
- "zpui-kit",
  "zz-client",
+ "zz-gpui",
+ "zz-gpui-kit",
  "zz-protocol",
  "zz-terminal",
 ]

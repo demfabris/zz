@@ -16,12 +16,12 @@ mod fixture {
     };
 
     use env_logger::{Builder, Env, WriteStyle};
-    use zpui::{
+    use zz_gpui::{
         App, Bounds, Context, DevicePixels, ObjectFit, Pixels, Render, Size, WgpuDeviceContext,
         Window, WindowBounds, WindowOptions, div, external_texture, prelude::*, px, rgb, size,
         wgpu,
     };
-    use zpui_platform::application;
+    use zz_gpui_platform::application;
 
     const DEFAULT_SECONDS: u64 = 5;
     const TEXTURE_LOGICAL_WIDTH: f32 = 560.0;
@@ -42,7 +42,7 @@ mod fixture {
             }
         };
 
-        let _ = Builder::from_env(Env::default().default_filter_or("wgpu=warn,zpui=info"))
+        let _ = Builder::from_env(Env::default().default_filter_or("wgpu=warn,zz_gpui=info"))
             .write_style(WriteStyle::Never)
             .try_init();
         run(Duration::from_secs(seconds));

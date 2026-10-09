@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use zpui::{App, Window};
+use zz_gpui::{App, Window};
 use zz_ui::WindowExt as _;
 use zz_ui::feedback::import_configuration_file_alert;
 
@@ -29,7 +29,7 @@ fn mark_prompted() {
 }
 
 pub(crate) fn choose_tmux_config(window: &mut Window, cx: &mut App) {
-    let selected = cx.prompt_for_paths(zpui::PathPromptOptions {
+    let selected = cx.prompt_for_paths(zz_gpui::PathPromptOptions {
         files: true,
         directories: false,
         multiple: false,

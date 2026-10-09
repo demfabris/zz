@@ -26,6 +26,12 @@ out: list-windows -t =path-tmp -O index -f #{==:#{session_active},} -F #{window_
 out: list-windows -t =path-tmp -O index -f #{session_active} -F #{window_index}
 out: list-panes -t =path-tmp:0 -O index -f #{==:#{session_active},} -F #{pane_index}=[#{session_active}]
 out: list-panes -t =path-tmp:0 -O index -f #{session_active} -F #{pane_index}
+out: list-sessions -O name -F #{session_name}=[#{session_active}]
+out: list-windows -t =path-tmp -O index -F #{window_index}=[#{session_active}]#{S:n,a}
+out: list-panes -t =path-tmp:0 -O index -F #{pane_index}=[#{session_active}]
+out: list-sessions -O name -f #{client_pid} -F #{session_name}
+out: list-windows -t =path-tmp -O index -F #{window_index}:#{==:#{client_name},client-#{client_pid}}:#{client_flags}:#{client_key_table}:#{client_width}:[#{client_height}]:[#{client_session}]:#{client_prefix}:#{client_readonly}:#{client_control_mode}:#{window_bigger}:[#{window_offset_x}]
+out: list-panes -t =path-tmp:0 -O index -F #{pane_index}:#{client_termname}:#{client_utf8}:#{==:#{client_user},#{user}}
 new-window -d -t w: -n activity-quiet -- sleep 300
 out: display-message -p -t w:activity-quiet activity-created=#{?window_activity,set,unset}
 out: set-window-option -F -t w:activity-quiet @activity-captured #{window_activity}
@@ -43,3 +49,4 @@ run-shell "sleep 1.1"
 send-keys -t w:activity-quiet.1 -l ping
 run-shell "sleep 0.2"
 out: display-message -p -t w:activity-quiet output=#{!=:#{window_activity},#{@activity-captured}}
+out: new-session -d -P -s client-facts -F #{session_name}:#{==:#{client_name},client-#{client_pid}}:#{client_flags}:#{client_width}:#{session_active}

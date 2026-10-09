@@ -26,7 +26,7 @@ use windows::{
     },
     core::*,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::direct_manipulation::DirectManipulationHandler;
 use crate::*;

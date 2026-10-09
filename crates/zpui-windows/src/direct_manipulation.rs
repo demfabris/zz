@@ -8,8 +8,8 @@ use windows::Win32::{
     System::Com::*,
     UI::{Input::Pointer::*, WindowsAndMessaging::*},
 };
+use zpui::util::ResultExt;
 use zpui::*;
-use zpui_util::ResultExt;
 
 use crate::*;
 

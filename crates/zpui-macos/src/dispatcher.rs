@@ -9,8 +9,8 @@ use mach2::{
         thread_precedence_policy_data_t, thread_time_constraint_policy_data_t,
     },
 };
+use zpui::util::ResultExt;
 use zpui::{ActivityGuard, PlatformDispatcher, Priority, RunnableMeta, RunnableVariant};
-use zpui_util::ResultExt;
 
 use async_task::Runnable;
 use objc::{

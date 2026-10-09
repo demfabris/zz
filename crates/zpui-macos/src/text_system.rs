@@ -1,6 +1,5 @@
 use anyhow::anyhow;
 use cocoa::appkit::CGFloat;
-use collections::{HashMap, HashSet};
 use core_foundation::{
     array::{CFArray, CFArrayRef},
     attributed_string::CFMutableAttributedString,
@@ -42,6 +41,7 @@ use pathfinder_geometry::{
 };
 use smallvec::SmallVec;
 use std::{borrow::Cow, char, convert::TryFrom, sync::Arc, sync::OnceLock};
+use zpui::collections::{HashMap, HashSet};
 use zpui::{
     Bounds, DevicePixels, Font, FontFallbacks, FontFeatures, FontId, FontMetrics, FontRun,
     FontStyle, FontWeight, GlyphId, Hsla, LineLayout, Pixels, PlatformTextSystem,

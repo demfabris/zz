@@ -28,7 +28,7 @@ use calloop::{LoopSignal, channel::Sender};
 use futures::channel::oneshot;
 #[cfg(any(feature = "wayland", feature = "x11"))]
 use xkbcommon::xkb::{self, Keycode, Keysym, State};
-use zpui_util::{ResultExt as _, new_std_command};
+use zpui::util::{ResultExt as _, new_std_command};
 
 use crate::linux::{LinuxDispatcher, PriorityQueueCalloopReceiver};
 use zpui::{

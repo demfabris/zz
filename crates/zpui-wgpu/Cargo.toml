@@ -35,7 +35,6 @@ test-support = ["zpui/test-support", "dep:image"]
 zpui.workspace = true
 anyhow.workspace = true
 bytemuck = "1"
-collections.workspace = true
 naga = { version = "30.0.1", features = ["wgsl-in"] }
 cosmic-text = "0.19.0"
 etagere.workspace = true
@@ -65,7 +64,6 @@ smallvec = { workspace = true, features = ["union", "const_new"] }
 swash.workspace = true
 unicode-bidi.workspace = true
 unicode-segmentation.workspace = true
-zpui-util.workspace = true
 wgpu.workspace = true
 
 # Optional: only needed on platforms with multiple font sources (e.g. Linux)

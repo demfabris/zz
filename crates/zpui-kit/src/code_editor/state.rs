@@ -3,8 +3,8 @@
 use std::{cell::Cell, ops::Range, time::Duration};
 
 use ropey::Rope;
-use sum_tree::Bias;
 use unicode_segmentation::UnicodeSegmentation as _;
+use zpui::sum_tree::Bias;
 use zpui::{
     Action, App, AppContext as _, Bounds, ClipboardItem, Context, Corners, Edges, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, IntoElement, KeyBinding,

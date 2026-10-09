@@ -169,7 +169,7 @@ impl TestAppContext {
         platform: Rc<TestPlatform>,
     ) -> Self {
         let asset_source = Arc::new(());
-        let http_client = http_client::FakeHttpClient::with_404_response();
+        let http_client = crate::http_client::FakeHttpClient::with_404_response();
         let text_system = Arc::new(TextSystem::new(platform.text_system()));
 
         let app = App::new_app(platform.clone(), asset_source, http_client);

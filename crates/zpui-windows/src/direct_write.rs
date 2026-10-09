@@ -5,7 +5,6 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use collections::HashMap;
 use parking_lot::{RwLock, RwLockUpgradableReadGuard};
 use windows::{
     Win32::{
@@ -21,7 +20,8 @@ use windows::{
     core::*,
 };
 use windows_numerics::Vector2;
-use zpui_util::{ResultExt, maybe};
+use zpui::collections::HashMap;
+use zpui::{maybe, util::ResultExt};
 
 use crate::*;
 use zpui::*;

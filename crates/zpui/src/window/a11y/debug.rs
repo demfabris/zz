@@ -5,8 +5,8 @@
 //! [`crate::Window::debug_a11y_tree_json`]). In `cfg(debug_assertions)` builds,
 //! we capture extra info.
 
+use crate::collections::FxHashMap;
 use accesskit::{Action, NodeId, TreeUpdate};
-use collections::FxHashMap;
 
 use crate::{Bounds, Pixels, SharedString, Size};
 
@@ -382,9 +382,9 @@ fn ephemeral_id(mut index: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::{NodeProvenance, node_to_json};
+    use crate::collections::FxHashMap;
     use crate::{Bounds, point, px, size};
     use accesskit::{Node, NodeId, Role};
-    use collections::FxHashMap;
 
     #[test]
     fn node_json_includes_bounds_and_automation_properties() {

@@ -60,7 +60,7 @@ use std::{
     ffi::c_void,
     sync::{Mutex, MutexGuard, PoisonError},
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 static REGISTRY: Mutex<Registry> = Mutex::new(Registry::new());
 

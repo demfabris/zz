@@ -1,4 +1,4 @@
-use scheduler::Instant;
+use crate::scheduler::Instant;
 use std::{
     any::{TypeId, type_name},
     cell::{BorrowMutError, Cell, Ref, RefCell, RefMut},
@@ -20,15 +20,16 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use slotmap::SlotMap;
 
+use crate::collections::{FxHashMap, FxHashSet, HashMap, TypeIdHashMap, TypeIdHashSet, VecDeque};
+use crate::http_client::{HttpClient, Url};
+use crate::{debug_panic, util::ResultExt};
 pub use async_context::*;
 #[cfg(feature = "bench-support")]
 pub use bench_context::{BenchAppContext, BenchReport, BenchWindowContext, bench_platform};
-use collections::{FxHashMap, FxHashSet, HashMap, TypeIdHashMap, TypeIdHashSet, VecDeque};
 pub use context::*;
 pub use entity_map::*;
 #[cfg(any(test, feature = "test-support"))]
 pub use headless_app_context::*;
-use http_client::{HttpClient, Url};
 use smallvec::SmallVec;
 #[cfg(any(test, feature = "test-support"))]
 pub use test_app::*;
@@ -36,7 +37,6 @@ pub use test_app::*;
 pub use test_context::*;
 #[cfg(all(target_os = "macos", any(test, feature = "test-support")))]
 pub use visual_test_context::*;
-use zpui_util::{ResultExt, debug_panic};
 
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::InspectorElementRegistry;
@@ -3251,10 +3251,10 @@ struct NullHttpClient;
 impl HttpClient for NullHttpClient {
     fn send(
         &self,
-        _req: http_client::Request<http_client::AsyncBody>,
+        _req: crate::http_client::Request<crate::http_client::AsyncBody>,
     ) -> futures::future::BoxFuture<
         'static,
-        anyhow::Result<http_client::Response<http_client::AsyncBody>>,
+        anyhow::Result<crate::http_client::Response<crate::http_client::AsyncBody>>,
     > {
         async move {
             anyhow::bail!("No HttpClient available");
@@ -3262,7 +3262,7 @@ impl HttpClient for NullHttpClient {
         .boxed()
     }
 
-    fn user_agent(&self) -> Option<&http_client::http::HeaderValue> {
+    fn user_agent(&self) -> Option<&crate::http_client::http::HeaderValue> {
         None
     }
 

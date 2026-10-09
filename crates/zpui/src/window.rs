@@ -30,11 +30,15 @@ use crate::{
     WindowTextSystem, WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
 };
 
+use crate::collections::{FxHashMap, FxHashSet};
 use crate::gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer};
 use crate::glass::glass_shape_slots;
 use crate::interactive::TouchEvent;
+use crate::refineable::Refineable;
+use crate::scheduler::Instant;
+use crate::util::post_inc;
+use crate::util::{ResultExt, measure};
 use anyhow::{Context as _, Result, anyhow};
-use collections::{FxHashMap, FxHashSet};
 #[cfg(target_os = "macos")]
 use core_video::pixel_buffer::CVPixelBuffer;
 use derive_more::{Deref, DerefMut};
@@ -43,8 +47,6 @@ use itertools::FoldWhile::{Continue, Done};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use raw_window_handle::{HandleError, HasDisplayHandle, HasWindowHandle};
-use refineable::Refineable;
-use scheduler::Instant;
 use slotmap::SlotMap;
 use smallvec::SmallVec;
 use std::{
@@ -67,8 +69,6 @@ use std::{
     time::Duration,
 };
 use uuid::Uuid;
-use zpui_util::post_inc;
-use zpui_util::{ResultExt, measure};
 
 pub(crate) mod a11y;
 mod glyph_cache;

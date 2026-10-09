@@ -1,5 +1,5 @@
-use collections::HashMap;
 use std::ffi::{CStr, c_void};
+use zpui::collections::HashMap;
 
 use objc::{msg_send, runtime::Object, sel, sel_impl};
 

@@ -25,7 +25,7 @@ use windows::{
     core::{BOOL, HRESULT, w},
 };
 use zpui::ForegroundExecutor;
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::SafeHwnd;
 

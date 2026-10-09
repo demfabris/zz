@@ -1,3 +1,4 @@
+use crate::util::ResultExt;
 use crate::{
     ActiveTooltip, AnyView, App, Bounds, DispatchPhase, Element, ElementId, GlobalElementId,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId,
@@ -16,7 +17,6 @@ use std::{
     rc::Rc,
     sync::Arc,
 };
-use zpui_util::ResultExt;
 
 /// An [`Element`] that renders text.
 ///

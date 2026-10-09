@@ -19,7 +19,7 @@ use windows::Win32::{
     },
 };
 use windows::core::Interface;
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 pub(crate) fn try_to_recover_from_device_lost<T>(mut f: impl FnMut() -> Result<T>) -> Result<T> {
     (0..5)

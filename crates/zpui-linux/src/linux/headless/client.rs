@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use calloop::{EventLoop, LoopHandle};
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::linux::headless::window::{HeadlessDisplay, HeadlessWindow};
 use crate::linux::{LinuxClient, LinuxCommon, LinuxKeyboardLayout};

@@ -1,3 +1,4 @@
+use crate::util::ResultExt as _;
 use crate::{
     AnyWindowHandle, Bounds, DevicePixels, DispatchEventResult, GpuSpecs, HeadlessAtlas, Pixels,
     PlatformAtlas, PlatformDisplay, PlatformHeadlessRenderer, PlatformInput, PlatformInputHandler,
@@ -15,7 +16,6 @@ use std::{
     rc::{Rc, Weak},
     sync::{self, Arc},
 };
-use zpui_util::ResultExt as _;
 
 pub(crate) struct TestWindowState {
     pub(crate) bounds: Bounds<Pixels>,

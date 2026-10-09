@@ -4,12 +4,12 @@
 /// large enough to overcome the overhead of a more complex algorithm.
 ///
 /// If this meets your use cases, then [`VecMap`] should be a drop-in
-/// replacement for [`std::collections::HashMap`] or [`crate::HashMap`]. Note
+/// replacement for [`std::collections::HashMap`] or [`crate::collections::HashMap`]. Note
 /// that we are adding APIs on an as-needed basis. If the API you need is not
 /// present yet, please add it!
 ///
 /// Because it uses vectors as a backing store, the map also iterates over items
-/// in insertion order, like [`crate::IndexMap`].
+/// in insertion order, like [`crate::collections::IndexMap`].
 ///
 /// This struct uses a struct-of-arrays (SoA) representation which tends to be
 /// more cache efficient and promotes autovectorization when using simple key or

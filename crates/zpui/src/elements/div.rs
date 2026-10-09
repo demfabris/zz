@@ -15,6 +15,9 @@
 //! and Tailwind-like styling that you can use to build your own custom elements. Div is
 //! constructed by combining these two systems into an all-in-one element.
 
+use crate::collections::HashMap;
+use crate::refineable::Refineable;
+use crate::util::ResultExt;
 use crate::{
     Action, AnyDrag, AnyElement, AnyTooltip, AnyView, App, Bounds, ClickEvent, DispatchPhase,
     Display, Element, ElementId, Entity, EntityId, ExternalDragPayload, ExternalDragPayloadSource,
@@ -26,8 +29,6 @@ use crate::{
     Render, ScrollWheelEvent, SharedString, Size, Style, StyleRefinement, Styled, Task, TooltipId,
     TouchPhase, Visibility, Window, WindowControlArea, point, px, size,
 };
-use collections::HashMap;
-use refineable::Refineable;
 use smallvec::SmallVec;
 use std::{
     any::{Any, TypeId},
@@ -41,7 +42,6 @@ use std::{
     sync::Arc,
     time::Duration,
 };
-use zpui_util::ResultExt;
 
 use super::ImageCacheProvider;
 

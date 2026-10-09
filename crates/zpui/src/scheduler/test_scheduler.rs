@@ -1,4 +1,4 @@
-use crate::{
+use crate::scheduler::{
     BackgroundExecutor, Clock, Instant, LocalExecutor, Priority, RunnableMeta, Scheduler,
     SessionId, Task, TestClock, Timer,
 };

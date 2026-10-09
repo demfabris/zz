@@ -17,7 +17,7 @@ use windows::{
     },
     core::{HSTRING, Interface},
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::directx_renderer::shader_resources::{RawShaderBytes, ShaderModule, ShaderTarget};
 use crate::*;

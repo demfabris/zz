@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use sum_tree::Bias;
+use zpui::sum_tree::Bias;
 use zpui::{ClipboardItem, Context, Window};
 
 use crate::code_editor::{CodeEditorState, RopeExt as _};

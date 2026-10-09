@@ -33,8 +33,6 @@ nonminimal_bool = "allow"
 default = ["font-kit", "wayland", "x11", "windows-manifest"]
 test-support = [
     "leak-detection",
-    "collections/test-support",
-    "http_client/test-support",
     "wayland",
     "x11",
     "proptest",
@@ -43,12 +41,13 @@ bench-support = ["profiler", "dep:criterion"]
 # Preserve the published feature name while consumers migrate to `bench-support`.
 bench = ["bench-support"]
 inspector = ["zpui-macros/inspector"]
-leak-detection = ["backtrace"]
+leak-detection = []
 wayland = []
 x11 = []
 windows-manifest = ["dep:embed-resource"]
 profiler = ["dep:hdrhistogram"]
 stacker = ["dep:stacksafe"]
+wasm-threads = ["dep:wasm_thread", "flume/spin"]
 
 [lib]
 path = "src/zpui.rs"
@@ -57,10 +56,9 @@ path = "src/zpui.rs"
 accesskit.workspace = true
 anyhow.workspace = true
 async-task.workspace = true
-backtrace = { workspace = true, optional = true }
+backtrace.workspace = true
 bitflags.workspace = true
 
-collections.workspace = true
 criterion = { workspace = true, optional = true }
 ctor.workspace = true
 derive_more.workspace = true
@@ -68,8 +66,6 @@ etagere.workspace = true
 futures.workspace = true
 futures-concurrency.workspace = true
 zpui-macros.workspace = true
-zpui-shared-string.workspace = true
-http_client.workspace = true
 image = { workspace = true, features = [
     "bmp",
     "dds",
@@ -100,8 +96,6 @@ profiling.workspace = true
 rand.workspace = true
 raw-window-handle.workspace = true
 regex.workspace = true
-refineable.workspace = true
-scheduler.workspace = true
 resvg.workspace = true
 usvg.workspace = true
 ttf-parser = "0.25"
@@ -113,10 +107,8 @@ slotmap.workspace = true
 smallvec = { workspace = true, features = ["union", "const_new"] }
 stacksafe = { workspace = true, optional = true }
 strum.workspace = true
-sum_tree.workspace = true
 taffy = "=0.13.0"
 thiserror.workspace = true
-zpui-util.workspace = true
 hdrhistogram = { workspace = true, optional = true }
 waker-fn = "1.2.0"
 lyon = "1.0"
@@ -128,6 +120,17 @@ uuid.workspace = true
 web-time.workspace = true
 heapless.workspace = true
 
+bytes.workspace = true
+derive_refineable.workspace = true
+flume.workspace = true
+http.workspace = true
+http-body.workspace = true
+indexmap.workspace = true
+rayon.workspace = true
+rustc-hash.workspace = true
+serde_urlencoded.workspace = true
+smol_str = "0.3.6"
+
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 # Workspace inheritance would re-enable defaults, including blocking channel synchronization.
 async-channel = { version = "2.5.0", default-features = false }
@@ -136,6 +139,7 @@ async-channel = { version = "2.5.0", default-features = false }
 async-channel.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
+wasm_thread = { git = "https://github.com/zed-industries/wasm_thread", rev = "0cf96c7708dfb97ccf3da50347e25edcf75d6937", version = "0.3", features = ["es_modules"], optional = true }
 getrandom = { version = "0.3.4", features = ["wasm_js"] }
 uuid = { workspace = true, features = ["js"] }
 
@@ -158,6 +162,7 @@ libc.workspace = true
 
 
 [target.'cfg(target_os = "windows")'.dependencies]
+which.workspace = true
 windows = { workspace = true, features = [
     "Data_Xml_Dom",
     "Foundation_Numerics",
@@ -221,18 +226,13 @@ windows = { workspace = true, features = [
 
 
 [dev-dependencies]
-backtrace.workspace = true
-collections = { workspace = true, features = ["test-support"] }
 env_logger.workspace = true
 zpui-platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
-zpui-util = { workspace = true }
 lyon = { version = "1.0", features = ["extra"] }
 rand.workspace = true
-scheduler = { workspace = true, features = ["test-support"] }
 unicode-segmentation = { workspace = true }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
-http_client = { workspace = true, features = ["test-support"] }
 proptest = { workspace = true }
 
 [target.'cfg(target_family = "wasm")'.dev-dependencies]

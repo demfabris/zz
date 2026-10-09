@@ -4,7 +4,7 @@ use zpui::{
     App, Bounds, Context, Render, Subscription, Task, Window, WindowBounds, WindowOptions, div,
     prelude::*, px, rgb, size,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 use std::borrow::Cow;
 
 // Pin the raw TTF rather than using Google Fonts CSS, which may supply WOFF2

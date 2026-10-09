@@ -4,7 +4,6 @@ use futures::{
     AsyncRead, AsyncReadExt as _, FutureExt as _, SinkExt as _, TryStreamExt as _,
     channel::{mpsc, oneshot},
 };
-use http_client::{AsyncBody, HttpClient, RedirectPolicy};
 use std::{
     io,
     pin::Pin,
@@ -13,6 +12,7 @@ use std::{
 };
 use wasm_bindgen::JsCast as _;
 use wasm_bindgen::prelude::*;
+use zpui::http_client::{AsyncBody, HttpClient, RedirectPolicy};
 
 #[wasm_bindgen]
 extern "C" {
@@ -22,7 +22,7 @@ extern "C" {
 
 pub struct FetchHttpClient {
     dispatcher: Arc<WebDispatcher>,
-    user_agent: Option<http_client::http::header::HeaderValue>,
+    user_agent: Option<zpui::http_client::http::header::HeaderValue>,
     credentials: FetchCredentials,
 }
 
@@ -53,7 +53,7 @@ impl FetchHttpClient {
     ) -> anyhow::Result<Self> {
         Ok(Self {
             dispatcher,
-            user_agent: Some(http_client::http::header::HeaderValue::from_str(
+            user_agent: Some(zpui::http_client::http::header::HeaderValue::from_str(
                 user_agent,
             )?),
             credentials: FetchCredentials::default(),
@@ -67,19 +67,21 @@ impl FetchHttpClient {
 }
 
 impl HttpClient for FetchHttpClient {
-    fn user_agent(&self) -> Option<&http_client::http::header::HeaderValue> {
+    fn user_agent(&self) -> Option<&zpui::http_client::http::header::HeaderValue> {
         self.user_agent.as_ref()
     }
 
-    fn proxy(&self) -> Option<&http_client::Url> {
+    fn proxy(&self) -> Option<&zpui::http_client::Url> {
         None
     }
 
     fn send(
         &self,
-        req: http_client::http::Request<AsyncBody>,
-    ) -> futures::future::BoxFuture<'static, anyhow::Result<http_client::http::Response<AsyncBody>>>
-    {
+        req: zpui::http_client::http::Request<AsyncBody>,
+    ) -> futures::future::BoxFuture<
+        'static,
+        anyhow::Result<zpui::http_client::http::Response<AsyncBody>>,
+    > {
         let (parts, body) = req.into_parts();
         let credentials = self.credentials;
         let dispatcher = self.dispatcher.clone();
@@ -103,10 +105,10 @@ impl HttpClient for FetchHttpClient {
 }
 
 async fn fetch(
-    parts: http_client::http::request::Parts,
+    parts: zpui::http_client::http::request::Parts,
     body_bytes: Option<Vec<u8>>,
     credentials: FetchCredentials,
-) -> anyhow::Result<http_client::http::Response<AsyncBody>> {
+) -> anyhow::Result<zpui::http_client::http::Response<AsyncBody>> {
     let init = web_sys::RequestInit::new();
     init.set_method(parts.method.as_str());
     init.set_credentials(match credentials {
@@ -156,7 +158,7 @@ async fn fetch(
         .map_err(|error| anyhow!("fetch result is not a Response: {error:?}"))?;
 
     let status = web_response.status();
-    let mut builder = http_client::http::Response::builder().status(status);
+    let mut builder = zpui::http_client::http::Response::builder().status(status);
 
     // `Headers` is a JS iterable yielding `[name, value]` pairs.
     // `js_sys::Array::from` calls `Array.from()` which accepts any iterable.

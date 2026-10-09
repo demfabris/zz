@@ -1,4 +1,4 @@
-use scheduler::Instant;
+use crate::scheduler::Instant;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use crate::{

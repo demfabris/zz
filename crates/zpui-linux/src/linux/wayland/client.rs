@@ -14,9 +14,7 @@ use calloop::{
     timer::{TimeoutAction, Timer},
 };
 use calloop_wayland_source::WaylandSource;
-use collections::HashMap;
 use filedescriptor::Pipe;
-use http_client::Url;
 use smallvec::SmallVec;
 use wayland_backend::client::ObjectId;
 use wayland_backend::protocol::WEnum;
@@ -76,7 +74,9 @@ use wayland_protocols_plasma::blur::client::{org_kde_kwin_blur, org_kde_kwin_blu
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 use xkbcommon::xkb::ffi::XKB_KEYMAP_FORMAT_TEXT_V1;
 use xkbcommon::xkb::{self, KEYMAP_COMPILE_NO_FLAGS, Keycode};
-use zpui_util::ResultExt as _;
+use zpui::collections::HashMap;
+use zpui::http_client::Url;
+use zpui::util::ResultExt as _;
 
 use super::{
     display::WaylandDisplay,

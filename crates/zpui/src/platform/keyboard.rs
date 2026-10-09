@@ -1,4 +1,4 @@
-use collections::HashMap;
+use crate::collections::HashMap;
 
 use crate::{KeybindingKeystroke, Keystroke};
 

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use collections::HashMap;
 use windows::Win32::UI::{
     Input::KeyboardAndMouse::{
         GetKeyboardLayoutNameW, MAPVK_VK_TO_CHAR, MAPVK_VK_TO_VSC, MapVirtualKeyW, ToUnicode,
@@ -9,6 +8,7 @@ use windows::Win32::UI::{
     },
     WindowsAndMessaging::KL_NAMELENGTH,
 };
+use zpui::collections::HashMap;
 
 use zpui::{
     KeybindingKeystroke, Keystroke, Modifiers, PlatformKeyboardLayout, PlatformKeyboardMapper,

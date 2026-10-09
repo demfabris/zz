@@ -4,9 +4,7 @@ use calloop::{
     EventLoop, LoopHandle, RegistrationToken,
     generic::{FdWrapper, Generic},
 };
-use collections::HashMap;
 use core::str;
-use http_client::Url;
 use log::Level;
 use smallvec::SmallVec;
 use std::{
@@ -17,8 +15,10 @@ use std::{
     rc::{Rc, Weak},
     time::{Duration, Instant},
 };
+use zpui::collections::HashMap;
+use zpui::http_client::Url;
+use zpui::util::ResultExt as _;
 use zpui::{Capslock, profiler};
-use zpui_util::ResultExt as _;
 
 use x11rb::{
     connection::{Connection, RequestConnection},

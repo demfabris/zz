@@ -1,8 +1,8 @@
+use crate::refineable::Refineable;
 use crate::{
     App, Bounds, DevicePixels, Element, ElementId, GlobalElementId, InspectorElementId,
     IntoElement, LayoutId, ObjectFit, Pixels, Size, Style, StyleRefinement, Styled, Window, size,
 };
-use refineable::Refineable;
 
 /// The handle the renderer samples for an [`ExternalTexture`]: a view on the
 /// wgpu backends, and the texture itself on DirectX, where the shader resource

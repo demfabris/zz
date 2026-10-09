@@ -34,7 +34,7 @@ use windows::{
     },
     core::*,
 };
-use zpui_util::{ResultExt, get_powershell, new_std_command};
+use zpui::util::{ResultExt, get_powershell, new_std_command};
 
 use crate::*;
 use zpui::*;

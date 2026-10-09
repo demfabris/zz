@@ -2,7 +2,7 @@ use core::fmt::Debug;
 
 use proptest::{prelude::*, sample::SizeRange};
 
-use crate::{Item, SumTree, Summary};
+use crate::sum_tree::{Item, SumTree, Summary};
 
 impl<T> Arbitrary for SumTree<T>
 where

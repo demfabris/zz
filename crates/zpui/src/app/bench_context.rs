@@ -540,8 +540,8 @@ impl<'a, 'measurement> BenchAppContext<'a, 'measurement> {
         // Benchmark setup must not make accidental network requests. The
         // production `BlockedHttpClient` reports them without enabling a
         // configurable test double through `test-support`.
-        let http_client: Arc<dyn http_client::HttpClient> =
-            Arc::new(http_client::BlockedHttpClient::new());
+        let http_client: Arc<dyn crate::http_client::HttpClient> =
+            Arc::new(crate::http_client::BlockedHttpClient::new());
         let app = App::new_app(platform, asset_source, http_client);
 
         Self {

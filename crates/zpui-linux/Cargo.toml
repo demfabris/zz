@@ -64,12 +64,9 @@ accesskit.workspace = true
 accesskit_unix.workspace = true
 anyhow.workspace = true
 bytemuck = "1"
-collections.workspace = true
 futures.workspace = true
 zpui.workspace = true
-zpui-util.workspace = true
 zpui-wgpu = { workspace = true, optional = true, features = ["font-kit"] }
-http_client.workspace = true
 libc.workspace = true
 log = { workspace = true, features = ["kv_unstable_serde", "serde"] }
 parking_lot.workspace = true

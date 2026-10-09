@@ -3,7 +3,7 @@
 //! This is in a sibling module so that the tests are guaranteed to only cover
 //! states that can be created by the public API.
 
-use crate::vecmap::*;
+use crate::collections::vecmap::*;
 
 #[test]
 fn test_entry_vacant_or_insert() {

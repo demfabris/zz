@@ -15,7 +15,7 @@ use windows::{
     },
     core::PCWSTR,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::*;
 use zpui::*;

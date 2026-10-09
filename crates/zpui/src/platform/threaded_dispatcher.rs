@@ -58,7 +58,7 @@ impl IdleTracker {
     /// Returns a guard that decrements the in-flight count when dropped, so
     /// the count stays correct even if the runnable being executed panics.
     fn decrement_on_drop(&self) -> impl Drop + '_ {
-        zpui_util::defer(|| self.decrement())
+        crate::util::defer(|| self.decrement())
     }
 
     /// Notifies waiters while holding the in-flight lock. `run_until_idle`

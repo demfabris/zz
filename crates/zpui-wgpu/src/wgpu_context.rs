@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use wgpu::TextureFormat;
 #[cfg(not(target_family = "wasm"))]
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 pub struct WgpuContext {
     pub instance: wgpu::Instance,

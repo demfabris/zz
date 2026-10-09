@@ -1,7 +1,7 @@
 use std::ops::Range;
 
-use sum_tree::Bias;
 use unicode_segmentation::UnicodeSegmentation as _;
+use zpui::sum_tree::Bias;
 use zpui::{Context, Window};
 
 use super::{CodeEditorState, RopeExt as _};

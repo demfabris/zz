@@ -12,7 +12,6 @@ use zpui::{
 };
 use zpui_wgpu::{CompositorGpuHint, WgpuRenderer, WgpuSurfaceConfig};
 
-use collections::FxHashSet;
 use raw_window_handle as rwh;
 use x11rb::{
     connection::Connection,
@@ -27,7 +26,8 @@ use x11rb::{
     wrapper::ConnectionExt as _,
     xcb_ffi::XCBConnection,
 };
-use zpui_util::{ResultExt, maybe};
+use zpui::collections::FxHashSet;
+use zpui::{maybe, util::ResultExt};
 
 use std::{
     cell::RefCell, ffi::c_void, fmt::Display, num::NonZeroU32, ptr::NonNull, rc::Rc, sync::Arc,

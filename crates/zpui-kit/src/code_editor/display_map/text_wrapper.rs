@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use ropey::Rope;
 use smallvec::SmallVec;
-use sum_tree::{Bias, Dimensions, SumTree};
+use zpui::sum_tree::{Bias, Dimensions, SumTree};
 use zpui::{
     App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px, size,
 };
@@ -38,7 +38,7 @@ pub(crate) struct LineSummary {
     longest_row: usize,
 }
 
-impl sum_tree::Summary for LineSummary {
+impl zpui::sum_tree::Summary for LineSummary {
     type Context<'a> = &'a ();
 
     fn zero(_: &()) -> Self {
@@ -62,7 +62,7 @@ impl sum_tree::Summary for LineSummary {
     }
 }
 
-impl sum_tree::Item for LineItem {
+impl zpui::sum_tree::Item for LineItem {
     type Summary = LineSummary;
 
     fn summary(&self, _: &()) -> LineSummary {
@@ -79,7 +79,7 @@ impl sum_tree::Item for LineItem {
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct BufferRows(pub usize);
 
-impl<'a> sum_tree::Dimension<'a, LineSummary> for BufferRows {
+impl<'a> zpui::sum_tree::Dimension<'a, LineSummary> for BufferRows {
     fn zero(_: &()) -> Self {
         BufferRows(0)
     }
@@ -92,7 +92,7 @@ impl<'a> sum_tree::Dimension<'a, LineSummary> for BufferRows {
 #[derive(Clone, Copy, Default, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct WrapRows(pub usize);
 
-impl<'a> sum_tree::Dimension<'a, LineSummary> for WrapRows {
+impl<'a> zpui::sum_tree::Dimension<'a, LineSummary> for WrapRows {
     fn zero(_: &()) -> Self {
         WrapRows(0)
     }

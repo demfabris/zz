@@ -2,7 +2,6 @@ use crate::wgpu_glass::{GlassResources, glass_count};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
-use collections::FxHashMap;
 use log::warn;
 #[cfg(not(target_family = "wasm"))]
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle};
@@ -14,6 +13,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use zpui::PaintSurface;
+use zpui::collections::FxHashMap;
 use zpui::{
     AtlasTextureId, Background, Bounds, CustomShader, DevicePixels, GpuSpecs, Path, Point,
     PrimitiveBatch, ScaledPixels, Scene, ShaderLayer, Size, get_gamma_correction_ratios,

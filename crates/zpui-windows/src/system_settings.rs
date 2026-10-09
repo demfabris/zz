@@ -7,7 +7,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SPI_GETWHEELSCROLLCHARS, SPI_GETWHEELSCROLLLINES, SYSTEM_PARAMETERS_INFO_ACTION,
     SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS, SystemParametersInfoW,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 /// Windows settings pulled from SystemParametersInfo
 /// https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-systemparametersinfow

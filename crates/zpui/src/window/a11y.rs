@@ -102,9 +102,9 @@ use crate::*;
 
 pub(crate) mod debug;
 
+use crate::collections::{FxHashMap, FxHashSet};
 use crate::{App, Bounds, FocusId, Pixels, SharedString, Window};
 use accesskit::{Action, NodeId, TreeUpdate};
-use collections::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 use std::hash::{Hash, Hasher};
 use std::sync::{

@@ -33,12 +33,12 @@
 
 #[cfg(any(feature = "inspector", debug_assertions))]
 use crate::InspectorElementPath;
+use crate::collections::FxHashMap;
 use crate::{
     A11ySubtreeBuilder, App, ArenaBox, AvailableSpace, Bounds, Context, DispatchNodeId, ElementId,
     FocusHandle, InspectorElementId, LayoutId, Pixels, Point, Size, Style, Window,
     util::FluentBuilder, window::with_element_arena,
 };
-use collections::FxHashMap;
 use derive_more::Deref;
 use std::{
     any::Any,
@@ -225,7 +225,7 @@ impl GlobalElementId {
 
     fn hash_path(path: &[ElementId]) -> u64 {
         use std::hash::{Hash, Hasher};
-        let mut hasher = collections::FxHasher::default();
+        let mut hasher = crate::collections::FxHasher::default();
         path.hash(&mut hasher);
         hasher.finish()
     }
@@ -275,7 +275,7 @@ pub(crate) struct GlobalIdCache {
 impl GlobalIdCache {
     fn path_hash(path: &[ElementId]) -> u64 {
         use std::hash::{Hash, Hasher};
-        let mut hasher = collections::FxHasher::default();
+        let mut hasher = crate::collections::FxHasher::default();
         path.hash(&mut hasher);
         hasher.finish()
     }
@@ -918,7 +918,7 @@ mod tests {
     }
 
     fn hash(id: &GlobalElementId) -> u64 {
-        BuildHasherDefault::<collections::FxHasher>::default().hash_one(id)
+        BuildHasherDefault::<crate::collections::FxHasher>::default().hash_one(id)
     }
 
     #[test]

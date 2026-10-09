@@ -80,7 +80,7 @@ use std::{
     },
     time::Duration,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 const WINDOW_STATE_IVAR: &str = "windowState";
 

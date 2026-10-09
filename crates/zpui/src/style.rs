@@ -4,6 +4,8 @@ use std::{
     ops::Range,
 };
 
+use crate::collections::HashSet;
+use crate::refineable::Refineable;
 use crate::{
     AbsoluteLength, App, Background, BackgroundTag, BorderStyle, Bounds, ContentMask, Corners,
     CornersRefinement, CursorStyle, DefiniteLength, DevicePixels, Edges, EdgesRefinement, Font,
@@ -11,8 +13,6 @@ use crate::{
     Pixels, Point, PointRefinement, Rgba, SharedString, Size, SizeRefinement, Styled, TextRun,
     Window, black, phi, point, px, quad, rems, size,
 };
-use collections::HashSet;
-use refineable::Refineable;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

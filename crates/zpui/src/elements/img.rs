@@ -7,12 +7,13 @@ use crate::{
 };
 use anyhow::Result;
 
+use crate::scheduler::Instant;
+use crate::util::ResultExt;
 use futures::Future;
 use image::{
     AnimationDecoder, ImageError, ImageFormat, Rgba,
     codecs::{gif::GifDecoder, webp::WebPDecoder},
 };
-use scheduler::Instant;
 use smallvec::SmallVec;
 use std::{
     fs,
@@ -24,7 +25,6 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use zpui_util::ResultExt;
 
 use super::{Stateful, StatefulInteractiveElement};
 
@@ -760,7 +760,7 @@ pub enum ImageCacheError {
         /// The URI of the image.
         uri: SharedUri,
         /// The HTTP status code.
-        status: http_client::StatusCode,
+        status: crate::http_client::StatusCode,
         /// The HTTP response body.
         body: String,
     },

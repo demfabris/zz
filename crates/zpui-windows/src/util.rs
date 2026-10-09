@@ -12,7 +12,7 @@ use windows::{
     },
     core::{BOOL, PCSTR},
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::*;
 use zpui::*;

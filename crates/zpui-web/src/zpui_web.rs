@@ -43,8 +43,6 @@ pub use dispatcher::WebDispatcher;
 #[cfg(target_family = "wasm")]
 pub use display::WebDisplay;
 #[cfg(target_family = "wasm")]
-pub use http_client::{FetchCredentials, FetchHttpClient};
-#[cfg(target_family = "wasm")]
 pub use keyboard::WebKeyboardLayout;
 #[cfg(target_family = "wasm")]
 pub use logging::init_logging;
@@ -52,5 +50,7 @@ pub use logging::init_logging;
 pub use platform::{WebPlatform, WebWindowError};
 #[cfg(target_family = "wasm")]
 pub use window::WebWindow;
+#[cfg(target_family = "wasm")]
+pub use zpui::http_client::{FetchCredentials, FetchHttpClient};
 #[cfg(target_family = "wasm")]
 pub use zpui_wgpu::WebBackendPreference;

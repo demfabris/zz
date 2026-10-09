@@ -1,7 +1,6 @@
 use std::sync::LazyLock;
 
 use anyhow::Result;
-use collections::FxHashMap;
 use itertools::Itertools;
 use windows::Win32::{
     Foundation::{HANDLE, HGLOBAL},
@@ -17,6 +16,7 @@ use windows::Win32::{
     UI::Shell::{DragQueryFileW, HDROP},
 };
 use windows::core::{Owned, PCWSTR};
+use zpui::collections::FxHashMap;
 
 use zpui::{
     ClipboardEntry, ClipboardItem, ClipboardString, ExternalPaths, Image, ImageFormat, hash,

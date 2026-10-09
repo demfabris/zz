@@ -9,7 +9,7 @@ use windows::Win32::{
     Graphics::Dwm::{DWM_TIMING_INFO, DwmFlush, DwmGetCompositionTimingInfo},
     System::Performance::QueryPerformanceFrequency,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 static QPC_TICKS_PER_SECOND: LazyLock<u64> = LazyLock::new(|| {
     let mut frequency = 0;

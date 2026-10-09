@@ -58,6 +58,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
+use zpui::util::{ResultExt, new_std_command};
 use zpui::{
     Action, ActivityGuard, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle,
     ForegroundExecutor, KeyContext, Keymap, Menu, MenuItem, OsMenu, OwnedMenu, PathPromptOptions,
@@ -65,7 +66,6 @@ use zpui::{
     PlatformWindow, Result, SystemMenuType, Task, ThermalState, WindowAppearance, WindowKind,
     WindowParams, popup::PopupNotSupportedError,
 };
-use zpui_util::{ResultExt, new_std_command};
 
 #[allow(non_upper_case_globals)]
 const NSUTF8StringEncoding: NSUInteger = 4;

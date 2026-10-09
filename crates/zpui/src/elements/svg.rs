@@ -5,12 +5,12 @@ use std::{
     sync::Arc,
 };
 
+use crate::util::ResultExt;
 use crate::{
     App, Asset, Bounds, Element, GlobalElementId, Hitbox, InspectorElementId, InteractiveElement,
     Interactivity, IntoElement, LayoutId, Pixels, Point, Radians, SharedString, Size,
     StyleRefinement, Styled, TransformationMatrix, Window, point, px, radians, size,
 };
-use zpui_util::ResultExt;
 
 /// An SVG element.
 pub struct Svg {

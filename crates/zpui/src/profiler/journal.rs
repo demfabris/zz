@@ -21,8 +21,8 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use scheduler::Instant;
-use zpui_util::ResultExt;
+use crate::scheduler::Instant;
+use crate::util::ResultExt;
 
 use super::{ActionTiming, FrameTiming, PresentTiming, TaskTiming};
 use crate::{App, WindowId, WindowVisibility};
@@ -1230,8 +1230,8 @@ impl IntervalSealer {
 
 #[cfg(test)]
 mod tests {
+    use crate::scheduler::SpawnTime;
     use proptest::prelude::*;
-    use scheduler::SpawnTime;
 
     use super::*;
     use crate::{WindowId, profiler::YieldTime};

@@ -36,11 +36,9 @@ zpui.workspace = true
 accesskit.workspace = true
 accesskit_windows.workspace = true
 anyhow.workspace = true
-collections.workspace = true
 dunce.workspace = true
 etagere.workspace = true
 futures.workspace = true
-zpui-util.workspace = true
 image = { workspace = true, features = [
     "bmp",
     "dds",

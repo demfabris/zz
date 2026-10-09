@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 use std::mem;
 use std::time::Duration;
 
-use scheduler::Instant;
+use crate::scheduler::Instant;
 use smallvec::SmallVec;
 
 use crate::{

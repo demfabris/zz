@@ -1,8 +1,10 @@
 use std::{cmp::Ordering, fmt::Debug};
 
-use crate::{Bias, ContextLessSummary, Dimension, Edit, Item, KeyedItem, SeekTarget, SumTree};
+use crate::sum_tree::{
+    Bias, ContextLessSummary, Dimension, Edit, Item, KeyedItem, SeekTarget, SumTree,
+};
 
-/// A cheaply-cloneable ordered map based on a [SumTree](crate::SumTree).
+/// A cheaply-cloneable ordered map based on a [SumTree](crate::sum_tree::SumTree).
 #[derive(Clone, PartialEq, Eq)]
 pub struct TreeMap<K, V>(SumTree<MapEntry<K, V>>)
 where

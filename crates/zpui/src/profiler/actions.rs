@@ -1,7 +1,7 @@
 use std::time::Duration;
 
+use crate::scheduler::Instant;
 use itertools::Itertools;
-use scheduler::Instant;
 
 #[cfg(feature = "profiler")]
 use crate::action::Action;

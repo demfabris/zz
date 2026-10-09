@@ -13,6 +13,8 @@ mod arena;
 mod asset_cache;
 mod assets;
 mod bounds_tree;
+#[allow(missing_docs)]
+pub mod collections;
 mod color;
 /// The default colors used by GPUI.
 pub mod colors;
@@ -28,6 +30,8 @@ mod geometry;
 mod gestures;
 mod glass;
 mod global;
+#[allow(missing_docs)]
+pub mod http_client;
 mod input;
 mod inspector;
 mod interactive;
@@ -48,19 +52,28 @@ pub mod profiler;
 ))]
 #[expect(missing_docs)]
 pub mod queue;
+#[allow(missing_docs)]
+pub mod refineable;
 mod scene;
+#[allow(missing_docs)]
+pub mod scheduler;
+#[allow(missing_docs)]
+mod shared_string;
 mod shared_uri;
 mod spring;
 mod style;
 mod styled;
 mod subscription;
+#[allow(missing_docs)]
+pub mod sum_tree;
 mod svg_renderer;
 mod tab_stop;
 mod taffy;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test;
 mod text_system;
-mod util;
+#[allow(missing_docs)]
+pub mod util;
 mod view;
 mod window;
 
@@ -136,7 +149,6 @@ macro_rules! bench_main {
         criterion::criterion_main!($($tokens)*);
     };
 }
-pub use http_client;
 pub use input::*;
 pub use inspector::*;
 pub use interactive::*;
@@ -149,6 +161,7 @@ pub use profiler::*;
 pub use queue::{PriorityQueueReceiver, PriorityQueueSender};
 pub use refineable::*;
 pub use scene::*;
+pub use shared_string::*;
 pub use shared_uri::*;
 use std::{any::Any, future::Future};
 pub use style::*;
@@ -161,11 +174,10 @@ pub use taffy::{AvailableSpace, LayoutId};
 #[cfg(any(test, feature = "test-support"))]
 pub use test::*;
 pub use text_system::*;
+pub use util::arc_cow::ArcCow;
 pub use util::{FutureExt, Timeout};
 pub use view::*;
 pub use window::*;
-pub use zpui_shared_string::*;
-pub use zpui_util::arc_cow::ArcCow;
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 pub use wgpu;

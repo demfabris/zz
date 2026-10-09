@@ -13,7 +13,7 @@ use windows::{
     },
     core::*,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::logical_point;
 use zpui::{Bounds, DevicePixels, DisplayId, Pixels, PlatformDisplay, point, size};

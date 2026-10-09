@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use sum_tree::Bias;
+use zpui::sum_tree::Bias;
 
 use crate::code_editor::{Rope, RopeExt as _};
 

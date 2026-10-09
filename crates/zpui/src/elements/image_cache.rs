@@ -5,7 +5,7 @@ use crate::{
 };
 
 use crate::asset_cache::CachedLoad;
-use refineable::Refineable;
+use crate::refineable::Refineable;
 use smallvec::SmallVec;
 use std::{collections::HashMap, fmt, sync::Arc};
 

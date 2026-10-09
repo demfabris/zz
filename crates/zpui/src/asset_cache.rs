@@ -1,5 +1,5 @@
+use crate::collections::FxHashSet;
 use crate::{App, EntityId, SharedString, SharedUri, Task};
-use collections::FxHashSet;
 use futures::{Future, TryFutureExt};
 
 use std::cell::RefCell;
@@ -137,7 +137,7 @@ where
 
 /// Use a quick, non-cryptographically secure hash function to get an identifier from data
 pub fn hash<T: Hash>(data: &T) -> u64 {
-    collections::FxBuildHasher.hash_one(data)
+    crate::collections::FxBuildHasher.hash_one(data)
 }
 
 #[cfg(test)]

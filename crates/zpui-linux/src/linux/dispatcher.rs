@@ -3,7 +3,7 @@ use calloop::{
     channel::{self, Sender},
     timer::TimeoutAction,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use std::{mem::MaybeUninit, thread, time::Duration};
 

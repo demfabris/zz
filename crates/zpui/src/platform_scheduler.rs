@@ -1,12 +1,12 @@
+use crate::scheduler::Instant;
+use crate::scheduler::{
+    Clock, LocalExecutor, Priority, Scheduler, SessionId, Task, TestScheduler, Timer,
+    spawn_dedicated_thread,
+};
 use crate::{PlatformDispatcher, RunnableMeta};
 use async_task::Runnable;
 use chrono::{DateTime, Utc};
 use futures::channel::oneshot;
-use scheduler::Instant;
-use scheduler::{
-    Clock, LocalExecutor, Priority, Scheduler, SessionId, Task, TestScheduler, Timer,
-    spawn_dedicated_thread,
-};
 #[cfg(not(target_family = "wasm"))]
 use std::task::{Context, Poll};
 use std::{
@@ -135,7 +135,7 @@ impl Scheduler for PlatformScheduler {
         let (runnable, _task) = async_task::Builder::new()
             .metadata(RunnableMeta {
                 location,
-                spawned: scheduler::SpawnTime(Instant::now()),
+                spawned: crate::scheduler::SpawnTime(Instant::now()),
             })
             .spawn(
                 move |_| async move {
@@ -193,7 +193,7 @@ impl Clock for PlatformClock {
 mod tests {
     use super::*;
     use crate::RunnableVariant;
-    use scheduler::BackgroundExecutor;
+    use crate::scheduler::BackgroundExecutor;
     use std::time::Instant as StdInstant;
 
     // `spawn_dedicated` shouldn't touch the platform dispatcher at all;
@@ -222,7 +222,7 @@ mod tests {
     fn dedicated_executor_tasks_share_one_thread() {
         let background =
             BackgroundExecutor::new(Arc::new(PlatformScheduler::new(Arc::new(SmokeDispatcher))));
-        let dedicated = scheduler::DedicatedExecutor::new(&background);
+        let dedicated = crate::scheduler::DedicatedExecutor::new(&background);
 
         let first = dedicated.spawn(async { std::thread::current().id() });
         let second = dedicated.spawn(async { std::thread::current().id() });

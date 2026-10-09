@@ -2,6 +2,8 @@
 use crate::NoopTextSystem;
 #[cfg(any(test, feature = "test-support"))]
 use crate::PathPromptOptions;
+#[cfg(any(test, feature = "test-support"))]
+use crate::collections::VecDeque;
 use crate::{
     ActivityGuard, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DevicePixels,
     DummyKeyboardMapper, ForegroundExecutor, Keymap, OwnedMenu, Platform, PlatformDisplay,
@@ -11,8 +13,6 @@ use crate::{
     ThermalState, WindowAppearance, WindowParams, size,
 };
 use anyhow::Result;
-#[cfg(any(test, feature = "test-support"))]
-use collections::VecDeque;
 use futures::channel::oneshot;
 use parking_lot::Mutex;
 use std::{

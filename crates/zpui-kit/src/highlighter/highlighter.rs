@@ -237,7 +237,7 @@ impl HighlightItem {
     }
 }
 
-impl sum_tree::Item for HighlightItem {
+impl zpui::sum_tree::Item for HighlightItem {
     type Summary = HighlightSummary;
     fn summary(&self, _cx: &()) -> Self::Summary {
         HighlightSummary {
@@ -250,7 +250,7 @@ impl sum_tree::Item for HighlightItem {
     }
 }
 
-impl sum_tree::Summary for HighlightSummary {
+impl zpui::sum_tree::Summary for HighlightSummary {
     type Context<'a> = &'a ();
     fn zero(_: Self::Context<'_>) -> Self {
         HighlightSummary {
@@ -271,7 +271,7 @@ impl sum_tree::Summary for HighlightSummary {
     }
 }
 
-impl<'a> sum_tree::Dimension<'a, HighlightSummary> for usize {
+impl<'a> zpui::sum_tree::Dimension<'a, HighlightSummary> for usize {
     fn zero(_: &()) -> Self {
         0
     }
@@ -279,7 +279,7 @@ impl<'a> sum_tree::Dimension<'a, HighlightSummary> for usize {
     fn add_summary(&mut self, _: &'a HighlightSummary, _: &()) {}
 }
 
-impl<'a> sum_tree::Dimension<'a, HighlightSummary> for Range<usize> {
+impl<'a> zpui::sum_tree::Dimension<'a, HighlightSummary> for Range<usize> {
     fn zero(_: &()) -> Self {
         Default::default()
     }

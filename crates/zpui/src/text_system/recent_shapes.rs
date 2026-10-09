@@ -1,6 +1,6 @@
 use super::{FontRun, LineLayout, ShapedGlyph, ShapedRun};
 use crate::Pixels;
-use collections::{FxHashMap, FxHasher};
+use crate::collections::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 use std::{
     hash::{Hash, Hasher},

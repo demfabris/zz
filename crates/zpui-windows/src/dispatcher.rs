@@ -18,7 +18,7 @@ use windows::Win32::{
     },
     UI::WindowsAndMessaging::PostMessageW,
 };
-use zpui_util::ResultExt;
+use zpui::util::ResultExt;
 
 use crate::{HWND, SafeHwnd, WM_GPUI_TASK_DISPATCHED_ON_MAIN_THREAD};
 use zpui::{
@@ -166,7 +166,7 @@ impl PlatformDispatcher for WindowsDispatcher {
         unsafe {
             timeBeginPeriod(1);
         }
-        zpui_util::defer(Box::new(|| unsafe {
+        zpui::util::defer(Box::new(|| unsafe {
             timeEndPeriod(1);
         }))
     }

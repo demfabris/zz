@@ -7,8 +7,8 @@ use std::{
 };
 
 use calloop::ping::Ping;
-use collections::{FxHashMap, HashMap};
 use futures::channel::oneshot::Receiver;
+use zpui::collections::{FxHashMap, HashMap};
 
 use raw_window_handle as rwh;
 use wayland_backend::client::ObjectId;

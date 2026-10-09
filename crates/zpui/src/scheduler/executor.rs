@@ -1,4 +1,4 @@
-use crate::{Instant, Priority, RunnableMeta, Scheduler, SessionId, Timer};
+use crate::scheduler::{Instant, Priority, RunnableMeta, Scheduler, SessionId, Timer};
 use async_task::Runnable;
 use std::{
     any::Any,
@@ -72,7 +72,7 @@ impl LocalExecutor {
             schedule,
             RunnableMeta {
                 location,
-                spawned: crate::SpawnTime(Instant::now()),
+                spawned: crate::scheduler::SpawnTime(Instant::now()),
             },
         );
         runnable.schedule();
@@ -99,7 +99,7 @@ impl LocalExecutor {
             dispatch,
             RunnableMeta {
                 location,
-                spawned: crate::SpawnTime(Instant::now()),
+                spawned: crate::scheduler::SpawnTime(Instant::now()),
             },
         );
         runnable.schedule();
@@ -239,7 +239,7 @@ impl BackgroundExecutor {
         let (runnable, task) = async_task::Builder::new()
             .metadata(RunnableMeta {
                 location,
-                spawned: crate::SpawnTime(Instant::now()),
+                spawned: crate::scheduler::SpawnTime(Instant::now()),
             })
             .spawn(move |_| future, schedule);
         runnable.schedule();
@@ -265,7 +265,7 @@ impl BackgroundExecutor {
         let (runnable, task) = async_task::Builder::new()
             .metadata(RunnableMeta {
                 location,
-                spawned: crate::SpawnTime(Instant::now()),
+                spawned: crate::scheduler::SpawnTime(Instant::now()),
             })
             .spawn(
                 move |_| future,

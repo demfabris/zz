@@ -182,20 +182,13 @@ zeroize = "=1.9.0"
 
 zpui = { path = "crates/zpui", default-features = false }
 zpui-apple = { path = "crates/zpui-apple" }
-collections = { path = "crates/zpui-collections", package = "zpui-collections" }
-http_client = { path = "crates/zpui-http-client", package = "zpui-http-client" }
 zpui-ios = { path = "crates/zpui-ios" }
 zpui-kit = { path = "crates/zpui-kit" }
 zpui-linux = { path = "crates/zpui-linux", default-features = false }
 zpui-macos = { path = "crates/zpui-macos", default-features = false }
 zpui-macros = { path = "crates/zpui-macros" }
 zpui-platform = { path = "crates/zpui-platform", default-features = false }
-refineable = { path = "crates/zpui-refineable", package = "zpui-refineable" }
 derive_refineable = { path = "crates/zpui-refineable-derive", package = "zpui-refineable-derive" }
-scheduler = { path = "crates/zpui-scheduler", package = "zpui-scheduler" }
-zpui-shared-string = { path = "crates/zpui-shared-string" }
-sum_tree = { path = "crates/zpui-sum-tree", package = "zpui-sum-tree" }
-zpui-util = { path = "crates/zpui-util" }
 zpui-web = { path = "crates/zpui-web" }
 zpui-wgpu = { path = "crates/zpui-wgpu" }
 zpui-windows = { path = "crates/zpui-windows", default-features = false }
@@ -255,19 +248,12 @@ debug = 1
 taffy = { opt-level = 3 }
 zpui = { opt-level = 3 }
 zpui-apple = { opt-level = 2 }
-zpui-collections = { opt-level = 2 }
-zpui-http-client = { opt-level = 2 }
 zpui-ios = { opt-level = 2 }
 zpui-linux = { opt-level = 2 }
 zpui-macos = { opt-level = 2 }
 zpui-macros = { opt-level = 2 }
 zpui-platform = { opt-level = 2 }
-zpui-refineable = { opt-level = 2 }
 zpui-refineable-derive = { opt-level = 2 }
-zpui-scheduler = { opt-level = 2 }
-zpui-shared-string = { opt-level = 2 }
-zpui-sum-tree = { opt-level = 2 }
-zpui-util = { opt-level = 2 }
 zpui-web = { opt-level = 2 }
 zpui-wgpu = { opt-level = 2 }
 zpui-windows = { opt-level = 2 }

@@ -1,7 +1,7 @@
+use crate::scheduler::{Instant, SpawnTime};
 #[cfg(feature = "profiler")]
 use hdrhistogram::Histogram;
 use itertools::Itertools;
-use scheduler::{Instant, SpawnTime};
 #[cfg(feature = "profiler")]
 use smallvec::SmallVec;
 use std::{

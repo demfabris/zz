@@ -1,3 +1,4 @@
+use crate::util::Deferred;
 use crate::{
     AnyView, AnyWindowHandle, AppContext, AsyncApp, DispatchPhase, Effect, EntityId, EventEmitter,
     FocusHandle, FocusOutEvent, Focusable, Global, KeystrokeObserver, Priority, Reservation,
@@ -13,7 +14,6 @@ use std::{
     ops,
     sync::Arc,
 };
-use zpui_util::Deferred;
 
 use super::{App, AsyncWindowContext, Entity, KeystrokeEvent};
 
@@ -274,7 +274,7 @@ impl<'a, T: 'static> Context<'a, T> {
     ) -> Deferred<impl FnOnce()> {
         let this = self.weak_entity();
         let mut cx = self.to_async();
-        zpui_util::defer(move || {
+        crate::util::defer(move || {
             this.update(&mut cx, f).ok();
         })
     }

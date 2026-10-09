@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use ropey::{LineType, Rope, RopeSlice};
-use sum_tree::Bias;
+use zpui::sum_tree::Bias;
 
 #[cfg(feature = "tree-sitter")]
 pub use tree_sitter::{InputEdit, Point};
@@ -200,7 +200,7 @@ pub trait RopeExt {
     ///
     /// ```
     /// use zpui_kit::code_editor::{Rope, RopeExt};
-    /// use sum_tree::Bias;
+    /// use zpui::sum_tree::Bias;
     ///
     /// let rope = Rope::from("Hello 中文🎉 test\nRope");
     /// assert_eq!(rope.clip_offset(5, Bias::Left), 5);
@@ -415,7 +415,7 @@ impl RopeExt for Rope {
 mod tests {
     use super::Point;
     use ropey::Rope;
-    use sum_tree::Bias;
+    use zpui::sum_tree::Bias;
 
     use crate::code_editor::{Position, RopeExt};
 

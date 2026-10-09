@@ -14,6 +14,7 @@ path = "src/terminal_core.rs"
 default = ["session"]
 session = [
     "dep:async-channel",
+    "dep:base64",
     "dep:crossbeam-channel",
     "dep:filedescriptor",
     "dep:foldhash",
@@ -30,6 +31,7 @@ session = [
 
 [dependencies]
 async-channel = { workspace = true, optional = true }
+base64 = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true, optional = true }
 csscolorparser.workspace = true
 filedescriptor = { workspace = true, optional = true }

@@ -9,8 +9,8 @@ pub use zz_protocol::layout::{joined_layout, swapped_layout};
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, MAX_GUI_TEXT_BYTES,
     MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PaneSnapshot, ServerError, SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot,
-    normalize_browser_profile_name,
+    PaneSnapshot, PaneStatus, ServerError, SessionId, SessionSnapshot, SplitId, WindowId,
+    WindowSnapshot, normalize_browser_profile_name,
 };
 
 use crate::{
@@ -216,6 +216,7 @@ pub struct Pane {
     pub active_point: u64,
     /// A BEL rang here and nobody has been back since.
     pub bell: bool,
+    pub status: Option<PaneStatus>,
     pub dead: bool,
     pub dead_status: Option<u32>,
     pub dead_time: Option<u64>,
@@ -513,6 +514,7 @@ impl MuxState {
             kind: PaneKind::Terminal,
             active_point,
             bell: false,
+            status: None,
             dead: false,
             dead_status: None,
             dead_time: None,
@@ -641,6 +643,7 @@ impl MuxState {
             kind,
             active_point,
             bell: false,
+            status: None,
             dead: false,
             dead_status: None,
             dead_time: None,
@@ -1208,6 +1211,7 @@ impl MuxState {
                 kind,
                 active_point,
                 bell: false,
+                status: None,
                 dead: false,
                 dead_status: None,
                 dead_time: None,
@@ -1834,6 +1838,18 @@ impl MuxState {
             return false;
         }
         pane_state.bell = bell;
+        self.bump_generation();
+        true
+    }
+
+    pub fn set_pane_status(&mut self, pane: PaneId, status: Option<PaneStatus>) -> bool {
+        let Some(pane_state) = self.pane_mut(pane) else {
+            return false;
+        };
+        if pane_state.status == status {
+            return false;
+        }
+        pane_state.status = status;
         self.bump_generation();
         true
     }
@@ -3936,6 +3952,7 @@ impl MuxState {
                             active_border_colour: None,
                             border_status_text: String::new(),
                             mode: None,
+                            status: pane.status.clone(),
                         },
                     )
                 })

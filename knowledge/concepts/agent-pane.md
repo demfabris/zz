@@ -288,6 +288,10 @@ Use `#{agent_state}` to read the daemon's phase: `starting`, `idle`, `working`, 
 `failed`. `#{agent_pending_permission}` returns `1` or `0` for an agent and an empty string
 for other pane kinds. For terminal panes, `#{agent_state}` reads the inherited `@agent_state`
 user option, or an empty string when unset; other pane kinds return an empty string.
+A terminal pane whose program reports OSC 7501 program status gets its most urgent
+record mapped into `@agent_state`: `working`, `blocked`, `failed` for `error`, and
+`idle` for `idle`, `done`, or no record. Once a pane has reported, the two heuristics
+below stop writing `@agent_state` for it until a full reset.
 Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
 progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
 sets the whitespace- or comma-separated list of command basenames (default `claude`).

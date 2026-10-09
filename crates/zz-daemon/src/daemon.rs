@@ -97,12 +97,12 @@ use zz_protocol::{
     MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
     MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
     MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat,
-    PatchTail, PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState,
-    PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage, RawText,
-    SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
-    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
-    encode_protocol_message_into, encode_terminal_patch_event_into,
+    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PaneStatus, PaneStatusKind, PaneStatusState,
+    PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction, PopupBorderLines, PopupPointer,
+    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_patch_event_into,
     encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
     menu_row_width, resolve_command,
 };
@@ -110,11 +110,11 @@ use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, ColourClass, CursorBlinkPolicy,
     CursorStyle, DeferredTerminalEvent, EngineKnobs, LastCommandCapture, PasteBufferAction,
-    ProgressBarState, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
-    TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
-    TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
-    TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides, parse_x11_color,
-    prepare_paste_buffer,
+    ProgramBlockKind, ProgramState, ProgramStatus, ProgressBarState, TerminalAppearance,
+    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents,
+    TerminalMode, TerminalPalette, TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn,
+    TerminalViewId, TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides,
+    parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -4241,6 +4241,15 @@ const INSPECT_FIELDS: &[&str] = &[
     "pane_last_command_status",
     "pane_pb_state",
     "pane_pb_progress",
+    "pane_status",
+    "pane_status_kind",
+    "pane_status_progress",
+    "pane_status_app",
+    "pane_status_title",
+    "pane_status_message",
+    "pane_status_raw_title",
+    "pane_status_raw_message",
+    "pane_status_reported",
     "agent_state",
     "agent_pending_permission",
     "permission",
@@ -10041,6 +10050,7 @@ impl Shared {
                             inner.name_checks.remove(pane);
                             inner.pane_read_observations.remove(pane);
                             inner.control_activity_pending.remove(pane);
+                            inner.program_status_panes.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
@@ -27913,6 +27923,9 @@ impl Shared {
         current_command: &str,
         bar_state: ProgressBarState,
     ) {
+        if terminal.program_status().reported() {
+            return;
+        }
         let value = match bar_state {
             ProgressBarState::Indeterminate => "working",
             ProgressBarState::Hidden => "idle",
@@ -27955,6 +27968,74 @@ impl Shared {
             }
         }
         self.write_pane_agent_state(pane, value);
+    }
+
+    fn synchronize_pane_program_status(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        status: &ProgramStatus,
+        worked: bool,
+    ) {
+        let headline = status.headline().map(|record| PaneStatus {
+            state: match record.state {
+                ProgramState::Idle => PaneStatusState::Idle,
+                ProgramState::Working => PaneStatusState::Working,
+                ProgramState::Done => PaneStatusState::Done,
+                ProgramState::Blocked => PaneStatusState::Blocked,
+                ProgramState::Error => PaneStatusState::Error,
+            },
+            kind: record.kind.map(|kind| match kind {
+                ProgramBlockKind::Permission => PaneStatusKind::Permission,
+                ProgramBlockKind::Question => PaneStatusKind::Question,
+                ProgramBlockKind::Auth => PaneStatusKind::Auth,
+            }),
+            progress: record.progress,
+            app: record.app,
+            title: record.title,
+            message: record.message,
+        });
+        let reported = status.reported();
+        let (changed, agent_state) = {
+            let mut inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            {
+                return;
+            }
+            let owned = if reported {
+                !inner.program_status_panes.insert(pane)
+            } else {
+                inner.program_status_panes.remove(&pane)
+            };
+            #[cfg(all(feature = "agent", unix))]
+            if owned != reported {
+                inner.claude_peer_states.remove(&pane);
+            }
+            let agent_state = (reported || owned).then(|| {
+                match headline.as_ref().map(|headline| headline.state) {
+                    Some(PaneStatusState::Working) => "working",
+                    Some(PaneStatusState::Blocked) => "blocked",
+                    Some(PaneStatusState::Error) => "failed",
+                    Some(PaneStatusState::Idle | PaneStatusState::Done) | None => "idle",
+                }
+            });
+            (
+                inner.engine.state.set_pane_status(pane, headline),
+                agent_state,
+            )
+        };
+        if changed {
+            self.publish_snapshot();
+        }
+        if let Some(value) = agent_state {
+            if worked && value == "idle" {
+                self.write_pane_agent_state(pane, "working");
+            }
+            self.write_pane_agent_state(pane, value);
+        }
     }
 
     fn write_pane_agent_state(self: &Arc<Self>, pane: PaneId, value: &str) {
@@ -32968,6 +33049,7 @@ impl Shared {
                         .pane_runtime_facts(pane)
                         .and_then(|runtime| runtime.pid)
                         != pid
+                    || inner.program_status_panes.contains(&pane)
                 {
                     continue;
                 }
@@ -32996,7 +33078,7 @@ impl Shared {
             if self.loop_active.load(Ordering::Acquire) {
                 let _ = self
                     .timer_tx
-                    .send(timers::TimerInput::PeerSample { pane, value });
+                    .send(timers::TimerInput::PeerSample { pane, pid, value });
             } else {
                 self.write_pane_agent_state(pane, &value);
             }
@@ -35169,6 +35251,7 @@ struct ServerState {
     scheduled_name_check: Option<Instant>,
     pane_read_observations: BTreeMap<PaneId, Weak<terminal_reads::Observation>>,
     control_activity_pending: BTreeSet<PaneId>,
+    program_status_panes: BTreeSet<PaneId>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
@@ -47250,7 +47333,16 @@ impl StatusFactSelection {
                 | "cursor_flag"
                 | "pane_last_command_status"
                 | "pane_pb_progress"
-                | "pane_pb_state" => selection.terminals = true,
+                | "pane_pb_state"
+                | "pane_status"
+                | "pane_status_kind"
+                | "pane_status_progress"
+                | "pane_status_app"
+                | "pane_status_title"
+                | "pane_status_message"
+                | "pane_status_raw_title"
+                | "pane_status_raw_message"
+                | "pane_status_reported" => selection.terminals = true,
                 "pane_pipe" | "pane_pipe_pid" => selection.pane_pipes = true,
                 "session_attached" | "session_attached_list" | "session_many_attached" => {
                     selection.session_attachments = true;
@@ -51031,7 +51123,8 @@ for one JSON object per row in the same order as text output. Keys are the forma
 variable names for that entity; values are strings with the same expansion as
 `#{name}`, including empty strings for unavailable values. Pane rows include
 `pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
-`pane_pb_state`, and `pane_pb_progress`. Use `show-options --json` for one object
+`pane_pb_state`, `pane_pb_progress`, and the `pane_status*` program status
+variables. Use `show-options --json` for one object
 mapping option names to value strings in the selected scope. Combining `-F` and
 `--json` is a usage error.
 
@@ -51108,7 +51201,7 @@ Read one `key: value` line per field, or use `--json` for one object with string
 zz inspect -a --json | jq -c 'select(.pane_kind=="agent") | {pane_id,agent_state}'
 ```
 
-The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `pane_status`, `pane_status_kind`, `pane_status_progress`, `pane_status_app`, `pane_status_title`, `pane_status_message`, `pane_status_raw_title`, `pane_status_raw_message`, `pane_status_reported`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
 
 `permission` is a nested `{"request_id":7,"tool_call":{...},"options":[...]}` object or `null` in JSON output; text output prints compact JSON on the `permission:` line, or an empty value.
 
@@ -51283,6 +51376,10 @@ Run `zz tools advanced` for state subscriptions and terminal-agent integration.
 ### State and waiting
 
 Read native Agent state and permission presence through formats.
+A terminal pane whose program reports OSC 7501 program status gets its most urgent
+record mapped into `@agent_state`: `working`, `blocked`, `failed` for `error`, and
+`idle` for `idle`, `done`, or no record. Once a pane has reported, the two heuristics
+below stop writing `@agent_state` for it until a full reset.
 Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
 progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
 sets the whitespace- or comma-separated list of command basenames (default `claude`).
@@ -80209,6 +80306,15 @@ set-option -g @alias-mixed-next yes
                 "pane_last_command_status",
                 "pane_pb_state",
                 "pane_pb_progress",
+                "pane_status",
+                "pane_status_kind",
+                "pane_status_progress",
+                "pane_status_app",
+                "pane_status_title",
+                "pane_status_message",
+                "pane_status_raw_title",
+                "pane_status_raw_message",
+                "pane_status_reported",
                 "agent_state",
                 "agent_pending_permission",
                 "permission",
@@ -81849,6 +81955,162 @@ set-option -g @alias-mixed-next yes
                     .contains_key(&format!("@agent_state@{pane}"))
             );
         }
+        shared.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn program_status_reports_reach_formats_the_tree_and_agent_state() {
+        let shared = Arc::new(Shared::new(1));
+        let (pane, command) = progress_bar_pane(&shared);
+        let target = pane.to_string();
+        let run = |args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(1),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+        };
+        let settle = |format: &str, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let output = run(&["display-message", "-p", "-t", &target, format]).output;
+                if output.trim() == expected {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{format} stayed {output:?}, wanted {expected:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let tree_status = || {
+            shared.inner.lock().engine.state.snapshot().sessions[0].windows[0].panes[&pane]
+                .status
+                .clone()
+        };
+        let peer_sample = |pid: &str| {
+            run(&[
+                "if-shell",
+                "-F",
+                "-t",
+                &target,
+                &format!("#{{?pane_status_reported,,#{{==:#{{pane_pid}},{pid}}}}}"),
+                &format!("set-option -p -t {target} @agent_state working"),
+            ]);
+        };
+        let pane_pid = || {
+            run(&["display-message", "-p", "-t", &target, "#{pane_pid}"])
+                .output
+                .trim()
+                .to_owned()
+        };
+        run(&[
+            "set-option",
+            "-p",
+            "-t",
+            &target,
+            "@agent-progress-commands",
+            &command,
+        ]);
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]7501;state=working:app=tf\\007\\033]7501;state=blocked:id=plan:kind=permission:progress=40:title=UGxhbg:msg=QXBwbHkgIzE/\\007'",
+            "Enter",
+        ]);
+        settle(
+            "#{pane_status}|#{pane_status_kind}|#{pane_status_progress}|#{pane_status_app}|#{pane_status_title}|#{pane_status_message}|#{pane_status_raw_message}|#{pane_status_reported}|#{agent_state}",
+            "blocked|permission|40|tf|Plan|Apply ##1?|Apply #1?|1|blocked",
+        );
+        assert_eq!(
+            tree_status(),
+            Some(PaneStatus {
+                state: PaneStatusState::Blocked,
+                kind: Some(PaneStatusKind::Permission),
+                progress: Some(40),
+                app: "tf".to_owned(),
+                title: "Plan".to_owned(),
+                message: "Apply #1?".to_owned(),
+            })
+        );
+
+        let old_pid = pane_pid();
+        peer_sample(&old_pid);
+        settle("#{agent_state}", "blocked");
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]9;4;0\\007\\033]7501;state=done:id=plan\\007\\033]0;yielded\\007'",
+            "Enter",
+        ]);
+        settle(
+            "#{pane_title}|#{pane_status}|#{agent_state}",
+            "yielded|working|working",
+        );
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]133;A\\007'",
+            "Enter",
+        ]);
+        settle(
+            "#{pane_status}|#{pane_status_app}|#{agent_state}",
+            "done||idle",
+        );
+        assert_eq!(
+            tree_status().map(|status| status.state),
+            Some(PaneStatusState::Done)
+        );
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]7501;state=working\\007'",
+            "Enter",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "working|working");
+        run(&["send-keys", "-t", &target, "printf '\\033c'", "Enter"]);
+        settle(
+            "#{pane_status}|#{pane_status_reported}|#{agent_state}",
+            "|0|idle",
+        );
+        assert_eq!(tree_status(), None);
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]7501;state=blocked\\007'",
+            "Enter",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "blocked|blocked");
+        run(&["respawn-pane", "-k", "-t", &target]);
+        settle("#{pane_status}|#{agent_state}", "|idle");
+        assert_eq!(tree_status(), None);
+        peer_sample(&old_pid);
+        settle("#{agent_state}", "idle");
+
+        run(&[
+            "agent-send",
+            "-t",
+            &target,
+            "--wait",
+            "--timeout",
+            "10",
+            "printf '\\033]7501;state=working\\007\\033]7501;state=done\\007'",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "done|idle");
         shared.request_shutdown();
     }
 

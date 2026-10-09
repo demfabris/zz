@@ -49,6 +49,10 @@ use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::ColourClass;
+use crate::program_status::{
+    MAX_PROGRAM_STATUS_OSC_BYTES, PROGRAM_STATUS_PREFIX, ProgramStatus, ProgramStatusReport,
+    parse_program_status,
+};
 use crate::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, ClipboardTarget, Color, CopyJump,
@@ -439,12 +443,16 @@ struct EngineFilter {
     /// engine as it is read; `osc_overflowed` once it outgrew the cap and only
     /// its command number can still be parsed.
     osc: Vec<u8>,
+    osc_dropped: usize,
     osc_overflowed: bool,
     integration_title: bool,
     program_title_writes: u64,
     bar: ProgressBar,
     primary_history_size: usize,
     metadata_hint: bool,
+    program_status: ProgramStatus,
+    program_status_changed: bool,
+    replies: Option<Rc<RefCell<PtyEffects>>>,
 }
 
 impl EngineFilter {
@@ -500,7 +508,9 @@ impl EngineFilter {
                         bytes = &bytes[1..];
                     }
                     other => {
-                        self.metadata_hint |= other == b'c';
+                        if other == b'c' {
+                            self.full_reset();
+                        }
                         terminal.vt_write(b"\x1b");
                         self.state = EngineState::Ground;
                     }
@@ -657,7 +667,7 @@ impl EngineFilter {
                     return &bytes[escape + 2..];
                 }
                 b'c' => {
-                    self.metadata_hint = true;
+                    self.full_reset();
                     cursor = escape + 2;
                 }
                 _ => {
@@ -690,12 +700,12 @@ impl EngineFilter {
         };
         if terminator == 0x1b {
             terminal.vt_write(&bytes[..end]);
-            self.finish_osc(bar, last_command_status);
+            self.finish_osc(bar, last_command_status, terminator);
             self.state = EngineState::Escape;
             return &bytes[end + 1..];
         }
         terminal.vt_write(&bytes[..=end]);
-        self.finish_osc(bar, last_command_status);
+        self.finish_osc(bar, last_command_status, terminator);
         self.state = EngineState::Ground;
         &bytes[end + 1..]
     }
@@ -704,30 +714,46 @@ impl EngineFilter {
     /// every other control byte inside an OSC is a null transition the pin
     /// drops.
     fn collect_osc(&mut self, bytes: &[u8]) {
-        if self.osc.len() + bytes.len() > MAX_ENGINE_OSC_BYTES {
-            self.osc_overflowed = true;
+        for &byte in bytes {
+            if self.osc_overflowed {
+                return;
+            }
+            let program_status = self.osc.starts_with(PROGRAM_STATUS_PREFIX);
+            if byte < 0x20 && !program_status {
+                continue;
+            }
+            let cap = if program_status {
+                MAX_PROGRAM_STATUS_OSC_BYTES
+            } else {
+                MAX_ENGINE_OSC_BYTES
+            };
+            if self.osc.len() + self.osc_dropped == cap {
+                self.osc_overflowed = true;
+            } else if byte < 0x20 {
+                self.osc_dropped += 1;
+            } else {
+                self.osc.push(byte);
+            }
         }
-        let room = MAX_ENGINE_OSC_BYTES - self.osc.len();
-        self.osc.extend(
-            bytes
-                .iter()
-                .copied()
-                .filter(|byte| *byte >= 0x20)
-                .take(room),
-        );
     }
 
     fn finish_osc(
         &mut self,
         bar: &mut Option<ProgressBar>,
         last_command_status: &mut Option<CommandStatusUpdate>,
+        terminator: u8,
     ) {
         let osc = std::mem::take(&mut self.osc);
         let overflowed = std::mem::take(&mut self.osc_overflowed);
+        self.osc_dropped = 0;
         let integration_title = std::mem::take(&mut self.integration_title);
         self.metadata_hint |= overflowed || osc_touches_metadata(&osc);
         if matches!(osc_command(&osc), Some((0 | 2, _))) {
             self.program_title_writes += u64::from(!integration_title);
+            return;
+        }
+        if is_prompt_start(&osc) {
+            self.program_status_changed |= self.program_status.program_left();
             return;
         }
         if overflowed {
@@ -735,6 +761,14 @@ impl EngineFilter {
         }
         if osc == SHELL_INTEGRATION_TITLE_MARK {
             self.integration_title = true;
+            return;
+        }
+        if let Some(body) = osc.strip_prefix(PROGRAM_STATUS_PREFIX) {
+            match parse_program_status(body) {
+                Some(ProgramStatusReport::Query) => self.answer_program_status_query(terminator),
+                Some(report) => self.program_status_changed |= self.program_status.apply(report),
+                None => {}
+            }
             return;
         }
         if let Some(status) = parse_osc_command_status(&osc) {
@@ -749,6 +783,26 @@ impl EngineFilter {
         if self.bar != before {
             *bar = Some(self.bar);
         }
+    }
+
+    fn answer_program_status_query(&self, terminator: u8) {
+        if let Some(replies) = &self.replies {
+            let reply: &[u8] = if terminator == 0x07 {
+                b"\x1b]7501;?\x07"
+            } else {
+                b"\x1b]7501;?\x1b\\"
+            };
+            replies.borrow_mut().push(reply);
+        }
+    }
+
+    fn full_reset(&mut self) {
+        self.metadata_hint = true;
+        self.program_status_changed |= self.program_status.reset();
+    }
+
+    fn take_program_status(&mut self) -> Option<ProgramStatus> {
+        std::mem::take(&mut self.program_status_changed).then(|| self.program_status.clone())
     }
 
     /// `input_exit_rename`: every way out of the rename state applies the
@@ -808,6 +862,12 @@ fn csi_touches_metadata(parameters: &[u8], final_byte: u8) -> bool {
         b't' => parameters.starts_with(b"22") || parameters.starts_with(b"23"),
         _ => false,
     }
+}
+
+fn is_prompt_start(payload: &[u8]) -> bool {
+    payload
+        .strip_prefix(b"133;A")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(b";"))
 }
 
 fn parse_osc_command_status(payload: &[u8]) -> Option<CommandStatusUpdate> {
@@ -1736,6 +1796,7 @@ struct PublishedViewports {
     fallback_current: bool,
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
     bar: ProgressBar,
+    program_status: Arc<ProgramStatus>,
     last_command_status: Option<i32>,
     facts: TerminalFacts,
     search_string: String,
@@ -1753,6 +1814,7 @@ impl PublishedViewports {
             fallback_current: false,
             copy_facts: HashMap::new(),
             bar: ProgressBar::default(),
+            program_status: Arc::default(),
             last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
@@ -2459,6 +2521,11 @@ impl TerminalSession {
     #[must_use]
     pub fn progress_bar(&self) -> ProgressBar {
         self.latest.read().bar
+    }
+
+    #[must_use]
+    pub fn program_status(&self) -> Arc<ProgramStatus> {
+        Arc::clone(&self.latest.read().program_status)
     }
 
     #[must_use]
@@ -5353,6 +5420,11 @@ impl Publisher {
 
     fn set_last_command_status(&self, status: Option<i32>) {
         self.latest.write().last_command_status = status;
+    }
+
+    fn set_program_status(&self, status: ProgramStatus) {
+        self.latest.write().program_status = Arc::new(status);
+        self.notify_latest();
     }
 
     #[cfg(test)]
@@ -16942,6 +17014,96 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn engine_filter_answers_and_keeps_program_status() {
+        let effects = Rc::new(RefCell::new(PtyEffects::new()));
+        let sink = Rc::clone(&effects);
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
+        terminal
+            .on_pty_write(move |_, bytes| sink.borrow_mut().push(bytes))
+            .expect("pty write");
+        register_device_attributes(&mut terminal).expect("device attributes");
+        let mut write = |filter: &mut EngineFilter, bytes: &[u8]| {
+            filter.write(
+                bytes,
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut Vec::new(),
+                &mut None,
+                &mut None,
+            );
+        };
+        let mut filter = EngineFilter {
+            replies: Some(Rc::clone(&effects)),
+            ..EngineFilter::default()
+        };
+
+        write(&mut filter, b"\x1b]7501;?\x1b\\\x1b[c");
+        let replies = std::mem::take(&mut effects.borrow_mut().bytes);
+        assert!(
+            replies.starts_with(b"\x1b]7501;?\x1b\\\x1b[?"),
+            "{:?}",
+            String::from_utf8_lossy(&replies)
+        );
+        write(&mut filter, b"\x1b]7501;?\x07");
+        assert_eq!(effects.borrow().bytes, b"\x1b]7501;?\x07");
+        assert!(filter.take_program_status().is_none());
+
+        write(&mut filter, b"\x1b]7501;state=working:id=sync:msg=U3lu");
+        assert!(filter.take_program_status().is_none());
+        write(&mut filter, b"Y2luZyBwaG90b3M=\x1b\\");
+        let record = filter
+            .take_program_status()
+            .and_then(|status| status.headline())
+            .expect("split report");
+        assert_eq!(
+            (record.id.as_str(), record.state, record.message.as_str()),
+            ("sync", crate::ProgramState::Working, "Syncing photos")
+        );
+
+        let long = format!("\x1b]7501;state=working:msg={}\x07", "eHh4".repeat(500));
+        write(&mut filter, long.as_bytes());
+        let record = filter
+            .take_program_status()
+            .and_then(|status| status.headline())
+            .expect("long report");
+        assert_eq!(record.message, "xxx".repeat(500));
+
+        write(
+            &mut filter,
+            format!(
+                "\x1b]7501;state=done:msg=RG9uZQ\x07\x1b]7501;state=working:id=w\x07\x1b]133;A;aid={}\x07",
+                "x".repeat(80)
+            )
+            .as_bytes(),
+        );
+        let status = filter.take_program_status().expect("prompt");
+        assert_eq!(
+            status
+                .records()
+                .iter()
+                .map(|record| (record.state, record.message.as_str()))
+                .collect::<Vec<_>>(),
+            [(crate::ProgramState::Done, "Done")]
+        );
+
+        let padded = format!("\x1b]7501;{}state=clear\x07", "\t".repeat(4100));
+        write(&mut filter, padded.as_bytes());
+        assert!(filter.take_program_status().is_none());
+        write(&mut filter, b"\x1b]7501;\t\tstate=clear\x07");
+        let status = filter.take_program_status().expect("clear");
+        assert!(status.records().is_empty());
+
+        write(&mut filter, b"text\x1bcmore");
+        let status = filter.take_program_status().expect("reset");
+        assert!(status.records().is_empty() && !status.reported());
+
+        let mut quiet = EngineFilter::default();
+        write(&mut quiet, b"\x1b]7501;?\x07\x1b]7501;state=idle\x07");
+        assert_eq!(effects.borrow().bytes, b"\x1b]7501;?\x07");
+        assert!(quiet.take_program_status().is_some());
     }
 
     /// The same probe's edges. From `9;4;1;50`, the pin answered

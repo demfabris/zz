@@ -3412,7 +3412,7 @@ pub fn delegated_format_variable_names() -> impl Iterator<Item = &'static str> {
     })
 }
 
-const PANE_HOOK_FORMAT_VARIABLES: [&str; 7] = [
+const PANE_HOOK_FORMAT_VARIABLES: [&str; 16] = [
     "pane_kind",
     "agent_state",
     "agent_pending_permission",
@@ -3420,6 +3420,15 @@ const PANE_HOOK_FORMAT_VARIABLES: [&str; 7] = [
     "pane_pb_state",
     "pane_pb_progress",
     "pane_last_command_status",
+    "pane_status",
+    "pane_status_kind",
+    "pane_status_progress",
+    "pane_status_app",
+    "pane_status_title",
+    "pane_status_message",
+    "pane_status_raw_title",
+    "pane_status_raw_message",
+    "pane_status_reported",
 ];
 
 impl StatusContext<'_> {

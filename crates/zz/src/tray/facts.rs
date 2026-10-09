@@ -192,6 +192,7 @@ mod tests {
             active_border_colour: None,
             border_status_text: String::new(),
             mode: None,
+            status: None,
         };
         let terminal = pane(1, "Shell", PaneKindSnapshot::Terminal);
         let approval = pane(

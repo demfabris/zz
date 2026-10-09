@@ -426,6 +426,7 @@ fn pane_snapshot_carries_bell() {
         active_border_colour: None,
         border_status_text: String::new(),
         mode: None,
+        status: None,
     };
     assert!(snapshot.bell);
 }
@@ -444,6 +445,7 @@ fn pane_snapshot_border_colours_round_trip_and_reject_invalid_rgb() {
         active_border_colour: Some(TmuxColour::Basic(1)),
         border_status_text: String::new(),
         mode: None,
+        status: None,
     };
     let bytes = postcard::to_stdvec(&snapshot).expect("pane snapshot encodes");
     assert_eq!(

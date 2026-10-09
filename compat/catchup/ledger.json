@@ -504,7 +504,7 @@
       "id": "pin.hooks-events-2",
       "track": "pin",
       "title": "Rest of the 3.8 hook surface",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "pin.hooks-events"
       ],
@@ -527,14 +527,15 @@
         "compat/attached-client.sh's probe_client_event_hooks passes at 3.8: client-active fills #{hook_session} and #{hook_session_name} (3.8 prints |$0|attached,)."
       ],
       "branch": "catchup/pin.hooks-events-2",
-      "sha": null,
+      "sha": "7f251c2e4",
       "notes": [
         "2026-10-09: leftovers of pin.hooks-events.",
         "2026-10-09: From pin.display-panes: inner.pane_mode_transitions.clear() at command end sits outside the hooks-enabled branch, so a transition recorded outside a command and not fired at once is dropped (clock-mode -k and switch-mode exits may leak); 3.8 send-keys to a pane in a mode does nothing without an attached client (window_pane_key), zz passes it to the mode.",
         "2026-10-09: Lane done at 44257f9e6: all 7 clauses (prompt events, wait-for -E/-v/-F sink, 10 payload keys + 2 to linked-groups, after-select-pane skip, set-hook -E registry, gap closed, attached-client --client-events PASS); mode transition leak fixed; send-keys to a mode unattached already matched. Follow-ups: zz events still carry d77 payload keys 3.8 dropped (visible in wait-for -E -v); -v prints at wake not per event; pane prompts are per client (close on detach); formats-values session_active list filters fail on main. Review 1 running.",
         "2026-10-09: Codex review 1 (pin.hooks-events-2-1.md): 4 P1 (format monitors bypass the sink, -v buffered not streamed, interactive clients cannot wait, pane_command uses the current default-shell) + P2 (prompt events carry session keys; also drop d77 keys 3.8 removed); fix pass sent.",
         "2026-10-09: Fix pass 18573ad8e (main merged 6ad508a6a): review 1's 4 P1 + P2 fixed with 3.8 checks; d77 payload keys left to fix.followups. Review 2 running.",
-        "2026-10-09: Codex review 2 (pin.hooks-events-2-2.md): 3 P1 (-v still buffered for control/interactive, filters inherit waiter context, set-hook -o no-op registers) + P2 (legacy keys: fix.followups); final fix pass sent."
+        "2026-10-09: Codex review 2 (pin.hooks-events-2-2.md): 3 P1 (-v still buffered for control/interactive, filters inherit waiter context, set-hook -o no-op registers) + P2 (legacy keys: fix.followups); final fix pass sent.",
+        "2026-10-09: Merged after the final fix pass (df5ce835b: -v streams to every client kind, filters use only the waiting client, set-hook @x registers only on assignment) and main merges; checks green (zz-daemon 1584, zz-mux 682, zz-protocol 291, zz-client 217, 8 hook scenarios vs 3.8, attached-client --client-events)."
       ]
     },
     {

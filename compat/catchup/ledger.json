@@ -316,7 +316,7 @@
       "id": "pin.contract-breaks",
       "track": "pin",
       "title": "3.8 contract breaks: active-pane flag, %% quoting, q: escaping, relative targets",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -336,12 +336,13 @@
         "Invalid relative targets such as +foo and -0 are errors (00f3899a)."
       ],
       "branch": "catchup/pin.contract-breaks",
-      "sha": null,
+      "sha": "a43dd3cd3",
       "notes": [
         "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here.",
         "2026-10-09 from pin.layout-v2: smoke/control-notify fails tmux-side-only at 3.8 (%pause, %continue and hook %window-renamed now queued outside %begin/%end).",
         "2026-10-09 from pin.layout-v2: 3.8 layout_parse no longer rebuilds tiled pane z-order from the tree; zz still sets window.z_order = panes_in_order() in select_layout_string; measure and align.",
-        "2026-10-09: lane done at be130e32d: all 5 items + 2 notes closed against 3.8; compat/attached-client.sh edited (active-pane flag) but not run"
+        "2026-10-09: lane done at be130e32d: all 5 items + 2 notes closed against 3.8; compat/attached-client.sh edited (active-pane flag) but not run",
+        "2026-10-09: 2 reviews + final fix; merged; clippy, zz-daemon lib 1682, hunt_claims, just compat check green on main"
       ]
     },
     {

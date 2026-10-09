@@ -3744,6 +3744,7 @@ pub enum EventPayload {
     TerminalNegotiation {
         features: Vec<String>,
         user_keys: Vec<String>,
+        application_escape: Vec<String>,
     },
 }
 

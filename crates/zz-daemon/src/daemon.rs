@@ -41161,7 +41161,7 @@ fn client_feature_mask_from_source(inner: &ClientFormatSource<'_>, client: Clien
     features
 }
 
-type TerminalNegotiation = (Vec<String>, Vec<String>);
+type TerminalNegotiation = (Vec<String>, Vec<String>, Vec<String>);
 
 fn client_terminal_negotiation(
     inner: &ServerState,
@@ -41170,6 +41170,19 @@ fn client_terminal_negotiation(
     let source = ClientFormatSource::from_inner(inner);
     client_colour_count_from_source(&source, client)?;
     let features = terminal_features_list(client_feature_mask_from_source(&source, client));
+    let application_escape = client_terminal_facts(
+        client_environment_value_from_source(&source, client, "TERM").unwrap_or_default(),
+        client_environment_value_from_source(&source, client, "COLORTERM"),
+        &features,
+        &inner.engine.terminal_features_option(),
+        &inner.engine.terminal_overrides_option(),
+    )
+    .map(|term| {
+        ["Enesc", "Dsesc"]
+            .map(|name| term.string_capability(name).to_owned())
+            .to_vec()
+    })
+    .unwrap_or_default();
     Some((
         features
             .split(',')
@@ -41177,6 +41190,7 @@ fn client_terminal_negotiation(
             .map(str::to_owned)
             .collect(),
         inner.engine.user_keys_option(),
+        application_escape,
     ))
 }
 
@@ -41193,10 +41207,11 @@ fn take_terminal_negotiation(inner: &mut ServerState, client: ClientId) -> Optio
         .client_entry(client)
         .published_terminal_negotiation
         .replace(negotiation.clone());
-    let (features, user_keys) = negotiation;
+    let (features, user_keys, application_escape) = negotiation;
     Some(EventPayload::TerminalNegotiation {
         features,
         user_keys,
+        application_escape,
     })
 }
 

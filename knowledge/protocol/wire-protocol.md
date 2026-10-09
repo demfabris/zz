@@ -881,7 +881,9 @@ v108 also carries the rest of tmux 3.8's formats and options (catch-up item
 clear when on; the old screen scrolled into the terminal's history when off). `ModePresentation`
 appends `current_line_style` after `current_line_number_style`: the expanded
 `copy-mode-current-line-style`, empty while the option is `default`, which the raw TUI lays over
-the copy cursor's row.
+the copy cursor's row. `EventPayload::TerminalNegotiation` appends `application_escape`: the
+client's effective `Enesc` and `Dsesc`, in that order, each empty when its term has none; the raw
+TUI writes the first when it takes the terminal and the second when it lets go, as `tty.c` does.
 
 v108 also carries the mode prompts' cursor (catch-up item `fix.followups`).
 `ChooserPresentation` appends `prompt_cursor: PromptCursor`, and `PaneMode::Switch` appends

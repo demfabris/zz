@@ -725,6 +725,11 @@ pub(crate) fn run(
                                 ) {
                                     refresh_terminal_options(&mut model, &core, &escape_time);
                                     event_loop.adopt_negotiation(&core);
+                                    if crate::tty::take_utf8_repaint() {
+                                        renderer
+                                            .paint(&model, true)
+                                            .map_err(|error| error.to_string())?;
+                                    }
                                 }
                                 let popup_lifecycle_changed = matches!(
                                     &*event,

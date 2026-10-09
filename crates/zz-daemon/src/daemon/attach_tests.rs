@@ -994,6 +994,7 @@ fn negotiations(mailbox: &OutboundMailbox) -> Vec<(Vec<String>, Vec<String>)> {
                     EventPayload::TerminalNegotiation {
                         features,
                         user_keys,
+                        ..
                     },
                 ..
             }) => Some((features, user_keys)),

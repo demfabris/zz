@@ -1344,6 +1344,7 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   CASE_LOCALE=C
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/non-utf8
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-u -u -u
+  case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-T-utf8 '-T utf8' '-T utf8'
   case_colours
   case_silent
   case_silent_tc 'silent/tc' ',*:Tc' ',*:Tc'

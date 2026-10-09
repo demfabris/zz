@@ -582,6 +582,11 @@ impl TtyTerm {
         self.has(name)
     }
 
+    #[must_use]
+    pub fn string_capability(&self, name: &str) -> &str {
+        self.string(name)
+    }
+
     /// `tty_feature_present`.
     #[must_use]
     pub fn has_feature(&self, name: &str) -> bool {
@@ -1416,8 +1421,18 @@ mod tests {
             ["focus", "sync"]
         );
         assert!(term.has_feature("appesc"));
-        assert!(term.has_capability("Enesc"));
-        assert!(term.has_capability("Dsesc"));
+        assert_eq!(term.string_capability("Enesc"), "\u{1b}[?7727h");
+        assert_eq!(term.string_capability("Dsesc"), "\u{1b}[?7727l");
+        let removed = TtyTerm::create(
+            "xterm",
+            &entries,
+            None,
+            "appesc",
+            &[],
+            &rows(&["xterm*:Enesc@:Dsesc@"]),
+        );
+        assert_eq!(removed.string_capability("Enesc"), "");
+        assert_eq!(removed.string_capability("Dsesc"), "");
         assert!(!term.has_feature("sync"));
         assert!(term.has_feature("utf8"));
         let plain = TtyTerm::create("xterm", &entries, None, "", &[], &[]);

@@ -2264,7 +2264,6 @@ fn format_monitor_display(name: &str, scope: FormatMonitorScope, format: &str) -
 #[derive(Clone, Copy)]
 enum ShowOptionArgument {
     Expand,
-    AlreadyExpanded,
     HookAlreadyExpanded,
 }
 
@@ -11167,6 +11166,7 @@ impl MuxEngine {
         if parsed.name.starts_with('@') {
             if options.has("-R") {
                 let Some(commands) = self.user_hook_commands(&target_context, &argument) else {
+                    self.note_event_hook_fired(&target_context, &argument, unix_seconds());
                     return Ok(Execution::default());
                 };
                 return Ok(Execution::effect(MuxEffect::RunHook {
@@ -11499,7 +11499,12 @@ impl MuxEngine {
             .find(|monitor| monitor.id == id)?;
         match monitor.previous.insert(target, value.to_owned()) {
             Some(last) if last != value && (!monitor.notify_true || format_true(value)) => {
-                monitor.fire.fired(self.state.format_now());
+                let now = self.state.format_now();
+                monitor.fire.fired(now);
+                let owner = (monitor.target, monitor.name.clone());
+                if self.user_option_at_target(owner.0, &owner.1).is_some() {
+                    self.hook_fires.entry(owner).or_default().fired(now);
+                }
                 Some(last)
             }
             Some(_) | None => None,
@@ -11750,6 +11755,7 @@ impl MuxEngine {
             self.hook_array_mut(target, name)
                 .expect("global hook table is complete")
                 .clear();
+            self.forget_hook_fires(target, name);
         } else if let Some(hooks) = self.hook_table_mut(target) {
             hooks.remove(name);
             self.forget_hook_fires(target, name);
@@ -12311,7 +12317,7 @@ impl MuxEngine {
                 context,
                 &forwarded,
                 false,
-                ShowOptionArgument::AlreadyExpanded,
+                ShowOptionArgument::HookAlreadyExpanded,
                 hooks,
             );
         }
@@ -12880,9 +12886,7 @@ impl MuxEngine {
                 let target = self.show_options_format_target(context, &options, force_window);
                 self.expand_pane_format(argument, &target.0, context.session, target.1, hooks)
             }
-            ShowOptionArgument::AlreadyExpanded | ShowOptionArgument::HookAlreadyExpanded => {
-                argument.to_string()
-            }
+            ShowOptionArgument::HookAlreadyExpanded => argument.to_string(),
         };
         let parsed = match parse_tmux_option(&argument) {
             Ok(parsed) => parsed,
@@ -12993,6 +12997,9 @@ impl MuxEngine {
                         value_only,
                     );
                 }
+                if matches!(argument_expansion, ShowOptionArgument::HookAlreadyExpanded) {
+                    self.stamp_hook_fires(target, &mut lines);
+                }
                 return Ok(self.shown_options_execution(
                     context,
                     &options,
@@ -13027,6 +13034,9 @@ impl MuxEngine {
             inherited,
             value_only,
         );
+        if matches!(argument_expansion, ShowOptionArgument::HookAlreadyExpanded) {
+            self.stamp_hook_fires(target, &mut lines);
+        }
         Ok(self.shown_options_execution(context, &options, force_window, &lines, hooks))
     }
 
@@ -47411,6 +47421,37 @@ mod tests {
         assert_eq!(
             run(&mut engine, &["show-hooks", "-B", "-F", fired, "@watch"]),
             "@watch:1:1700000020"
+        );
+        assert_eq!(
+            run(&mut engine, &["show-hooks", "-F", fired, "@watch"]),
+            "@watch:1:1700000020"
+        );
+        assert_eq!(
+            run(&mut engine, &["show-hooks", "-g", "-F", fired, "status"]),
+            "status:0:unset"
+        );
+        run(&mut engine, &["set-hook", "-gu", "after-new-window"]);
+        assert_eq!(
+            run(
+                &mut engine,
+                &["show-hooks", "-g", "-F", fired, "after-new-window"]
+            ),
+            "after-new-window:0:unset"
+        );
+        run(&mut engine, &["set-option", "-g", "@broken", "{"]);
+        run(&mut engine, &["set-hook", "-R", "@broken"]);
+        assert_eq!(
+            run(
+                &mut engine,
+                &[
+                    "show-hooks",
+                    "-g",
+                    "-F",
+                    "#{option_name}:#{hook_fire_count}",
+                    "@broken"
+                ]
+            ),
+            "@broken:1"
         );
     }
 

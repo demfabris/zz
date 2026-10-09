@@ -103,11 +103,25 @@ fn raise_terminal_colours(colours: u32) {
 }
 
 /// `CLIENT_UTF8`, the flag `tty_check_codeset` reads before it writes a cell.
-/// `tmux.c` decides it in the client process from `-u` and the locale and
-/// never revisits it, so this reads it once too.
+/// `tmux.c` decides it in the client process from `-u` and the locale, and
+/// `tty_apply_features` sets it again once the `utf8` feature applies.
 pub(crate) fn terminal_takes_utf8() -> bool {
     static TAKES_UTF8: OnceLock<bool> = OnceLock::new();
     *TAKES_UTF8.get_or_init(zz_daemon_client::client_takes_utf8_terminal)
+        || UTF8_FEATURE.load(Ordering::Relaxed)
+}
+
+static UTF8_FEATURE: AtomicBool = AtomicBool::new(false);
+static UTF8_REPAINT: AtomicBool = AtomicBool::new(false);
+
+fn note_utf8_feature() {
+    if terminal_carries("utf8") && !UTF8_FEATURE.swap(true, Ordering::Relaxed) {
+        UTF8_REPAINT.store(true, Ordering::Relaxed);
+    }
+}
+
+pub(crate) fn take_utf8_repaint() -> bool {
+    UTF8_REPAINT.swap(false, Ordering::Relaxed)
 }
 
 /// `tty_keys_device_attributes2` reads the first parameter of a secondary DA
@@ -169,30 +183,46 @@ fn learn_terminal_features(features: &str) {
     raise_terminal_colours(zz_daemon_client::client_terminal_colour_count());
     arm_extended_keys();
     arm_application_escape();
+    note_utf8_feature();
 }
 
-pub(crate) fn adopt_negotiated_features(features: &[String]) {
+pub(crate) fn adopt_negotiated_features(features: &[String], application_escape: &[String]) {
+    if let Ok(mut escape) = APPLICATION_ESCAPE.lock() {
+        *escape = [0, 1].map(|index| {
+            application_escape
+                .get(index)
+                .map(|value| value.as_bytes().to_vec())
+                .unwrap_or_default()
+        });
+    }
     zz_daemon_client::adopt_negotiated_terminal_features(features);
     if terminal_colours().is_some() {
         raise_terminal_colours(zz_daemon_client::client_terminal_colour_count());
     }
     arm_extended_keys();
     arm_application_escape();
+    note_utf8_feature();
 }
 
 static APPLICATION_ESCAPE_ARMED: AtomicBool = AtomicBool::new(false);
-const APPLICATION_ESCAPE_ENABLE: &[u8] = b"\x1b[?7727h";
-const APPLICATION_ESCAPE_DISABLE: &[u8] = b"\x1b[?7727l";
+static APPLICATION_ESCAPE: std::sync::Mutex<[Vec<u8>; 2]> =
+    std::sync::Mutex::new([Vec::new(), Vec::new()]);
+
+fn application_escape(index: usize) -> Vec<u8> {
+    APPLICATION_ESCAPE
+        .lock()
+        .map(|escape| escape[index].clone())
+        .unwrap_or_default()
+}
 
 fn arm_application_escape() {
-    if !terminal_carries("appesc") || APPLICATION_ESCAPE_ARMED.swap(true, Ordering::Relaxed) {
+    let enable = application_escape(0);
+    if enable.is_empty() || APPLICATION_ESCAPE_ARMED.swap(true, Ordering::Relaxed) {
         return;
     }
     ACTIVE_OUTPUT.with(|output| {
         if let Some(writer) = output.borrow().as_ref() {
-            let _ = writer
-                .borrow_mut()
-                .control(APPLICATION_ESCAPE_ENABLE.to_vec());
+            let _ = writer.borrow_mut().control(enable);
         }
     });
 }
@@ -414,6 +444,7 @@ impl TerminalGuard {
         self.writer.borrow_mut().control(output)?;
         arm_extended_keys();
         arm_application_escape();
+        note_utf8_feature();
         Ok(())
     }
 
@@ -488,7 +519,7 @@ impl TerminalGuard {
             let _ = output.write_all(EXTENDED_KEYS_DISABLE);
         }
         if APPLICATION_ESCAPE_ARMED.swap(false, Ordering::Relaxed) {
-            let _ = output.write_all(APPLICATION_ESCAPE_DISABLE);
+            let _ = output.write_all(&application_escape(1));
         }
         let _ = output.write_all(THEME_UNSUBSCRIBE);
         let _ = output.write_all(KEYPAD_LOCAL);
@@ -564,6 +595,8 @@ fn terminal_supports<const N: usize>(names: [&str; N]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static NEGOTIATION_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn the_hello_arms_the_terminal_from_subscribed_options() {
@@ -685,6 +718,9 @@ mod tests {
 
     #[test]
     fn a_negotiated_extkeys_feature_writes_the_extended_key_request() {
+        let _serial = NEGOTIATION_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = std::sync::Arc::clone(&written);
         let writer = crate::writer::TerminalWriter::with_sink(Box::new(move |bytes| {
@@ -695,12 +731,40 @@ mod tests {
             *output.borrow_mut() = Some(std::rc::Rc::new(std::cell::RefCell::new(writer)));
         });
         EXTENDED_KEYS_OPTION.store(true, Ordering::Relaxed);
-        adopt_negotiated_features(&["extkeys".to_owned()]);
+        adopt_negotiated_features(&["extkeys".to_owned()], &[]);
         let armed = EXTENDED_KEYS_ARMED.swap(false, Ordering::Relaxed);
         EXTENDED_KEYS_OPTION.store(false, Ordering::Relaxed);
         ACTIVE_OUTPUT.with(|output| output.borrow_mut().take());
         assert!(armed);
         assert_eq!(written.lock().unwrap().as_slice(), EXTENDED_KEYS_ENABLE);
+    }
+
+    #[test]
+    fn application_escape_writes_the_terms_own_enesc_and_nothing_without_it() {
+        let _serial = NEGOTIATION_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&written);
+        let writer = crate::writer::TerminalWriter::with_sink(Box::new(move |bytes| {
+            sink.lock().unwrap().extend_from_slice(bytes);
+            Ok(())
+        }));
+        ACTIVE_OUTPUT.with(|output| {
+            *output.borrow_mut() = Some(std::rc::Rc::new(std::cell::RefCell::new(writer)));
+        });
+        adopt_negotiated_features(&["appesc".to_owned()], &[String::new(), String::new()]);
+        assert!(!APPLICATION_ESCAPE_ARMED.load(Ordering::Relaxed));
+        assert!(written.lock().unwrap().is_empty());
+        adopt_negotiated_features(
+            &["appesc".to_owned()],
+            &["\x1b[?7727h".to_owned(), "\x1b[?7727l".to_owned()],
+        );
+        let armed = APPLICATION_ESCAPE_ARMED.swap(false, Ordering::Relaxed);
+        adopt_negotiated_features(&[], &[]);
+        ACTIVE_OUTPUT.with(|output| output.borrow_mut().take());
+        assert!(armed);
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[?7727h");
     }
 
     #[test]

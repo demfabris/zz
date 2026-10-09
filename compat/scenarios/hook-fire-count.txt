@@ -3,7 +3,10 @@
 # hook_fire_time (cmd-show-options.c), and show-options leaves both out. The
 # global entry of every table hook always exists, so an event counts there
 # whether or not the hook has commands; a local entry that is unset and set
-# again starts at zero; a user hook counts on its own option.
+# again starts at zero, and so does a global entry that is unset; a user hook
+# counts on its own option, even when its value does not parse. A monitor also
+# counts on the option that owns it; its one-second tick cannot be awaited here,
+# so show_hooks_counts_each_entrys_fires_like_3_8 carries that case.
 new-window -d -n fired-1
 out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} after-new-window
 set-hook -g after-new-window 'set-option -g @fired-new yes'
@@ -30,4 +33,10 @@ out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,un
 set-hook -E @user-hook
 out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} @user-hook
 out: show-options -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} status
+out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} status
+set-hook -gu after-new-window
+out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} after-new-window
+set-option -g @broken-hook '{'
+set-hook -R @broken-hook
+out: show-hooks -g -F #{option_name}:#{hook_fire_count} @broken-hook
 kill-session -t side

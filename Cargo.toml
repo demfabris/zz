@@ -181,16 +181,9 @@ x11rb = "0.13.2"
 zeroize = "=1.9.0"
 
 zpui = { path = "crates/zpui", default-features = false }
-zpui-apple = { path = "crates/zpui-apple" }
-zpui-ios = { path = "crates/zpui-ios" }
 zpui-kit = { path = "crates/zpui-kit" }
-zpui-linux = { path = "crates/zpui-linux", default-features = false }
-zpui-macos = { path = "crates/zpui-macos", default-features = false }
 zpui-macros = { path = "crates/zpui-macros" }
 zpui-platform = { path = "crates/zpui-platform", default-features = false }
-zpui-web = { path = "crates/zpui-web" }
-zpui-wgpu = { path = "crates/zpui-wgpu" }
-zpui-windows = { path = "crates/zpui-windows", default-features = false }
 
 zz = { path = "crates/zz" }
 zz-app = { path = "clients/app" }
@@ -246,15 +239,8 @@ debug = 1
 "*" = { opt-level = 2 }
 taffy = { opt-level = 3 }
 zpui = { opt-level = 3 }
-zpui-apple = { opt-level = 2 }
-zpui-ios = { opt-level = 2 }
-zpui-linux = { opt-level = 2 }
-zpui-macos = { opt-level = 2 }
 zpui-macros = { opt-level = 2 }
 zpui-platform = { opt-level = 2 }
-zpui-web = { opt-level = 2 }
-zpui-wgpu = { opt-level = 2 }
-zpui-windows = { opt-level = 2 }
 
 [profile.release]
 opt-level = 3

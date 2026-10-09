@@ -323,11 +323,11 @@ impl AppShell {
         if self.compact.compact_keyboard != Some(compact) {
             self.compact.compact_keyboard = Some(compact);
             #[cfg(target_os = "ios")]
-            zpui_ios::set_compact_keyboard(compact);
+            zpui_platform::ios::set_compact_keyboard(compact);
         }
         if !compact {
             #[cfg(target_os = "ios")]
-            zpui_ios::set_status_bar_on_dark(None);
+            zpui_platform::ios::set_status_bar_on_dark(None);
             zz_ui::compact::StickyModifiers::take(cx);
             if self.compact.pinch.take().is_some() {
                 self.terminal_resize_suppressed.set(false);
@@ -739,7 +739,7 @@ impl AppShell {
             .then(|| compact_pane_header(kind_icon(&pane.kind), slot.title.clone(), actions, cx));
         #[cfg(target_os = "ios")]
         if current {
-            zpui_ios::set_status_bar_on_dark(Some(background.l < 0.5));
+            zpui_platform::ios::set_status_bar_on_dark(Some(background.l < 0.5));
         }
         div()
             .size_full()

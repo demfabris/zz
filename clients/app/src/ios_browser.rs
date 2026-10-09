@@ -24,7 +24,9 @@ use raw_window_handle::RawWindowHandle;
 use zpui::{Bounds, Pixels, Window};
 use zz_daemon_client::InteractiveClient;
 
-use zpui_ios::{CGPoint, CGRect, CGSize, id, nil, ns_array, ns_string, nsstring_to_string};
+use zpui_platform::ios::{
+    CGPoint, CGRect, CGSize, id, nil, ns_array, ns_string, nsstring_to_string,
+};
 pub use zz_client::element_picker::ElementPickerAppearance;
 use zz_client::element_picker::{
     ElementPickOutcome, ElementPickState, PickGeometry, element_picker_start_script,

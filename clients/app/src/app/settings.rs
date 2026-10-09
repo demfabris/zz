@@ -78,7 +78,7 @@ pub(super) fn shown(setting: Setting, phone: bool) -> bool {
 
 pub(super) fn phone() -> bool {
     #[cfg(target_os = "ios")]
-    return zpui_ios::phone();
+    return zpui_platform::ios::phone();
     #[cfg(not(target_os = "ios"))]
     false
 }
@@ -108,7 +108,7 @@ impl zpui::Global for PlatformReduceMotion {}
 impl Preferences {
     pub(super) fn apply(&self, connection: &Entity<Connection>, window: &mut Window, cx: &mut App) {
         #[cfg(target_os = "ios")]
-        let system = zpui_ios::accessibility();
+        let system = zpui_platform::ios::accessibility();
         #[cfg(target_os = "ios")]
         cx.set_global(PlatformReduceMotion(system.reduce_motion));
         if !cx.has_global::<PlatformReduceMotion>() {

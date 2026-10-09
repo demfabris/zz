@@ -766,7 +766,7 @@ impl AppShell {
         let chrome = |title: &'static str, action: ChromeAction| {
             zpui::MenuItem::action(
                 title,
-                zpui_ios::MenuCommand {
+                zpui_platform::ios::MenuCommand {
                     id: action.name().into(),
                     shortcut: bindings
                         .iter()
@@ -778,7 +778,7 @@ impl AppShell {
         let tmux = |title: &'static str, command: &'static str| {
             zpui::MenuItem::action(
                 title,
-                zpui_ios::MenuCommand {
+                zpui_platform::ios::MenuCommand {
                     id: format!("tmux:{command}").into(),
                     shortcut: None,
                 },
@@ -811,7 +811,7 @@ impl AppShell {
     #[cfg(target_os = "ios")]
     fn menu_command(
         &mut self,
-        command: &zpui_ios::MenuCommand,
+        command: &zpui_platform::ios::MenuCommand,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

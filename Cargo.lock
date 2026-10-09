@@ -11114,50 +11114,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui-apple"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "block2 0.6.2",
- "cbindgen",
- "cocoa",
- "core-foundation",
- "core-video",
- "derive_more",
- "etagere",
- "foreign-types",
- "image",
- "log",
- "metal",
- "naga",
- "objc",
- "objc2 0.6.4",
- "parking_lot",
- "zpui",
-]
-
-[[package]]
-name = "zpui-ios"
-version = "0.1.0"
-dependencies = [
- "accesskit_ios",
- "anyhow",
- "async-task",
- "block2 0.6.2",
- "dispatch2",
- "futures",
- "image",
- "log",
- "memmap2",
- "objc",
- "parking_lot",
- "raw-window-handle",
- "uuid",
- "zpui",
- "zpui-wgpu",
-]
-
-[[package]]
 name = "zpui-kit"
 version = "0.16.0"
 dependencies = [
@@ -11184,87 +11140,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui-linux"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_unix",
- "anyhow",
- "as-raw-xcb-connection",
- "ashpd",
- "bitflags 2.13.2",
- "bytemuck",
- "calloop",
- "calloop-wayland-source",
- "filedescriptor",
- "futures",
- "libc",
- "log",
- "notify-rust",
- "oo7",
- "open",
- "parking_lot",
- "raw-window-handle",
- "smallvec",
- "smol",
- "strum",
- "url",
- "uuid",
- "wayland-backend",
- "wayland-client",
- "wayland-cursor",
- "wayland-protocols",
- "wayland-protocols-plasma",
- "wayland-protocols-wlr",
- "x11-clipboard",
- "x11rb",
- "xkbcommon",
- "zed-xim",
- "zpui",
- "zpui-wgpu",
-]
-
-[[package]]
-name = "zpui-macos"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_macos",
- "anyhow",
- "async-task",
- "block2 0.6.2",
- "cocoa",
- "core-foundation",
- "core-foundation-sys",
- "core-graphics",
- "core-text",
- "ctor",
- "dispatch2",
- "foreign-types",
- "futures",
- "image",
- "itertools 0.14.0",
- "libc",
- "log",
- "mach2",
- "objc",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "objc2-user-notifications 0.3.2",
- "parking_lot",
- "pathfinder_geometry",
- "raw-window-handle",
- "semver",
- "smallvec",
- "strum",
- "uuid",
- "zed-font-kit",
- "zpui",
- "zpui-apple",
-]
-
-[[package]]
 name = "zpui-macros"
 version = "0.1.0"
 dependencies = [
@@ -11279,93 +11154,92 @@ dependencies = [
 name = "zpui-platform"
 version = "0.1.0"
 dependencies = [
+ "accesskit",
+ "accesskit_ios",
+ "accesskit_macos",
+ "accesskit_unix",
+ "accesskit_windows",
  "anyhow",
+ "as-raw-xcb-connection",
+ "ashpd",
+ "async-task",
+ "bitflags 2.13.2",
+ "block2 0.6.2",
+ "bytemuck",
+ "calloop",
+ "calloop-wayland-source",
+ "cbindgen",
+ "cocoa",
  "console_error_panic_hook",
+ "core-foundation",
+ "core-foundation-sys",
+ "core-graphics",
+ "core-text",
+ "core-video",
+ "cosmic-text",
  "criterion",
- "zpui",
- "zpui-linux",
- "zpui-macos",
- "zpui-web",
- "zpui-wgpu",
- "zpui-windows",
-]
-
-[[package]]
-name = "zpui-web"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "console_error_panic_hook",
+ "ctor",
+ "derive_more",
+ "dispatch2",
+ "dunce",
+ "etagere",
+ "filedescriptor",
+ "foreign-types",
  "futures",
+ "image",
+ "itertools 0.14.0",
  "js-sys",
+ "libc",
  "log",
+ "mach2",
+ "memmap2",
+ "metal",
+ "naga",
+ "notify-rust",
+ "objc",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "objc2-user-notifications 0.3.2",
+ "oo7",
+ "open",
  "parking_lot",
+ "pathfinder_geometry",
+ "profiling",
+ "rand 0.9.5",
  "raw-window-handle",
+ "semver",
  "smallvec",
+ "smol",
+ "strum",
+ "swash",
+ "unicode-bidi",
  "unicode-properties",
  "unicode-script",
  "unicode-segmentation",
+ "url",
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm_thread",
- "web-sys",
- "web-time",
- "zpui",
- "zpui-wgpu",
-]
-
-[[package]]
-name = "zpui-wgpu"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "bytemuck",
- "cosmic-text",
- "criterion",
- "etagere",
- "image",
- "itertools 0.14.0",
- "log",
- "naga",
- "parking_lot",
- "profiling",
- "raw-window-handle",
- "smallvec",
- "swash",
- "unicode-bidi",
- "unicode-segmentation",
  "wayland-backend",
  "wayland-client",
+ "wayland-cursor",
  "wayland-protocols",
+ "wayland-protocols-plasma",
+ "wayland-protocols-wlr",
  "web-sys",
+ "web-time",
  "wgpu",
- "zed-font-kit",
- "zpui",
-]
-
-[[package]]
-name = "zpui-windows"
-version = "0.1.0"
-dependencies = [
- "accesskit",
- "accesskit_windows",
- "anyhow",
- "dunce",
- "etagere",
- "futures",
- "image",
- "itertools 0.14.0",
- "log",
- "parking_lot",
- "rand 0.9.5",
- "raw-window-handle",
- "smallvec",
- "uuid",
  "windows 0.62.2",
  "windows-core 0.62.2",
  "windows-numerics 0.3.1",
  "windows-registry",
+ "x11-clipboard",
+ "x11rb",
+ "xkbcommon",
+ "zed-font-kit",
+ "zed-xim",
  "zpui",
 ]
 
@@ -11512,7 +11386,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "zpui",
- "zpui-ios",
+ "zpui-platform",
  "zz-client",
  "zz-daemon-client",
  "zz-protocol",
@@ -11705,7 +11579,7 @@ dependencies = [
  "futures",
  "image",
  "zpui",
- "zpui-ios",
+ "zpui-platform",
  "zz-app",
  "zz-client",
  "zz-daemon-client",

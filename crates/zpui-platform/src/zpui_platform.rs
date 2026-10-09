@@ -1,6 +1,25 @@
 //! Convenience crate that re-exports GPUI's platform traits and the
 //! `current_platform` constructor so consumers don't need `#[cfg]` gating.
 
+#[cfg(target_os = "macos")]
+pub mod apple;
+pub mod ios;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+pub mod linux;
+#[cfg(target_os = "macos")]
+pub mod macos;
+#[cfg(any(target_family = "wasm", test))]
+pub mod web;
+#[cfg(any(
+    target_os = "linux",
+    target_os = "freebsd",
+    target_family = "wasm",
+    target_os = "ios"
+))]
+pub mod wgpu;
+#[cfg(target_os = "windows")]
+pub mod windows;
+
 pub use zpui::Platform;
 
 use std::rc::Rc;
@@ -13,7 +32,7 @@ pub fn background_executor() -> zpui::BackgroundExecutor {
 pub fn application() -> zpui::Application {
     #[cfg(target_family = "wasm")]
     {
-        application_with_web_backend(zpui_web::WebBackendPreference::Auto)
+        application_with_web_backend(crate::web::WebBackendPreference::Auto)
     }
 
     #[cfg(not(target_family = "wasm"))]
@@ -25,11 +44,11 @@ pub fn headless() -> zpui::Application {
 }
 
 #[cfg(target_family = "wasm")]
-pub use zpui_web::WebBackendPreference;
+pub use crate::web::WebBackendPreference;
 
 #[cfg(target_family = "wasm")]
 pub fn application_with_web_backend(backend_preference: WebBackendPreference) -> zpui::Application {
-    let platform = Rc::new(zpui_web::WebPlatform::new_with_backend(
+    let platform = Rc::new(crate::web::WebPlatform::new_with_backend(
         true,
         backend_preference,
     ));
@@ -40,7 +59,7 @@ pub fn application_with_web_backend(backend_preference: WebBackendPreference) ->
 /// Unlike `application`, this function returns a single-threaded web application.
 #[cfg(target_family = "wasm")]
 pub fn single_threaded_web() -> zpui::Application {
-    let platform = Rc::new(zpui_web::WebPlatform::new(false));
+    let platform = Rc::new(crate::web::WebPlatform::new(false));
     let http_client = std::sync::Arc::new(platform.fetch_http_client());
     zpui::Application::with_platform(platform).with_http_client(http_client)
 }
@@ -50,33 +69,39 @@ pub fn single_threaded_web() -> zpui::Application {
 #[cfg(target_family = "wasm")]
 pub fn web_init() {
     console_error_panic_hook::set_once();
-    zpui_web::init_logging();
+    crate::web::init_logging();
 }
 
 /// Returns the default [`Platform`] for the current OS.
 pub fn current_platform(headless: bool) -> Rc<dyn Platform> {
     #[cfg(target_os = "macos")]
     {
-        Rc::new(zpui_macos::MacPlatform::new(headless))
+        Rc::new(crate::macos::MacPlatform::new(headless))
     }
 
     #[cfg(target_os = "windows")]
     {
         Rc::new(
-            zpui_windows::WindowsPlatform::new(headless)
+            crate::windows::WindowsPlatform::new(headless)
                 .expect("failed to initialize Windows platform"),
         )
     }
 
     #[cfg(any(target_os = "linux", target_os = "freebsd"))]
     {
-        zpui_linux::current_platform(headless)
+        crate::linux::current_platform(headless)
     }
 
     #[cfg(target_family = "wasm")]
     {
         let _ = headless;
-        Rc::new(zpui_web::WebPlatform::new(true))
+        Rc::new(crate::web::WebPlatform::new(true))
+    }
+
+    #[cfg(target_os = "ios")]
+    {
+        let _ = headless;
+        Rc::new(crate::ios::IosPlatform::new())
     }
 }
 
@@ -87,13 +112,13 @@ pub fn current_headless_renderer() -> anyhow::Result<Option<Box<dyn zpui::Platfo
     #[cfg(target_os = "macos")]
     {
         Ok(Some(Box::new(
-            zpui_macos::metal_renderer::MetalHeadlessRenderer::new(),
+            crate::macos::metal_renderer::MetalHeadlessRenderer::new(),
         )))
     }
 
     #[cfg(target_os = "linux")]
     {
-        zpui_wgpu::WgpuHeadlessRenderer::new()
+        crate::wgpu::WgpuHeadlessRenderer::new()
             .map(|renderer| Some(Box::new(renderer) as Box<dyn zpui::PlatformHeadlessRenderer>))
     }
 

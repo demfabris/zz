@@ -100,6 +100,9 @@ jobs:
         timeout-minutes: ${{ runner.os == 'Windows' && 90 || 360 }}
         run: cargo ci-test ${{ runner.os == 'Windows' && '--no-fail-fast' || '' }}
 
+      - name: Test the iOS input logic
+        run: cargo test -p zpui-platform --all-features --test ios
+
       - name: Test zz-mux release profile
         if: runner.os == 'Linux'
         timeout-minutes: 15

@@ -9,7 +9,7 @@ fn main() {
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let application = Application::with_platform(Rc::new(
-        zpui_ios::IosPlatform::new().with_touch_gestures(true),
+        zpui_platform::ios::IosPlatform::new().with_touch_gestures(true),
     ))
     .with_assets(zz_ui::Assets);
     let (url_sender, mut url_receiver) = futures::channel::mpsc::unbounded::<Vec<String>>();

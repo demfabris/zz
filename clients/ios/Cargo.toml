@@ -4,14 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
-description = "zz for iPhone and iPad: the entry point around zz-app and zpui-ios"
+description = "zz for iPhone and iPad: the entry point around zz-app and zpui-platform"
 publish = false
 
 [target.'cfg(target_os = "ios")'.dependencies]
 env_logger.workspace = true
 futures.workspace = true
 zpui = { workspace = true, features = ["default"] }
-zpui-ios.workspace = true
+zpui-platform.workspace = true
 zz-app.workspace = true
 zz-ui = { workspace = true, features = ["agent", "tree-sitter"] }
 

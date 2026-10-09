@@ -637,7 +637,7 @@ impl TerminalPane {
                 Some(ChromeAction::TerminalPaste) => {
                     #[cfg(target_os = "ios")]
                     {
-                        zpui_ios::request_paste();
+                        zpui_platform::ios::request_paste();
                         cx.stop_propagation();
                     }
                     return;
@@ -1722,7 +1722,7 @@ impl TerminalPane {
                 );
                 #[cfg(target_os = "ios")]
                 if phase == zpui::TouchPhase::Ended {
-                    zpui_ios::show_edit_menu(
+                    zpui_platform::ios::show_edit_menu(
                         f32::from(position.x) * window.zoom(),
                         f32::from(position.y) * window.zoom(),
                     );

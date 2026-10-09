@@ -28,7 +28,7 @@ use std::{future::Future, rc::Rc, sync::Arc, time::Duration};
 /// # Usage
 ///
 /// ```ignore
-/// let text_system = Arc::new(zpui_wgpu::CosmicTextSystem::new("fallback"));
+/// let text_system = Arc::new(zpui_platform::wgpu::CosmicTextSystem::new("fallback"));
 /// let mut cx = HeadlessAppContext::with_platform(
 ///     text_system,
 ///     Arc::new(Assets),

@@ -13,7 +13,7 @@ mod app {
 
     pub fn run() {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-        Application::with_platform(Rc::new(zpui_ios::IosPlatform::new()))
+        Application::with_platform(Rc::new(zpui_platform::ios::IosPlatform::new()))
             .with_assets(zz_ui::Assets)
             .run(|cx: &mut App| {
                 cx.text_system()

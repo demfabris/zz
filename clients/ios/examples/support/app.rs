@@ -289,7 +289,7 @@ impl TerminalApp {
     }
 
     fn paste_clipboard(&mut self, _: &mut Context<Self>) {
-        zpui_ios::request_paste();
+        zpui_platform::ios::request_paste();
     }
 
     fn answer_prompt(

@@ -1,0 +1,8 @@
+# window_pane_key hands a key to a pane's mode only with a target client: with
+# no client attached anywhere, send-keys to a pane in clock-mode, options-mode
+# or switch-mode does nothing and the mode stays.
+clock-mode -t w:0.0
+send-keys -t w:0.0 q
+out: display-message -p -t w:0.0 #{pane_in_mode}/#{pane_mode}
+send-keys -t w:0.0 -X cancel
+out: display-message -p -t w:0.0 #{pane_in_mode}/#{pane_mode}

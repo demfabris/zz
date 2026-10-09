@@ -885,30 +885,24 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         missing_hook_names,
-        [
-            "hook_exit_signal",
-            "hook_exit_status",
-            "hook_exit_success",
-            "hook_group",
-            "hook_group_size",
-            "hook_new_session",
-            "hook_new_session_name",
-            "hook_old_session",
-            "hook_old_session_name",
-            "hook_pane_command",
-            "hook_pane_current_path",
-            "hook_prompt_type",
-        ]
-        .into_iter()
-        .map(str::to_owned)
-        .collect::<BTreeSet<_>>()
+        ["hook_group", "hook_group_size"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<BTreeSet<_>>()
     );
-    let missing_hook_item = "semantic:hook-event-payload-formats";
-    let mut owned_items = missing_literal_items
+    assert!(!items.contains_key("semantic:hook-event-payload-formats"));
+    assert_eq!(
+        items.get("semantic:hook-group-payload").map(String::as_str),
+        Some("sessions.linked-groups")
+    );
+    assert_eq!(
+        groups.get("sessions.linked-groups").copied(),
+        Some(("never", "accepted"))
+    );
+    let owned_items = missing_literal_items
         .values()
         .map(|item| (*item, "pin.formats-options"))
         .collect::<Vec<_>>();
-    owned_items.push((missing_hook_item, "pin.hooks-events"));
     for (item, owner) in owned_items {
         assert_eq!(
             items.get(item).map(String::as_str),

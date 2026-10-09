@@ -2924,6 +2924,8 @@ pub struct ChooserPresentation {
     pub prompt_style: String,
     pub preview_size: ChooserPreviewSize,
     pub preview: Option<ChooserPreview>,
+    #[serde(default)]
+    pub prompt_cursor: PromptCursor,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

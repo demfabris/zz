@@ -426,7 +426,7 @@
       "id": "pin.display-panes",
       "track": "pin",
       "title": "display-panes as a pane mode",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -446,14 +446,15 @@
         "compat/attached-client.sh gets past every display-panes probe at 3.8 (probe_display_panes_target_no_select and later display-panes probes); its full PASS is owned by pin.hooks-events-2, where the fixture stops next (probe_client_event_hooks)."
       ],
       "branch": "catchup/pin.display-panes",
-      "sha": null,
+      "sha": "70b313708",
       "notes": [
         "2026-10-09: lane done at 123fd791c: all 11 items closed; tui-overlays mode screen asserted; terminal.zoom-reflow ruled an engine limit (native) by the orchestrator under the no-engine-patch ruling; integration merge sent",
         "2026-10-09: codex review 1: 4 P1 + 5 P2 (template lost when -k host chosen, desktop routing by invoking client, -k dropped on desktop, wrong window unzoomed, ...); fix pass sent; full attached-client PASS moved to pin.hooks-events-2",
         "PAUSED 2026-10-09: fix pass 9a9628914 done (9 findings); second Codex review was stopped before it reported: rerun review.sh a pin.display-panes, then merge.",
         "2026-10-09: RESUMED: main (8e948fd46, the zpui/zz-kit/clients restructure plus pin.hooks-events) merged in at a1acf6309; daemon.rs pane-mode conflict hand-resolved (push_pane_mode wraps push_pane_mode_entry, Panes is panes-mode); lane relaunched to compile, prove the pane-mode hooks, rerun its scenarios; then review 2.",
         "2026-10-09: Relaunch done at ebb54affb: merge compiles; pane-mode hooks fire on timer, overlay choice and mode re-entry like 3.8 (display-panes-format 38 steps, display-panes-template clean:36, args-parse 3, tui-overlays 39/39, zz-daemon 1690, zz-mux 679, clippy, fmt, compat check); review 2 running.",
-        "2026-10-09: Codex review 2 (pin.display-panes-2.md): 4 P1 (overlay not tied to the mode: focus dismissal, -s source vs host window, viewers attaching later; copy-mode does not replace panes-mode) + 2 P2 (zoom marker, format_draw alignment); final fix pass sent (overlay derived from the pane mode), merges after it without a third review."
+        "2026-10-09: Codex review 2 (pin.display-panes-2.md): 4 P1 (overlay not tied to the mode: focus dismissal, -s source vs host window, viewers attaching later; copy-mode does not replace panes-mode) + 2 P2 (zoom marker, format_draw alignment); final fix pass sent (overlay derived from the pane mode), merges after it without a third review.",
+        "2026-10-09: Merged after the final fix pass (730dd70da) and the main merge (override count 25); merge checks green (clippy 4 crates, zz-protocol 283, zz-mux 680, daemon display_panes 18, zz-tui 269, compat check). Desktop: with -s naming another window the overlay draws indicators on panes not on screen (renderer work, not chased)."
       ]
     },
     {
@@ -651,7 +652,7 @@
       "id": "float.core",
       "track": "float",
       "title": "Floating panes in the mux and daemon",
-      "status": "review",
+      "status": "active",
       "deps": [
         "float.design",
         "pin.layout-v2",
@@ -693,14 +694,15 @@
         "PAUSED 2026-10-09: first Codex review was stopped before it reported: rerun review.sh c float.core. Also open: register the 9 display-popup smoke scenarios as known differences (master modal-pane model), popup kill exit code 129, remain-on-exit timing at spawn, resize-pane -y border-status adjustment.",
         "2026-10-09: RESUMED: main merged at 04ed1a96d (registry, wire doc, gaps.md by hand); session 3 relaunched (compile, exit code 129, remain-on-exit timing, resize-pane -y, register the 9 display-popup smoke diffs); Codex review 1 running on 04ed1a96d.",
         "2026-10-09: Codex review 1 (float.core-1.md): 9 P1 + 1 P2 (preset split-id panic, popup retention before spawn, float split validates late, new-pane -I stdin, popup kill 129, resize/move on zoomed floats, after-split-window hook, border-status -y, new-pane -M closed early); sent to the session 3 lane.",
-        "2026-10-09: Session 3 done at 8c786438c: review 1's 10 findings fixed (new-pane -M reopened into float.keys); display-popup.modal-pane gap + 9 known differentials (34cd5da4); floating-panes 182 + floating-zoom 55 + floating-events 39 steps clean vs 3.8; 5 crates' full tests, clippy, fmt, compat check. Review 2 running."
+        "2026-10-09: Session 3 done at 8c786438c: review 1's 10 findings fixed (new-pane -M reopened into float.keys); display-popup.modal-pane gap + 9 known differentials (34cd5da4); floating-panes 182 + floating-zoom 55 + floating-events 39 steps clean vs 3.8; 5 crates' full tests, clippy, fmt, compat check. Review 2 running.",
+        "2026-10-09: Codex review 2 (float.core-2.md): 5 P1 (float split -l parsed late, select active pane clears zoom, join-pane loses zoomed float z order, -P forward ignores hidden floats, float border title off with window status off: already fixed on float.clients) + 1 P2 (more layout round trips); final fix pass sent, no third review."
       ]
     },
     {
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "active",
+      "status": "review",
       "deps": [
         "float.core"
       ],
@@ -730,14 +732,15 @@
       "notes": [
         "2026-10-09: branches from catchup/float.core (not main): float.core alone on main would make popups invisible. The float track merges to main as one unit (core + clients + keys).",
         "PAUSED 2026-10-09: branch catchup/float.clients created from catchup/float.core in slot b; no lane launched yet.",
-        "2026-10-09: RESUMED: fast-forwarded to float.core 04ed1a96d; session 1 launched in slot b (raw TUI, zz-client, desktop, web/iOS). Zone clients/gpui-shared/src is now clients/app/src."
+        "2026-10-09: RESUMED: fast-forwarded to float.core 04ed1a96d; session 1 launched in slot b (raw TUI, zz-client, desktop, web/iOS). Zone clients/gpui-shared/src is now clients/app/src.",
+        "2026-10-09: Session 1 done at f61c2f2f1 (float.core 8c786438c merged in): tui-floating.sh 10/10 vs 3.8 on glyphs/cursor/pane list (colours not compared), click/modal clauses, kitty-placement test, zz-client floating tests, modal capture test, popup code gone. Not met: desktop/web screenshots (gamescope vkCreateInstance -9 here; web build works, no headless browser render). Found: display-popup -T draws no title (float.core). Review 1 running on catchup/float.core...HEAD."
       ]
     },
     {
       "id": "float.keys",
       "track": "float",
       "title": "Move table, prefix * @ g, pane menu Float, mouse drag, editor",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "float.core",
         "pin.keys-copy"
@@ -764,10 +767,11 @@
         "With editor set to a script that appends a line, choose-buffer e opens a centred 90% modal and exit 0 updates show-buffer, non-zero leaves it; customize-mode e edits a string option the same way.",
         "keys.move-table closes; keys.default-prefix drops * @ g Tab BTab; option:editor closes."
       ],
-      "branch": null,
+      "branch": "catchup/float.keys",
       "sha": null,
       "notes": [
-        "2026-10-09: float.core deleted PopupPointerState; build drag on MouseKey.press (on the wire, ignored by the daemon until this item). Branch from the float.clients branch tip."
+        "2026-10-09: float.core deleted PopupPointerState; build drag on MouseKey.press (on the wire, ignored by the daemon until this item). Branch from the float.clients branch tip.",
+        "2026-10-09: Branched from catchup/float.clients f61c2f2f1 (float track merges as one unit)."
       ]
     },
     {

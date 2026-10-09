@@ -28,7 +28,7 @@ case "${1:-}" in
     WT="$(path_of "$2")"
     [ -d "$WT" ] || git -C "$MAIN" worktree add --detach "$WT" main >/dev/null
     if [ ! -d "$WT/target" ] && [ -d "$MAIN/target" ]; then
-      cp -a --reflink=always "$MAIN/target" "$WT/target" 2>/dev/null || cp -a --reflink=auto "$MAIN/target" "$WT/target"
+      cp -a --reflink=always "$MAIN/target" "$WT/target" 2>/dev/null || echo "target copied partly (a build in $MAIN moved files); cargo rebuilds the rest" >&2
     fi
     if [ ! -d "$WT/compat/.cache" ] && [ -d "$MAIN/compat/.cache" ]; then
       cp -a --reflink=auto "$MAIN/compat/.cache" "$WT/compat/.cache"

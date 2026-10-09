@@ -41,11 +41,11 @@ pub struct GlassMaterial {
     /// Standard deviation of the backdrop blur, the frost. Zero is clear.
     pub blur: Pixels,
     /// Width of the rim where the surface curves and lenses the backdrop.
-    /// Capped at a quarter of the shape's shorter side.
+    /// Each shape caps it at a quarter of its shorter side.
     pub bezel: Pixels,
     /// How far inward the rim pulls the backdrop at the very edge. Negative
-    /// values push outward and pull in what lies past the edge. Capped at
-    /// half the shape's shorter side.
+    /// values push outward and pull in what lies past the edge. Each shape
+    /// caps it at half its shorter side.
     pub refraction: Pixels,
     /// Splits the lensing by wavelength along the rim, as a fraction of the
     /// pull; 0.1 is a faint fringe, 0.5 a rainbow.
@@ -338,9 +338,15 @@ impl GlassMaterial {
 
     /// The fill painted in place of the glass where the renderer cannot read
     /// back the frame.
+    /// It fades with the material, so [`Self::vanished`] paints nothing.
     pub fn fallback_fill(&self) -> Hsla {
         let tint = self.tint;
-        let strength = (0.55 + tint.a).min(0.9);
+        let lensing = (self.refraction.as_f32().abs() / 20.
+            + self.blur.as_f32() / 4.
+            + self.specular
+            + self.fresnel)
+            .clamp(0., 1.);
+        let strength = (0.55 * lensing + tint.a).min(0.9);
         let lightness = if tint.a > 0.0 { tint.l } else { 1.0 };
         hsla(tint.h, tint.s, lightness * 0.92, strength * self.opacity)
     }
@@ -622,13 +628,11 @@ impl Glass {
         };
         let material = &self.material;
         let mut shapes = [[[0.; 4]; 2]; GLASS_MAX_SHAPES];
-        let mut half_minor = f32::MAX;
         for (slot, (bounds, radii)) in shapes
             .iter_mut()
             .zip(self.shapes.iter())
             .take(self.shape_count as usize)
         {
-            half_minor = half_minor.min(bounds.size.width.0.min(bounds.size.height.0) / 2.);
             *slot = [
                 [
                     bounds.origin.x.0,
@@ -644,12 +648,9 @@ impl Glass {
                 ],
             ];
         }
-        let half_minor = half_minor.max(0.);
-        let bezel = material
-            .bezel
-            .as_f32()
-            .clamp(0.5, (half_minor * 0.5).max(0.5));
-        let refraction = material.refraction.as_f32().clamp(-half_minor, half_minor);
+        // Each shape caps its own bezel and lensing in the shader.
+        let bezel = material.bezel.as_f32().max(0.5);
+        let refraction = material.refraction.as_f32();
         let tint = material.tint.to_rgb();
         let (sin, cos) = material.light_angle.sin_cos();
         let shape_bounds = self.shape_bounds();
@@ -810,13 +811,26 @@ pub fn plan_glass(
         })
         .collect();
 
+    // Two regions closer than a texel at the deepest level either blurs to
+    // would share texels down the chain, so they count as overlapping.
+    let overlap = |a: &Planned, b: &Planned| {
+        let reach = 1 << a.blur.levels.max(b.blur.levels);
+        let grown = Bounds {
+            origin: a.region.origin - point(reach, reach),
+            size: size(
+                a.region.size.width + 2 * reach,
+                a.region.size.height + 2 * reach,
+            ),
+        };
+        intersects(grown, b.region)
+    };
     let mut runs = Vec::new();
     let mut start = 0;
     for end in 1..=planned.len() {
         let overlaps = end < planned.len()
             && planned[start..end]
                 .iter()
-                .any(|other| intersects(other.region, planned[end].region));
+                .any(|other| overlap(other, &planned[end]));
         if end < planned.len() && !overlaps {
             continue;
         }
@@ -1214,6 +1228,18 @@ pub fn check_glass_rendering(
     anyhow::ensure!(
         after[1] > 200 && after[0] < 60,
         "a quad painted after the glass should draw, got {after:?}"
+    );
+
+    // The contour darkens only past the edge, even under translucent glass.
+    let faded = GlassMaterial::regular()
+        .vanished()
+        .edge_shadow(0.8)
+        .opacity(0.5);
+    let inside = render(&glass_test_scene(Some(faded)))?.get_pixel(32, 32).0;
+    let expected = plain.get_pixel(32, 32).0;
+    anyhow::ensure!(
+        inside.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 1),
+        "translucent glass should not darken inside, got {inside:?} for {expected:?}"
     );
 
     let frost = GlassMaterial::regular().vanished().blur(px(3.));

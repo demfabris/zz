@@ -2025,7 +2025,7 @@ impl PlatformWindow for MacWindow {
     }
 
     fn supports_backdrop_sampling(&self) -> bool {
-        true
+        self.0.lock().renderer.supports_glass()
     }
 
     fn set_edited(&mut self, edited: bool) {

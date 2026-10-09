@@ -165,20 +165,27 @@ fn rounded_rect(point: vec2<f32>, shape: GlassShape, smoothing: f32, bezel: f32)
 
 // Smooth union of every shape, so shapes closer than the merge radius melt
 // into one body. The radius shrinks where the two edges face the same way,
-// which keeps neighbors in a row from bulging along their shared side.
-fn glass_field(point: vec2<f32>) -> vec3<f32> {
+// which keeps neighbors in a row from bulging along their shared side. The
+// fourth component is half the shorter side of the shapes nearby, which
+// caps how deep the rim may lens.
+fn glass_field(point: vec2<f32>) -> vec4<f32> {
     let count = u32(glass.shape.x);
     let smoothing = glass.shape.y;
     let merge = glass.shape.z;
     let bezel = glass.optics.x;
-    var field = rounded_rect(point, glass.shapes[0], smoothing, bezel);
+    var field = vec4<f32>(
+        rounded_rect(point, glass.shapes[0], smoothing, bezel),
+        0.5 * min(glass.shapes[0].rect.z, glass.shapes[0].rect.w),
+    );
     for (var i = 1u; i < count; i += 1u) {
-        let next = rounded_rect(point, glass.shapes[i], smoothing, bezel);
+        let shape = glass.shapes[i];
+        let next = rounded_rect(point, shape, smoothing, bezel);
         let k = max(merge * min(0.5 * length(next.yz - field.yz), 1.0), 1e-4);
         let h = clamp(0.5 + 0.5 * (next.x - field.x) / k, 0.0, 1.0);
         let distance = mix(next.x, field.x, h) - k * h * (1.0 - h);
         let gradient = mix(next.yz, field.yz, h);
-        field = vec3<f32>(distance, gradient);
+        let half_minor = mix(0.5 * min(shape.rect.z, shape.rect.w), field.w, h);
+        field = vec4<f32>(distance, gradient, half_minor);
     }
     return field;
 }
@@ -221,7 +228,9 @@ fn fs_glass(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let contour_width = glass.rim.z;
     var contour = 0.0;
     if (contour_width > 0.0) {
-        contour = glass.rim.y * (1.0 - saturate(distance / contour_width)) * mix(0.35, 1.0, facing);
+        // Only past the edge: inside, the body covers it.
+        contour = glass.rim.y * (1.0 - saturate(distance / contour_width))
+            * saturate(distance + 0.5) * mix(0.35, 1.0, facing);
     }
     var clip = 1.0;
     if (glass.mask.y > 0.5) {
@@ -243,9 +252,10 @@ fn fs_glass(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     // refraction at the edge, so the rim shows a squeezed, mirrored copy of
     // what lies further in.
     let depth = max(-distance, 0.0);
-    let bezel = max(glass.optics.x, 1e-3);
+    let bezel = clamp(glass.optics.x, 1e-3, max(field.w * 0.5, 1e-3));
     let edge = 1.0 - saturate(depth / bezel);
-    let pull = glass.optics.y * (1.0 - sqrt(max(1.0 - edge * edge, 0.0)));
+    let refraction = clamp(glass.optics.y, -field.w, field.w);
+    let pull = refraction * (1.0 - sqrt(max(1.0 - edge * edge, 0.0)));
     let offset = -normal * pull;
 
     var color: vec4<f32>;

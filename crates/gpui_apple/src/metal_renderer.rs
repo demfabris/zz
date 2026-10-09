@@ -448,6 +448,18 @@ impl MetalRenderer {
         self.presents_with_transaction || self.underlay_active
     }
 
+    /// Whether this renderer can draw glass, building its pipelines the
+    /// first time it is asked. Windows paint a plain fill in its place when
+    /// it cannot.
+    pub fn supports_glass(&mut self) -> bool {
+        let glass = self.glass.get_or_insert_with(|| {
+            MetalGlass::new(&self.device)
+                .inspect_err(|error| log::error!("glass is unavailable: {error:#}"))
+                .map_err(drop)
+        });
+        glass.is_ok()
+    }
+
     fn layer_opaque(&self) -> bool {
         self.opaque && !self.underlay_active
     }
@@ -585,12 +597,8 @@ impl MetalRenderer {
         })?;
         let atlas_frame = self.sprite_atlas.begin_frame();
         self.shader_layers_drawn = false;
-        if self.glass.is_none() && scene_has_glass(scene) {
-            self.glass = Some(
-                MetalGlass::new(&self.device)
-                    .inspect_err(|error| log::error!("glass is unavailable: {error:#}"))
-                    .map_err(drop),
-            );
+        if scene_has_glass(scene) {
+            self.supports_glass();
         }
         if let Some(Ok(glass)) = &mut self.glass {
             glass.begin_frame();

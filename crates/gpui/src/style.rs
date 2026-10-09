@@ -743,7 +743,12 @@ impl Style {
         );
 
         if let Some(material) = &self.glass {
-            window.paint_glass(bounds, corner_radii, material);
+            window.paint_glass_with_smoothing(
+                bounds,
+                corner_radii,
+                material,
+                self.corner_smoothing,
+            );
         }
 
         let background_color = self.background.as_ref().and_then(Fill::color);

@@ -2,8 +2,8 @@ use scheduler::Instant;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use crate::{
-    AbsoluteLength, AnyElement, App, Bounds, BoxShadow, Corners, DispatchPhase, Div, Element,
-    ElementId, GlassMaterial, GlassShape, GlobalElementId, Hitbox, HitboxBehavior,
+    AbsoluteLength, AnyElement, App, Bounds, BoxShadow, CornerRadiusMode, Corners, DispatchPhase,
+    Div, Element, ElementId, GlassMaterial, GlassShape, GlobalElementId, Hitbox, HitboxBehavior,
     InspectorElementId, InteractiveElement, Interactivity, Interpolate, IntoElement, LayoutId,
     LiquidRect, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
     Point, SpringConfig, SpringState, Stateful, StatefulInteractiveElement, StyleRefinement,
@@ -36,6 +36,8 @@ pub fn liquid_glass(id: impl Into<ElementId>, material: GlassMaterial) -> Liquid
         light_follows_pointer: false,
         shadows: Vec::new(),
         corner_radii: Corners::default(),
+        corner_radius_mode: CornerRadiusMode::default(),
+        corner_smoothing: None,
     }
 }
 
@@ -58,6 +60,8 @@ pub struct LiquidGlass {
     light_follows_pointer: bool,
     shadows: Vec<BoxShadow>,
     corner_radii: Corners<AbsoluteLength>,
+    corner_radius_mode: CornerRadiusMode,
+    corner_smoothing: Option<f32>,
 }
 
 impl LiquidGlass {
@@ -262,13 +266,16 @@ impl Element for LiquidGlass {
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
         let mut content = self.content.take().expect("liquid glass is laid out once");
-        let radii = &content.style().corner_radii;
+        let style = content.style();
+        let radii = &style.corner_radii;
         self.corner_radii = Corners {
             top_left: radii.top_left.unwrap_or_default(),
             top_right: radii.top_right.unwrap_or_default(),
             bottom_right: radii.bottom_right.unwrap_or_default(),
             bottom_left: radii.bottom_left.unwrap_or_default(),
         };
+        self.corner_radius_mode = style.corner_radius_mode.unwrap_or_default();
+        self.corner_smoothing = style.corner_smoothing;
         let mut content = content.into_any_element();
         (content.request_layout(window, cx), content)
     }
@@ -294,7 +301,7 @@ impl Element for LiquidGlass {
                         hover: Toggle::default(),
                         presence: Toggle {
                             spring: SpringState {
-                                position: if self.appear { 0. } else { 1. },
+                                position: if self.appear || !self.shown { 0. } else { 1. },
                                 velocity: 0.,
                             },
                             on: true,
@@ -436,10 +443,14 @@ impl Element for LiquidGlass {
             body.size.height * scale + Pixels(1.2 * pull_y - 0.6 * pull_x),
         );
         let center = body.center() + point(Pixels(drag.x), Pixels(drag.y));
-        let radii = self
-            .corner_radii
-            .to_pixels(window.rem_size())
-            .clamp_radii_for_quad_size(bounds.size);
+        // The same shape policy Style::paint gives the element's own fill.
+        let requested = self.corner_radii.to_pixels(window.rem_size());
+        let radii = match (self.corner_radius_mode, window.adaptive_corner_fraction()) {
+            (CornerRadiusMode::Inherit, Some(fraction)) => {
+                requested.resolve_radii_for_quad_size(bounds.size, fraction)
+            }
+            _ => requested.clamp_radii_for_quad_size(bounds.size),
+        };
         let shape = GlassShape {
             bounds: Bounds::new(center - point(grown.width / 2., grown.height / 2.), grown),
             corner_radii: Corners {
@@ -465,6 +476,7 @@ impl Element for LiquidGlass {
                     press,
                     touch,
                     shadows: shadows.clone(),
+                    corner_smoothing: self.corner_smoothing,
                 });
                 true
             });
@@ -499,10 +511,11 @@ impl Element for LiquidGlass {
                     &frame.shadows,
                 );
             }
-            window.paint_glass(
+            window.paint_glass_with_smoothing(
                 frame.shape.bounds,
                 frame.shape.corner_radii,
                 &frame.material,
+                self.corner_smoothing,
             );
         }
         // Gone glass paints nothing, so its content takes no input either.
@@ -512,9 +525,11 @@ impl Element for LiquidGlass {
             });
         }
 
+        // Pointer changes redraw only the view this glass belongs to.
+        let view = window.current_view();
         let down_state = frame.state.clone();
         let down_hitbox = frame.hitbox.clone();
-        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _| {
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
             if phase == DispatchPhase::Bubble
                 && event.button == MouseButton::Left
                 && down_hitbox.is_hovered(window)
@@ -528,23 +543,23 @@ impl Element for LiquidGlass {
                     ((event.position.x - bounds.origin.x) / bounds.size.width).clamp(0., 1.),
                     ((event.position.y - bounds.origin.y) / bounds.size.height).clamp(0., 1.),
                 );
-                window.refresh();
+                cx.notify(view);
             }
         });
         let up_state = frame.state.clone();
-        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, _| {
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
             if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
                 let mut state = up_state.borrow_mut();
                 if state.press.on {
                     state.press.on = false;
-                    window.refresh();
+                    cx.notify(view);
                 }
             }
         });
         let move_state = frame.state.clone();
         let move_hitbox = frame.hitbox.clone();
         let tracks_pointer = self.drag_flex > Pixels(0.) || self.light_follows_pointer;
-        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
             if phase != DispatchPhase::Bubble {
                 return;
             }
@@ -554,7 +569,7 @@ impl Element for LiquidGlass {
                 state.pointer = event.position;
             }
             if hovered != state.hover.on || (tracks_pointer && (hovered || state.press.on)) {
-                window.refresh();
+                cx.notify(view);
             }
         });
     }
@@ -572,6 +587,7 @@ pub struct GroupedGlass {
     press: f32,
     touch: Point<f32>,
     shadows: Vec<BoxShadow>,
+    corner_smoothing: Option<f32>,
 }
 
 /// Turns angle `from` toward `to` by `phase`, the short way round.
@@ -590,6 +606,10 @@ fn turn_toward(from: f32, to: f32, phase: f32) -> f32 {
 /// Style it and give it children like a `div`. One body holds up to
 /// [`GLASS_MAX_SHAPES`](crate::GLASS_MAX_SHAPES) shapes; more are drawn as
 /// further bodies that do not merge with the first.
+///
+/// Children join while the group prepaints them, so a child inside a cached
+/// view that is not redrawn this frame is left out of the body; keep grouped
+/// glass in the group's own view.
 pub fn glass_group(id: impl Into<ElementId>, material: GlassMaterial) -> GlassGroup {
     let id = id.into();
     GlassGroup {
@@ -738,7 +758,8 @@ impl Element for GlassGroup {
                     pressed.press,
                 );
             }
-            window.paint_glass_shapes(&shapes, &material);
+            let corner_smoothing = body.first().and_then(|glass| glass.corner_smoothing);
+            window.paint_glass_shapes_with_smoothing(&shapes, &material, corner_smoothing);
         }
         content.paint(window, cx);
     }
@@ -857,6 +878,26 @@ mod tests {
             next_frame(cx, Duration::from_millis(16));
         }
         assert_eq!(glass_center_x(cx), 40.);
+    }
+
+    struct Hidden;
+
+    impl Render for Hidden {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                liquid_glass("hidden", GlassMaterial::regular())
+                    .appear(false)
+                    .shown(false)
+                    .size(px(40.)),
+            )
+        }
+    }
+
+    #[crate::test]
+    fn glass_that_starts_hidden_paints_nothing(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| Hidden);
+        cx.run_until_parked();
+        assert!(cx.update(|window, _| window.painted_glasses().is_empty()));
     }
 
     // Materials interpolate, so gpui's own springs can carry one into another.

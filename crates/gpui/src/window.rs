@@ -4721,7 +4721,8 @@ impl Window {
     /// says. Paint the glass's own content after it.
     ///
     /// Where the renderer cannot read back the frame, a translucent fill
-    /// stands in.
+    /// stands in. Inside [`Self::paint_layer`], everything shares one draw
+    /// order, so glass there draws after the rest of the layer.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
     pub fn paint_glass(
@@ -4730,12 +4731,26 @@ impl Window {
         corner_radii: Corners<Pixels>,
         material: &GlassMaterial,
     ) {
-        self.paint_glass_shapes(
+        self.paint_glass_with_smoothing(bounds, corner_radii, material, None);
+    }
+
+    /// [`Self::paint_glass`] with corners smoothed by `corner_smoothing`
+    /// instead of the window's default, to match an element that sets its
+    /// own.
+    pub fn paint_glass_with_smoothing(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        material: &GlassMaterial,
+        corner_smoothing: Option<f32>,
+    ) {
+        self.paint_glass_shapes_with_smoothing(
             &[GlassShape {
                 bounds,
                 corner_radii,
             }],
             material,
+            corner_smoothing,
         );
     }
 
@@ -4745,6 +4760,17 @@ impl Window {
     ///
     /// This method should only be called as part of the paint phase of element drawing.
     pub fn paint_glass_shapes(&mut self, shapes: &[GlassShape], material: &GlassMaterial) {
+        self.paint_glass_shapes_with_smoothing(shapes, material, None);
+    }
+
+    /// [`Self::paint_glass_shapes`] with corners smoothed by
+    /// `corner_smoothing` instead of the window's default.
+    pub fn paint_glass_shapes_with_smoothing(
+        &mut self,
+        shapes: &[GlassShape],
+        material: &GlassMaterial,
+        corner_smoothing: Option<f32>,
+    ) {
         self.invalidator.debug_assert_paint();
         if shapes.is_empty() {
             return;
@@ -4752,7 +4778,8 @@ impl Window {
 
         let opacity = self.element_opacity();
         if !self.platform_window.supports_backdrop_sampling() {
-            let fill = material.fallback_fill().opacity(opacity);
+            // paint_quad applies the element's opacity itself.
+            let fill = material.fallback_fill();
             for shape in shapes {
                 self.paint_quad(PaintQuad {
                     bounds: shape.bounds,
@@ -4761,7 +4788,7 @@ impl Window {
                     border_widths: Edges::default(),
                     border_color: transparent_black(),
                     border_style: BorderStyle::default(),
-                    corner_smoothing: None,
+                    corner_smoothing,
                 });
             }
             return;
@@ -4772,8 +4799,10 @@ impl Window {
         let mut material = material.scale(scale_factor);
         material.opacity *= opacity;
         let bounds = shape_bounds.dilate(ScaledPixels(material.edge_width.as_f32().max(0.) + 1.5));
+        // The backdrop takes in what the glass draws too, its contour
+        // included, so the glass orders after everything under any of it.
         let reach = material.backdrop_reach().as_f32();
-        let backdrop_bounds = shape_bounds.dilate(ScaledPixels(reach));
+        let backdrop_bounds = shape_bounds.dilate(ScaledPixels(reach)).union(&bounds);
         self.next_frame.scene.insert_primitive(Glass {
             order: 0,
             bounds,
@@ -4781,7 +4810,7 @@ impl Window {
             content_mask: self.snapped_content_mask(),
             shapes: slots,
             shape_count,
-            corner_smoothing: self.default_corner_smoothing,
+            corner_smoothing: corner_smoothing.unwrap_or(self.default_corner_smoothing),
             material,
         });
     }

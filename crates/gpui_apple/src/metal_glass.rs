@@ -172,21 +172,27 @@ impl MetalGlass {
             width: self.peak.width.max(extent.width),
             height: self.peak.height.max(extent.height),
         };
-        let fits = self.levels.first().is_some_and(|level| {
-            level.width() as i32 >= extent.width && level.height() as i32 >= extent.height
+        let current = self.levels.first().map(|level| Size {
+            width: level.width() as i32,
+            height: level.height() as i32,
         });
-        if !fits {
-            self.levels.clear();
-        }
-        let capacity = match self.levels.first() {
-            Some(level) => Size {
-                width: level.width() as i32,
-                height: level.height() as i32,
-            },
-            None => Size {
-                width: (extent.width.max(1) as u32).next_multiple_of(CHAIN_STEP) as i32,
-                height: (extent.height.max(1) as u32).next_multiple_of(CHAIN_STEP) as i32,
-            },
+        let capacity = match current {
+            Some(current) if current.width >= extent.width && current.height >= extent.height => {
+                current
+            }
+            // Grow each side to the larger of what is there and what is
+            // asked, so a tall run and a wide one do not trade the chain back
+            // and forth every frame.
+            current => {
+                self.levels.clear();
+                let current = current.unwrap_or_default();
+                Size {
+                    width: (current.width.max(extent.width).max(1) as u32)
+                        .next_multiple_of(CHAIN_STEP) as i32,
+                    height: (current.height.max(extent.height).max(1) as u32)
+                        .next_multiple_of(CHAIN_STEP) as i32,
+                }
+            }
         };
         while self.levels.len() <= depth.max(1) as usize {
             let size = glass_level_size(capacity, self.levels.len() as u32);

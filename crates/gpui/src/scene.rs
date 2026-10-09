@@ -176,11 +176,17 @@ impl Scene {
             return false;
         }
 
+        // Glass reads its whole backdrop, clipped or not, so it orders after
+        // everything painted under any of it.
+        let ordered_bounds = match &primitive {
+            Primitive::Glass(glass) => glass.backdrop_bounds,
+            _ => clipped_bounds,
+        };
         let order = self
             .layer_stack
             .last()
             .copied()
-            .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+            .unwrap_or_else(|| self.primitive_bounds.insert(ordered_bounds));
         match &mut primitive {
             Primitive::Shadow(shadow) => {
                 shadow.order = order;

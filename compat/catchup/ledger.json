@@ -13,7 +13,7 @@
       "id": "fix.tui-colour",
       "track": "fix",
       "title": "Raw TUI honours terminal-overrides, terminal-features and user-keys",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/client.rs",
@@ -34,7 +34,9 @@
       ],
       "branch": "catchup/fix.tui-colour",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at 5451831a4: all 4 clauses met; wire: EventPayload::TerminalNegotiation + KeyCode::User under 108; also fixed set -s extended-keys/focus-events not reaching the TUI hello"
+      ]
     },
     {
       "id": "fix.streams",
@@ -63,7 +65,7 @@
       "id": "fix.capture-links",
       "track": "fix",
       "title": "capture-pane -H and the derivable -F line flags",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-terminal/src/session.rs",
@@ -78,7 +80,7 @@
         "capture-pane -F emits the W, H, P and O line flags; D and X are recorded as native in the registry.",
         "capture.rich-transports keeps only -P, -R and the saved alternate grid."
       ],
-      "branch": null,
+      "branch": "catchup/fix.capture-links",
       "sha": null,
       "notes": []
     },

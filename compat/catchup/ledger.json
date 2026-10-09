@@ -437,7 +437,7 @@
       "id": "pin.hooks-events",
       "track": "pin",
       "title": "3.8 hooks, event payloads, set-hook -E/-T, wait-for -E/-v/-l/-w/-F",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -454,7 +454,7 @@
         "hook_<key> payload formats resolve; old names still resolve.",
         "set-hook -E fires a user event; set-hook -T gates a -B monitor; wait-for -E -v -l -w -F behave as 3.8."
       ],
-      "branch": null,
+      "branch": "catchup/pin.hooks-events",
       "sha": null,
       "notes": [
         "2026-10-09 from pin.contract-breaks: scenarios failing at 3.8 that look like this item's: daemon-command-item-format (#{command} inside an after-hook is set-buffer on 3.8), source-file-current-file (@cf-hook), smoke/args-parse-set-hook and smoke/config-chain-parse-abort (tmux-side only); show-options-hooks also diverges on display-panes options (pin.display-panes) and after-queue."

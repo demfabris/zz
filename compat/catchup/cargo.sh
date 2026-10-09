@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 set -uo pipefail
 
-CARGO="${ZZ_CARGO_BIN:-$(command -v cargo)}"
+SELF="$(readlink -f "$0")"
+CARGO="${ZZ_CARGO_BIN:-}"
+if [ -z "$CARGO" ]; then
+  for CANDIDATE in $(type -ap cargo); do
+    [ "$(readlink -f "$CANDIDATE")" = "$SELF" ] && continue
+    CARGO="$CANDIDATE"
+    break
+  done
+fi
 if [ -n "${ZZ_CARGO_SLOT_HELD:-}" ]; then
   exec "$CARGO" "$@"
 fi

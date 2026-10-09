@@ -3922,7 +3922,7 @@ impl Window {
             let tree_update = self.a11y.end_frame(frame_info);
 
             if should_send_a11y_update {
-                log::debug!(
+                log::trace!(
                     "Sending a11y tree update: {} nodes",
                     tree_update.nodes.len()
                 );

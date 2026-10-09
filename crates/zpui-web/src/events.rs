@@ -1175,10 +1175,7 @@ impl WebWindowInner {
                 state.is_active = true;
             }
             *this.active_window.borrow_mut() = Some(this.handle);
-            this.with_callback(
-                |callbacks| &mut callbacks.active_status_change,
-                |callback| callback(true),
-            );
+            this.report_activity();
         })
     }
 
@@ -1192,11 +1189,23 @@ impl WebWindowInner {
                 let mut state = this.state.borrow_mut();
                 state.is_active = false;
             }
+            this.report_activity();
+        })
+    }
+
+    /// Tells GPUI about a focus change once the current event has finished.
+    /// Focusing one window's hidden input blurs another window's input
+    /// synchronously, from inside the first window's dispatch, where the app
+    /// is already borrowed.
+    fn report_activity(self: &Rc<Self>) {
+        let this = Rc::clone(self);
+        wasm_bindgen_futures::spawn_local(async move {
+            let active = this.state.borrow().is_active;
             this.with_callback(
                 |callbacks| &mut callbacks.active_status_change,
-                |callback| callback(false),
+                |callback| callback(active),
             );
-        })
+        });
     }
 
     fn register_pointer_enter(self: &Rc<Self>) -> EventListenerHandle {

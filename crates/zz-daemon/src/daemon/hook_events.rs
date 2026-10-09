@@ -1094,7 +1094,7 @@ pub(super) fn pane_mode_hook_events(
         .symmetric_difference(after_modes)
         .flat_map(|pane| {
             let entered = after_modes.contains(pane);
-            let events = ["pane-mode-entered", "pane-mode-exited", "pane-mode-changed"]
+            ["pane-mode-entered", "pane-mode-exited", "pane-mode-changed"]
                 .into_iter()
                 .filter(|name| match *name {
                     "pane-mode-entered" => entered,
@@ -1112,8 +1112,7 @@ pub(super) fn pane_mode_hook_events(
                     event.add_copy_mode_payload(entered);
                     event
                 })
-                .collect::<Vec<_>>();
-            events
+                .collect::<Vec<_>>()
         })
         .collect()
 }

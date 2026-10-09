@@ -19245,6 +19245,7 @@ mod tests {
                 | TerminalEvent::CopyReady { .. }
                 | TerminalEvent::ClipboardSet { .. }
                 | TerminalEvent::Bell
+                | TerminalEvent::ShellMark(_)
                 | TerminalEvent::RenameWindow(_)
                 | TerminalEvent::PlaceholderBound { .. }
                 | TerminalEvent::PendingPasteExpired { .. } => {

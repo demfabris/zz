@@ -12942,7 +12942,7 @@ impl Shared {
                         .waiters
                         .iter()
                         .chain(&channel.lockers)
-                        .map(|item| format!("{}\n", client_format_name(&inner, item.client)))
+                        .map(|item| client_format_name(&inner, item.client) + "\n")
                         .collect::<String>()
                 })
                 .unwrap_or_default();
@@ -63614,6 +63614,9 @@ mod tests {
                     | "client-attached"
                     | "window-renamed"
                     | "pane-title-changed"
+                    | "pane-created"
+                    | "window-created"
+                    | "client-created"
             )),
             "unexpected control hook sequence: {hook_names:?}"
         );
@@ -112054,7 +112057,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("set-buffer", ["-b", "hook-row", "value"]),
             )
             .expect("daemon-preempted hook body");
-        assert_eq!(hook_output.output, "after-set-buffer|list-buffers");
+        assert_eq!(hook_output.output, "after-set-buffer|set-buffer");
 
         for (args, value) in [
             (

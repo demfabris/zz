@@ -45,7 +45,7 @@
       "id": "fix.tui-regressions",
       "track": "fix",
       "title": "Regressions the 3.8 fixture rebaseline found on main",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-tui/src",
@@ -74,7 +74,8 @@
         "2026-10-09: lane done at 5e9ab7774: clauses 1,3,4,5,6 fixed (TUI-014 from 095151f19/d9a36e312 stale size write-back; TUI-018 from e43308848; TUI-005 fixture timing; TUI-012 fixture wrong; chain attach bug found via launch-diff); integration pass merging main + fixing zz-cli test broken by 82dca06a9",
         "PAUSED 2026-10-09: integration done at aad92d4b7 (all fixtures, verify-claims TUI-014/TUI-003, zz-daemon/zz-cli, clippy, fmt, compat check green); needs its Codex review, then merge.",
         "2026-10-09: RESUMED: main merged at ce1ebd317 (both sides deleted a fixed known_drift case); Codex review running.",
-        "2026-10-09: Codex review 1 (fix.tui-regressions-1.md): 1 P1, the stale-report guard in write_back_terminal_geometries drops control-client geometry too; fix pass launched in slot d."
+        "2026-10-09: Codex review 1 (fix.tui-regressions-1.md): 1 P1, the stale-report guard in write_back_terminal_geometries drops control-client geometry too; fix pass launched in slot d.",
+        "2026-10-09: Fix pass fbc898683: stale interactive report replaced per client in terminal_geometry_for_mode_from, control-client size still writes back (a_stale_report_leaves_the_latest_control_size_to_write_back; zz-daemon 1689; tui-client-commands 406/406; clippy; fmt); review 2 running."
       ]
     },
     {
@@ -135,7 +136,7 @@
       "id": "fix.capture-e-links",
       "track": "fix",
       "title": "capture-pane -e keeps OSC 8 hyperlinks",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "fix.capture-links"
       ],
@@ -148,7 +149,7 @@
         "On link rows capture-pane -e emits \\033]8;;uri\\033\\\\ around the linked text exactly where the pin does (measure on tmux 3.8); zz emits SGR only today.",
         "A scenario or daemon test pins it against recorded pin output."
       ],
-      "branch": null,
+      "branch": "catchup/fix.capture-e-links",
       "sha": null,
       "notes": [
         "2026-10-09: found by fix.capture-links; zz can read per-cell URIs now."
@@ -417,7 +418,7 @@
       "id": "pin.display-panes",
       "track": "pin",
       "title": "display-panes as a pane mode",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -442,7 +443,8 @@
         "2026-10-09: lane done at 123fd791c: all 11 items closed; tui-overlays mode screen asserted; terminal.zoom-reflow ruled an engine limit (native) by the orchestrator under the no-engine-patch ruling; integration merge sent",
         "2026-10-09: codex review 1: 4 P1 + 5 P2 (template lost when -k host chosen, desktop routing by invoking client, -k dropped on desktop, wrong window unzoomed, ...); fix pass sent; full attached-client PASS moved to pin.hooks-events-2",
         "PAUSED 2026-10-09: fix pass 9a9628914 done (9 findings); second Codex review was stopped before it reported: rerun review.sh a pin.display-panes, then merge.",
-        "2026-10-09: RESUMED: main (8e948fd46, the zpui/zz-kit/clients restructure plus pin.hooks-events) merged in at a1acf6309; daemon.rs pane-mode conflict hand-resolved (push_pane_mode wraps push_pane_mode_entry, Panes is panes-mode); lane relaunched to compile, prove the pane-mode hooks, rerun its scenarios; then review 2."
+        "2026-10-09: RESUMED: main (8e948fd46, the zpui/zz-kit/clients restructure plus pin.hooks-events) merged in at a1acf6309; daemon.rs pane-mode conflict hand-resolved (push_pane_mode wraps push_pane_mode_entry, Panes is panes-mode); lane relaunched to compile, prove the pane-mode hooks, rerun its scenarios; then review 2.",
+        "2026-10-09: Relaunch done at ebb54affb: merge compiles; pane-mode hooks fire on timer, overlay choice and mode re-entry like 3.8 (display-panes-format 38 steps, display-panes-template clean:36, args-parse 3, tui-overlays 39/39, zz-daemon 1690, zz-mux 679, clippy, fmt, compat check); review 2 running."
       ]
     },
     {
@@ -504,7 +506,8 @@
       "branch": null,
       "sha": null,
       "notes": [
-        "2026-10-09: leftovers of pin.hooks-events."
+        "2026-10-09: leftovers of pin.hooks-events.",
+        "2026-10-09: From pin.display-panes: inner.pane_mode_transitions.clear() at command end sits outside the hooks-enabled branch, so a transition recorded outside a command and not fired at once is dropped (clock-mode -k and switch-mode exits may leak); 3.8 send-keys to a pane in a mode does nothing without an attached client (window_pane_key), zz passes it to the mode."
       ]
     },
     {

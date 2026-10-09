@@ -3144,13 +3144,9 @@ impl MuxEngine {
             .or(context.window);
         let session_chain = context
             .session
-            .map(|session| {
-                vec![
-                    TmuxOptionTarget::Session(session),
-                    TmuxOptionTarget::GlobalSession,
-                ]
-            })
-            .unwrap_or_else(|| vec![TmuxOptionTarget::GlobalSession]);
+            .map(TmuxOptionTarget::Session)
+            .into_iter()
+            .chain([TmuxOptionTarget::GlobalSession]);
         let pane_chain = context
             .pane
             .map(TmuxOptionTarget::Pane)
@@ -3158,7 +3154,6 @@ impl MuxEngine {
             .chain(window.map(TmuxOptionTarget::Window))
             .chain([TmuxOptionTarget::GlobalWindow]);
         let target = session_chain
-            .into_iter()
             .chain(pane_chain)
             .find(|target| self.user_option_at_target(*target, name).is_some());
         self.count_hook_fire(target, name, now);

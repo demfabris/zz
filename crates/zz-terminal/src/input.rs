@@ -20,6 +20,7 @@ pub enum KeyCode {
     ArrowRight,
     Function(u8),
     Unidentified,
+    User(u16),
 }
 
 /// The phase of a key event.

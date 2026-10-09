@@ -3568,10 +3568,9 @@ impl MuxState {
     }
 
     /// The pin's `window_find_string` plus `window_get_active_at`: a compass
-    /// word names one window cell and the covering tiled pane answers, its
-    /// right and bottom borders included. Tiled cells never overlap, so the
-    /// pin's z-index walk and this layout walk pick the same pane; a zoomed
-    /// window shows only its active pane, which then covers every cell.
+    /// word names one window cell; the modal answers alone, then visible
+    /// floats front to back with their borders, then the covering tiled pane,
+    /// its right and bottom borders included.
     fn pane_at_compass_point(&self, window: WindowId, target: &str) -> Option<PaneId> {
         let state = self.windows.get(&window)?;
         let compass = PANE_COMPASS_TARGETS
@@ -3589,10 +3588,33 @@ impl MuxState {
             "bottom-left" => (0, last_row),
             _ => (last_column, last_row),
         };
+        let (x, y) = (i32::from(x), i32::from(y));
+        let float_contains = |pane: PaneId| {
+            state.layout.pane_geometry(pane).is_some_and(|geometry| {
+                (geometry.xoff - 1..=geometry.xoff + i32::from(geometry.sx)).contains(&x)
+                    && (geometry.yoff - 1..=geometry.yoff + i32::from(geometry.sy)).contains(&y)
+            })
+        };
+        if let Some(modal) = state.modal_pane() {
+            return float_contains(modal).then_some(modal);
+        }
+        let visible = |pane: PaneId| match state.zoomed_pane {
+            Some(zoomed) => {
+                zoomed != pane && state.panes.get(&pane).is_some_and(|pane| pane.over_zoom)
+            }
+            None => true,
+        };
+        if let Some(pane) = state
+            .z_order
+            .iter()
+            .copied()
+            .find(|pane| state.is_floating(*pane) && visible(*pane) && float_contains(*pane))
+        {
+            return Some(pane);
+        }
         if let Some(zoomed) = state.zoomed_pane {
             return Some(zoomed);
         }
-        let (x, y) = (i32::from(x), i32::from(y));
         state.layout.tiled_panes().into_iter().find(|pane| {
             state.layout.pane_geometry(*pane).is_some_and(|geometry| {
                 (geometry.xoff..=geometry.xoff + i32::from(geometry.sx)).contains(&x)
@@ -3720,6 +3742,9 @@ impl MuxState {
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let window = &self.windows[&window_id];
+        if window.has_floating_panes() {
+            return Ok(pane_in_direction_with_floats(window, pane, direction));
+        }
         let (window_columns, window_rows) = window.layout.extent();
         let rects = window
             .layout
@@ -3770,6 +3795,27 @@ impl MuxState {
 
     pub fn next_pane(&self, pane: PaneId) -> Result<PaneId, ServerError> {
         self.pane_at_order_offset(pane, 1)
+    }
+
+    pub fn next_tiled_pane(&self, pane: PaneId, step: isize) -> Result<PaneId, ServerError> {
+        let window_id = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let window = &self.windows[&window_id];
+        let order = &window.pane_order;
+        let index = order
+            .iter()
+            .position(|candidate| *candidate == pane)
+            .expect("validated pane order contains every window pane");
+        let len = isize::try_from(order.len()).expect("pane count fits isize");
+        let start = isize::try_from(index).expect("pane index fits isize");
+        Ok((1..=len)
+            .map(|distance| {
+                order[usize::try_from((start + distance * step).rem_euclid(len))
+                    .expect("wrapped index is nonnegative")]
+            })
+            .find(|candidate| !window.is_floating(*candidate))
+            .unwrap_or(pane))
     }
 
     fn pane_at_order_offset(&self, pane: PaneId, offset: isize) -> Result<PaneId, ServerError> {
@@ -5240,6 +5286,59 @@ fn directional_candidates(
             adjacent.then_some(*candidate)
         })
         .collect()
+}
+
+fn pane_in_direction_with_floats(
+    window: &Window,
+    pane: PaneId,
+    direction: PaneDirection,
+) -> Option<PaneId> {
+    let (columns, rows) = window.layout.extent();
+    let (columns, rows) = (i32::from(columns), i32::from(rows));
+    let current = window.layout.pane_geometry(pane)?;
+    let (xoff, yoff) = (current.xoff, current.yoff);
+    let (sx, sy) = (i32::from(current.sx), i32::from(current.sy));
+    let (edge, low, high) = match direction {
+        PaneDirection::Up => (if yoff == 0 { rows + 1 } else { yoff }, xoff, xoff + sx),
+        PaneDirection::Down => {
+            let edge = yoff + sy + 1;
+            (if edge >= rows { 0 } else { edge }, xoff, xoff + sx)
+        }
+        PaneDirection::Left => (if xoff == 0 { columns + 1 } else { xoff }, yoff, yoff + sy),
+        PaneDirection::Right => {
+            let edge = xoff + sx + 1;
+            (if edge >= columns { 0 } else { edge }, yoff, yoff + sy)
+        }
+    };
+    let mut best: Option<PaneId> = None;
+    for candidate in &window.pane_order {
+        if *candidate == pane {
+            continue;
+        }
+        let Some(geometry) = window.layout.pane_geometry(*candidate) else {
+            continue;
+        };
+        let (x, y) = (geometry.xoff, geometry.yoff);
+        let (w, h) = (i32::from(geometry.sx), i32::from(geometry.sy));
+        let (on_edge, start, size) = match direction {
+            PaneDirection::Up => (y + h + 1 == edge, x, w),
+            PaneDirection::Down => (y == edge, x, w),
+            PaneDirection::Left => (x + w + 1 == edge, y, h),
+            PaneDirection::Right => (x == edge, y, h),
+        };
+        let end = start + size - 1;
+        let found = (start < low && end > high)
+            || (start >= low && start <= high)
+            || (end >= low && end <= high);
+        if !on_edge || !found {
+            continue;
+        }
+        let point = |pane: PaneId| window.panes.get(&pane).map_or(0, |pane| pane.active_point);
+        if best.is_none_or(|best| point(*candidate) > point(best)) {
+            best = Some(*candidate);
+        }
+    }
+    best
 }
 
 fn ranges_overlap(first_start: u32, first_end: u32, second_start: u32, second_end: u32) -> bool {

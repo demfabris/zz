@@ -1379,13 +1379,8 @@ fn handle_protocol<W: Write>(
                 error,
                 sticky_failure,
                 flags,
-            } => {
-                if sticky_failure || (error && is_source_error_message(&text)) {
-                    state.return_code = 1;
-                }
-                output.control_command_guard_bytes(text.as_bytes(), error, flags)?;
             }
-            EventPayload::ControlCommandGuardRaw {
+            | EventPayload::ControlCommandGuardRaw {
                 output: text,
                 error,
                 sticky_failure,

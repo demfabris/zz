@@ -58722,7 +58722,10 @@ mod tests {
                 .to_vec()
         };
         assert_eq!(output("show-options", &["-gv", "@binary"]), b"a\xfeb");
-        assert_eq!(output("show-options", &["-g", "@binary"]), b"@binary a\\376b");
+        assert_eq!(
+            output("show-options", &["-g", "@binary"]),
+            b"@binary a\\376b"
+        );
         assert_eq!(output("display-message", &["-p", "#{@binary}"]), b"a\xfeb");
         assert_eq!(output("show-buffer", &["-b", "sourced"]), b"c\xfed");
         assert_eq!(

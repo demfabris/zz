@@ -1400,6 +1400,9 @@ fn handle_protocol<W: Write>(
             EventPayload::ControlCommandOutput { output: text } => {
                 output.control_command_output(&text)?;
             }
+            EventPayload::CommandStdout { output: text } => {
+                output.command_block_output(text.as_bytes())?;
+            }
             EventPayload::StartupConfigCauses { causes } => {
                 output.startup_config_causes(&causes)?;
             }
@@ -2505,6 +2508,11 @@ impl<W: Write> ControlWriter<W> {
                 Ok(())
             }
         }
+    }
+
+    fn command_block_output(&mut self, output: &[u8]) -> io::Result<()> {
+        self.payload(output)?;
+        self.output.flush()
     }
 
     fn control_command_output(&mut self, output: &str) -> io::Result<()> {

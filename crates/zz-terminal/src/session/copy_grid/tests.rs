@@ -4,11 +4,11 @@ use super::*;
 use crate::session::SelectionMode;
 use crate::session::mode_revision::{ModeRevision, ModeSelection};
 use crate::session::{
-    CaptureBoundary, CaptureOptions, CopyModeSearch, HistorySearchSnapshot, SearchCase,
-    SearchDirection, SearchMatch, SearchMode, SearchQuery, SearchWorker, SnapshotChange,
-    TerminalViewId, TerminalViewState, ViewportGenerations, append_history_row, capture_terminal,
-    color, copy_mode_search_match, copy_mode_snapshot, enter_copy_mode, new_terminal,
-    run_copy_mode_search, snapshot,
+    CaptureBoundary, CaptureCarry, CaptureOptions, CopyModeSearch, HistorySearchSnapshot,
+    SearchCase, SearchDirection, SearchMatch, SearchMode, SearchQuery, SearchWorker,
+    SnapshotChange, TerminalViewId, TerminalViewState, ViewportGenerations, append_history_row,
+    capture_revision, capture_terminal, color, copy_mode_search_match, copy_mode_snapshot,
+    enter_copy_mode, new_terminal, run_copy_mode_search, snapshot,
 };
 use crate::{OverlayKind, OverlaySpan, SessionStatus};
 
@@ -45,10 +45,7 @@ fn paged_copy_entry_keeps_cells_and_search_offsets_lazy() {
     }
     let revision = ModeRevision::capture(&terminal).expect("revision");
     assert!(revision.total_rows() >= 1000);
-    assert_eq!(
-        revision.capture_rows(0, 0, false, false, false),
-        "row-0000 target"
-    );
+    assert_eq!(revision.capture_rows(0, 0, false, false), "row-0000 target");
 }
 
 #[test]
@@ -90,7 +87,7 @@ fn lazy_rows_keep_semantics_styles_wide_cells_and_graphemes_after_pruning_and_ed
     assert!(input_style.bold());
     assert_eq!(input_style.underline(), crate::UnderlineStyle::Single);
     assert_eq!(
-        revision.capture_rows(0, 1, false, false, false),
+        revision.capture_rows(0, 1, false, false),
         format!("$ {cluster}界 input-old\noutput-old")
     );
     let selected = revision.format_selection(
@@ -358,14 +355,8 @@ fn appearance_refresh_keeps_frozen_text_and_explicit_colors() {
     let updated = original
         .with_appearance(&mut terminal)
         .expect("frozen appearance");
-    assert_eq!(
-        updated.capture_rows(0, 0, false, false, false),
-        "frozen RGB"
-    );
-    assert_eq!(
-        original.capture_rows(0, 0, false, false, false),
-        "frozen RGB"
-    );
+    assert_eq!(updated.capture_rows(0, 0, false, false), "frozen RGB");
+    assert_eq!(original.capture_rows(0, 0, false, false), "frozen RGB");
     assert_eq!(style(&original, point(0, 0)), original_default);
     assert_eq!(
         style(&updated, point(0, 0)).foreground(),
@@ -402,10 +393,10 @@ fn frozen_resize_tracks_the_wide_cell_through_a_width_round_trip() {
     assert!(restored.cell_matches_text(restored_cursor, "界"));
     assert_eq!(
         restored
-            .capture_rows(0, restored.total_rows() - 1, true, false, false)
+            .capture_rows(0, restored.total_rows() - 1, true, false)
             .trim_end(),
         original
-            .capture_rows(0, original.total_rows() - 1, true, false, false)
+            .capture_rows(0, original.total_rows() - 1, true, false)
             .trim_end()
     );
 }
@@ -454,7 +445,7 @@ fn row_conversion_keeps_style_links_semantics_and_mixed_unicode() {
     assert_eq!(revision.cell(point(14, 0)).glyph(), u32::from('界'));
     assert_eq!(revision.cell(point(15, 0)).width(), CellWidth::SpacerTail);
     assert_eq!(
-        revision.capture_rows(0, 1, false, false, false),
+        revision.capture_rows(0, 1, false, false),
         format!("AABBCCDDEEF🦀{cluster}界input\nGGHH")
     );
 }
@@ -497,24 +488,30 @@ fn formatting_reader_keeps_its_row_dictionary_after_other_rows_compact() {
         .chain((0..4200).map(|index| format!("row-{index:04}")))
         .collect::<Vec<_>>()
         .join("\n");
-    assert_eq!(
-        revision.capture_rows(0, 4200, false, false, false),
-        expected
-    );
-    let styled = revision.capture_rows(0, 4200, false, false, true);
+    assert_eq!(revision.capture_rows(0, 4200, false, false), expected);
+    let styled = capture_revision(
+        &revision,
+        0,
+        CaptureOptions {
+            escape_sequences: true,
+            start: CaptureBoundary::HistoryStart,
+            end: CaptureBoundary::Relative(4200),
+            ..CaptureOptions::default()
+        },
+        &mut CaptureCarry::default(),
+    )
+    .expect("styled capture");
     assert_eq!(styled.lines().count(), 4201);
     let mut styled_rows = styled.lines();
-    assert!(
-        styled_rows
-            .next()
-            .expect("initial styled row")
-            .ends_with(&format!("{cluster} initial\x1b[0m"))
+    assert_eq!(
+        styled_rows.next().expect("initial styled row"),
+        format!("{cluster} initial")
     );
     for (index, row) in styled_rows.enumerate() {
         assert_eq!(
             row,
             format!(
-                "\x1b[0;38;2;{};{};99;48;2;0;0;0mrow-{index:04}\x1b[0m",
+                "\x1b[38;2;{};{};99mrow-{index:04}\x1b[39m",
                 index / 256,
                 index % 256,
             )
@@ -552,30 +549,56 @@ fn frozen_row_formatting_keeps_wrap_padding_unicode_and_style_contracts() {
         format!("\x1b[1;38;2;11;22;33mab界cdef{cluster} Z     \x1b[0m\r\nQ       ").as_bytes(),
     );
     let revision = ModeRevision::capture(&terminal).expect("revision");
+    let styled = |options: CaptureOptions| CaptureOptions {
+        escape_sequences: true,
+        start: CaptureBoundary::HistoryStart,
+        end: CaptureBoundary::Relative(2),
+        ..options
+    };
+    let flags = [(false, false), (false, true), (true, false), (true, true)];
+    let live = flags.map(|(join_wrapped, preserve_trailing)| {
+        capture_terminal(
+            &terminal,
+            None,
+            styled(CaptureOptions {
+                join_wrapped,
+                preserve_trailing,
+                ..CaptureOptions::default()
+            }),
+        )
+        .expect("live styled capture")
+    });
     terminal.vt_write(b"\x1b[3J\x1b[2J\x1b[Hreplacement");
     drop(terminal);
+    for ((join_wrapped, preserve_trailing), live) in flags.into_iter().zip(live) {
+        assert!(live.contains("\x1b[1m\x1b[38;2;11;22;33mab界cdef"));
+        assert_eq!(
+            capture_revision(
+                &revision,
+                0,
+                styled(CaptureOptions {
+                    join_wrapped,
+                    preserve_trailing,
+                    ..CaptureOptions::default()
+                }),
+                &mut CaptureCarry::default(),
+            )
+            .expect("frozen styled capture"),
+            live
+        );
+    }
 
     assert!(revision.row(0).wrapped());
     assert!(!revision.row(1).wrapped());
     for (join_wrapped, separator) in [(false, "\n"), (true, "")] {
         assert_eq!(
-            revision.capture_rows(0, 2, join_wrapped, false, false),
+            revision.capture_rows(0, 2, join_wrapped, false),
             format!("ab界cdef{separator}{cluster} Z\nQ")
         );
         assert_eq!(
-            revision.capture_rows(0, 2, join_wrapped, true, false),
+            revision.capture_rows(0, 2, join_wrapped, true),
             format!("ab界cdef{separator}{cluster} Z     \nQ       ")
         );
-        for preserve_trailing in [false, true] {
-            let padding = if preserve_trailing { "     " } else { "" };
-            let tail = if preserve_trailing { "       " } else { "" };
-            assert_eq!(
-                revision.capture_rows(0, 2, join_wrapped, preserve_trailing, true),
-                format!(
-                    "\x1b[0;1;38;2;11;22;33;48;2;0;0;0mab界cdef\x1b[0m{separator}\x1b[0;1;38;2;11;22;33;48;2;0;0;0m{cluster} Z{padding}\x1b[0m\n\x1b[0;38;2;255;255;255;48;2;0;0;0mQ{tail}\x1b[0m"
-                )
-            );
-        }
     }
     for vi in [false, true] {
         assert_eq!(

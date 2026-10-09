@@ -403,12 +403,17 @@ const HOOK_PAYLOAD_CONTEXT_FORMATS: &[&str] = &[
     "hook_created_respawn",
     "hook_current_mode",
     "hook_event",
+    "hook_exit_signal",
+    "hook_exit_status",
+    "hook_exit_success",
     "hook_height",
     HOOK_LAST_CONTEXT_FORMAT,
     "hook_marked",
     "hook_mode_entered",
     "hook_new_name",
     "hook_new_pane",
+    "hook_new_session",
+    "hook_new_session_name",
     "hook_new_title",
     "hook_new_window",
     "hook_new_window_index",
@@ -416,13 +421,18 @@ const HOOK_PAYLOAD_CONTEXT_FORMATS: &[&str] = &[
     "hook_old_height",
     "hook_old_name",
     "hook_old_pane",
+    "hook_old_session",
+    "hook_old_session_name",
     "hook_old_width",
     "hook_old_window",
     "hook_old_window_index",
     "hook_old_window_name",
     HOOK_PANE_CONTEXT_FORMAT,
+    "hook_pane_command",
+    "hook_pane_current_path",
     "hook_paste_buffer",
     "hook_previous_mode",
+    "hook_prompt_type",
     HOOK_SESSION_CONTEXT_FORMAT,
     HOOK_SESSION_NAME_CONTEXT_FORMAT,
     HOOK_VALUE_CONTEXT_FORMAT,
@@ -2648,6 +2658,7 @@ pub struct MuxEngine {
     global_window_hooks: HookTable,
     window_hooks: BTreeMap<WindowId, HookTable>,
     pane_hooks: BTreeMap<PaneId, HookTable>,
+    hook_events: BTreeSet<String>,
     global_environment: Environment,
     session_environments: BTreeMap<SessionId, RetainedJobEnvironment>,
     status: StatusFormats,
@@ -3006,6 +3017,7 @@ impl Default for MuxEngine {
             global_window_hooks: global_hook_table(TmuxOptionScope::Window),
             window_hooks: BTreeMap::new(),
             pane_hooks: BTreeMap::new(),
+            hook_events: BTreeSet::new(),
             global_environment: Environment::new(),
             session_environments: BTreeMap::new(),
             status: StatusFormats::default(),
@@ -3055,6 +3067,38 @@ impl Default for MuxEngine {
 }
 
 impl MuxEngine {
+    #[must_use]
+    pub fn is_hook_event(name: &str) -> bool {
+        name.starts_with('@') || tmux_option_is_hook(name)
+    }
+
+    #[must_use]
+    pub fn pane_created_payload(&self, pane: PaneId) -> (Option<String>, Option<String>) {
+        let command = self
+            .pane_start_command(pane)
+            .map(|command| {
+                command
+                    .iter()
+                    .map(|argument| crate::formats::quote_argument(argument))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .filter(|command| !command.is_empty())
+            .or_else(|| self.pane_shells.get(&pane).cloned())
+            .or_else(|| {
+                let window = self.state.window_for_pane(pane)?;
+                let session = self.state.windows.get(&window)?.session;
+                self.default_shell_for_session(session)
+                    .ok()
+                    .map(str::to_owned)
+            });
+        let path = self
+            .pane_runtime_facts(pane)
+            .map(|facts| facts.start_path.clone())
+            .filter(|path| !path.is_empty());
+        (command, path)
+    }
+
     #[must_use]
     pub fn after_command_hook(command: &str) -> Option<&'static str> {
         let command = if command == "new-pane" {
@@ -3157,12 +3201,9 @@ impl MuxEngine {
         let Some(mut hook_context) = ExecutionContext::for_pane(&self.state, pane) else {
             return execution;
         };
-        let Some(commands) = self
+        let commands = self
             .event_hook_commands(&hook_context, "marked-pane-changed")
-            .filter(|commands| !commands.is_empty())
-        else {
-            return execution;
-        };
+            .unwrap_or_default();
         let mut variables = BTreeMap::from([
             ("hook_event".to_owned(), "marked-pane-changed".to_owned()),
             (HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string()),
@@ -8916,18 +8957,18 @@ impl MuxEngine {
             let pane = self.state.last_pane(window)?;
             if options.has("-e") {
                 self.state.set_pane_input_off(pane, false)?;
-                return Ok(Execution::default());
+                return Ok(Execution::effect(MuxEffect::SuppressAfterHook));
             }
             if options.has("-d") {
                 self.state.set_pane_input_off(pane, true)?;
-                return Ok(Execution::default());
+                return Ok(Execution::effect(MuxEffect::SuppressAfterHook));
             }
             self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
-            return Ok(Execution::default());
+            return Ok(Execution::effect(MuxEffect::SuppressAfterHook));
         }
         if options.has("-m") || options.has("-M") {
             if options.has("-m") && !self.pane_is_visible(start) {
-                return Ok(Execution::default());
+                return Ok(Execution::effect(MuxEffect::SuppressAfterHook));
             }
             let old = self.state.marked_pane();
             if options.has("-M") {
@@ -8935,9 +8976,11 @@ impl MuxEngine {
             } else {
                 self.state.toggle_marked_pane(start)?;
             }
-            return Ok(self.marked_pane_changed(context, start, old));
+            let mut execution = self.marked_pane_changed(context, start, old);
+            execution.effects.push(MuxEffect::SuppressAfterHook);
+            return Ok(execution);
         }
-        let mut execution = Execution::default();
+        let mut execution = Execution::effect(MuxEffect::SuppressAfterHook);
         if let Some(style) = options.value("-P") {
             let style = style.to_owned();
             let pane_options = self.scalar_table_mut_or_insert(TmuxOptionTarget::Pane(start));
@@ -8985,6 +9028,16 @@ impl MuxEngine {
                 self.state.pin_pane_title(pane, title)?;
             }
             return Ok(execution);
+        }
+        if self
+            .state
+            .window_for_pane(pane)
+            .and_then(|window| self.state.windows.get(&window))
+            .is_some_and(|window| window.active_pane != pane)
+        {
+            execution
+                .effects
+                .retain(|effect| *effect != MuxEffect::SuppressAfterHook);
         }
         self.select_pane_target(context, pane, options.has("-Z"), hooks)?;
         Ok(execution)
@@ -11920,7 +11973,18 @@ impl MuxEngine {
                 )));
             }
             let value = value.map(RawText::from);
-            return self.set_user_option(context, parsed.name, value.as_ref(), &options, false);
+            let execution =
+                self.set_user_option(context, parsed.name, value.as_ref(), &options, false)?;
+            if !options.has("-u")
+                && !options.has("-U")
+                && execution
+                    .effects
+                    .iter()
+                    .any(|effect| matches!(effect, MuxEffect::UserOptionChanged { .. }))
+            {
+                self.hook_events.insert(parsed.name.to_owned());
+            }
+            return Ok(execution);
         }
         let table_option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
@@ -11994,12 +12058,12 @@ impl MuxEngine {
                 "event name must start with @".to_owned(),
             ));
         }
-        let Some(commands) = self
-            .user_hook_commands(&target_context, &name)
-            .filter(|commands| !commands.is_empty())
-        else {
-            return Ok(Execution::default());
-        };
+        let commands = self
+            .hook_events
+            .contains(&name)
+            .then(|| self.user_hook_commands(&target_context, &name))
+            .flatten()
+            .unwrap_or_default();
         let mut hook_context = target_context;
         let mut variables = BTreeMap::from([("hook_event".to_owned(), name.clone())]);
         if let Some(session) = hook_context.session {
@@ -17374,7 +17438,8 @@ fn option_is_unset(options: &Options) -> bool {
     options.has("-u") || options.has("-U")
 }
 
-fn tmux_signal_name(value: &str) -> String {
+#[must_use]
+pub fn tmux_signal_name(value: &str) -> String {
     #[cfg(target_os = "linux")]
     if let Some(signal) = value
         .trim()
@@ -28693,7 +28758,10 @@ mod tests {
                 ),
             )
             .expect("set pane title");
-        assert_eq!(renamed.effects, [MuxEffect::SnapshotChanged]);
+        assert_eq!(
+            renamed.effects,
+            [MuxEffect::SuppressAfterHook, MuxEffect::SnapshotChanged]
+        );
         assert_eq!(engine.state.pane(first).unwrap().title, r"~/src\\zz");
         assert_eq!(context.pane, Some(second));
         assert_eq!(
@@ -28710,7 +28778,7 @@ mod tests {
                 ),
             )
             .expect("same title is a no-op");
-        assert!(unchanged.effects.is_empty());
+        assert_eq!(unchanged.effects, [MuxEffect::SuppressAfterHook]);
         assert_eq!(context.pane, Some(second));
 
         for title in ["bad\n", "bad\x7f"] {
@@ -28720,7 +28788,7 @@ mod tests {
                     &command("select-pane", &["-t", &first.to_string(), "-T", title]),
                 )
                 .expect("invalid title is ignored");
-            assert!(invalid.effects.is_empty());
+            assert_eq!(invalid.effects, [MuxEffect::SuppressAfterHook]);
             assert_eq!(engine.state.pane(first).unwrap().title, r"~/src\\zz");
         }
     }
@@ -45847,7 +45915,7 @@ mod tests {
         assert_eq!(context.window, Some(other_window));
         assert_eq!(context.pane, Some(other_pane));
         assert_eq!(engine.state.generation(), generation);
-        assert!(no_op.effects.is_empty());
+        assert_eq!(no_op.effects, [MuxEffect::SuppressAfterHook]);
     }
 
     #[test]
@@ -47865,7 +47933,7 @@ mod tests {
         assert!(rows.contains(
             &"run-shell (run) [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]"
         ));
-        assert!(rows.contains(&"wait-for (wait) [-L|-S|-U] [-l] [-w waiter] channel"));
+        assert!(rows.contains(&"wait-for (wait) [-ELSUlv] [-F format] [-w waiter] name"));
         assert!(rows.contains(&"pipe-pane (pipep) [-IOo] [-t target-pane] [shell-command]"));
         assert_eq!(
             engine
@@ -47898,7 +47966,7 @@ mod tests {
                     .execute(&mut context, &command("list-commands", &[name]))
                     .unwrap()
                     .output,
-                "wait-for (wait) [-L|-S|-U] [-l] [-w waiter] channel"
+                "wait-for (wait) [-ELSUlv] [-F format] [-w waiter] name"
             );
         }
         for name in ["pipe-pane", "pipep"] {

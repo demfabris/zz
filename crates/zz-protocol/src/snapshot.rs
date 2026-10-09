@@ -520,6 +520,8 @@ pub enum PaneMode {
         matches: Vec<Vec<u16>>,
         #[serde(default)]
         match_style: String,
+        #[serde(default)]
+        prompt_shape: crate::PromptCursor,
     },
     Customize {
         state: crate::ChooseTreeState,

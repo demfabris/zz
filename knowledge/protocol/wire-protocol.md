@@ -898,6 +898,15 @@ writes for a UTF-8 client instead of U+FFFD. postcard encodes a byte string and 
 the same way, so a UTF-8 guard's frame is unchanged; one holding other bytes now decodes.
 `control_command_guard_output_round_trips_bytes_that_are_not_utf8` pins it.
 
+v108 also carries the mode prompts' cursor (catch-up item `fix.followups`).
+`ChooserPresentation` appends `prompt_cursor: PromptCursor`, and `PaneMode::Switch` appends
+`prompt_shape: PromptCursor`: what `mode_tree_set_prompt` and the switch mode's prompt read through
+`prompt_set_options` from the client's session (a chooser) or the pane's session (customize and
+switch modes). Their `prompt_style` is now that session's `message-style` (or
+`message-command-style` in command mode) expanded with `prompt_flags` holding `ISMODE`, instead of
+a fixed default. The raw TUI sends the cursor's DECSCUSR and OSC 12 while a chooser search, filter
+or kill prompt, a customize prompt or the switch prompt is up.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

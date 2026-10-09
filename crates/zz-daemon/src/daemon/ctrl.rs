@@ -1039,7 +1039,10 @@ impl Shared {
     ) {
         self.send_compact_state(client, outbound, full);
         let (appearance, provenance, options, stream, terminals, overlays) = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
+            if let Some(entry) = inner.client_mut(client) {
+                entry.published_chooser = Default::default();
+            }
             let subscriptions = inner
                 .client(client)
                 .and_then(|c| c.ctrl_subscriptions.as_ref())

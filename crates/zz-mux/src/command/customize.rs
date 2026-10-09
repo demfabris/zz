@@ -105,6 +105,14 @@ impl CustomizeMode {
             .as_ref()
             .is_some_and(|(prompt, _)| prompt.command_mode())
     }
+
+    #[must_use]
+    pub fn prompt_input(&self) -> String {
+        self.prompt
+            .as_ref()
+            .map(|(prompt, _)| prompt.input())
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -935,6 +943,7 @@ impl MuxEngine {
                     Preview::Big => ChooserPreviewSize::Big,
                 },
                 preview,
+                prompt_cursor: zz_protocol::PromptCursor::default(),
             },
             prompt,
         )

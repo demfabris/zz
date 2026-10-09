@@ -3082,7 +3082,7 @@ fn pane_prompt_row_y(model: &Model, content: Rect) -> u16 {
 }
 
 fn prompt_cursor(model: &Model) -> zz_protocol::PromptCursor {
-    if model.popup.is_some() || model.menu.is_some() {
+    if model.menu.is_some() {
         return zz_protocol::PromptCursor::default();
     }
     if let Some(confirm) = &model.confirm {

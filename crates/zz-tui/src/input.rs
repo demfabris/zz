@@ -22,7 +22,7 @@ use crate::{
         BrowserState, ProviderModifiers, ProviderPointerButton, ProviderPointerInput,
         ProviderPointerPhase,
     },
-    layout::{PaneRect, Rect},
+    layout::Rect,
     picker::{self, Action as PickerAction},
     sidebar::{self, EditKind as SidebarEditKind, Target as SidebarTarget},
     state::{ClientMessage, HostSwitch, Model},

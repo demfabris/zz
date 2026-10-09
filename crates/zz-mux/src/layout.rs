@@ -166,7 +166,7 @@ impl CellNode {
         }
     }
 
-    fn tiled(&self) -> bool {
+    pub(crate) fn tiled(&self) -> bool {
         match self {
             Self::Leaf { .. } => true,
             Self::Float { .. } => false,

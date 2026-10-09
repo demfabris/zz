@@ -129,15 +129,21 @@ fn split_lines(node: &CellNode, scale: Scale, map: &mut BorderMap, joins: bool) 
         return;
     };
     for (position, child) in children.iter().enumerate() {
+        if !child.node.tiled() {
+            continue;
+        }
         split_lines(&child.node, scale, map, joins);
-        if position + 1 >= children.len() {
+        if !children[position + 1..]
+            .iter()
+            .any(|next| next.node.tiled())
+        {
             continue;
         }
         let cell = child.node.geometry();
         if *axis == Axis::Horizontal {
-            let x = scale.x(u32::from(cell.xoff) + u32::from(cell.sx));
-            let y = scale.y(u32::from(geometry.yoff));
-            let y2 = scale.y(u32::from(geometry.yoff) + u32::from(geometry.sy));
+            let x = scale.x(at(cell.xoff) + u32::from(cell.sx));
+            let y = scale.y(at(geometry.yoff));
+            let y2 = scale.y(at(geometry.yoff) + u32::from(geometry.sy));
             if !joins {
                 map.vline(x, y, y2);
                 continue;
@@ -154,9 +160,9 @@ fn split_lines(node: &CellNode, scale: Scale, map: &mut BorderMap, joins: bool) 
                 map.mark(x, y2 - 1, BORDER_D);
             }
         } else {
-            let x = scale.x(u32::from(geometry.xoff));
-            let x2 = scale.x(u32::from(geometry.xoff) + u32::from(geometry.sx));
-            let y = scale.y(u32::from(cell.yoff) + u32::from(cell.sy));
+            let x = scale.x(at(geometry.xoff));
+            let x2 = scale.x(at(geometry.xoff) + u32::from(geometry.sx));
+            let y = scale.y(at(cell.yoff) + u32::from(cell.sy));
             if !joins {
                 map.hline(x, x2, y);
                 continue;
@@ -193,11 +199,17 @@ const fn cell_type(mask: u8) -> u8 {
     }
 }
 
-const fn carves(cell: CellGeometry, root: CellGeometry, status: PaneBorderStatus) -> bool {
+fn at(offset: i32) -> u32 {
+    u32::try_from(offset).unwrap_or(0)
+}
+
+fn carves(cell: CellGeometry, root: CellGeometry, status: PaneBorderStatus) -> bool {
     match status {
         PaneBorderStatus::Off => false,
         PaneBorderStatus::Top => cell.yoff == root.yoff,
-        PaneBorderStatus::Bottom => cell.yoff + cell.sy == root.yoff + root.sy,
+        PaneBorderStatus::Bottom => {
+            cell.yoff + i32::from(cell.sy) == root.yoff + i32::from(root.sy)
+        }
     }
 }
 
@@ -211,7 +223,13 @@ impl MuxEngine {
     ) -> Option<PanesModeGeometry> {
         let state = self.state.windows.get(&window)?;
         let root = state.layout.root();
-        let extent = root.geometry();
+        let (sx, sy) = state.layout.extent();
+        let extent = CellGeometry {
+            sx,
+            sy,
+            xoff: 0,
+            yoff: 0,
+        };
         let scale = Scale {
             osx: u32::from(extent.sx),
             osy: u32::from(extent.sy),
@@ -235,17 +253,17 @@ impl MuxEngine {
             };
             let (x, y, mut x2, mut y2) = if scale.copies() {
                 (
-                    u32::from(cell.xoff),
-                    u32::from(cell.yoff),
-                    u32::from(cell.xoff) + u32::from(cell.sx),
-                    u32::from(cell.yoff) + u32::from(cell.sy),
+                    at(cell.xoff),
+                    at(cell.yoff),
+                    at(cell.xoff) + u32::from(cell.sx),
+                    at(cell.yoff) + u32::from(cell.sy),
                 )
             } else {
                 (
-                    u32::from(cell.xoff) * scale.dsx / scale.osx,
-                    u32::from(cell.yoff) * scale.dsy / scale.osy,
-                    (u32::from(cell.xoff) + u32::from(cell.sx)) * scale.dsx / scale.osx,
-                    (u32::from(cell.yoff) + u32::from(cell.sy)) * scale.dsy / scale.osy,
+                    at(cell.xoff) * scale.dsx / scale.osx,
+                    at(cell.yoff) * scale.dsy / scale.osy,
+                    (at(cell.xoff) + u32::from(cell.sx)) * scale.dsx / scale.osx,
+                    (at(cell.yoff) + u32::from(cell.sy)) * scale.dsy / scale.osy,
                 )
             };
             if x >= scale.dsx || y >= scale.dsy {
@@ -289,12 +307,12 @@ impl MuxEngine {
                 if !carves(cell, extent, status) {
                     continue;
                 }
-                let x = scale.x(u32::from(cell.xoff));
-                let x2 = scale.x(u32::from(cell.xoff) + u32::from(cell.sx));
+                let x = scale.x(at(cell.xoff));
+                let x2 = scale.x(at(cell.xoff) + u32::from(cell.sx));
                 let y = if status == PaneBorderStatus::Top {
-                    scale.y(u32::from(cell.yoff))
+                    scale.y(at(cell.yoff))
                 } else {
-                    scale.y(u32::from(cell.yoff) + u32::from(cell.sy)) - 1
+                    scale.y(at(cell.yoff) + u32::from(cell.sy)) - 1
                 };
                 map.hline(x, x2, y);
             }

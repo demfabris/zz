@@ -107,10 +107,9 @@ use zz_protocol::{
     PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PaneStatus, PaneStatusKind, PaneStatusState,
     PanesModeArea, PanesModeBorder, PasteUploadPurpose, PastedImageFormat, PatchTail,
     PopupBorderLines, PreparedCommand, PreparedCommandResult, PromptCursor, ProtocolError,
-    ProtocolMessage, RawText,
-    SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
-    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
-    encode_protocol_message_into, encode_terminal_patch_event_into,
+    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_patch_event_into,
     encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
     menu_row_width, resolve_command,
 };
@@ -46490,6 +46489,7 @@ fn pane_place(inner: &ServerState, pane: PaneId) -> Option<PanePlace> {
                 path.push((id, in_first));
                 node = if in_first { *first } else { *second };
             }
+            zz_protocol::LayoutNode::Empty => return None,
         }
     }
 }

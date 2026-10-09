@@ -8,7 +8,7 @@
 
 use std::path::PathBuf;
 
-use crate::{AgentPaneWire, ClientId, ClientInstanceId};
+use crate::{AgentPaneWire, AgentTaskWire, ClientId, ClientInstanceId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -88,6 +88,17 @@ pub enum AgentStreamPayload {
         request_id: u64,
         tool_call: Value,
         options: Value,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        questions: Vec<AgentQuestion>,
+    },
+    /// The agent's background tasks, the whole set after a change.
+    TasksChanged {
+        tasks: Vec<AgentTaskWire>,
+    },
+    /// The agent is working on a turn nobody here started, such as a
+    /// background task reporting back, or has gone idle again.
+    Activity {
+        busy: bool,
     },
     PermissionResolved {
         request_id: u64,
@@ -131,6 +142,33 @@ pub enum AgentStreamPayload {
         reclaim_id: u64,
         prompts: Vec<AgentPrompt>,
     },
+}
+
+/// A question the agent asks the user, answered from a card rather than a
+/// permission option list: one or more choices, or typed text.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentQuestion {
+    pub id: String,
+    #[serde(default)]
+    pub header: Option<String>,
+    pub question: String,
+    #[serde(default)]
+    pub options: Vec<AgentQuestionOption>,
+    #[serde(default)]
+    pub multi_select: bool,
+    #[serde(default)]
+    pub allow_other: bool,
+    #[serde(default)]
+    pub secret: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentQuestionOption {
+    pub label: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
@@ -189,6 +227,8 @@ pub struct AgentSessionCapabilities {
     pub delete: bool,
     pub additional_directories: bool,
     pub images: bool,
+    #[serde(default)]
+    pub verbs: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -234,6 +274,20 @@ mod base64_text {
         let bytes = BASE64.decode(&encoded).map_err(D::Error::custom)?;
         String::from_utf8(bytes).map_err(D::Error::custom)
     }
+}
+
+pub const AGENT_VERBS: [&str; 5] = ["btw", "side", "steer", "fork", "rewind"];
+
+#[must_use]
+pub fn agent_verb(text: &str) -> Option<(&'static str, &str)> {
+    let line = text.trim().strip_prefix('/')?;
+    let (name, rest) = line
+        .split_once(char::is_whitespace)
+        .map_or((line, ""), |(name, rest)| (name, rest.trim()));
+    AGENT_VERBS
+        .into_iter()
+        .find(|verb| *verb == name)
+        .map(|verb| (verb, rest))
 }
 
 #[cfg(test)]
@@ -312,6 +366,24 @@ mod tests {
                 request_id: 7,
                 tool_call: serde_json::json!({"toolCallId": "call-1"}),
                 options: serde_json::json!([{"optionId": "allow", "kind": "allow_once"}]),
+                questions: vec![AgentQuestion {
+                    id: "q".to_owned(),
+                    question: "Which?".to_owned(),
+                    options: vec![AgentQuestionOption {
+                        label: "this".to_owned(),
+                        description: None,
+                    }],
+                    ..AgentQuestion::default()
+                }],
+            },
+            AgentStreamPayload::Activity { busy: true },
+            AgentStreamPayload::TasksChanged {
+                tasks: vec![AgentTaskWire {
+                    id: "b1".to_owned(),
+                    kind: "shell".to_owned(),
+                    description: "sleep".to_owned(),
+                    tool_call_id: None,
+                }],
             },
             AgentStreamPayload::PermissionResolved {
                 request_id: 7,

@@ -8,7 +8,9 @@ use std::{
     collections::{BTreeMap, BTreeSet, HashMap, VecDeque},
     sync::Arc,
 };
-use zz_protocol::{MAX_AGENT_PERMISSION_OPTIONS, MAX_AGENT_TOOL_CONTENT_ITEMS};
+use zz_protocol::{
+    MAX_AGENT_PERMISSION_OPTIONS, MAX_AGENT_TOOL_CONTENT_ITEMS, agent_stream::AgentQuestion,
+};
 
 const ENTRY_CHANGE_LOG_CAPACITY: usize = 4_096;
 const MAX_TOOL_PAYLOAD_BYTES: usize = 512 * 1024;
@@ -61,10 +63,13 @@ pub enum AgentThreadEntry<I> {
         id: u64,
         markdown: String,
         images: Vec<I>,
+        message_id: Option<String>,
     },
     Assistant {
         id: u64,
         markdown: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        aside: Option<AgentAside>,
     },
     Reasoning {
         id: u64,
@@ -82,11 +87,19 @@ pub enum AgentThreadEntry<I> {
         input: Option<ToolPayload>,
         output: Vec<ToolPayload>,
         default_expanded: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i64>,
     },
     Plan {
         id: u64,
         markdown: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct AgentAside {
+    pub side: bool,
+    pub reply_to: Option<u64>,
 }
 
 impl<I> AgentThreadEntry<I> {
@@ -99,6 +112,25 @@ impl<I> AgentThreadEntry<I> {
             | Self::Plan { id, .. } => *id,
         }
     }
+
+    pub fn rewind_id(&self) -> Option<&str> {
+        match self {
+            Self::User {
+                markdown,
+                message_id: Some(message_id),
+                ..
+            } if !markdown.trim_start().starts_with('/') => Some(message_id),
+            _ => None,
+        }
+    }
+}
+
+pub fn is_zz_command(text: &str) -> bool {
+    zz_protocol::agent_stream::agent_verb(text).is_some()
+}
+
+pub fn rewind_command(message_id: &str) -> String {
+    format!("/rewind {message_id}")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize)]
@@ -129,6 +161,8 @@ pub struct AgentPermissionRequest {
     pub tool_call_id: String,
     pub title: String,
     pub options: Vec<AgentPermissionOption>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub questions: Vec<AgentQuestion>,
 }
 
 #[derive(Debug)]
@@ -144,9 +178,12 @@ pub struct AgentTranscript<I> {
     message_entries: BTreeMap<(StreamRole, String), u64>,
     active_stream: Option<(StreamRole, u64)>,
     tool_entries: HashMap<String, u64>,
+    tool_parents: HashMap<u64, String>,
+    awaiting_parent: HashMap<String, Vec<u64>>,
     structured_tool_outputs: BTreeSet<String>,
     plan_entry: Option<u64>,
     suppress_user_echo: bool,
+    echo_target: Option<u64>,
     decode_image: ImageDecoder<I>,
 }
 
@@ -164,9 +201,12 @@ impl<I> AgentTranscript<I> {
             message_entries: BTreeMap::new(),
             active_stream: None,
             tool_entries: HashMap::new(),
+            tool_parents: HashMap::new(),
+            awaiting_parent: HashMap::new(),
             structured_tool_outputs: BTreeSet::new(),
             plan_entry: None,
             suppress_user_echo: false,
+            echo_target: None,
             decode_image,
         }
     }
@@ -179,6 +219,16 @@ impl<I> AgentTranscript<I> {
     }
     pub fn entries(&self) -> &[AgentThreadEntry<I>] {
         &self.entries
+    }
+
+    /// The tool call a subagent's tool row belongs to, by the parent's tool
+    /// call ID, when the driver said so.
+    pub fn tool_parent(&self, entry_id: u64) -> Option<&str> {
+        self.tool_parents.get(&entry_id).map(String::as_str)
+    }
+
+    pub fn tool_entry(&self, tool_call_id: &str) -> Option<u64> {
+        self.tool_entries.get(tool_call_id).copied()
     }
     pub fn entry_revisions(&self) -> &[u64] {
         &self.entry_revisions
@@ -212,8 +262,10 @@ impl<I> AgentTranscript<I> {
             id,
             markdown: prompt,
             images,
+            message_id: None,
         });
         self.suppress_user_echo = true;
+        self.echo_target = Some(id);
     }
     pub fn apply_update(&mut self, update: SessionUpdate) {
         match update {
@@ -285,9 +337,26 @@ impl<I> AgentTranscript<I> {
 
     fn apply_message_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
         if role == StreamRole::User && self.suppress_user_echo {
+            if let Some(target) = self.echo_target.take()
+                && let Some(message_id) = chunk.message_id
+            {
+                self.set_message_id(target, message_id.0.to_string());
+            }
             return;
         }
         self.append_chunk(role, chunk);
+    }
+
+    fn set_message_id(&mut self, entry_id: u64, next: String) {
+        let Some(index) = self.entry_index(entry_id) else {
+            return;
+        };
+        if let AgentThreadEntry::User { message_id, .. } = &mut self.entries[index]
+            && message_id.is_none()
+        {
+            *message_id = Some(next);
+            self.touch_entry(index);
+        }
     }
 
     fn append_chunk(&mut self, role: StreamRole, chunk: ContentChunk) {
@@ -307,7 +376,40 @@ impl<I> AgentTranscript<I> {
             return;
         }
         let message_id = chunk.message_id.map(|message_id| message_id.0.to_string());
+        let aside = (role == StreamRole::Assistant)
+            .then(|| self.aside(chunk.meta.as_ref()))
+            .flatten();
         self.append_stream_content(role, message_id, &markdown, images);
+        if let Some(aside) = aside
+            && let Some((_, entry_id)) = self.active_stream.take()
+            && let Some(index) = self.entry_index(entry_id)
+            && let AgentThreadEntry::Assistant { aside: slot, .. } = &mut self.entries[index]
+            && slot.is_none()
+        {
+            *slot = Some(aside);
+            self.touch_entry(index);
+        }
+    }
+
+    fn aside(
+        &self,
+        meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Option<AgentAside> {
+        let zz = meta?.get("zz")?;
+        let side = zz.get("side").and_then(serde_json::Value::as_bool) == Some(true);
+        let notice = zz.get("notice").and_then(serde_json::Value::as_bool) == Some(true);
+        if !side && !notice {
+            return None;
+        }
+        let reply_to = zz
+            .get("reply")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|reply| {
+                self.message_entries
+                    .get(&(StreamRole::User, reply.to_owned()))
+                    .copied()
+            });
+        Some(AgentAside { side, reply_to })
     }
 
     fn append_stream_content(
@@ -325,7 +427,7 @@ impl<I> AgentTranscript<I> {
             if let Some(id) = self.message_entries.get(key).copied() {
                 id
             } else {
-                let id = self.push_stream_entry(role);
+                let id = self.push_stream_entry(role, Some(&key.1));
                 self.message_entries.insert(key.clone(), id);
                 id
             }
@@ -333,10 +435,10 @@ impl<I> AgentTranscript<I> {
             if active_role == role {
                 id
             } else {
-                self.push_stream_entry(role)
+                self.push_stream_entry(role, None)
             }
         } else {
-            self.push_stream_entry(role)
+            self.push_stream_entry(role, None)
         };
         self.active_stream = Some((role, entry_id));
         if let Some(index) = self.entry_index(entry_id) {
@@ -363,17 +465,19 @@ impl<I> AgentTranscript<I> {
         }
     }
 
-    fn push_stream_entry(&mut self, role: StreamRole) -> u64 {
+    fn push_stream_entry(&mut self, role: StreamRole, message_id: Option<&str>) -> u64 {
         let id = self.allocate_entry_id();
         let entry = match role {
             StreamRole::User => AgentThreadEntry::User {
                 id,
                 markdown: String::new(),
                 images: Vec::new(),
+                message_id: message_id.map(str::to_owned),
             },
             StreamRole::Assistant => AgentThreadEntry::Assistant {
                 id,
                 markdown: String::new(),
+                aside: None,
             },
             StreamRole::Reasoning => AgentThreadEntry::Reasoning {
                 id,
@@ -388,6 +492,13 @@ impl<I> AgentTranscript<I> {
 
     fn upsert_tool(&mut self, tool: ToolCall) {
         let protocol_id = tool.tool_call_id.0.to_string();
+        let parent = tool
+            .meta
+            .as_ref()
+            .and_then(|meta| meta.get("zz"))
+            .and_then(|zz| zz.get("parent"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned);
         if tool.content.is_empty() {
             self.structured_tool_outputs.remove(&protocol_id);
         } else {
@@ -396,6 +507,7 @@ impl<I> AgentTranscript<I> {
         let location = tool_location(&tool);
         let input = tool_input(&tool);
         let output = tool_output(&tool);
+        let exit = exit_code(tool.meta.as_ref());
         if let Some(entry_id) = self.tool_entries.get(&protocol_id).copied()
             && let Some(index) = self.entry_index(entry_id)
             && let AgentThreadEntry::Tool {
@@ -405,6 +517,7 @@ impl<I> AgentTranscript<I> {
                 location: entry_location,
                 input: entry_input,
                 output: entry_output,
+                exit_code: entry_exit,
                 ..
             } = &mut self.entries[index]
         {
@@ -414,11 +527,23 @@ impl<I> AgentTranscript<I> {
             *entry_location = location;
             *entry_input = input;
             *entry_output = output;
+            if exit.is_some() {
+                *entry_exit = exit;
+            }
             self.touch_entry(index);
             return;
         }
         let id = self.allocate_entry_id();
         self.tool_entries.insert(protocol_id.clone(), id);
+        if let Some(parent) = parent {
+            if !self.tool_entries.contains_key(&parent) {
+                self.awaiting_parent
+                    .entry(parent.clone())
+                    .or_default()
+                    .push(id);
+            }
+            self.tool_parents.insert(id, parent);
+        }
         self.push_entry(AgentThreadEntry::Tool {
             id,
             protocol_id: protocol_id.clone(),
@@ -429,7 +554,17 @@ impl<I> AgentTranscript<I> {
             input,
             output,
             default_expanded: matches!(tool.status, ToolCallStatus::Failed),
+            exit_code: exit,
         });
+        for child in self
+            .awaiting_parent
+            .remove(&protocol_id)
+            .unwrap_or_default()
+        {
+            if let Some(index) = self.entry_index(child) {
+                self.touch_entry(index);
+            }
+        }
     }
 
     fn apply_tool_update(&mut self, update: ToolCallUpdate) {
@@ -445,6 +580,7 @@ impl<I> AgentTranscript<I> {
             return;
         };
         let had_structured_output = self.structured_tool_outputs.contains(&protocol_id);
+        let exit = exit_code(update.meta.as_ref());
         let AgentThreadEntry::Tool {
             kind,
             status,
@@ -452,12 +588,17 @@ impl<I> AgentTranscript<I> {
             location,
             input,
             output,
+            exit_code: entry_exit,
             ..
         } = &mut self.entries[index]
         else {
             return;
         };
         let mut changed = false;
+        if exit.is_some() && *entry_exit != exit {
+            *entry_exit = exit;
+            changed = true;
+        }
         if let Some(next) = update.fields.kind
             && reclassifies_tool(*kind, next, carries_shape)
         {
@@ -550,6 +691,16 @@ impl<I> AgentTranscript<I> {
         tool_call: ToolCallUpdate,
         options: Vec<PermissionOption>,
     ) {
+        self.request_questions(request_id, tool_call, options, Vec::new());
+    }
+
+    pub fn request_questions(
+        &mut self,
+        request_id: u64,
+        tool_call: ToolCallUpdate,
+        options: Vec<PermissionOption>,
+        questions: Vec<AgentQuestion>,
+    ) {
         let tool_call_id = tool_call.tool_call_id.0.to_string();
         let updated_title = tool_call.fields.title.clone();
         self.apply_tool_update(tool_call);
@@ -586,6 +737,7 @@ impl<I> AgentTranscript<I> {
                     kind: map_permission_kind(option.kind),
                 })
                 .collect(),
+            questions,
         };
         let mut pending_permissions = self.pending_permissions.to_vec();
         if let Some(existing) = pending_permissions
@@ -633,6 +785,7 @@ impl<I> AgentTranscript<I> {
     pub fn finish_turn(&mut self) {
         self.pending_permissions = Arc::from([]);
         self.suppress_user_echo = false;
+        self.echo_target = None;
         self.active_stream = None;
     }
 
@@ -713,6 +866,10 @@ fn map_tool_kind(kind: ToolKind) -> AgentToolKindModel {
         ToolKind::SwitchMode => AgentToolKindModel::SwitchMode,
         _ => AgentToolKindModel::Other,
     }
+}
+
+fn exit_code(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<i64> {
+    meta?.get("zz")?.get("exitCode")?.as_i64()
 }
 
 fn map_tool_status(status: ToolCallStatus) -> AgentToolStatusModel {
@@ -897,6 +1054,180 @@ fn pretty_json_markdown(value: &impl serde::Serialize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn update(json: serde_json::Value) -> SessionUpdate {
+        serde_json::from_value(json).expect("ACP update")
+    }
+
+    #[test]
+    fn subagent_tool_rows_remember_their_parent_and_questions_ride_the_request() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "agent-1", "title": "Survey", "kind": "think",
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "read-1", "title": "Read a.rs", "kind": "read",
+            "_meta": { "zz": { "parent": "agent-1" } },
+        })));
+        let child = transcript.tool_entry("read-1").expect("child row");
+        let parent = transcript.tool_entry("agent-1").expect("parent row");
+        assert_eq!(transcript.tool_parent(child), Some("agent-1"));
+        assert_eq!(transcript.tool_parent(parent), None);
+        let tool_call: ToolCallUpdate = serde_json::from_value(serde_json::json!({
+            "toolCallId": "ask-1", "title": "Which fruit?",
+        }))
+        .expect("tool call");
+        transcript.request_questions(
+            9,
+            tool_call,
+            Vec::new(),
+            vec![AgentQuestion {
+                id: "fruit".to_owned(),
+                question: "Which fruit?".to_owned(),
+                multi_select: true,
+                ..AgentQuestion::default()
+            }],
+        );
+        let pending = transcript.permissions();
+        assert_eq!(pending[0].questions[0].id, "fruit");
+        assert!(pending[0].options.is_empty());
+    }
+
+    #[test]
+    fn a_step_that_arrives_before_its_agent_changes_once_the_agent_appears() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "read-1", "title": "Read a.rs", "kind": "read",
+            "_meta": { "zz": { "parent": "agent-1" } },
+        })));
+        let child = transcript.tool_entry("read-1").expect("child row");
+        assert_eq!(transcript.tool_parent(child), Some("agent-1"));
+        assert_eq!(transcript.tool_entry("agent-1"), None);
+        let before = transcript.revision();
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "agent-1", "title": "Survey", "kind": "think",
+        })));
+        let changed = transcript.changed_entries(before).expect("change log");
+        assert!(
+            changed.contains(&0),
+            "the waiting step is touched: {changed:?}"
+        );
+        assert!(changed.contains(&1));
+        let before = transcript.revision();
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "agent-2", "title": "Survey", "kind": "think",
+        })));
+        assert_eq!(transcript.changed_entries(before), Some(vec![2]));
+    }
+
+    #[test]
+    fn zz_replies_attach_to_their_command_and_failed_tools_keep_the_exit_code() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "user_message_chunk", "messageId": "zz-command-1-in",
+            "content": { "type": "text", "text": "/btw why" },
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk", "messageId": "zz-command-1-out",
+            "content": { "type": "text", "text": "because" },
+            "_meta": { "zz": { "side": true, "reply": "zz-command-1-in" } },
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk", "messageId": "zz-notice-1",
+            "content": { "type": "text", "text": "Forked." },
+            "_meta": { "zz": { "notice": true } },
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "bash-1", "title": "false", "kind": "execute",
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "bash-1", "status": "failed",
+            "_meta": { "zz": { "exitCode": 2 } },
+        })));
+        let prompt = transcript.entries()[0].id();
+        let asides = transcript
+            .entries()
+            .iter()
+            .filter_map(|entry| match entry {
+                AgentThreadEntry::Assistant { aside, .. } => Some(*aside),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            asides,
+            [
+                Some(AgentAside {
+                    side: true,
+                    reply_to: Some(prompt)
+                }),
+                Some(AgentAside {
+                    side: false,
+                    reply_to: None
+                }),
+            ]
+        );
+        assert!(matches!(
+            transcript.entries().last(),
+            Some(AgentThreadEntry::Tool {
+                status: AgentToolStatusModel::Failed,
+                exit_code: Some(2),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn prompt_rows_keep_the_message_id_a_rewind_targets() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        let prompt = |id: &str, text: &str| {
+            update(serde_json::json!({
+                "sessionUpdate": "user_message_chunk", "messageId": id,
+                "content": { "type": "text", "text": text },
+            }))
+        };
+        transcript.apply_update(prompt("u-1", "first"));
+        transcript.apply_update(prompt("zz-command-1-in", "/btw what now"));
+        transcript.apply_update(prompt("u-2", "/compact"));
+        transcript.finish_replay();
+        transcript.begin_prompt("second".to_owned(), Vec::new());
+        let before = transcript.revision();
+        transcript.apply_update(prompt("u-3", "second"));
+        assert_eq!(
+            transcript.changed_entries(before),
+            Some(vec![3]),
+            "the echo names the row it echoes"
+        );
+        transcript.apply_update(prompt("zz-command-2-in", "/steer faster"));
+        transcript.apply_update(prompt("u-3", "second"));
+
+        let message_ids = transcript
+            .entries()
+            .iter()
+            .map(|entry| match entry {
+                AgentThreadEntry::User { message_id, .. } => message_id.as_deref(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            message_ids,
+            [
+                Some("u-1"),
+                Some("zz-command-1-in"),
+                Some("u-2"),
+                Some("u-3")
+            ]
+        );
+        let rewind_ids = transcript
+            .entries()
+            .iter()
+            .map(AgentThreadEntry::rewind_id)
+            .collect::<Vec<_>>();
+        assert_eq!(rewind_ids, [Some("u-1"), None, None, Some("u-3")]);
+        assert_eq!(rewind_command("u-3"), "/rewind u-3");
+        assert!(is_zz_command("  /rewind u-3"));
+        assert!(!is_zz_command("//rewind u-3"));
+        assert!(!is_zz_command("/compact"));
+    }
 
     #[test]
     fn copied_payloads_preserve_owned_truncation_behavior() {

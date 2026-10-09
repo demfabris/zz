@@ -2068,7 +2068,7 @@ impl InteractiveClient {
     }
 
     pub fn send(&self, message: &ProtocolMessage) -> Result<(), DaemonError> {
-        self.send_locked(message, |writer| writer.send(message))
+        self.send_locked(&TracedMessage(message), |writer| writer.send(message))
     }
 
     fn send_locked(
@@ -2089,6 +2089,32 @@ impl InteractiveClient {
             diagnostic_elapsed_us(started),
         );
         result
+    }
+}
+
+pub(crate) struct TracedMessage<'a>(pub(crate) &'a ProtocolMessage);
+
+impl fmt::Debug for TracedMessage<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            ProtocolMessage::AgentAnswerQuestion {
+                pane,
+                request_id,
+                answers,
+            } => formatter
+                .debug_struct("AgentAnswerQuestion")
+                .field("pane", pane)
+                .field("request_id", request_id)
+                .field(
+                    "answers",
+                    &answers
+                        .iter()
+                        .map(|answer| (&answer.id, answer.answers.len()))
+                        .collect::<Vec<_>>(),
+                )
+                .finish(),
+            message => message.fmt(formatter),
+        }
     }
 }
 
@@ -3162,6 +3188,28 @@ mod tests {
         client_working_directory, startup_config_owner_capability, terminal_facts_capabilities,
         terminal_facts_capabilities_with,
     };
+
+    #[test]
+    fn traced_answers_keep_the_question_and_drop_what_was_typed() {
+        let message = zz_protocol::ProtocolMessage::AgentAnswerQuestion {
+            pane: zz_protocol::PaneId(3),
+            request_id: 9,
+            answers: vec![zz_protocol::AgentQuestionAnswer {
+                id: "Which token?".to_owned(),
+                answers: vec!["hunter2".to_owned()],
+            }],
+        };
+        let traced = format!("{:#?}", super::TracedMessage(&message));
+        assert!(traced.contains("Which token?"));
+        assert!(!traced.contains("hunter2"));
+        let prompt = zz_protocol::ProtocolMessage::AgentCancel {
+            pane: zz_protocol::PaneId(3),
+        };
+        assert_eq!(
+            format!("{:#?}", super::TracedMessage(&prompt)),
+            format!("{prompt:#?}")
+        );
+    }
 
     #[cfg(unix)]
     #[test]

@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 use zz_ui::agent::composer::COMPOSER_OUTER_PADDING;
@@ -14,8 +15,11 @@ use zz_ui::agent::controls::{context_usage_fraction, context_usage_tooltip, git_
 #[cfg(test)]
 use zz_ui::agent::presentation::MAX_RENDERED_ERROR_BYTES;
 use zz_ui::agent::presentation::{
-    empty_state, error_card, permission_card, permission_option, rendered_error, welcome_state,
+    empty_state, error_card, permission_card, permission_option, rendered_error, spinner_phase,
+    welcome_state,
 };
+use zz_ui::agent::question::{QuestionCardAction, QuestionCardState, QuestionCardStep};
+use zz_ui::agent::tasks::{TaskTrayAction, TrayPanel, task_tray};
 use zz_ui::agent::title::{agent_thread_title_editor, agent_title_is_editing};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
@@ -26,17 +30,18 @@ use gpui::{
 };
 use zz_client::agent_completion::{
     CommandCompletion, active_command_hint, bare_command_name, completion_query, completion_score,
-    meaningful_command_description, ranked_completions,
+    meaningful_command_description, pane_commands, ranked_completions,
 };
+use zz_client::agent_transcript::rewind_command;
 use zz_protocol::{AgentDescriptor, AgentProvider, Axis, CommandInvocation, PaneId};
-#[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
-    AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentTimeline, AgentTimelineStore,
-    AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText,
-    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick,
-    agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
-    append_timeline_row, fold_timeline_rows, timeline_group_kind,
+    AGENT_CONTENT_MAX_WIDTH, AgentAside, AgentEntry, AgentMarkdown, AgentPaneStatus, AgentTimeline,
+    AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
+    AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow,
+    TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
+    agent_status_pill, append_timeline_row, fold_timeline_rows, plan_progress, timeline_group_kind,
+    timeline_parent, tool_output_text,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -114,14 +119,30 @@ struct TimelineModel {
     entry_to_row: Vec<usize>,
     markdown: HashMap<u64, AgentMarkdown>,
     tool_payloads: HashMap<(u64, usize), AgentToolPayload>,
+    plan: Option<u64>,
+}
+
+fn plan_entry_id(entries: &[AgentThreadEntry]) -> Option<u64> {
+    entries.iter().rev().find_map(|entry| match entry {
+        AgentThreadEntry::Plan { id, .. } => Some(*id),
+        _ => None,
+    })
 }
 
 impl TimelineModel {
-    fn new(entries: &[AgentThreadEntry], revisions: &[u64]) -> Self {
+    fn new(entries: &[AgentThreadEntry], revisions: &[u64], parents: ToolParents<'_>) -> Self {
         debug_assert_eq!(entries.len(), revisions.len());
         let mut markdown = HashMap::new();
         let mut tool_payloads = HashMap::new();
-        let ui_entries = ui_entries_with_markdown(entries, &mut markdown, &mut tool_payloads);
+        let ui_entries = entries
+            .iter()
+            .map(|entry| {
+                parented(
+                    ui_entry_with_markdown(entry, &mut markdown, &mut tool_payloads),
+                    parents,
+                )
+            })
+            .collect::<Vec<_>>();
         let FoldedTimelineRows { rows, entry_to_row } = fold_timeline_rows(&ui_entries);
         Self {
             rows,
@@ -130,6 +151,7 @@ impl TimelineModel {
             entry_to_row,
             markdown,
             tool_payloads,
+            plan: plan_entry_id(entries),
         }
     }
 
@@ -140,10 +162,16 @@ impl TimelineModel {
         self.entry_to_row.clear();
         self.markdown.clear();
         self.tool_payloads.clear();
+        self.plan = None;
     }
 
-    fn rebuild(&mut self, entries: &[AgentThreadEntry], revisions: &[u64]) {
-        *self = Self::new(entries, revisions);
+    fn rebuild(
+        &mut self,
+        entries: &[AgentThreadEntry],
+        revisions: &[u64],
+        parents: ToolParents<'_>,
+    ) {
+        *self = Self::new(entries, revisions, parents);
     }
 
     fn synchronize(
@@ -151,6 +179,7 @@ impl TimelineModel {
         entries: &[AgentThreadEntry],
         revisions: &[u64],
         changed_entries: Option<&[usize]>,
+        parents: ToolParents<'_>,
     ) -> TimelineModelUpdate {
         debug_assert_eq!(entries.len(), revisions.len());
         if entries.len() != revisions.len() {
@@ -170,7 +199,7 @@ impl TimelineModel {
                     .all(|(id, entry)| *id == entry.id())
             };
         if !append_only {
-            self.rebuild(entries, revisions);
+            self.rebuild(entries, revisions, parents);
             return TimelineModelUpdate::Rebuild;
         }
 
@@ -199,20 +228,23 @@ impl TimelineModel {
         for &entry_index in &changed_existing {
             let id = self.entry_ids[entry_index];
             let Some(&row_index) = self.entry_to_row.get(entry_index) else {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, parents);
                 return TimelineModelUpdate::Rebuild;
             };
-            let next = ui_entry_with_markdown(
-                &entries[entry_index],
-                &mut self.markdown,
-                &mut self.tool_payloads,
+            let next = parented(
+                ui_entry_with_markdown(
+                    &entries[entry_index],
+                    &mut self.markdown,
+                    &mut self.tool_payloads,
+                ),
+                parents,
             );
             let Some(previous) = self.rows.get(row_index).and_then(|row| row.entry(id)) else {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, parents);
                 return TimelineModelUpdate::Rebuild;
             };
             if !replacement_preserves_folding(previous, &next) {
-                self.rebuild(entries, revisions);
+                self.rebuild(entries, revisions, parents);
                 return TimelineModelUpdate::Rebuild;
             }
             replacements.push((entry_index, row_index, id, next));
@@ -221,8 +253,25 @@ impl TimelineModel {
         let appended = entries
             .iter()
             .skip(old_entry_count)
-            .map(|entry| ui_entry_with_markdown(entry, &mut self.markdown, &mut self.tool_payloads))
+            .map(|entry| {
+                parented(
+                    ui_entry_with_markdown(entry, &mut self.markdown, &mut self.tool_payloads),
+                    parents,
+                )
+            })
             .collect::<Vec<_>>();
+        let parent_arrives_later = appended.iter().enumerate().any(|(index, entry)| {
+            timeline_parent(entry).is_some_and(|parent| {
+                !self.entry_ids.contains(&parent)
+                    && !appended[..index]
+                        .iter()
+                        .any(|earlier| earlier.id() == parent)
+            })
+        });
+        if parent_arrives_later {
+            self.rebuild(entries, revisions, parents);
+            return TimelineModelUpdate::Rebuild;
+        }
         let old_row_count = self.rows.len();
         let mut store_entries = Vec::with_capacity(replacements.len());
         let mut remeasure_rows = replacements
@@ -244,6 +293,9 @@ impl TimelineModel {
                 remeasure_rows.push(row_index);
             }
         }
+        if let Some(plan) = plan_entry_id(&entries[old_entry_count..]) {
+            self.plan = Some(plan);
+        }
         self.entry_ids
             .extend(entries[old_entry_count..].iter().map(AgentThreadEntry::id));
         self.entry_revisions
@@ -262,6 +314,16 @@ impl TimelineModel {
 
 fn replacement_preserves_folding(previous: &AgentEntry, next: &AgentEntry) -> bool {
     timeline_group_kind(previous) == timeline_group_kind(next)
+        && timeline_parent(previous) == timeline_parent(next)
+}
+
+type ToolParents<'a> = &'a dyn Fn(u64) -> Option<u64>;
+
+fn parented(mut entry: AgentEntry, parents: ToolParents<'_>) -> AgentEntry {
+    if let AgentEntry::Tool(tool) = &mut entry {
+        tool.parent = parents(tool.id);
+    }
+    entry
 }
 
 /// What a wizard interaction asks the controller to do.
@@ -385,6 +447,24 @@ impl PermissionWizard {
         self.answer(requests, Some(option))
     }
 
+    fn take(&mut self, requests: &[AgentPermissionRequest], request_id: u64) -> bool {
+        if !self
+            .pages(requests)
+            .iter()
+            .any(|request| request.request_id == request_id)
+        {
+            return false;
+        }
+        self.answered.insert(request_id);
+        self.sync(requests);
+        true
+    }
+
+    fn release(&mut self, requests: &[AgentPermissionRequest], request_id: u64) {
+        self.answered.remove(&request_id);
+        self.sync(requests);
+    }
+
     fn confirm(&mut self, requests: &[AgentPermissionRequest]) -> PermissionStep {
         self.answer(requests, Some(self.highlighted))
     }
@@ -415,6 +495,8 @@ pub(crate) struct AgentView {
     completion_scroll: UniformListScrollHandle,
     submission_error: Option<Arc<str>>,
     permission_wizard: PermissionWizard,
+    question: Option<QuestionCardState>,
+    tray_open: Option<TrayPanel>,
     attachments: Vec<Arc<Image>>,
     completions: Arc<[CommandCompletion]>,
     completion_selected: Option<usize>,
@@ -495,7 +577,9 @@ impl AgentView {
                 controller.pane_entries(pane).unwrap_or((&[], &[], 0));
             (
                 pane_state,
-                TimelineModel::new(entries, revisions),
+                TimelineModel::new(entries, revisions, &|id| {
+                    controller.tool_parent_entry(pane, id)
+                }),
                 next_revision,
                 controller.conversation_epoch(pane),
             )
@@ -535,6 +619,8 @@ impl AgentView {
             completion_scroll: UniformListScrollHandle::new(),
             submission_error: None,
             permission_wizard: PermissionWizard::default(),
+            question: None,
+            tray_open: None,
             attachments: Vec::new(),
             completions: Arc::from([]),
             completion_selected: None,
@@ -605,7 +691,10 @@ impl AgentView {
         self.last_input.clone_from(&value);
         self.last_cursor = cursor;
         self.completion_dismissed = false;
-        let commands = self.pane_state.available_commands.clone();
+        let commands = pane_commands(
+            &self.pane_state.available_commands,
+            self.pane_state.session_capabilities.verbs,
+        );
         self.recompute_completions(&commands);
         cx.notify();
     }
@@ -706,10 +795,15 @@ impl AgentView {
             );
         }
         if commands_changed {
-            let commands = self.pane_state.available_commands.clone();
+            let commands = pane_commands(
+                &self.pane_state.available_commands,
+                self.pane_state.session_capabilities.verbs,
+            );
             self.recompute_completions(&commands);
         }
 
+        let pane = self.pane;
+        let parents = |id| controller.tool_parent_entry(pane, id);
         let Some((entries, revisions, next_revision)) = controller.pane_entries(self.pane) else {
             if !self.timeline.rows.is_empty() {
                 self.timeline.clear();
@@ -721,7 +815,7 @@ impl AgentView {
             return (state_changed, TimelineStoreUpdate::Clear);
         };
         if conversation_changed {
-            self.timeline.rebuild(entries, revisions);
+            self.timeline.rebuild(entries, revisions, &parents);
             self.timeline_next_revision = next_revision;
             self.timeline_scroll.reset(self.timeline.rows.len());
             self.stick.engage_now(&self.timeline_scroll, reduce_motion);
@@ -735,15 +829,20 @@ impl AgentView {
         let Some(changed_entries) =
             controller.pane_entry_changes(self.pane, self.timeline_next_revision)
         else {
-            self.timeline.rebuild(entries, revisions);
+            self.timeline.rebuild(entries, revisions, &parents);
             self.timeline_next_revision = next_revision;
             self.timeline_scroll.reset(self.timeline.rows.len());
             self.stick.engage_now(&self.timeline_scroll, reduce_motion);
             return (true, TimelineStoreUpdate::Clear);
         };
         self.timeline_next_revision = next_revision;
-        let (timeline_changed, store_update) =
-            self.synchronize_timeline(entries, revisions, &changed_entries, reduce_motion);
+        let (timeline_changed, store_update) = self.synchronize_timeline(
+            entries,
+            revisions,
+            &changed_entries,
+            &parents,
+            reduce_motion,
+        );
         (timeline_changed || state_changed, store_update)
     }
 
@@ -817,11 +916,12 @@ impl AgentView {
         entries: &[AgentThreadEntry],
         revisions: &[u64],
         changed_entries: &[usize],
+        parents: ToolParents<'_>,
         reduce_motion: bool,
     ) -> (bool, TimelineStoreUpdate) {
         match self
             .timeline
-            .synchronize(entries, revisions, Some(changed_entries))
+            .synchronize(entries, revisions, Some(changed_entries), parents)
         {
             TimelineModelUpdate::None => (false, TimelineStoreUpdate::None),
             TimelineModelUpdate::Rebuild => {
@@ -891,7 +991,7 @@ impl AgentView {
             self.accept_selected_completion(window, cx);
             return;
         }
-        if self.confirm_permission(cx) {
+        if self.confirm_permission(window, cx) {
             return;
         }
         self.submit(window, cx);
@@ -900,9 +1000,15 @@ impl AgentView {
     /// Enter over an empty composer confirms the highlighted permission option.
     /// It never reaches [`ComposerAction::Stop`]: a stray Enter right after
     /// sending must not kill the turn it just started.
-    fn confirm_permission(&mut self, cx: &mut Context<Self>) -> bool {
+    fn confirm_permission(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if !self.input.read(cx).value().trim().is_empty() {
             return false;
+        }
+        self.synchronize_question_card(window, cx);
+        if let Some(card) = &self.question {
+            let step = card.card.submit();
+            self.apply_question_step(step, window, cx);
+            return true;
         }
         let requests = self.pane_state.pending_permissions.clone();
         let step = self.permission_wizard.confirm(&requests);
@@ -947,7 +1053,7 @@ impl AgentView {
     fn handle_permission_key(
         &mut self,
         event: &KeyDownEvent,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
         if self.pane_state.pending_permissions.is_empty() {
@@ -958,6 +1064,10 @@ impl AgentView {
             return false;
         }
         let engaged = self.composer_engaged(window, cx);
+        self.synchronize_question_card(window, cx);
+        if self.question.is_some() {
+            return self.handle_question_key(event, engaged, window, cx);
+        }
         let requests = self.pane_state.pending_permissions.clone();
         let step = match event.keystroke.key.as_str() {
             "escape" if !engaged => self.permission_wizard.cancel(&requests),
@@ -1356,6 +1466,15 @@ impl AgentView {
         cx.notify();
     }
 
+    fn rewind_to(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        let pane = self.pane;
+        let result = self.controller.update(cx, |controller, cx| {
+            controller.prompt(pane, &rewind_command(message_id), Vec::new(), cx)
+        });
+        self.submission_error = result.err();
+        cx.notify();
+    }
+
     fn render_attachments(&self, view: &Entity<Self>, cx: &gpui::App) -> Option<impl IntoElement> {
         if self.attachments.is_empty() {
             return None;
@@ -1412,7 +1531,7 @@ impl AgentView {
             AgentConnectionState::Running => format!("Waiting for {agent}’s first update…").into(),
             AgentConnectionState::Cancelling => "Cancelling the current turn…".into(),
             AgentConnectionState::Failed => "The agent could not start this session.".into(),
-            AgentConnectionState::Disconnected => "The ACP agent is offline.".into(),
+            AgentConnectionState::Disconnected => "The agent is offline.".into(),
         };
         empty_state(message, pane_is_busy(state.connection), view, cx)
     }
@@ -1429,6 +1548,25 @@ impl AgentView {
         let counter = self
             .permission_wizard
             .page_label(&state.pending_permissions);
+        if let Some(card) = self
+            .question
+            .as_ref()
+            .filter(|card| card.request_id() == permission.request_id)
+        {
+            let view = view.clone();
+            return Some(
+                card.render(
+                    &format!("agent-question-{}-{}", self.pane.0, permission.request_id),
+                    counter.map(Into::into),
+                    true,
+                    move |action, window, cx| {
+                        view.update(cx, |view, cx| view.question_action(action, window, cx));
+                    },
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
         let highlighted = self.permission_wizard.highlighted;
         let request_id = permission.request_id;
         let options = permission
@@ -1545,6 +1683,266 @@ impl AgentView {
         let requests = self.pane_state.pending_permissions.clone();
         let step = self.permission_wizard.cancel(&requests);
         self.apply_permission_step(step, cx);
+    }
+
+    fn synchronize_question_card(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let head = self
+            .permission_wizard
+            .current(&self.pane_state.pending_permissions)
+            .filter(|request| !request.questions.is_empty())
+            .map(|request| (request.request_id, request.questions.clone()));
+        let current = self.question.as_ref().map(QuestionCardState::request_id);
+        if current == head.as_ref().map(|(request_id, _)| *request_id) {
+            return;
+        }
+        if self
+            .question
+            .as_ref()
+            .is_some_and(|card| card.editing(window, cx))
+        {
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        self.question = head.map(|(request_id, questions)| {
+            QuestionCardState::new(request_id, questions, window, cx, Self::on_question_input)
+        });
+    }
+
+    fn on_question_input(
+        &mut self,
+        question: usize,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(card) = self.question.as_mut() else {
+            return;
+        };
+        match event {
+            InputEvent::Change => {
+                if card.input_changed(question, cx) {
+                    cx.notify();
+                }
+            }
+            InputEvent::Focus => {
+                if card.card.focus(question) {
+                    cx.notify();
+                }
+            }
+            InputEvent::PressEnter { .. } => {
+                let step = card.card.submit();
+                self.apply_question_step(step, window, cx);
+            }
+            _ => {}
+        }
+    }
+
+    fn handle_question_key(
+        &mut self,
+        event: &KeyDownEvent,
+        engaged: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(card) = self.question.as_mut() else {
+            return false;
+        };
+        let key = event.keystroke.key.as_str();
+        if card.editing(window, cx) {
+            if key != "escape" {
+                return false;
+            }
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+            cx.notify();
+            return true;
+        }
+        if engaged {
+            return false;
+        }
+        let step = card.key(key, event.keystroke.modifiers.shift, window, cx);
+        self.apply_question_step(step, window, cx)
+    }
+
+    fn question_action(
+        &mut self,
+        action: QuestionCardAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(card) = self.question.as_mut() else {
+            return;
+        };
+        let step = card.action(action, window, cx);
+        self.apply_question_step(step, window, cx);
+    }
+
+    fn apply_question_step(
+        &mut self,
+        step: QuestionCardStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(request_id) = self.question.as_ref().map(QuestionCardState::request_id) else {
+            return false;
+        };
+        let editing = self
+            .question
+            .as_ref()
+            .is_some_and(|card| card.editing(window, cx));
+        let requests = self.pane_state.pending_permissions.clone();
+        let answers = match step {
+            QuestionCardStep::Stay => return false,
+            QuestionCardStep::Handled | QuestionCardStep::Other(_) => {
+                cx.notify();
+                return true;
+            }
+            QuestionCardStep::Submit(answers) => Some(answers),
+            QuestionCardStep::Dismiss => None,
+        };
+        if !self.permission_wizard.take(&requests, request_id) {
+            return true;
+        }
+        let pane = self.pane;
+        let answered = self.controller.update(cx, |controller, cx| match answers {
+            Some(answers) => controller.answer_question(pane, request_id, answers, cx),
+            None => controller.respond_permission(pane, request_id, None, cx),
+        });
+        if !answered {
+            self.permission_wizard.release(&requests, request_id);
+        }
+        if answered && editing {
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    fn task_action(&mut self, action: TaskTrayAction, cx: &mut Context<Self>) {
+        match action {
+            TaskTrayAction::Toggle(panel) => {
+                self.tray_open = (self.tray_open != Some(panel)).then_some(panel);
+            }
+            TaskTrayAction::Stop(task_id) => {
+                let pane = self.pane;
+                self.controller.update(cx, |controller, cx| {
+                    controller.stop_task(pane, task_id, cx);
+                });
+            }
+            TaskTrayAction::Reveal(tool_call_id) => self.reveal_tool(&tool_call_id, cx),
+        }
+        cx.notify();
+    }
+
+    fn reveal_tool(&mut self, tool_call_id: &str, cx: &mut Context<Self>) {
+        let Some(entry) = self.controller.read(cx).tool_entry(self.pane, tool_call_id) else {
+            return;
+        };
+        let Some(row) = self
+            .timeline
+            .entry_ids
+            .iter()
+            .position(|id| *id == entry)
+            .and_then(|index| self.timeline.entry_to_row.get(index).copied())
+        else {
+            return;
+        };
+        if let Some(turn) = self.timeline.rows.get(row).map(TimelineRow::id) {
+            self.timeline_store.update(cx, |store, cx| {
+                store.set_expanded(turn, DisclosureKind::Turn, true, cx);
+            });
+        }
+        self.stick.reveal(&self.timeline_scroll, row);
+    }
+
+    fn current_plan(&self, state: &AgentPaneState) -> Option<String> {
+        let source = self
+            .timeline
+            .markdown
+            .get(&self.timeline.plan?)?
+            .full_text();
+        let (done, total, _) = plan_progress(&source);
+        (total > 0 && (done < total || state.connection.has_active_turn())).then_some(source)
+    }
+
+    fn pane_status(state: &AgentPaneState) -> Option<AgentPaneStatus> {
+        if !state.pending_permissions.is_empty() {
+            return Some(AgentPaneStatus::Waiting);
+        }
+        match state.connection {
+            AgentConnectionState::Running => Some(AgentPaneStatus::Running),
+            AgentConnectionState::Cancelling => Some(AgentPaneStatus::Stopping),
+            AgentConnectionState::Failed => Some(AgentPaneStatus::Exited),
+            AgentConnectionState::Disconnected => Some(AgentPaneStatus::Offline),
+            AgentConnectionState::Starting
+            | AgentConnectionState::Restoring
+            | AgentConnectionState::Ready => None,
+        }
+    }
+
+    fn render_status(
+        &self,
+        state: &AgentPaneState,
+        view: &Entity<Self>,
+        cx: &mut gpui::App,
+    ) -> Option<AnyElement> {
+        let status = Self::pane_status(state)?;
+        let phase = if matches!(status, AgentPaneStatus::Running | AgentPaneStatus::Stopping) {
+            spinner_phase(view.entity_id(), cx)
+        } else {
+            0.0
+        };
+        let restart = (status == AgentPaneStatus::Exited).then(|| {
+            let controller = self.controller.clone();
+            let pane = self.pane;
+            Rc::new(move |_: &mut Window, cx: &mut gpui::App| {
+                controller.update(cx, |controller, cx| controller.retry(pane, cx));
+            }) as Rc<dyn Fn(&mut Window, &mut gpui::App)>
+        });
+        Some(
+            agent_status_pill(("agent-status", self.pane.0), status, phase, restart, cx)
+                .into_any_element(),
+        )
+    }
+
+    fn open_output(&self, tool: &AgentToolEntry, cx: &mut Context<Self>) {
+        let Some(args) = zz_client::agent_output::output_pane_args(
+            self.pane,
+            &self.pane_state.cwd,
+            &tool.label,
+            tool.exit_code,
+            &tool_output_text(tool),
+        ) else {
+            return;
+        };
+        self.mux
+            .read(cx)
+            .execute(CommandInvocation::new("split-window", args));
+    }
+
+    fn render_task_tray(
+        &self,
+        state: &AgentPaneState,
+        view: &Entity<Self>,
+        cx: &mut gpui::App,
+    ) -> Option<impl IntoElement> {
+        let phase = if state.tasks.is_empty() {
+            0.0
+        } else {
+            spinner_phase(view.entity_id(), cx)
+        };
+        let plan = self.current_plan(state);
+        let view = view.clone();
+        task_tray(
+            &format!("agent-{}", self.pane.0),
+            plan.as_deref(),
+            &state.tasks,
+            self.tray_open,
+            true,
+            phase,
+            move |action, _, cx| {
+                view.update(cx, |view, cx| view.task_action(action, cx));
+            },
+            cx,
+        )
     }
 
     fn render_error(&self, state: &AgentPaneState, cx: &gpui::App) -> Option<impl IntoElement> {
@@ -2523,7 +2921,10 @@ impl AgentView {
             self.render_directory_picker(state, view.clone(), cx)
                 .into_any_element(),
         ];
-        let command_hint = active_command_hint(&self.last_input, &state.available_commands);
+        let command_hint = active_command_hint(
+            &self.last_input,
+            &pane_commands(&state.available_commands, state.session_capabilities.verbs),
+        );
         let completions = self.render_completions(view, cx);
         zz_ui::agent::composer::AgentComposer {
             input: self.input.clone(),
@@ -2539,6 +2940,10 @@ impl AgentView {
                 .map(IntoElement::into_any_element)
                 .chain(
                     self.render_queue_chip(state, cx)
+                        .map(IntoElement::into_any_element),
+                )
+                .chain(
+                    self.render_task_tray(state, view, cx)
                         .map(IntoElement::into_any_element),
                 )
                 .chain(
@@ -2631,6 +3036,10 @@ impl Render for AgentView {
         self.drain_pending_composer(window, cx);
         self.permission_wizard
             .sync(&self.pane_state.pending_permissions);
+        self.synchronize_question_card(window, cx);
+        if self.pane_state.tasks.is_empty() && self.tray_open == Some(TrayPanel::Tasks) {
+            self.tray_open = None;
+        }
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
         let has_timeline = !rows.is_empty();
@@ -2743,6 +3152,28 @@ impl Render for AgentView {
             );
         let view = cx.entity();
         let input_focus = self.focus(cx);
+        let timeline = AgentTimeline::new(
+            rows,
+            self.timeline_scroll.clone(),
+            self.timeline_store.clone(),
+        )
+        .active_turn(state.connection.has_active_turn())
+        .bottom_padding(COMPOSER_OUTER_PADDING)
+        .open_output({
+            let view = view.clone();
+            move |tool, _, cx| view.update(cx, |view, cx| view.open_output(tool, cx))
+        });
+        let timeline = if state.session_capabilities.verbs {
+            let rewind_view = view.clone();
+            timeline.rewind(
+                state.connection.accepts_prompt() && state.pending_permissions.is_empty(),
+                move |message_id, _, cx| {
+                    rewind_view.update(cx, |view, cx| view.rewind_to(message_id, cx));
+                },
+            )
+        } else {
+            timeline
+        };
         let root = div()
             .id(("agent-pane", self.pane.0))
             .key_context(AGENT_KEY_CONTEXT)
@@ -2767,6 +3198,7 @@ impl Render for AgentView {
                     .flat_map(|session| &session.windows)
                     .any(|window| window.active_pane == self.pane),
                 header_controls,
+                self.render_status(&state, &view, cx),
                 header_actions,
                 has_timeline,
                 cx,
@@ -2790,16 +3222,7 @@ impl Render for AgentView {
                         )
                     })
                     .when(has_timeline, |this| {
-                        this.child(
-                            AgentTimeline::new(
-                                rows,
-                                self.timeline_scroll.clone(),
-                                self.timeline_store.clone(),
-                            )
-                            .active_turn(state.connection.has_active_turn())
-                            .bottom_padding(COMPOSER_OUTER_PADDING),
-                        )
-                        .child(
+                        this.child(timeline).child(
                             div()
                                 .absolute()
                                 .top_0()
@@ -2842,6 +3265,7 @@ fn disconnected_pane_state() -> AgentPaneState {
         available_commands: Arc::from([]),
         usage: None,
         git: None,
+        tasks: Arc::from([]),
         pending_composer: None,
         queued_prompts: 0,
     }
@@ -2849,24 +3273,18 @@ fn disconnected_pane_state() -> AgentPaneState {
 
 #[cfg(test)]
 fn ui_entries(entries: &[AgentThreadEntry]) -> Arc<[AgentEntry]> {
-    ui_entries_with_markdown(entries, &mut HashMap::new(), &mut HashMap::new())
+    let mut markdown = HashMap::new();
+    let mut tool_payloads = HashMap::new();
+    entries
+        .iter()
+        .map(|entry| ui_entry_with_markdown(entry, &mut markdown, &mut tool_payloads))
+        .collect::<Vec<_>>()
+        .into()
 }
 
 #[cfg(test)]
 fn ui_entry(entry: &AgentThreadEntry) -> AgentEntry {
     ui_entry_with_markdown(entry, &mut HashMap::new(), &mut HashMap::new())
-}
-
-fn ui_entries_with_markdown(
-    entries: &[AgentThreadEntry],
-    markdown: &mut HashMap<u64, AgentMarkdown>,
-    tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
-) -> Arc<[AgentEntry]> {
-    entries
-        .iter()
-        .map(|entry| ui_entry_with_markdown(entry, markdown, tool_payloads))
-        .collect::<Vec<_>>()
-        .into()
 }
 
 fn streaming_markdown(
@@ -2903,14 +3321,25 @@ fn ui_entry_with_markdown(
             id,
             markdown,
             images,
+            ..
         } => AgentEntry::User {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
             images: images.clone().into(),
+            rewind_id: entry.rewind_id().map(SharedString::from),
         },
-        AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
+        AgentThreadEntry::Assistant {
+            id,
+            markdown,
+            aside,
+            ..
+        } => AgentEntry::Assistant {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
+            aside: aside.map(|aside| AgentAside {
+                side: aside.side,
+                reply_to: aside.reply_to,
+            }),
         },
         AgentThreadEntry::Reasoning {
             id,
@@ -2932,6 +3361,7 @@ fn ui_entry_with_markdown(
             input,
             output,
             default_expanded,
+            exit_code,
             ..
         } => {
             tool_payloads.retain(|(entry_id, slot), _| {
@@ -2976,6 +3406,8 @@ fn ui_entry_with_markdown(
                     .collect::<Vec<_>>()
                     .into(),
                 default_expanded: *default_expanded,
+                parent: None,
+                exit_code: *exit_code,
             })
         }
         AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
@@ -2992,24 +3424,14 @@ fn synchronize_entry_store(
 ) {
     match entry {
         AgentEntry::User { id, markdown, .. }
-        | AgentEntry::Assistant { id, markdown }
+        | AgentEntry::Assistant { id, markdown, .. }
         | AgentEntry::Reasoning { id, markdown, .. }
         | AgentEntry::Plan { id, markdown } => {
             store.update(cx, |store, cx| {
                 store.synchronize_markdown(*id, MarkdownSlot::Body, markdown.clone(), cx);
             });
         }
-        AgentEntry::Tool(tool) => {
-            store.update(cx, |store, cx| {
-                store.synchronize_tool_content(
-                    tool.id,
-                    tool.location.clone(),
-                    tool.input.clone(),
-                    tool.output.clone(),
-                    cx,
-                );
-            });
-        }
+        AgentEntry::Tool(_) => {}
     }
 }
 
@@ -3240,7 +3662,24 @@ mod completion_tests {
                     kind: AgentPermissionKind::RejectOnce,
                 },
             ],
+            questions: Vec::new(),
         }
+    }
+
+    #[test]
+    fn a_card_takes_its_own_request_off_the_wizard_whatever_page_is_focused() {
+        let requests = [permission(1), permission(2)];
+        let mut wizard = PermissionWizard::default();
+        wizard.sync(&requests);
+        assert!(wizard.take(&requests, 2));
+        assert_eq!(wizard.current(&requests).map(|r| r.request_id), Some(1));
+        assert!(
+            !wizard.take(&requests, 2),
+            "an answered request is taken once"
+        );
+        assert!(!wizard.take(&requests, 9));
+        wizard.release(&requests, 2);
+        assert_eq!(wizard.page_label(&requests).as_deref(), Some("1/2"));
     }
 
     #[test]
@@ -3661,10 +4100,8 @@ mod completion_tests {
                 cx.new(|_| AgentController::new(crate::config::AgentConfig::default()));
             let timeline_store = cx.new(|_| AgentTimelineStore::default());
             timeline_store.update(cx, |store, cx| {
-                assert!(!store.expanded(1, DisclosureKind::Tool, false));
-                assert!(!store.expanded(1, DisclosureKind::Group, false));
-                store.toggle_expanded(1, DisclosureKind::Tool, false, cx);
-                store.toggle_expanded(1, DisclosureKind::Group, false, cx);
+                assert!(!store.expanded(1, DisclosureKind::Turn, false));
+                store.toggle_expanded(1, DisclosureKind::Turn, false, cx);
                 store.markdown(1, MarkdownSlot::Body, "old session".into(), cx);
             });
             let timeline_entries = [
@@ -3672,10 +4109,12 @@ mod completion_tests {
                     id: 1,
                     markdown: "old session".to_owned(),
                     images: Vec::new(),
+                    message_id: None,
                 },
                 AgentThreadEntry::Assistant {
                     id: 2,
                     markdown: "old response".to_owned(),
+                    aside: None,
                 },
             ];
 
@@ -3688,7 +4127,7 @@ mod completion_tests {
                 history_input,
                 visible: false,
                 pane_state: disconnected_pane_state(),
-                timeline: TimelineModel::new(&timeline_entries, &[1, 2]),
+                timeline: TimelineModel::new(&timeline_entries, &[1, 2], &|_| None),
                 timeline_store,
                 timeline_next_revision: 2,
                 conversation_epoch: 0,
@@ -3697,6 +4136,8 @@ mod completion_tests {
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 permission_wizard: PermissionWizard::default(),
+                question: None,
+                tray_open: None,
                 attachments: Vec::new(),
                 completions: Arc::from([]),
                 completion_selected: None,
@@ -3725,11 +4166,12 @@ mod completion_tests {
             id: 1,
             markdown: "new session".to_owned(),
             images: Vec::new(),
+            message_id: None,
         }];
         let (changed, cleared) = cx.update(|_, cx| {
             view.update(cx, |view, cx| {
                 let (changed, store_update) =
-                    view.synchronize_timeline(&replacement, &[3], &[], false);
+                    view.synchronize_timeline(&replacement, &[3], &[], &|_| None, false);
                 let cleared = view.update_timeline_store(store_update, cx);
                 (changed, cleared)
             })
@@ -3740,12 +4182,7 @@ mod completion_tests {
         let timeline_store = cx.update(|_, cx| view.read(cx).timeline_store.clone());
         assert!(!cx.update(|_, cx| {
             timeline_store.update(cx, |store, _| {
-                store.expanded(1, DisclosureKind::Tool, false)
-            })
-        }));
-        assert!(!cx.update(|_, cx| {
-            timeline_store.update(cx, |store, _| {
-                store.expanded(1, DisclosureKind::Group, false)
+                store.expanded(1, DisclosureKind::Turn, false)
             })
         }));
     }
@@ -3790,6 +4227,8 @@ mod completion_tests {
                 completion_scroll: UniformListScrollHandle::new(),
                 submission_error: None,
                 permission_wizard: PermissionWizard::default(),
+                question: None,
+                tray_open: None,
                 attachments: Vec::new(),
                 completions: vec![
                     CommandCompletion {
@@ -3848,6 +4287,785 @@ mod completion_tests {
             "/first "
         );
         assert!(cx.update(|_, cx| view.read(cx).completions.is_empty()));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    type RecordedRequests = Rc<RefCell<Vec<(PaneId, crate::mux::client::AgentRequest)>>>;
+
+    #[cfg(not(target_os = "macos"))]
+    fn wired_view(
+        cx: &mut TestAppContext,
+        pane: PaneId,
+    ) -> (
+        Entity<AgentView>,
+        Entity<AgentController>,
+        RecordedRequests,
+        &mut VisualTestContext,
+    ) {
+        cx.update(zz_ui::init);
+        let slot = Rc::new(RefCell::new(None));
+        let captured = Rc::clone(&slot);
+        let (_, cx) = cx.add_window_view(move |window, cx| {
+            crate::config::set_fleet_hosts_for_test(Vec::new(), cx);
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            let sink = mux.update(cx, |mux, _| {
+                mux.set_agent_client_instance_id_for_test(zz_protocol::ClientInstanceId(1));
+                mux.record_agent_requests_for_test()
+            });
+            let controller =
+                cx.new(|_| AgentController::new(crate::config::AgentConfig::default()));
+            controller.update(cx, |controller, _| controller.attach_mux(mux.clone()));
+            let descriptor = AgentDescriptor {
+                provider: AgentProvider::ClaudeCode,
+                cwd: Some(PathBuf::from("/workspace")),
+                session_id: None,
+            };
+            let view = cx.new(|cx| {
+                let mut view =
+                    AgentView::new(pane, &descriptor, controller.clone(), mux, window, cx);
+                view.set_visible(true, cx);
+                view
+            });
+            view.read(cx).focus(cx).focus(window, cx);
+            captured.replace(Some((view.clone(), controller, sink)));
+            Root::new(view, window, cx)
+        });
+        let (view, controller, sink) = slot.borrow_mut().take().expect("captured agent view");
+        (view, controller, sink, cx)
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn ask(
+        cx: &mut VisualTestContext,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+        request_id: u64,
+        questions: Vec<zz_protocol::agent_stream::AgentQuestion>,
+    ) {
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_stream_items(
+                    pane,
+                    vec![zz_daemon::AgentStreamItem {
+                        seq: request_id,
+                        payload: zz_daemon::AgentStreamPayload::PermissionRequested {
+                            request_id,
+                            tool_call: serde_json::json!({
+                                "toolCallId": format!("ask-{request_id}"),
+                                "title": "Claude has questions",
+                            }),
+                            options: serde_json::json!([]),
+                            questions,
+                        },
+                    }],
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn asked(
+        id: &str,
+        labels: &[&str],
+        multi_select: bool,
+    ) -> zz_protocol::agent_stream::AgentQuestion {
+        zz_protocol::agent_stream::AgentQuestion {
+            id: id.to_owned(),
+            question: format!("{id}?"),
+            options: labels
+                .iter()
+                .map(|label| zz_protocol::agent_stream::AgentQuestionOption {
+                    label: (*label).to_owned(),
+                    description: None,
+                })
+                .collect(),
+            multi_select,
+            allow_other: true,
+            ..Default::default()
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn reply(id: &str, answers: &[&str]) -> zz_protocol::AgentQuestionAnswer {
+        zz_protocol::AgentQuestionAnswer {
+            id: id.to_owned(),
+            answers: answers.iter().map(|answer| (*answer).to_owned()).collect(),
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_question_card_answers_choices_and_typed_text_from_the_keyboard(cx: &mut TestAppContext) {
+        let pane = PaneId(41);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            1,
+            vec![
+                asked("fruit", &["apple", "pear"], false),
+                asked("tools", &["saw", "drill"], true),
+            ],
+        );
+        assert!(cx.update(|_, cx| view.read(cx).question.is_some()));
+
+        cx.simulate_keystrokes("2 1 3");
+        assert!(
+            cx.update(|_, cx| view.read(cx).input.read(cx).value().is_empty()),
+            "the card keeps its digits out of the composer"
+        );
+        cx.simulate_input("chisel");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sink.borrow().as_slice(),
+            &[(
+                pane,
+                crate::mux::client::AgentRequest::AnswerQuestion {
+                    request_id: 1,
+                    answers: vec![
+                        reply("fruit", &["pear"]),
+                        reply("tools", &["saw", "chisel"])
+                    ],
+                }
+            )]
+        );
+        assert!(cx.update(|_, cx| view.read(cx).question.is_none()));
+        assert!(
+            cx.update(|window, cx| view.read(cx).focus(cx).is_focused(window)),
+            "the composer takes the keyboard back"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn one_plain_question_answers_on_its_digit_and_escape_dismisses(cx: &mut TestAppContext) {
+        let pane = PaneId(42);
+        let (_view, controller, sink, cx) = wired_view(cx, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            1,
+            vec![asked("fruit", &["apple", "pear"], false)],
+        );
+        cx.simulate_keystrokes("1");
+        ask(
+            cx,
+            &controller,
+            pane,
+            2,
+            vec![asked("tools", &["saw"], true)],
+        );
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sink.borrow().as_slice(),
+            &[
+                (
+                    pane,
+                    crate::mux::client::AgentRequest::AnswerQuestion {
+                        request_id: 1,
+                        answers: vec![reply("fruit", &["apple"])],
+                    }
+                ),
+                (
+                    pane,
+                    crate::mux::client::AgentRequest::RespondPermission {
+                        request_id: 2,
+                        option_id: None,
+                    }
+                ),
+            ]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn the_task_tray_opens_and_stops_a_task(cx: &mut TestAppContext) {
+        let pane = PaneId(43);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_pane_state(
+                    pane,
+                    &zz_protocol::AgentPaneWire {
+                        phase: zz_protocol::AgentConnectionPhase::Running,
+                        tasks: vec![zz_protocol::AgentTaskWire {
+                            id: "b1".to_owned(),
+                            kind: "shell".to_owned(),
+                            description: "cargo build".to_owned(),
+                            tool_call_id: None,
+                        }],
+                        ..Default::default()
+                    },
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("agent-task-stop-0").is_none());
+        let chip = cx
+            .debug_bounds("agent-task-tray")
+            .expect("the tray chip should be painted");
+        cx.simulate_click(chip.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert_eq!(
+            cx.update(|_, cx| view.read(cx).tray_open),
+            Some(TrayPanel::Tasks)
+        );
+        let stop = cx
+            .debug_bounds("agent-task-stop-0")
+            .expect("an open tray lists the task");
+        cx.simulate_click(stop.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        assert_eq!(
+            sink.borrow().as_slice(),
+            &[(
+                pane,
+                crate::mux::client::AgentRequest::StopTask {
+                    task_id: "b1".to_owned()
+                }
+            )]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn subagent_steps_nest_from_the_controllers_parent_links(cx: &mut TestAppContext) {
+        let pane = PaneId(44);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        let tool = |seq: u64, id: &str, meta: serde_json::Value| zz_daemon::AgentStreamItem {
+            seq,
+            payload: zz_daemon::AgentStreamPayload::Update {
+                update: serde_json::json!({
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": id,
+                    "title": id,
+                    "kind": "read",
+                    "_meta": meta,
+                }),
+            },
+        };
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        tool(1, "agent-1", serde_json::json!({})),
+                        tool(
+                            2,
+                            "read-1",
+                            serde_json::json!({"zz": {"parent": "agent-1"}}),
+                        ),
+                        tool(
+                            3,
+                            "read-2",
+                            serde_json::json!({"zz": {"parent": "agent-1"}}),
+                        ),
+                    ],
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+
+        let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
+        let [TimelineRow::Group { entries, .. }] = rows.as_slice() else {
+            panic!("the steps join their agent's row: {rows:?}");
+        };
+        let parents = entries
+            .iter()
+            .map(zz_ui::agent::timeline_parent)
+            .collect::<Vec<_>>();
+        let agent = entries[0].id();
+        assert_eq!(parents, [None, Some(agent), Some(agent)]);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn stream(
+        cx: &mut VisualTestContext,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+        items: Vec<(u64, zz_daemon::AgentStreamPayload)>,
+    ) {
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_stream_items(
+                    pane,
+                    items
+                        .into_iter()
+                        .map(|(seq, payload)| zz_daemon::AgentStreamItem { seq, payload })
+                        .collect(),
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn sent_answers(sink: &RecordedRequests) -> Vec<crate::mux::client::AgentRequest> {
+        sink.borrow()
+            .iter()
+            .map(|(_, request)| request.clone())
+            .filter(|request| {
+                matches!(
+                    request,
+                    crate::mux::client::AgentRequest::AnswerQuestion { .. }
+                        | crate::mux::client::AgentRequest::RespondPermission { .. }
+                        | crate::mux::client::AgentRequest::Prompt { .. }
+                )
+            })
+            .collect()
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn ready_with_an_image(
+        cx: &mut VisualTestContext,
+        view: &Entity<AgentView>,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+    ) {
+        stream(
+            cx,
+            controller,
+            pane,
+            vec![
+                (
+                    1,
+                    zz_daemon::AgentStreamPayload::Ready {
+                        agent_name: "Claude Code".to_owned(),
+                        agent_key: "claude".to_owned(),
+                        auth_methods: Vec::new(),
+                        capabilities: zz_protocol::agent_stream::AgentSessionCapabilities {
+                            images: true,
+                            ..Default::default()
+                        },
+                    },
+                ),
+                (
+                    2,
+                    zz_daemon::AgentStreamPayload::SessionReady {
+                        session_id: "s-1".to_owned(),
+                        modes: None,
+                        config_options: None,
+                    },
+                ),
+            ],
+        );
+        cx.update(|_, cx| {
+            view.update(cx, |view, _| {
+                view.attachments.push(Arc::new(Image::from_bytes(
+                    gpui::ImageFormat::Png,
+                    vec![0x89, b'P', b'N', b'G'],
+                )));
+            });
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn one_enter_answers_the_card_and_nothing_behind_it(cx: &mut TestAppContext) {
+        let pane = PaneId(45);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_an_image(cx, &view, &controller, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            3,
+            vec![
+                asked("fruit", &["apple", "pear"], false),
+                asked("tools", &["saw", "drill"], true),
+            ],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                4,
+                zz_daemon::AgentStreamPayload::PermissionRequested {
+                    request_id: 4,
+                    tool_call: serde_json::json!({"toolCallId": "bash-1", "title": "Run ls"}),
+                    options: serde_json::json!([
+                        {"optionId": "allow-once", "name": "Allow once", "kind": "allow_once"},
+                    ]),
+                    questions: Vec::new(),
+                },
+            )],
+        );
+
+        cx.simulate_keystrokes("2 1 enter");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sent_answers(&sink),
+            [crate::mux::client::AgentRequest::AnswerQuestion {
+                request_id: 3,
+                answers: vec![reply("fruit", &["pear"]), reply("tools", &["saw"])],
+            }],
+            "the Enter that answers the card neither approves the next request nor sends the images"
+        );
+        assert_eq!(
+            cx.update(|_, cx| view
+                .read(cx)
+                .pane_state
+                .pending_permissions
+                .iter()
+                .map(|request| request.request_id)
+                .collect::<Vec<_>>()),
+            [4]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn the_enter_that_answers_a_card_keeps_the_attached_images(cx: &mut TestAppContext) {
+        let pane = PaneId(48);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_an_image(cx, &view, &controller, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            3,
+            vec![asked("fruit", &["apple"], true)],
+        );
+
+        cx.simulate_keystrokes("1 enter");
+        cx.run_until_parked();
+
+        assert_eq!(
+            sent_answers(&sink),
+            [crate::mux::client::AgentRequest::AnswerQuestion {
+                request_id: 3,
+                answers: vec![reply("fruit", &["apple"])],
+            }]
+        );
+        assert_eq!(cx.update(|_, cx| view.read(cx).attachments.len()), 1);
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_card_resolved_elsewhere_hands_the_keyboard_back(cx: &mut TestAppContext) {
+        let pane = PaneId(46);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        ask(
+            cx,
+            &controller,
+            pane,
+            1,
+            vec![asked("fruit", &["apple", "pear"], false)],
+        );
+        cx.simulate_keystrokes("3");
+        assert!(cx.update(|window, cx| !view.read(cx).focus(cx).is_focused(window)));
+        assert!(cx.update(|window, cx| {
+            view.read(cx)
+                .question
+                .as_ref()
+                .is_some_and(|card| card.editing(window, cx))
+        }));
+
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                2,
+                zz_daemon::AgentStreamPayload::PermissionResolved {
+                    request_id: 1,
+                    canceled: true,
+                },
+            )],
+        );
+
+        assert!(cx.update(|_, cx| view.read(cx).question.is_none()));
+        assert!(cx.update(|window, cx| view.read(cx).focus(cx).is_focused(window)));
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_step_that_arrives_before_its_agent_nests_once_the_agent_shows_up(cx: &mut TestAppContext) {
+        let pane = PaneId(47);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        let tool = |id: &str, meta: serde_json::Value| zz_daemon::AgentStreamPayload::Update {
+            update: serde_json::json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": id,
+                "title": id,
+                "kind": "read",
+                "_meta": meta,
+            }),
+        };
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                1,
+                tool("read-1", serde_json::json!({"zz": {"parent": "agent-1"}})),
+            )],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                2,
+                zz_daemon::AgentStreamPayload::Update {
+                    update: serde_json::json!({
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "meanwhile"},
+                    }),
+                },
+            )],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(3, tool("agent-1", serde_json::json!({})))],
+        );
+
+        let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
+        let [
+            TimelineRow::Single(AgentEntry::Assistant { .. }),
+            TimelineRow::Group { entries, .. },
+        ] = rows.as_slice()
+        else {
+            panic!("the step leaves its place for its agent's row: {rows:?}");
+        };
+        let agent = entries[0].id();
+        assert_eq!(
+            entries
+                .iter()
+                .map(zz_ui::agent::timeline_parent)
+                .collect::<Vec<_>>(),
+            [None, Some(agent)]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_step_that_lands_in_the_same_batch_before_its_agent_still_nests(cx: &mut TestAppContext) {
+        let pane = PaneId(49);
+        let (view, controller, _sink, cx) = wired_view(cx, pane);
+        let tool = |id: &str, meta: serde_json::Value| zz_daemon::AgentStreamPayload::Update {
+            update: serde_json::json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": id,
+                "title": id,
+                "kind": "read",
+                "_meta": meta,
+            }),
+        };
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![(
+                1,
+                zz_daemon::AgentStreamPayload::Update {
+                    update: serde_json::json!({
+                        "sessionUpdate": "agent_message_chunk",
+                        "content": {"type": "text", "text": "starting"},
+                    }),
+                },
+            )],
+        );
+        stream(
+            cx,
+            &controller,
+            pane,
+            vec![
+                (
+                    2,
+                    tool("read-1", serde_json::json!({"zz": {"parent": "agent-1"}})),
+                ),
+                (
+                    3,
+                    zz_daemon::AgentStreamPayload::Update {
+                        update: serde_json::json!({
+                            "sessionUpdate": "agent_message_chunk",
+                            "messageId": "m-2",
+                            "content": {"type": "text", "text": "meanwhile"},
+                        }),
+                    },
+                ),
+                (4, tool("agent-1", serde_json::json!({}))),
+            ],
+        );
+
+        let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
+        let [
+            TimelineRow::Single(AgentEntry::Assistant { .. }),
+            TimelineRow::Single(AgentEntry::Assistant { .. }),
+            TimelineRow::Group { entries, .. },
+        ] = rows.as_slice()
+        else {
+            panic!("the step joins its agent's row: {rows:?}");
+        };
+        let agent = entries[0].id();
+        assert_eq!(
+            entries
+                .iter()
+                .map(zz_ui::agent::timeline_parent)
+                .collect::<Vec<_>>(),
+            [None, Some(agent)]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn ready_with_a_prompt(
+        cx: &mut VisualTestContext,
+        controller: &Entity<AgentController>,
+        pane: PaneId,
+        verbs: bool,
+        text: &str,
+    ) {
+        stream(
+            cx,
+            controller,
+            pane,
+            vec![
+                (
+                    1,
+                    zz_daemon::AgentStreamPayload::Ready {
+                        agent_name: "Claude Code".to_owned(),
+                        agent_key: "claude".to_owned(),
+                        auth_methods: Vec::new(),
+                        capabilities: zz_protocol::agent_stream::AgentSessionCapabilities {
+                            verbs,
+                            ..Default::default()
+                        },
+                    },
+                ),
+                (
+                    2,
+                    zz_daemon::AgentStreamPayload::SessionReady {
+                        session_id: "s-1".to_owned(),
+                        modes: None,
+                        config_options: None,
+                    },
+                ),
+                (
+                    3,
+                    zz_daemon::AgentStreamPayload::Update {
+                        update: serde_json::json!({
+                            "sessionUpdate": "user_message_chunk",
+                            "messageId": "u-1",
+                            "content": {"type": "text", "text": text},
+                        }),
+                    },
+                ),
+            ],
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    fn hover_prompt(cx: &mut VisualTestContext) -> Option<gpui::Bounds<gpui::Pixels>> {
+        let bubble = cx
+            .debug_bounds("agent-user-bubble")
+            .expect("the prompt row is painted");
+        cx.simulate_mouse_move(bubble.center(), None, gpui::Modifiers::none());
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        cx.debug_bounds("agent-user-rewind")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn rewind_to_here_sends_the_rows_id_the_way_the_composer_sends(cx: &mut TestAppContext) {
+        let pane = PaneId(50);
+        let (view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, true, "fix the flaky test");
+
+        let rewind = hover_prompt(cx).expect("an idle pane offers the rewind");
+        cx.simulate_click(rewind.center(), gpui::Modifiers::none());
+        cx.run_until_parked();
+
+        assert_eq!(
+            sent_answers(&sink),
+            [crate::mux::client::AgentRequest::Prompt {
+                text: "/rewind u-1".to_owned(),
+                images: Vec::new(),
+            }]
+        );
+        let (rows, connection) = cx.update(|_, cx| {
+            let view = view.read(cx);
+            (view.timeline.rows.len(), view.pane_state.connection)
+        });
+        assert_eq!(rows, 1, "the command adds no prompt row of its own");
+        assert_eq!(connection, AgentConnectionState::Ready, "nor a turn");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn rewind_to_here_waits_for_the_turn_to_end(cx: &mut TestAppContext) {
+        let pane = PaneId(51);
+        let (_view, controller, sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, true, "fix the flaky test");
+        cx.update(|_, cx| {
+            controller.update(cx, |controller, cx| {
+                controller.apply_pane_state(
+                    pane,
+                    &zz_protocol::AgentPaneWire {
+                        phase: zz_protocol::AgentConnectionPhase::Running,
+                        ..Default::default()
+                    },
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+
+        assert!(hover_prompt(cx).is_none());
+        assert!(sent_answers(&sink).is_empty());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn a_slash_command_row_is_not_a_rewind_point(cx: &mut TestAppContext) {
+        let pane = PaneId(52);
+        let (_view, controller, _sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, true, "/compact");
+        assert!(hover_prompt(cx).is_none());
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn an_agent_without_zz_commands_offers_no_rewind(cx: &mut TestAppContext) {
+        let pane = PaneId(53);
+        let (_view, controller, _sink, cx) = wired_view(cx, pane);
+        ready_with_a_prompt(cx, &controller, pane, false, "fix the flaky test");
+        assert!(hover_prompt(cx).is_none());
     }
 }
 
@@ -3925,6 +5143,65 @@ mod tests {
         assert!(!rendered.contains('\0'));
     }
 
+    fn no_parent(_: u64) -> Option<u64> {
+        None
+    }
+
+    #[test]
+    fn subagent_steps_join_their_agents_row_across_appends() {
+        let parents = |id: u64| matches!(id, 2 | 4).then_some(1);
+        let mut entries = vec![
+            thread_tool(1, "Survey", AgentToolStatusModel::Running),
+            thread_tool(2, "Read a.rs", AgentToolStatusModel::Completed),
+            AgentThreadEntry::Assistant {
+                id: 3,
+                markdown: "meanwhile".to_owned(),
+                aside: None,
+            },
+        ];
+        let mut revisions = vec![1, 1, 1];
+        let mut timeline = TimelineModel::new(&entries, &revisions, &parents);
+        assert_eq!(
+            timeline.entry_to_row,
+            [0, 0, 0],
+            "the message joins the turn"
+        );
+
+        entries.push(thread_tool(4, "Read b.rs", AgentToolStatusModel::Running));
+        revisions.push(1);
+        let TimelineModelUpdate::Incremental {
+            remeasure_rows,
+            added_rows,
+            ..
+        } = timeline.synchronize(&entries, &revisions, None, &parents)
+        else {
+            panic!("a late step should grow its agent's row in place");
+        };
+        assert_eq!(remeasure_rows, [0]);
+        assert_eq!(added_rows, 0);
+        assert_eq!(timeline.entry_to_row, [0, 0, 0, 0]);
+        assert!(matches!(
+            &timeline.rows[0],
+            TimelineRow::Group { entries, .. }
+                if entries.iter().map(AgentEntry::id).eq([1, 3, 2, 4])
+        ));
+        assert!(matches!(
+            timeline.rows[0].entry(4),
+            Some(AgentEntry::Tool(AgentToolEntry {
+                parent: Some(1),
+                ..
+            }))
+        ));
+
+        entries[3] = thread_tool(4, "Read b.rs", AgentToolStatusModel::Completed);
+        revisions[3] = 2;
+        assert!(matches!(
+            timeline.synchronize(&entries, &revisions, None, &no_parent),
+            TimelineModelUpdate::Rebuild
+        ));
+        assert_eq!(timeline.entry_to_row, [0, 0, 0, 0]);
+    }
+
     fn thread_tool(id: u64, label: &str, status: AgentToolStatusModel) -> AgentThreadEntry {
         AgentThreadEntry::Tool {
             id,
@@ -3936,6 +5213,7 @@ mod tests {
             input: None,
             output: Vec::new(),
             default_expanded: false,
+            exit_code: None,
         }
     }
 
@@ -3956,7 +5234,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions);
+        let mut timeline = TimelineModel::new(&entries, &revisions, &no_parent);
         assert_eq!(timeline.entry_to_row, [0, 0, 0]);
         assert!(matches!(
             &timeline.rows[0],
@@ -3971,7 +5249,7 @@ mod tests {
             splice_start,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("appending reasoning after a tool should update the trailing group");
         };
@@ -3986,7 +5264,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("a member revision should update its owning group row");
         };
@@ -4002,7 +5280,7 @@ mod tests {
             thread_tool(3, "Editing files", AgentToolStatusModel::Completed),
         ];
         let mut revisions = vec![1, 1, 1];
-        let mut timeline = TimelineModel::new(&entries, &revisions);
+        let mut timeline = TimelineModel::new(&entries, &revisions, &no_parent);
         assert_eq!(timeline.rows.len(), 1);
         assert_eq!(timeline.entry_to_row, [0, 0, 0]);
 
@@ -4017,7 +5295,7 @@ mod tests {
             remeasure_rows,
             splice_start,
             added_rows,
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("tool append should update the trailing group");
         };
@@ -4043,7 +5321,7 @@ mod tests {
             splice_start,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("different-label tool append should update the trailing group");
         };
@@ -4060,7 +5338,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("member revision should update its owning row");
         };
@@ -4083,7 +5361,7 @@ mod tests {
             remeasure_rows,
             added_rows,
             ..
-        } = timeline.synchronize(&entries, &revisions, None)
+        } = timeline.synchronize(&entries, &revisions, None, &no_parent)
         else {
             panic!("tool label changes should preserve contiguous grouping");
         };
@@ -4113,6 +5391,7 @@ mod tests {
                 ToolPayload::Terminal("$ cargo check\nok\n[exit status: 0]".to_owned()),
             ],
             default_expanded: false,
+            exit_code: None,
         });
         let AgentEntry::Tool(AgentToolEntry {
             location,
@@ -4157,6 +5436,7 @@ mod tests {
                 ToolPayload::Text("three".to_owned()),
             ],
             default_expanded: false,
+            exit_code: None,
         };
         let mut markdown = HashMap::new();
         let mut tool_payloads = HashMap::new();
@@ -4182,10 +5462,12 @@ mod tests {
                 id: 1,
                 markdown: "user".to_owned(),
                 images: Vec::new(),
+                message_id: None,
             },
             AgentThreadEntry::Assistant {
                 id: 2,
                 markdown: "assistant".to_owned(),
+                aside: None,
             },
             AgentThreadEntry::Reasoning {
                 id: 3,
@@ -4203,6 +5485,7 @@ mod tests {
                 input: None,
                 output: Vec::new(),
                 default_expanded: false,
+                exit_code: None,
             },
             AgentThreadEntry::Plan {
                 id: 5,
@@ -4225,6 +5508,7 @@ mod tests {
             id: 1,
             markdown: String::new(),
             images: vec![Arc::clone(&image)],
+            message_id: None,
         }]);
 
         let AgentEntry::User { images, .. } = &entries[0] else {

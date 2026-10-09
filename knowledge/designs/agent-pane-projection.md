@@ -37,8 +37,11 @@ grammar work on an Agent pane too.
   `TurnStarted` emits `OSC 133;A` `> ` `OSC 133;B` *prompt* `OSC 133;C` (the prompt text was
   remembered by `prompt_with_waiter` and is popped when its turn actually starts, so a queued
   prompt lands after the running turn's output); `agent_message_chunk` text is output with
-  LF→CRLF; `PromptFinished` emits `OSC 133;D;<0|1>` and a BEL; `PermissionRequested` prints a
-  `[zz] permission requested` line and rings. Thoughts and tool calls are not projected. The
+  LF→CRLF, and a chunk with a new message id starts a new paragraph; `PromptFinished` emits
+  `OSC 133;D;<0|1>` and a BEL; `PermissionRequested` prints a `[zz] permission requested` line and
+  rings. `SessionReset` clears the screen and scrollback, and while a restoring reset replays
+  history, each replayed `user_message_chunk` is framed like a live prompt, so a restarted or
+  switched pane reads the same as one that ran live. Thoughts and tool calls are not projected. The
   bytes leave `accept` after the lane lock drops, through `AgentPublisher::feed_agent_pane_text`,
   which resizes the shadow to the current layout cell when it changed.
 

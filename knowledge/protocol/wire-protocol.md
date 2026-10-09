@@ -791,10 +791,22 @@ string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch 
 `MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
 tags.
 
-v108 is unreleased as of 2026-10-08. `PaneSnapshot` appends `status: Option<PaneStatus { state,
-kind, progress, app, title, message }>`, the pane's most urgent
-[OSC 7501 program status](/terminal/program-status.md) record, and `TreeOp` appends
-`PaneStatus { session, window, pane, status }` after `PanePresentation`.
+v108 is unreleased as of 2026-10-07. Claude Code agent panes stop going through the
+`claude-agent-acp` adapter: `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` becomes `claude`, and the daemon
+drives the user's own binary over Claude Code's stream-json protocol
+([design](/designs/native-agent-drivers.md)). `ProtocolMessage` gains two variants after
+`TtyInputClosed`: `AgentAnswerQuestion { pane, request_id, answers: Vec<AgentQuestionAnswer { id,
+answers: Vec<String> }> }`, which answers a question card (at most `MAX_AGENT_QUESTION_ANSWERS`
+(32) questions and choices, each answer at most `MAX_AGENT_ANSWER_BYTES` (16 KiB)), and
+`AgentStopTask { pane, task_id }`. `AgentPaneWire` appends `tasks: Vec<AgentTaskWire { id, kind,
+description, tool_call_id }>`, the pane's background work, at most `MAX_AGENT_TASKS` (64).
+`agent_question_and_task_messages_append_at_the_wire_tail_and_round_trip` pins the tags. The JSON
+agent stream adds `questions` to `PermissionRequested` (omitted when empty), a `tasksChanged`
+item, and an `activity` item for turns the agent starts itself; the parked permission payload carries `questions` too, so a late client sees the card.
+A prompt `/btw`, `/side`, `/steer`, `/fork`, or `/rewind` is a zz command when the pane's `Ready`
+capabilities set `verbs` (`zz_protocol::agent_stream::AGENT_VERBS`); every other `/` command goes to
+the vendor. A zz command's reply carries `_meta.zz.reply`, the message id of the command's echoed
+prompt row, and a tool update may carry `_meta.zz.exitCode`.
 
 # Versioning & compatibility
 

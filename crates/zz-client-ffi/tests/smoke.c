@@ -331,6 +331,11 @@ int main(int argc, char **argv) {
         (void)zz_agent_attention_status(agent);
         zz_agent_state_release(agent);
     }
+    if (zz_client_agent_answer_question(client, pane, 0, NULL) ||
+        zz_client_agent_stop_task(client, pane, NULL)) {
+        fprintf(stderr, "smoke: agent card calls accepted a NULL payload\n");
+        return 1;
+    }
     zz_clipboard *clipboard = zz_client_clipboard_next(client);
     if (clipboard != NULL) {
         (void)zz_clipboard_text(clipboard);

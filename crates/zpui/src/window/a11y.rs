@@ -532,6 +532,24 @@ impl A11yNodeBuilder {
         true
     }
 
+    /// Add a leaf for an element without an id. Its id comes from the parent
+    /// node and the leaf's position among the parent's children, so it stays
+    /// stable while the surrounding structure does.
+    pub(crate) fn push_anonymous_leaf(&mut self, node: accesskit::Node) -> bool {
+        let Some(parent) = self.ids_stack.last().copied() else {
+            return false;
+        };
+        let position = self
+            .nodes_stack
+            .last()
+            .map_or(0, |parent| parent.children().len());
+        let mut hasher = std::hash::DefaultHasher::default();
+        parent.0.hash(&mut hasher);
+        "anonymous".hash(&mut hasher);
+        position.hash(&mut hasher);
+        self.push_leaf(NodeId(hasher.finish()), node)
+    }
+
     pub(crate) fn current_node_mut(&mut self) -> Option<&mut accesskit::Node> {
         self.nodes_stack.last_mut()
     }

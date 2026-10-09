@@ -1,9 +1,18 @@
-//! GPUI's browser platform uses one document-owned canvas and supports one top-level window.
-//! Browser WebGPU is preferred by default, with an automatic WebGL2 fallback. Applications can
-//! force either backend with `WebBackendPreference`. Opening a second top-level window, or
-//! reopening one after it closes, returns `WebWindowError`.
+//! GPUI's browser platform. Each window draws into its own canvas: either the whole page, or a
+//! page element named by `WindowOptions::mount`, so one page can host several windows among its
+//! own content. Browser WebGPU is preferred by default, with an automatic WebGL2 fallback;
+//! WebGL2 can draw only the first window. Applications can force either backend with
+//! `WebBackendPreference`.
+//!
+//! Every window can mirror its accessibility tree into the page, and `globalThis.zpui` lets
+//! agents and tests find, click and capture windows; see the `automation` module.
 
 pub mod canvas_fallback;
+
+#[cfg(target_family = "wasm")]
+mod a11y;
+#[cfg(target_family = "wasm")]
+mod automation;
 
 pub use canvas_fallback::CanvasFontFallback;
 

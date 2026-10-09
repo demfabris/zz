@@ -1,10 +1,11 @@
+use crate::a11y::WebA11y;
+use crate::automation;
 use crate::canvas_size::canvas_size;
 use crate::display::WebDisplay;
 use crate::events::{
     ClickState, EventListenerHandle, TouchIds, WebEventListeners, is_mac_platform,
 };
 use crate::ime_mirror::ImeMirror;
-use crate::platform::WebWindowLifecycle;
 use crate::viewport::WebViewport;
 use std::sync::Arc;
 use std::{cell::Cell, cell::RefCell, rc::Rc};
@@ -53,8 +54,14 @@ pub(crate) struct WebWindowMutableState {
 }
 
 pub(crate) struct WebWindowInner {
+    pub(crate) id: u32,
+    pub(crate) handle: AnyWindowHandle,
     pub(crate) browser_window: web_sys::Window,
     pub(crate) canvas: web_sys::HtmlCanvasElement,
+    pub(crate) mount: Option<web_sys::HtmlElement>,
+    pub(crate) mount_selector: Option<String>,
+    pub(crate) a11y: Rc<WebA11y>,
+    pub(crate) active_window: Rc<RefCell<Option<AnyWindowHandle>>>,
     pub(crate) ime_mirror: ImeMirror,
     pub(crate) viewport: RefCell<WebViewport>,
     pub(crate) has_device_pixel_support: bool,
@@ -94,8 +101,7 @@ pub(crate) struct WebWindowInner {
 pub struct WebWindow {
     inner: Rc<WebWindowInner>,
     display: Rc<dyn PlatformDisplay>,
-    lifecycle: Rc<Cell<WebWindowLifecycle>>,
-    active_window: Rc<RefCell<Option<AnyWindowHandle>>>,
+    open_windows: Rc<Cell<usize>>,
     _raf_closure: Closure<dyn FnMut()>,
     _resize_observer: Option<web_sys::ResizeObserver>,
     _resize_observer_closure: Closure<dyn FnMut(js_sys::Array)>,
@@ -117,6 +123,7 @@ impl WebWindow {
             .dyn_into()
             .map_err(|error| anyhow::anyhow!("Created element is not a canvas: {error:?}"))?;
         canvas.set_tab_index(-1);
+        canvas.set_attribute("data-zpui-canvas", "").ok();
 
         let style = canvas.style();
         for (property, value) in [
@@ -142,15 +149,43 @@ impl WebWindow {
         Ok(canvas)
     }
 
+    pub(crate) fn mount_canvas(
+        browser_window: &web_sys::Window,
+        canvas: &web_sys::HtmlCanvasElement,
+        mount: &web_sys::HtmlElement,
+    ) {
+        let is_static = browser_window
+            .get_computed_style(mount)
+            .ok()
+            .flatten()
+            .and_then(|style| style.get_property_value("position").ok())
+            .is_none_or(|position| position.is_empty() || position == "static");
+        if is_static {
+            mount.style().set_property("position", "relative").ok();
+        }
+        let style = canvas.style();
+        for (property, value) in [
+            ("position", "absolute"),
+            ("left", "0"),
+            ("top", "0"),
+            ("width", "100%"),
+            ("height", "100%"),
+        ] {
+            style.set_property(property, value).ok();
+        }
+        mount.append_child(canvas).ok();
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
-        _handle: AnyWindowHandle,
-        _params: WindowParams,
+        handle: AnyWindowHandle,
+        params: WindowParams,
         context: &WgpuContext,
         canvas: web_sys::HtmlCanvasElement,
         surface: wgpu::Surface<'static>,
+        mount: Option<web_sys::HtmlElement>,
         browser_window: web_sys::Window,
-        lifecycle: Rc<Cell<WebWindowLifecycle>>,
+        open_windows: Rc<Cell<usize>>,
         active_window: Rc<RefCell<Option<AnyWindowHandle>>>,
     ) -> anyhow::Result<Self> {
         let document = browser_window
@@ -177,7 +212,13 @@ impl WebWindow {
             .ok()
             .flatten()
             .is_some_and(|query| query.matches());
-        let ime_mirror = ImeMirror::new(&document, &body, touch_input)?;
+        let ime_mirror = ImeMirror::new(&document, &body, touch_input, mount.is_none())?;
+        let id = automation::next_window_id();
+        let a11y = WebA11y::new(&document, &canvas, id)?;
+        let mount_selector = mount
+            .is_some()
+            .then(|| params.mount.as_ref().map(ToString::to_string))
+            .flatten();
         let mut viewport = WebViewport::new(&document)?;
         viewport.update(&browser_window, &canvas)?;
 
@@ -196,7 +237,7 @@ impl WebWindow {
             title: String::new(),
             input_handler: None,
             is_fullscreen: false,
-            is_active: true,
+            is_active: mount.is_none(),
             visibility: document_visibility(&browser_window),
             is_hovered: false,
             mouse_position: Point::default(),
@@ -207,8 +248,14 @@ impl WebWindow {
         let is_mac = is_mac_platform(&browser_window);
 
         let inner = Rc::new(WebWindowInner {
+            id,
+            handle,
             browser_window,
             canvas,
+            mount,
+            mount_selector,
+            a11y,
+            active_window,
             ime_mirror,
             viewport: RefCell::new(viewport),
             has_device_pixel_support,
@@ -244,6 +291,7 @@ impl WebWindow {
         }
 
         let event_listeners = inner.register_event_listeners();
+        automation::register(&inner);
         let safe_area_observer_closure = Closure::wrap(Box::new({
             let inner = Rc::downgrade(&inner);
             move |_: js_sys::Array| {
@@ -268,8 +316,7 @@ impl WebWindow {
         Ok(Self {
             inner,
             display,
-            lifecycle,
-            active_window,
+            open_windows,
             _raf_closure: raf_closure,
             _resize_observer: resize_observer,
             _resize_observer_closure: resize_observer_closure,
@@ -319,6 +366,7 @@ impl WebWindow {
             inner
                 .last_physical_size
                 .set((physical_width, physical_height));
+            inner.a11y.place_layer(&inner.canvas, dpr);
 
             // Skip rendering to a zero-size canvas (e.g. display:none).
             if physical_width == 0 || physical_height == 0 {
@@ -459,6 +507,25 @@ impl WebWindowInner {
         closure
     }
 
+    pub(crate) fn has_pending_frame(&self) -> bool {
+        self.raf_id.get().is_some()
+    }
+
+    pub(crate) fn render_now(&self) {
+        if let Some(raf_id) = self.raf_id.take() {
+            self.browser_window.cancel_animation_frame(raf_id).ok();
+        }
+        self.with_callback(
+            |callbacks| &mut callbacks.request_frame,
+            |callback| {
+                callback(RequestFrameOptions {
+                    require_presentation: true,
+                    force_render: true,
+                })
+            },
+        );
+    }
+
     pub(crate) fn wake_frame_loop(&self) {
         if self.raf_id.get().is_some() {
             return;
@@ -518,14 +585,15 @@ impl WebWindowInner {
                 let visibility = document_visibility(&this.browser_window);
                 let is_visible = visibility.is_visible();
 
+                let is_active = is_visible && this.ime_mirror.is_focused();
                 let visibility_changed = {
                     let mut state = this.state.borrow_mut();
-                    state.is_active = is_visible;
+                    state.is_active = is_active;
                     std::mem::replace(&mut state.visibility, visibility) != visibility
                 };
                 this.with_callback(
                     |callbacks| &mut callbacks.active_status_change,
-                    |callback| callback(is_visible),
+                    |callback| callback(is_active),
                 );
                 if visibility_changed {
                     this.with_callback(
@@ -617,8 +685,13 @@ impl Drop for WebWindow {
         let canvas: &web_sys::Element = self.inner.canvas.as_ref();
         canvas.remove();
         self.inner.ime_mirror.remove();
-        self.active_window.borrow_mut().take();
-        self.lifecycle.set(WebWindowLifecycle::Closed);
+        self.inner.a11y.remove();
+        let mut active_window = self.inner.active_window.borrow_mut();
+        if *active_window == Some(self.inner.handle) {
+            active_window.take();
+        }
+        self.open_windows
+            .set(self.open_windows.get().saturating_sub(1));
     }
 }
 
@@ -719,6 +792,13 @@ impl PlatformWindow for WebWindow {
     }
 
     fn resize(&mut self, size: Size<Pixels>) {
+        if let Some(mount) = &self.inner.mount {
+            mount
+                .style()
+                .set_property("height", &format!("{}px", f32::from(size.height)))
+                .ok();
+            return;
+        }
         let style = self.inner.canvas.style();
         style
             .set_property("width", &format!("{}px", f32::from(size.width)))
@@ -879,7 +959,9 @@ impl PlatformWindow for WebWindow {
 
     fn set_title(&mut self, title: &str) {
         self.inner.state.borrow_mut().title = title.to_owned();
-        if let Some(document) = self.inner.browser_window.document() {
+        if self.inner.mount.is_none()
+            && let Some(document) = self.inner.browser_window.document()
+        {
             document.set_title(title);
         }
     }
@@ -1038,4 +1120,16 @@ impl PlatformWindow for WebWindow {
     }
 
     fn set_client_inset(&self, _inset: Pixels) {}
+
+    fn a11y_init(&self, callbacks: zpui::A11yCallbacks) {
+        self.inner.a11y.set_callbacks(callbacks);
+        self.inner.a11y.set_interactive(automation::interactive());
+        if automation::accessibility_enabled() {
+            self.inner.a11y.activate();
+        }
+    }
+
+    fn a11y_tree_update(&self, tree_update: accesskit::TreeUpdate) {
+        self.inner.a11y.apply(tree_update);
+    }
 }

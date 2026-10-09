@@ -49,7 +49,7 @@ impl EventListenerHandle {
     /// Needed for events like `wheel` which are passive by default in modern
     /// browsers. Removal does not need to match the `passive` option, so
     /// `Drop` works the same as for [`EventListenerHandle::add`].
-    fn add_non_passive(
+    pub(crate) fn add_non_passive(
         target: &web_sys::EventTarget,
         event_name: &'static str,
         handler: impl FnMut(JsValue) + 'static,
@@ -525,6 +525,7 @@ impl WebWindowInner {
             let this = Rc::clone(self);
             move || {
                 this.state.borrow_mut().is_active = true;
+                *this.active_window.borrow_mut() = Some(this.handle);
                 this.with_callback(
                     |callbacks| &mut callbacks.active_status_change,
                     |callback| callback(true),
@@ -614,6 +615,10 @@ impl WebWindowInner {
         let this = Rc::clone(self);
         self.listen("pointerleave", move |event: JsValue| {
             let event: web_sys::PointerEvent = event.unchecked_into();
+            let mouse_event: &web_sys::MouseEvent = event.as_ref();
+            if this.a11y.contains(mouse_event.related_target()) {
+                return;
+            }
 
             let position = pointer_position_in_element(&event);
             let modifiers = modifiers_from_mouse_event(&event, this.is_mac);
@@ -1169,6 +1174,7 @@ impl WebWindowInner {
                 let mut state = this.state.borrow_mut();
                 state.is_active = true;
             }
+            *this.active_window.borrow_mut() = Some(this.handle);
             this.with_callback(
                 |callbacks| &mut callbacks.active_status_change,
                 |callback| callback(true),

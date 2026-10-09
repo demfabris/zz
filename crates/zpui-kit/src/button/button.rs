@@ -532,9 +532,10 @@ impl RenderOnce for Button {
             } else {
                 Role::Button
             })
-            .when_some(self.label.as_ref(), |this, label| {
-                this.aria_label(label.clone())
-            })
+            .when_some(
+                self.label.as_ref().or(self.tooltip.as_ref()),
+                |this, label| this.aria_label(label.clone()),
+            )
             .aria_selected(self.selected)
             .aria_disabled(is_disabled)
             .when(!self.disabled, |this| {

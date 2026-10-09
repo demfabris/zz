@@ -30,12 +30,17 @@ multithreaded = ["dep:wasm_thread", "scheduler/wasm-threads"]
 path = "src/zpui_web.rs"
 doctest = false
 
+[[example]]
+name = "web_agents"
+path = "examples/web_agents/main.rs"
+
 [dependencies]
 unicode-properties = "=0.1.3"
 unicode-script = "0.5.7"
 unicode-segmentation = "1.10"
 
 [target.'cfg(target_family = "wasm")'.dependencies]
+accesskit.workspace = true
 zpui.workspace = true
 scheduler.workspace = true
 parking_lot = { workspace = true, features = ["nightly"] }
@@ -87,6 +92,7 @@ web-sys = { version = "0.3", features = [
     "MediaQueryList",
     "MediaQueryListEvent",
     "MouseEvent",
+    "Node",
     "Navigator",
     "OffscreenCanvas",
     "OffscreenCanvasRenderingContext2d",

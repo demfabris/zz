@@ -182,6 +182,10 @@ impl Element for Text {
         self.id.clone()
     }
 
+    fn a11y_text(&self) -> Option<SharedString> {
+        self.id.is_none().then(|| self.text.clone())
+    }
+
     fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
         None
     }
@@ -259,6 +263,10 @@ impl Element for &'static str {
         None
     }
 
+    fn a11y_text(&self) -> Option<SharedString> {
+        Some(SharedString::new_static(self))
+    }
+
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
         None
     }
@@ -331,6 +339,10 @@ impl Element for SharedString {
 
     fn id(&self) -> Option<ElementId> {
         None
+    }
+
+    fn a11y_text(&self) -> Option<SharedString> {
+        Some(self.clone())
     }
 
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
@@ -545,6 +557,10 @@ impl Element for StyledText {
 
     fn id(&self) -> Option<ElementId> {
         None
+    }
+
+    fn a11y_text(&self) -> Option<SharedString> {
+        Some(self.text.clone())
     }
 
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
@@ -1513,5 +1529,67 @@ mod measurement_regression_tests {
             window.invalidator.set_phase(DrawPhase::None);
         })
         .unwrap();
+    }
+}
+
+#[cfg(test)]
+mod a11y_tests {
+    use crate::{
+        AppContext as _, Context, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+        StatefulInteractiveElement as _, Styled as _, TestAppContext, Window, div, px,
+    };
+
+    struct Labels;
+
+    impl Render for Labels {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .id("group")
+                .role(accesskit::Role::Group)
+                .w(px(200.))
+                .child("first")
+                .child(div().child("second"))
+                .child("  ")
+        }
+    }
+
+    #[crate::test]
+    fn text_without_an_id_becomes_a_stable_label_leaf(cx: &mut TestAppContext) {
+        let window = cx.add_window(|_, _| Labels);
+        let labels_in_frame = |cx: &mut TestAppContext| {
+            cx.update_window(window.into(), |_, window, cx| {
+                window.set_a11y_forced(true);
+                window.refresh();
+                window.draw(cx).clear(cx);
+                let tree = window.a11y_tree().expect("forced a11y builds a tree");
+                let (group_id, group) = tree
+                    .nodes
+                    .iter()
+                    .find(|(_, node)| node.role() == accesskit::Role::Group)
+                    .expect("the group is in the tree");
+                let labels = group
+                    .children()
+                    .iter()
+                    .filter_map(|child| tree.nodes.iter().find(|(id, _)| id == child))
+                    .map(|(id, node)| {
+                        assert_eq!(node.role(), accesskit::Role::Label);
+                        assert!(node.bounds().is_some());
+                        (*id, node.value().unwrap_or_default().to_owned())
+                    })
+                    .collect::<Vec<_>>();
+                (*group_id, labels)
+            })
+            .unwrap()
+        };
+
+        let (group, first) = labels_in_frame(cx);
+        let values = first
+            .iter()
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(values, ["first", "second"]);
+        let (same_group, second) = labels_in_frame(cx);
+        assert_eq!(group, same_group);
+        assert_eq!(first, second);
     }
 }

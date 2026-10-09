@@ -17,3 +17,8 @@ build *args:
 
 serve *args:
     @scripts/web-dev.sh --serve-only {{ args }}
+
+# Build the zpui-web multi-window example and serve it on port 8095.
+agents *args:
+    @crates/zpui-web/examples/web_agents/build.sh {{ args }}
+    python3 -m http.server -d target/web-agents 8095

@@ -35,7 +35,7 @@
 use crate::InspectorElementPath;
 use crate::{
     A11ySubtreeBuilder, App, ArenaBox, AvailableSpace, Bounds, Context, DispatchNodeId, ElementId,
-    FocusHandle, InspectorElementId, LayoutId, Pixels, Point, Size, Style, Window,
+    FocusHandle, InspectorElementId, LayoutId, Pixels, Point, SharedString, Size, Style, Window,
     util::FluentBuilder, window::with_element_arena,
 };
 use collections::FxHashMap;
@@ -123,6 +123,14 @@ pub trait Element: 'static + IntoElement {
     ///
     /// See the [accessibility guide](crate::_accessibility) for an overview.
     fn write_a11y_info(&self, _node: &mut accesskit::Node) {}
+
+    /// The text this element shows. An element without an
+    /// [`id`][Element::id] that returns `Some` is reported as an anonymous
+    /// `Label` leaf of the nearest node above it, so plain strings reach
+    /// assistive technology without each needing an id.
+    fn a11y_text(&self) -> Option<SharedString> {
+        None
+    }
 
     /// Add synthetic child nodes to an [`Element`] that has an
     /// [`.id()`][Element::id] and a [`.role()`][Element::a11y_role].
@@ -494,6 +502,19 @@ impl<E: Element> Drawable<E> {
                                 );
                             }
                         }
+                    } else if let Some(text) = self.element.a11y_text()
+                        && !text.trim().is_empty()
+                    {
+                        let mut node = accesskit::Node::new(accesskit::Role::Label);
+                        let scale = window.scale_factor();
+                        node.set_bounds(accesskit::Rect {
+                            x0: (bounds.origin.x.0 * scale) as f64,
+                            y0: (bounds.origin.y.0 * scale) as f64,
+                            x1: ((bounds.origin.x.0 + bounds.size.width.0) * scale) as f64,
+                            y1: ((bounds.origin.y.0 + bounds.size.height.0) * scale) as f64,
+                        });
+                        node.set_value(text.to_string());
+                        window.a11y.nodes.push_anonymous_leaf(node);
                     }
                 }
 

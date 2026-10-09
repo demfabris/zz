@@ -68,7 +68,8 @@
         "2026-10-09: found by pin.tui-fixtures; all six reproduce against both pins, so they are main regressions, not 3.8 drift. High priority: two break verified TUI obligations.",
         "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello",
         "2026-10-09: TUI-009 extended-keys rows pass on catchup/fix.tui-colour (set -s extended-keys now published to the TUI); clause 2 closes when fix.tui-colour merges.",
-        "2026-10-09: fix.tui-colour merged (8c952fd16); clause 2 (TUI-009 extended keys) should now pass on main: confirm with tui-caps and drop its 4 TUI-009 records when pin.tui-fixtures lands."
+        "2026-10-09: fix.tui-colour merged (8c952fd16); clause 2 (TUI-009 extended keys) should now pass on main: confirm with tui-caps and drop its 4 TUI-009 records when pin.tui-fixtures lands.",
+        "2026-10-09: pin.tui-fixtures merged: TUI-009's 4 tui-caps records are closed on main (clause 2 done by fix.tui-colour); TUI-014's 4 tui-client-commands records remain and must be deleted when clause 1 lands."
       ]
     },
     {
@@ -292,7 +293,7 @@
       "id": "pin.tui-fixtures",
       "track": "pin",
       "title": "Re-baseline the TUI fixtures at the 3.8 pin",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -310,10 +311,11 @@
         "The closed TUI campaign's ledger keeps its own pin (compat/tui/tracker.py) and stays green."
       ],
       "branch": "catchup/pin.tui-fixtures",
-      "sha": null,
+      "sha": "c740ffb4d",
       "notes": [
         "2026-10-09: pin.move ran check.sh only; the TUI fixtures went red at 3.8. Gates every later lane that runs a TUI fixture.",
-        "2026-10-09: lane done at 93b4b3d87: 10/14 fixtures green at 3.8, every 3.8 diff fixed or recorded under a pin.* gap; 4 fixtures fail identically on both pins (real regressions, see fix.tui-regressions); added semantic:customize-mode-3-8 and semantic:terminal-features-3-8 to the pin.formats-options gap (accepted by orchestrator)"
+        "2026-10-09: lane done at 93b4b3d87: 10/14 fixtures green at 3.8, every 3.8 diff fixed or recorded under a pin.* gap; 4 fixtures fail identically on both pins (real regressions, see fix.tui-regressions); added semantic:customize-mode-3-8 and semantic:terminal-features-3-8 to the pin.formats-options gap (accepted by orchestrator)",
+        "2026-10-09: review: 1 P1 + 1 P2 fixed (tui-mouse owner tally, version-gated menu); TUI-009 records closed after fix.tui-colour; merged"
       ]
     },
     {

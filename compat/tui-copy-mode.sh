@@ -392,7 +392,7 @@ OWNED_OPTIONS=(
   status status-left status-right automatic-rename default-command repeat-time
   mode-keys mode-style copy-mode-position-format copy-mode-selection-style
   copy-mode-match-style copy-mode-current-match-style copy-mode-mark-style
-  copy-mode-line-numbers
+  copy-mode-line-numbers copy-mode-current-line-style
   pane-border-style pane-active-border-style message-style status-style
   window-status-current-style
 )
@@ -1250,6 +1250,33 @@ run_presentation() {
   copy_case 'presentation-copy-mode-position' format '#{pane_in_mode}=1'
   type_both q
   copy_case 'presentation-cancel' format '#{pane_in_mode}=0'
+
+  # 3.8's copy-mode-current-line-style paints the copy cursor's row edge to
+  # edge (window_copy_update_style), fg and bg replaced and attributes added,
+  # and the row it leaves goes back to the pane's own cells.
+  set_on_both copy-mode-current-line-style 'bg=#00cd00,fg=#101010,bold'
+  type_prefix_both '['
+  copy_case 'presentation-current-line' format '#{pane_in_mode}=1'
+  type_both C-p
+  type_both C-p
+  copy_case 'presentation-current-line-moved' none ''
+  type_both q
+  copy_case 'presentation-current-line-cancel' format '#{pane_in_mode}=0'
+  set_on_both copy-mode-current-line-style default
+
+  # Setting the style while a client sits in copy mode does not redraw: 3.8
+  # calls window_copy_style_changed only for PANE_STYLECHANGED, which this
+  # option never sets, so the row keeps its paint until the cursor moves, and
+  # then takes the new style, extended underlines included.
+  type_prefix_both '['
+  copy_case 'presentation-current-line-plain' format '#{pane_in_mode}=1'
+  set_on_both copy-mode-current-line-style 'fg=#101010,bg=#00cd00,curly-underscore'
+  copy_case 'presentation-current-line-set-in-mode' none ''
+  type_both C-p
+  copy_case 'presentation-current-line-set-moved' none ''
+  type_both q
+  copy_case 'presentation-current-line-set-cancel' format '#{pane_in_mode}=0'
+  set_on_both copy-mode-current-line-style default
 }
 
 # --- self-check ------------------------------------------------------------

@@ -23,6 +23,7 @@ const TERM_DECFRA: u32 = 0x8;
 const TERM_RGB_COLOURS: u32 = 0x10;
 const TERM_VT100_LIKE: u32 = 0x20;
 const TERM_SIXEL: u32 = 0x40;
+const TERM_INVALID_MS: u32 = 0x80;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum CapabilityKind {
@@ -283,7 +284,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 236] = [
 /// tty-features.c `tty_features`, in declaration order. Each row is the
 /// feature name, the capabilities `tty_apply_features` writes into the term
 /// when the feature is on, and the term flags it sets.
-const TTY_FEATURES: [TtyFeature; 21] = [
+const TTY_FEATURES: [TtyFeature; 23] = [
     TtyFeature {
         name: "256",
         capabilities: &[
@@ -292,6 +293,11 @@ const TTY_FEATURES: [TtyFeature; 21] = [
             "setaf=\\E[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m",
         ],
         flags: TERM_256_COLOURS,
+    },
+    TtyFeature {
+        name: "appesc",
+        capabilities: &["Enesc=\\E[?7727h", "Dsesc=\\E[?7727l"],
+        flags: 0,
     },
     TtyFeature {
         name: "bpaste",
@@ -417,6 +423,11 @@ const TTY_FEATURES: [TtyFeature; 21] = [
         ],
         flags: 0,
     },
+    TtyFeature {
+        name: "utf8",
+        capabilities: &[],
+        flags: 0,
+    },
 ];
 
 /// `tigetflag` answers 0, not -1, for a standard boolean the entry omits, so
@@ -433,7 +444,9 @@ pub struct TtyTerm {
     codes: BTreeMap<&'static str, CodeValue>,
     features: BTreeSet<String>,
     requested: BTreeSet<String>,
+    removed: BTreeSet<String>,
     flags: u32,
+    client_utf8: bool,
 }
 
 /// One `struct tty_code`: the value `tty_term_string`, `tty_term_number` and
@@ -486,6 +499,10 @@ impl TtyTerm {
         }
 
         let mut requested = BTreeSet::new();
+        let mut removed = BTreeSet::new();
+        let mut add_features = |requested: &mut BTreeSet<String>, value: &str, separator: char| {
+            parse_features(requested, &mut removed, value, separator);
+        };
         add_features(&mut requested, negotiated, ',');
         for value in terminal_features {
             let mut offset = 0;
@@ -536,7 +553,18 @@ impl TtyTerm {
             .map(str::to_owned)
             .collect();
         term.requested = requested;
+        term.removed = removed;
         term
+    }
+
+    pub fn removed_features(&self) -> impl Iterator<Item = &str> {
+        self.removed.iter().map(String::as_str)
+    }
+
+    #[must_use]
+    pub fn with_client_utf8(mut self, utf8: bool) -> Self {
+        self.client_utf8 = utf8;
+        self
     }
 
     /// The pin's own `feat` for this client: what `tty_term_create` added from
@@ -554,9 +582,17 @@ impl TtyTerm {
         self.has(name)
     }
 
+    #[must_use]
+    pub fn string_capability(&self, name: &str) -> &str {
+        self.string(name)
+    }
+
     /// `tty_feature_present`.
     #[must_use]
     pub fn has_feature(&self, name: &str) -> bool {
+        if name == "utf8" {
+            return self.client_utf8 || self.requested.contains(name);
+        }
         self.features.contains(name)
     }
 
@@ -668,6 +704,24 @@ impl TtyTerm {
                 self.flags &= !flag;
             }
         }
+        self.validate();
+    }
+
+    fn validate(&mut self) {
+        let Some(CodeValue::Text(value)) = self.codes.get("Ms") else {
+            return;
+        };
+        if tiparm_takes_two_strings(value) {
+            self.flags &= !TERM_INVALID_MS;
+            return;
+        }
+        self.flags |= TERM_INVALID_MS;
+        self.codes.remove("Ms");
+    }
+
+    #[must_use]
+    pub const fn clipboard_invalid(&self) -> bool {
+        self.flags & TERM_INVALID_MS != 0
     }
 
     /// `tty_feature_present`: the feature bit, else every capability the
@@ -681,7 +735,7 @@ impl TtyTerm {
         if requested.contains(name) {
             return true;
         }
-        if name == "ignorefkeys" {
+        if name == "ignorefkeys" || feature.capabilities.is_empty() {
             return false;
         }
         if feature.flags != 0 && (self.flags & feature.flags) != feature.flags {
@@ -738,6 +792,61 @@ fn strtonum(value: &str) -> Option<i32> {
 }
 
 /// `tty_term_strip`: the `$<n>` padding a terminfo string carries.
+fn tiparm_takes_two_strings(format: &str) -> bool {
+    let bytes = format.as_bytes();
+    let mut count = 0;
+    let mut strings = [false; 9];
+    let mut last_pop: Option<usize> = None;
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        if bytes[cursor] != b'%' {
+            cursor += 1;
+            continue;
+        }
+        cursor += 1;
+        while bytes
+            .get(cursor)
+            .is_some_and(|byte| matches!(byte, b':' | b'-' | b'+' | b'#' | b' ' | b'.'))
+            || bytes.get(cursor).is_some_and(u8::is_ascii_digit)
+        {
+            cursor += 1;
+        }
+        let Some(&conversion) = bytes.get(cursor) else {
+            break;
+        };
+        let mut popped = None;
+        match conversion {
+            b'p' => {
+                cursor += 1;
+                if let Some(index) = bytes
+                    .get(cursor)
+                    .filter(|byte| (b'1'..=b'9').contains(byte))
+                    .map(|byte| usize::from(byte - b'0'))
+                {
+                    count = count.max(index);
+                    popped = Some(index);
+                }
+            }
+            b'P' | b'g' => cursor += 1,
+            b'\'' => cursor += 2,
+            b'{' => {
+                while bytes.get(cursor).is_some_and(|byte| *byte != b'}') {
+                    cursor += 1;
+                }
+            }
+            b's' | b'l' => {
+                if let Some(index) = last_pop {
+                    strings[index - 1] = true;
+                }
+            }
+            _ => {}
+        }
+        last_pop = popped;
+        cursor += 1;
+    }
+    count == 2 && strings == [true, true, false, false, false, false, false, false, false]
+}
+
 fn strip_padding(value: &str) -> String {
     if !value.contains('$') {
         return value.to_owned();
@@ -860,15 +969,29 @@ fn unvis(value: &str) -> String {
 
 /// `tty_add_features`: a case-insensitive name match against the feature table,
 /// stopping at the first name the table does not carry.
-fn add_features(requested: &mut BTreeSet<String>, value: &str, separator: char) {
+fn parse_features(
+    requested: &mut BTreeSet<String>,
+    removed: &mut BTreeSet<String>,
+    value: &str,
+    separator: char,
+) {
     for name in value.split(separator) {
+        let (name, remove) = name
+            .strip_suffix('@')
+            .filter(|name| !name.is_empty())
+            .map_or((name, false), |name| (name, true));
         let Some(feature) = TTY_FEATURES
             .iter()
             .find(|feature| feature.name.eq_ignore_ascii_case(name))
         else {
             break;
         };
-        requested.insert(feature.name.to_owned());
+        if remove {
+            requested.remove(feature.name);
+            removed.insert(feature.name.to_owned());
+        } else if !removed.contains(feature.name) {
+            requested.insert(feature.name.to_owned());
+        }
     }
 }
 
@@ -1277,6 +1400,84 @@ mod tests {
 
     /// Measured against pinned tmux on 2026-09-02 with an attached 80x24 pty
     /// client on TERM=xterm-256color and COLORTERM=truecolor, one
+    #[test]
+    fn terminal_features_take_a_feature_away_with_at_and_know_appesc_and_utf8() {
+        let entries = vec!["clear=\u{1b}[H\u{1b}[2J".to_owned(), "cup=x".to_owned()];
+        let rows = |rows: &[&str]| rows.iter().map(|row| (*row).to_owned()).collect::<Vec<_>>();
+        let term = TtyTerm::create(
+            "xterm",
+            &entries,
+            None,
+            "sync,appesc",
+            &rows(&["xterm*:sync@:focus@", "xterm*:focus:utf8"]),
+            &[],
+        );
+        assert_eq!(
+            term.requested_features().collect::<Vec<_>>(),
+            ["appesc", "bpaste", "title", "utf8"]
+        );
+        assert_eq!(
+            term.removed_features().collect::<Vec<_>>(),
+            ["focus", "sync"]
+        );
+        assert!(term.has_feature("appesc"));
+        assert_eq!(term.string_capability("Enesc"), "\u{1b}[?7727h");
+        assert_eq!(term.string_capability("Dsesc"), "\u{1b}[?7727l");
+        let removed = TtyTerm::create(
+            "xterm",
+            &entries,
+            None,
+            "appesc",
+            &[],
+            &rows(&["xterm*:Enesc@:Dsesc@"]),
+        );
+        assert_eq!(removed.string_capability("Enesc"), "");
+        assert_eq!(removed.string_capability("Dsesc"), "");
+        assert!(!term.has_feature("sync"));
+        assert!(term.has_feature("utf8"));
+        let plain = TtyTerm::create("xterm", &entries, None, "", &[], &[]);
+        assert!(!plain.has_feature("utf8"));
+        assert!(!plain.has_feature("appesc"));
+        assert!(plain.clone().with_client_utf8(true).has_feature("utf8"));
+    }
+
+    #[test]
+    fn ms_is_kept_only_when_tiparm_s_takes_it_with_two_strings() {
+        for (format, valid) in [
+            ("\\E]52;%p1%s;%p2%s\\007", true),
+            ("]52;%p1%s;%p2%s", true),
+            ("]52;%p2%s", false),
+            ("]52;%p1%s", false),
+            ("]52;%p1%d;%p2%s", false),
+            ("]52;%p1%s;%p2%s;%p3%s", false),
+            ("", false),
+            ("abc", false),
+            ("]52;%p1%l%d;%p2%s", true),
+            ("]52;%p1%p2%s%s", false),
+            ("]52;%p2%s;%p1%s", true),
+            ("]52;%p1%s%p1%d;%p2%s", true),
+            ("]52;%p1%c;%p2%s", false),
+        ] {
+            assert_eq!(tiparm_takes_two_strings(format), valid, "{format}");
+        }
+        let entries = |ms: &str| {
+            vec![
+                "clear=\u{1b}[H\u{1b}[2J".to_owned(),
+                "cup=x".to_owned(),
+                format!("Ms={ms}"),
+            ]
+        };
+        let invalid = TtyTerm::create("dumb", &entries("]52;%p1%d"), None, "", &[], &[]);
+        assert!(invalid.clipboard_invalid());
+        assert!(!invalid.has_capability("Ms"));
+        let valid = TtyTerm::create("dumb", &entries("]52;%p1%s;%p2%s"), None, "", &[], &[]);
+        assert!(!valid.clipboard_invalid());
+        assert!(valid.has_capability("Ms"));
+        let restored = TtyTerm::create("dumb", &entries("]52;%p1%d"), None, "clipboard", &[], &[]);
+        assert!(!restored.clipboard_invalid());
+        assert!(restored.has_capability("Ms"));
+    }
+
     /// `display-message -p -c <client>` per name.
     #[test]
     fn the_interrogate_matches_the_pinned_client_terminal() {

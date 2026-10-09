@@ -719,10 +719,6 @@ known_drift() {
     customize-screen-array-search | customize-screen-array-expanded | \
     customize-screen-array-unset-accept | customize-array-unset-values | \
     customize-screen-array-root-* | customize-screen-array-left-child) ;;
-  messages-terminals | messages-terminals-target | messages-terminals-missing-target | \
-    messages-jobs-and-terminals)
-    printf 'gap:pin.formats-options'
-    ;;
   customize-*-open | customize-screen-* | customize-long-* | customize-prompt-vi-* | \
     customize-unbound-* | customize-retained-* | customize-interrupt-* | customize-sabotage | \
     customize-array-screen-* | customize-right-sabotage | customize-preview-sabotage | \
@@ -735,9 +731,6 @@ known_drift() {
 
 known_drift_reason() {
   case "$1" in
-  messages-*)
-    printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 asks the terminal for synchronized output with DECRQM ?2026 and adds the sync feature when it answers, so the attached client's terminal lists Sync where zz's lists it missing; the three capabilities 3.8 added (Dsesc, Enesc, ind) match"
-    ;;
   customize-*)
     printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 rebuilt customize mode (window-customize.c: Session Hooks, Window & Pane Hooks, Global and Session Environment sections in the tree, e to edit, C for changed only, editable array keys); zz still draws the d77c9dc6 tree"
     ;;

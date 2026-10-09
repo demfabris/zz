@@ -478,7 +478,8 @@ invoking client as no client, unattached, or attached to one session. `target_fo
 overlays the current or explicitly selected target client for producers that tmux expands against
 that client. The daemon resolves the target without replacing the raw view, so one command can use
 the invoker for name or cwd expansion and the selected client for `session_active`.
-`PaneFormatOutput` stores that selected state for deferred expansion. Clientless lists and filters,
+`PaneFormatOutput` stores that selected state for deferred expansion. `list-sessions`,
+`list-windows` and `list-panes` rows use the invoking client, as tmux 3.8 does. Clientless filters,
 chooser rows, and `list-commands` keep no client; target-aware command formats, shell callbacks,
 buffer and capture paths, popup and menu text, `list-keys`, status rows, Control subscriptions, and
 display-panes labels receive the selected client. This split adds no protocol or snapshot field.

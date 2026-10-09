@@ -3,8 +3,9 @@
 //! its clients read it: the daemon to publish `client_termfeatures` and
 //! `client_colours`, and a client to know what its own terminal takes.
 
-pub const TERMINAL_FEATURES: [&str; 21] = [
+pub const TERMINAL_FEATURES: [&str; 23] = [
     "256",
+    "appesc",
     "bpaste",
     "ccolour",
     "clipboard",
@@ -25,6 +26,7 @@ pub const TERMINAL_FEATURES: [&str; 21] = [
     "sync",
     "title",
     "usstyle",
+    "utf8",
 ];
 
 pub(crate) fn terminal_feature_bit(name: &str) -> Option<u32> {
@@ -87,7 +89,9 @@ macro_rules! modern_xterm_features {
 /// table does not carry adds nothing.
 pub fn terminal_default_features(name: &str) -> &'static str {
     match name {
-        "mintty" => modern_xterm_features!("ccolour,cstyle,extkeys,margins,overline,usstyle"),
+        "mintty" => {
+            modern_xterm_features!("appesc,ccolour,cstyle,extkeys,margins,overline,usstyle")
+        }
         "tmux" => modern_xterm_features!(
             "ccolour,cstyle,extkeys,focus,overline,usstyle,hyperlinks,progressbar"
         ),
@@ -96,9 +100,14 @@ pub fn terminal_default_features(name: &str) -> &'static str {
             "cstyle,extkeys,margins,usstyle,sync,osc7,hyperlinks,progressbar"
         ),
         "foot" => modern_xterm_features!("ccolour,cstyle,extkeys,usstyle,sync,osc7,hyperlinks"),
-        "WezTerm" => modern_xterm_features!("ccolour,cstyle,extkeys,focus,hyperlinks,usstyle"),
+        "WezTerm" => {
+            modern_xterm_features!("ccolour,cstyle,extkeys,focus,hyperlinks,margins,usstyle")
+        }
         "ghostty" => modern_xterm_features!(
-            "ccolour,cstyle,extkeys,focus,overline,hyperlinks,osc7,sync,usstyle,progressbar"
+            "ccolour,cstyle,extkeys,focus,margins,overline,hyperlinks,osc7,sync,usstyle,progressbar"
+        ),
+        "Rio" => modern_xterm_features!(
+            "ccolour,cstyle,focus,overline,hyperlinks,osc7,sync,usstyle,progressbar"
         ),
         "XTerm" => modern_xterm_features!("ccolour,cstyle,extkeys,focus"),
         _ => "",
@@ -109,12 +118,22 @@ pub fn terminal_default_features(name: &str) -> &'static str {
 /// for a caller holding the raw specs `-T` and `-2` left behind alike.
 pub fn terminal_feature_mask<'a>(specs: impl IntoIterator<Item = &'a str>) -> u32 {
     let mut features = 0;
+    let mut removed = 0;
     for spec in specs {
         for name in spec.split([':', ',']) {
+            let (name, remove) = name
+                .strip_suffix('@')
+                .filter(|name| !name.is_empty())
+                .map_or((name, false), |name| (name, true));
             let Some(bit) = terminal_feature_bit(name) else {
                 break;
             };
-            features |= bit;
+            if remove {
+                features &= !bit;
+                removed |= bit;
+            } else if removed & bit == 0 {
+                features |= bit;
+            }
         }
     }
     features
@@ -125,7 +144,7 @@ mod tests {
     use super::*;
 
     /// `tty_default_features`'s own table, name for name, as tty-features.c
-    /// spells it at the pin's d77c9dc6.
+    /// spells it at 3.8.
     #[test]
     fn the_named_terminals_carry_the_features_the_pin_gives_them() {
         let list =
@@ -142,7 +161,27 @@ mod tests {
             list("rxvt-unicode"),
             "256,bpaste,ccolour,cstyle,ignorefkeys,mouse,title"
         );
+        assert_eq!(
+            list("mintty"),
+            "256,appesc,bpaste,ccolour,clipboard,cstyle,extkeys,margins,mouse,overline,RGB,strikethrough,title,usstyle"
+        );
+        assert_eq!(
+            list("ghostty"),
+            "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,extkeys,focus,margins,mouse,osc7,overline,progressbar,RGB,strikethrough,sync,title,usstyle"
+        );
+        assert_eq!(
+            list("Rio"),
+            "256,bpaste,ccolour,clipboard,hyperlinks,cstyle,focus,mouse,osc7,overline,progressbar,RGB,strikethrough,sync,title,usstyle"
+        );
         assert_eq!(terminal_default_features("Konsole"), "");
+        assert_eq!(
+            terminal_features_list(terminal_feature_mask(["sync,utf8", "sync@", "sync"])),
+            "utf8"
+        );
+        assert_eq!(
+            terminal_features_list(terminal_feature_mask(["256:title@:RGB"])),
+            "256,RGB"
+        );
         assert_eq!(
             terminal_colour_count(
                 "xterm",

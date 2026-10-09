@@ -63,6 +63,8 @@ orchestrator never runs the full suite per item.
      registry, oracle or manifest tests changed. A merge that changes `zz-protocol` (wire types,
      `key.rs` default tables, the catalog) also runs `cargo.sh test -p zz-client`: its which-key and
      reducer tests read those tables (pin.keys-copy's 3.8 `T` binding broke two, 2026-10-09).
+     Every merge also runs `cargo.sh test -p zz-cli`: its end-to-end tests drive the daemon and
+     caught two stale expectations that per-crate checks missed (hooks-events-2, followups).
    - `ledger.py set <id> merged --sha <merge sha>`, commit the ledger, push `main`.
    - Delete the branch locally and on origin. Start the next ready item in the same slot
      (`wt.sh item` switches the warm worktree to a new branch), or `wt.sh rm <slot>` if nothing is

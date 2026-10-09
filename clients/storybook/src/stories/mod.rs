@@ -3,15 +3,17 @@ use std::sync::LazyLock;
 use crate::story::Story;
 
 mod agent;
+mod console;
 mod foundation;
 mod kit;
-mod zz;
+mod workspace;
 
 pub static STORIES: LazyLock<Vec<&'static Story>> = LazyLock::new(|| {
     [
         foundation::STORIES,
         agent::STORIES,
-        zz::STORIES,
+        workspace::STORIES,
+        console::STORIES,
         kit::STORIES,
     ]
     .into_iter()

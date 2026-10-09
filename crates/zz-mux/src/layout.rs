@@ -954,11 +954,7 @@ impl CellLayout {
     }
 
     pub fn project(&self) -> LayoutNode {
-        project_node(&self.root).unwrap_or_else(|| {
-            let mut panes = Vec::new();
-            collect_panes(&self.root, &mut panes);
-            LayoutNode::Pane(panes[0])
-        })
+        project_node(&self.root).unwrap_or(LayoutNode::Empty)
     }
 
     #[must_use]
@@ -3947,6 +3943,7 @@ mod tests {
     fn projected_panes(node: &LayoutNode, panes: &mut Vec<PaneId>) {
         match node {
             LayoutNode::Pane(pane) => panes.push(*pane),
+            LayoutNode::Empty => {}
             LayoutNode::Split { first, second, .. } => {
                 projected_panes(first, panes);
                 projected_panes(second, panes);

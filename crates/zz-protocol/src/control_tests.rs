@@ -48,6 +48,8 @@ fn snapshot() -> MuxSnapshot {
                 pane_border_indicators: PaneBorderIndicators::Colour,
                 pane_order: vec![pane],
                 pane_z_order: vec![pane],
+                floating: Vec::new(),
+                modal: None,
             }],
         }],
     }

@@ -315,3 +315,66 @@ fn an_over_zoom_float_stays_active_above_a_zoomed_tile() {
         Some(geometry(20, 6, 4, 2))
     );
 }
+
+#[test]
+fn one_move_pane_emits_one_window_layout_op() {
+    use crate::{ExecutionContext, MuxEngine};
+    use zz_protocol::{CommandInvocation, LayoutNode, TreeDelta, TreeOp};
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "s", "-x", "80", "-y", "24"]),
+        )
+        .unwrap();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-pane", [] as [&str; 0]),
+        )
+        .unwrap();
+    let float = context.pane.unwrap();
+    let before = engine.state.snapshot();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("move-pane", ["-X", "10", "-Y", "3"]),
+        )
+        .unwrap();
+    let after = engine.state.snapshot();
+    let delta = TreeDelta::between(&before, &after);
+    let layouts = delta
+        .ops
+        .iter()
+        .filter(|op| matches!(op, TreeOp::WindowLayout { .. }))
+        .count();
+    assert_eq!(layouts, 1);
+    let window = &after.sessions[0].windows[0];
+    let snapshot = window
+        .floating
+        .iter()
+        .find(|snapshot| snapshot.pane == float)
+        .unwrap();
+    assert_eq!((snapshot.xoff, snapshot.yoff), (11, 4));
+    assert!(snapshot.visible);
+
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("break-pane", ["-W", "-s", "%0"]),
+        )
+        .unwrap();
+    let after = engine.state.snapshot();
+    assert_eq!(after.sessions[0].windows[0].layout, LayoutNode::Empty);
+    engine
+        .execute(&mut context, &CommandInvocation::new("new-pane", ["-O"]))
+        .unwrap();
+    let modal = context.pane.unwrap();
+    let after = engine.state.snapshot();
+    assert_eq!(
+        after.sessions[0].windows[0].modal.map(|modal| modal.pane),
+        Some(modal)
+    );
+}

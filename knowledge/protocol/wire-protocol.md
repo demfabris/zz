@@ -826,6 +826,17 @@ decoded bytes of the terminal's OSC 52 answer. The daemon stores them as a new a
 `tty_keys_clipboard` does with `paste_add`, only while a query to that client is pending; a reply
 outside that window is dropped. Clients that do not answer OSC 52 ignore the query.
 
+v108 also carries tmux 3.8's floating panes (catch-up item `float.core`,
+[design](/designs/floating-panes.md)). `WindowSnapshot` appends `floating:
+Vec<FloatingPaneSnapshot { pane, xoff: i32, yoff: i32, sx, sy, visible, border_lines,
+border_status }>`, front to back, and `modal: Option<ModalPaneSnapshot { pane, capture_keys,
+close_on_click, close_on_cancel }>`, both `#[serde(default)]`; a float's cell is its content box
+in window cells, offsets may be negative, and `visible` is false for a float hidden by zoom or
+zoomed itself. `TreeOp::WindowLayout` appends the same two fields. `LayoutNode` appends the unit
+variant `Empty`, which `WindowSnapshot.layout` holds when the window has no tiled pane.
+`InputMessage::MouseKey` appends `press: Option<(u16, u16)>` (`#[serde(default)]`), the client cell
+of the button-down that latched the gesture. `float_wire_tests` pins the encodings.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

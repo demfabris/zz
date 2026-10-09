@@ -7843,7 +7843,17 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
-    fn pane_lines(&self, pane: PaneId) -> PaneBorderLines {
+    #[must_use]
+    pub fn floating_pane_border_status(&self, pane: PaneId) -> PaneBorderStatus {
+        match self.scalar_option_effective(TmuxOptionTarget::Pane(pane), "pane-border-status") {
+            Some("top" | "top-floating") => PaneBorderStatus::Top,
+            Some("bottom" | "bottom-floating") => PaneBorderStatus::Bottom,
+            _ => PaneBorderStatus::Off,
+        }
+    }
+
+    #[must_use]
+    pub fn pane_lines(&self, pane: PaneId) -> PaneBorderLines {
         let Some(window) = self.state.window_for_pane(pane) else {
             return PaneBorderLines::Single;
         };
@@ -8790,6 +8800,7 @@ impl MuxEngine {
                         (u32::from(left_extent.0) * u32::from(left_extent.1))
                             .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
                     }
+                    Some(TmuxSortOrder::Z) => window.pane_z(*left).cmp(&window.pane_z(*right)),
                     _ => std::cmp::Ordering::Equal,
                 };
                 ordering.then_with(|| left_pane.title.cmp(&right_pane.title))

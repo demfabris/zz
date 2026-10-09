@@ -1406,6 +1406,7 @@ fn bound_mouse_key(
         row: global_row,
         border: latch.border,
         status_range_start: mouse_status_range_start(model, global_column, global_row),
+        press: None,
         view_action: latch.pane.and_then(|pane| {
             bound_mouse_view_action(
                 model,
@@ -1537,6 +1538,7 @@ pub(crate) fn expire_click_sequence(
             status_range_start: mouse_status_range_start(model, column, row),
             view_action: action.clone(),
             press_action: action,
+            press: None,
         })
         .map_err(|error| error.to_string())
 }
@@ -2373,6 +2375,8 @@ mod tests {
                     pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
                     pane_order: vec![PaneId(1), PaneId(2)],
                     pane_z_order: Vec::new(),
+                    floating: Vec::new(),
+                    modal: None,
                 }],
                 viewers: Vec::new(),
             }],

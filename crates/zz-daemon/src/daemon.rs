@@ -9033,7 +9033,9 @@ impl Shared {
         event: PendingHookEvent,
     ) -> Option<InsertedQueueChild> {
         if state.publish_control && !event.control_notified {
-            state.notifications.push(self.event_control_notification(&event));
+            state
+                .notifications
+                .push(self.event_control_notification(&event));
         }
         if self
             .command_item
@@ -21161,6 +21163,7 @@ impl Shared {
                     view_action,
                     press_action,
                     status_range_start,
+                    press: _,
                 } => {
                     self.input_mouse_key(
                         client,
@@ -37032,6 +37035,7 @@ impl ChooseTreeSession {
                             (u32::from(left_extent.0) * u32::from(left_extent.1))
                                 .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
                         }
+                        Some(TmuxSortOrder::Z) => window.pane_z(*left).cmp(&window.pane_z(*right)),
                         _ => std::cmp::Ordering::Equal,
                     };
                     ordering.then_with(|| left_pane.title.cmp(&right_pane.title))
@@ -43894,6 +43898,10 @@ fn stamp_pane_border_chrome(
             window.pane_border_status = engine.pane_border_status(window.id);
             window.pane_border_lines = engine.pane_border_lines(window.id);
             window.pane_border_indicators = engine.pane_border_indicators(window.id);
+            for float in &mut window.floating {
+                float.border_lines = engine.pane_lines(float.pane);
+                float.border_status = engine.floating_pane_border_status(float.pane);
+            }
             if !window.pane_border_status.is_on() {
                 continue;
             }
@@ -104575,10 +104583,7 @@ bind - split-window -v -c "#{pane_current_path}"
             "attached,focused,ignore-size,no-detach-on-destroy,read-only"
         );
         let flags = shared.inner.lock().client_flags.get(client);
-        assert_eq!(
-            flags.reconnect_flags(),
-            "ignore-size,no-detach-on-destroy"
-        );
+        assert_eq!(flags.reconnect_flags(), "ignore-size,no-detach-on-destroy");
         let messages = take_reliable_messages(&mailbox);
         assert!(messages.iter().any(|message| matches!(
             message,

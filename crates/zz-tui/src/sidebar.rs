@@ -450,6 +450,8 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
         }
     }
 

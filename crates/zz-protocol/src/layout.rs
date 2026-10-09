@@ -99,7 +99,7 @@ fn predict_insert_layout_pane(
             };
             true
         }
-        LayoutNode::Pane(_) => false,
+        LayoutNode::Pane(_) | LayoutNode::Empty => false,
         LayoutNode::Split { first, second, .. } => {
             predict_insert_layout_pane(first, target, pane, split, axis, pane_ratio, before, false)
                 || predict_insert_layout_pane(
@@ -111,7 +111,7 @@ fn predict_insert_layout_pane(
 
 fn predict_remove_layout_leaf(node: &mut LayoutNode, target: PaneId) -> bool {
     let promote_second = match node {
-        LayoutNode::Pane(_) => return false,
+        LayoutNode::Pane(_) | LayoutNode::Empty => return false,
         LayoutNode::Split { first, .. } if matches!(first.as_ref(), LayoutNode::Pane(pane) if *pane == target) => {
             Some(true)
         }
@@ -140,7 +140,7 @@ fn predict_swap_layout_panes(node: &mut LayoutNode, source: PaneId, target: Pane
     match node {
         LayoutNode::Pane(pane) if *pane == source => *pane = target,
         LayoutNode::Pane(pane) if *pane == target => *pane = source,
-        LayoutNode::Pane(_) => {}
+        LayoutNode::Pane(_) | LayoutNode::Empty => {}
         LayoutNode::Split { first, second, .. } => {
             predict_swap_layout_panes(first, source, target);
             predict_swap_layout_panes(second, source, target);

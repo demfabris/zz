@@ -124,6 +124,7 @@ pub fn pane_separator(
 fn pane_touches_edge(node: &LayoutNode, pane: PaneId, axis: Axis, edge: PaneEdge) -> bool {
     match node {
         LayoutNode::Pane(id) => *id == pane,
+        LayoutNode::Empty => false,
         LayoutNode::Split {
             axis: split_axis,
             first,
@@ -147,6 +148,7 @@ fn relative_pane_rect(
 ) -> Option<NormalizedPaneRect> {
     match node {
         LayoutNode::Pane(id) => (*id == pane).then_some(NormalizedPaneRect::FULL),
+        LayoutNode::Empty => None,
         LayoutNode::Split {
             id,
             axis,

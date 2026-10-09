@@ -450,6 +450,7 @@ fn pane_path_and_index(
             *next_index += 1;
             (*pane == target).then(|| (path.clone(), index))
         }
+        LayoutNode::Empty => None,
         LayoutNode::Split { first, second, .. } => {
             path.push(false);
             let found = pane_path_and_index(first, target, path, next_index);
@@ -503,6 +504,7 @@ fn visit_browser_panes(
                 *best = Some(BrowserTarget { score, pane: *pane });
             }
         }
+        LayoutNode::Empty => {}
         LayoutNode::Split { first, second, .. } => {
             path.push(false);
             visit_browser_panes(
@@ -9231,6 +9233,8 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
         }
     }
 

@@ -446,6 +446,7 @@ fn collect(
             border_status,
             status_on_border: false,
         }),
+        LayoutNode::Empty => {}
         LayoutNode::Split {
             axis,
             ratio,
@@ -524,6 +525,7 @@ fn collect(
 fn first_pane(node: &LayoutNode) -> Option<PaneId> {
     match node {
         LayoutNode::Pane(pane) => Some(*pane),
+        LayoutNode::Empty => None,
         LayoutNode::Split { first, second, .. } => first_pane(first).or_else(|| first_pane(second)),
     }
 }

@@ -2300,6 +2300,8 @@ pub enum InputMessage {
         /// and owns its ranges, so the start travels with the event.
         #[serde(default)]
         status_range_start: Option<u16>,
+        #[serde(default)]
+        press: Option<(u16, u16)>,
     },
     ClientSuspendState {
         suspended: bool,

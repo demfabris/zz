@@ -7,10 +7,11 @@ use std::{
 use zz_protocol::LayoutNode;
 pub use zz_protocol::layout::{joined_layout, swapped_layout};
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, MAX_GUI_TEXT_BYTES,
-    MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PaneSnapshot, PaneStatus, ServerError, SessionId, SessionSnapshot, SplitId, WindowId,
-    WindowSnapshot, normalize_browser_profile_name,
+    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor,
+    FloatingPaneSnapshot, MAX_GUI_TEXT_BYTES, ModalPaneSnapshot, MuxSnapshot, PaneBorderIndicators,
+    PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot, PaneSnapshot, PaneStatus,
+    ServerError, SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot,
+    normalize_browser_profile_name,
 };
 
 use crate::{
@@ -4680,6 +4681,30 @@ impl MuxState {
             pane_border_indicators: PaneBorderIndicators::Colour,
             pane_order: window.pane_order.clone(),
             pane_z_order: window.z_order.clone(),
+            floating: window
+                .z_order
+                .iter()
+                .filter(|pane| window.layout.is_floating(**pane))
+                .filter_map(|pane| {
+                    let geometry = window.layout.pane_geometry(*pane)?;
+                    Some(FloatingPaneSnapshot {
+                        pane: *pane,
+                        xoff: geometry.xoff,
+                        yoff: geometry.yoff,
+                        sx: geometry.sx,
+                        sy: geometry.sy,
+                        visible: window.shows_floating(*pane),
+                        border_lines: PaneBorderLines::Single,
+                        border_status: PaneBorderStatus::Off,
+                    })
+                })
+                .collect(),
+            modal: window.floats.modal.map(|modal| ModalPaneSnapshot {
+                pane: modal.pane,
+                capture_keys: modal.capture_keys,
+                close_on_click: modal.close_on_click,
+                close_on_cancel: modal.close_on_cancel,
+            }),
         }
     }
 
@@ -5335,6 +5360,7 @@ fn activate_relocated_window_pane(window: &mut Window, pane: PaneId, outgoing: P
 fn collect_pane_rects(node: &LayoutNode, bounds: PaneRect, output: &mut Vec<(PaneId, PaneRect)>) {
     match node {
         LayoutNode::Pane(pane) => output.push((*pane, bounds)),
+        LayoutNode::Empty => {}
         LayoutNode::Split {
             axis,
             ratio,

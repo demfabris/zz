@@ -219,11 +219,14 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         pane_border_indicators: zz_protocol::PaneBorderIndicators::Both,
         pane_order: vec![pane],
         pane_z_order: vec![pane],
+        floating: Vec::new(),
+        modal: None,
     };
     assert_eq!(
         postcard::to_stdvec(&window).expect("encode window"),
         [
-            1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S', 1, 0, 2, 2, 3, 1, 3, 1, 3
+            1, 2, 1, b'w', 1, 3, 0, 0, 3, 0, 1, b'L', 1, b'V', 1, b'S', 1, 0, 2, 2, 3, 1, 3, 1, 3,
+            0, 0
         ]
     );
 }

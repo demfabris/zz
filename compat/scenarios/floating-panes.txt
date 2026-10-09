@@ -149,3 +149,18 @@ join-pane -s lone2:0.0 -t lone2:1.0
 out: list-panes -t lone2:0 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
 out: display-message -p -t lone2:0 #{window_layout}
 out: list-panes -t lone2:1 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# Plain move-pane moves tiled panes as join-pane does; placement flags need a float.
+new-session -d -s mv
+split-window -h -t mv.0
+split-window -v -t mv.1
+move-pane -s mv.0 -t mv.2
+out: list-panes -t mv -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+move-pane -h -s mv.2 -t mv.0
+out: list-panes -t mv -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+new-window -t mv
+move-pane -s mv:1.0 -t mv:0.0
+out: list-panes -t mv:0 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+err: move-pane -P top-left -t mv:0.0
+new-pane -t mv:0.0
+out: list-panes -t mv:0 -O z -F #{pane_id}:#{pane_z}

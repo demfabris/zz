@@ -262,6 +262,7 @@ fn collect_pane_corners(
         LayoutNode::Pane(pane) => {
             by_pane.insert(*pane, corners);
         }
+        LayoutNode::Empty => {}
         LayoutNode::Split {
             axis,
             first,
@@ -3225,6 +3226,7 @@ impl AppView {
                 })
                 .into_any_element()
             }
+            LayoutNode::Empty => div().size_full().into_any_element(),
             LayoutNode::Split {
                 id,
                 axis,
@@ -4025,6 +4027,8 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
         };
         let attached = SessionId(1);
         let session = zz_protocol::SessionSnapshot {
@@ -4336,6 +4340,8 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
         };
         MuxSnapshot {
             generation,
@@ -6303,6 +6309,8 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
         };
         MuxSnapshot {
             generation: 10 + active.0 + generation_bias,
@@ -7263,6 +7271,8 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
         };
 
         assert!(pending.still_predicts(Some(&window), 12));

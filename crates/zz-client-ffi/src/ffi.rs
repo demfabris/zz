@@ -2953,6 +2953,8 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
         };
 
         assert_eq!(window_pane_rect(&window, PaneId(1)), None);

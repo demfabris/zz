@@ -46,6 +46,7 @@ fn collect_pane_rects(
 ) {
     match node {
         LayoutNode::Pane(pane) => rects.push((*pane, rect)),
+        LayoutNode::Empty => {}
         LayoutNode::Split {
             axis,
             ratio,

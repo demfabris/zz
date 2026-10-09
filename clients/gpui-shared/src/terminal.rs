@@ -2418,6 +2418,8 @@ mod tests {
                             pane_border_indicators: zz_protocol::PaneBorderIndicators::default(),
                             pane_order: vec![PaneId(1)],
                             pane_z_order: vec![PaneId(1)],
+                            floating: Vec::new(),
+                            modal: None,
                         }],
                     }],
                     focused_window: Some(WindowId(1)),

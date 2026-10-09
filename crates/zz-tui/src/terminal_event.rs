@@ -142,6 +142,7 @@ pub(crate) struct EventParser {
     in_paste: bool,
     graphics_reply: Option<Instant>,
     clipboard: Option<ClipboardReply>,
+    clipboard_query: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -176,9 +177,16 @@ impl EventParser {
         self.clipboard.is_some() || self.bytes.first() == Some(&0x1b)
     }
 
+    pub fn await_clipboard_reply(&mut self, deadline: Instant) {
+        self.clipboard_query = Some(deadline);
+    }
+
     pub fn pending_escape_delay(&self, escape_ms: u64) -> Option<Duration> {
         let delay = Duration::from_millis(escape_ms);
-        if self.clipboard.is_some() || is_clipboard_reply_prefix(&self.bytes) {
+        let query = self
+            .clipboard_query
+            .is_some_and(|deadline| deadline > Instant::now());
+        if self.clipboard.is_some() || (query && is_clipboard_reply_prefix(&self.bytes)) {
             Some(delay.max(CLIPBOARD_REPLY_DELAY))
         } else {
             self.has_pending_escape().then_some(delay)
@@ -211,6 +219,14 @@ impl EventParser {
     pub fn flush_escape(&mut self, output: &mut Vec<Event>) {
         if self.clipboard.take().is_some() {
             self.parse(output);
+        }
+        if is_clipboard_reply_prefix(&self.bytes) {
+            if let Some(parsed) = parse_escape(&self.bytes, self.graphics_reply.is_some()) {
+                self.bytes.drain(..parsed.consumed);
+                output.extend(parsed.event);
+            }
+            self.parse(output);
+            return;
         }
         if self.has_pending_escape() {
             if self.bytes.starts_with(b"\x1b[?") || self.bytes.starts_with(b"\x1b_") {
@@ -254,6 +270,7 @@ impl EventParser {
                 };
                 reply.take(&self.bytes[..end]);
                 self.bytes.drain(..end + terminator);
+                self.clipboard_query = None;
                 if let Some(reply) = self.clipboard.take()
                     && !reply.overflowed
                     && let Some(event) = parse_clipboard_reply(&reply.body)
@@ -397,7 +414,7 @@ fn parse_escape(bytes: &[u8], graphics_reply: bool) -> Option<Parsed> {
 }
 
 fn is_clipboard_reply_prefix(bytes: &[u8]) -> bool {
-    bytes.len() > 2 && bytes.len() < CLIPBOARD_REPLY.len() && CLIPBOARD_REPLY.starts_with(bytes)
+    bytes.len() > 1 && bytes.len() < CLIPBOARD_REPLY.len() && CLIPBOARD_REPLY.starts_with(bytes)
 }
 
 fn clipboard_reply_end(body: &[u8]) -> Option<(usize, usize)> {
@@ -823,6 +840,7 @@ mod tests {
 
         let mut parser = EventParser::default();
         let mut events = Vec::new();
+        parser.await_clipboard_reply(Instant::now() + Duration::from_secs(5));
         for chunk in [&b"\x1b]5"[..], b"2;c;aGk", b"=\x1b", b"\\"] {
             assert!(events.is_empty());
             parser.push(chunk, &mut events);
@@ -833,6 +851,37 @@ mod tests {
         assert_eq!(events, [Event::Clipboard(b"hi".to_vec())]);
         assert!(parser.is_idle());
         assert_eq!(parser.pending_escape_delay(10), None);
+    }
+
+    #[test]
+    fn a_clipboard_reply_split_after_its_escape_bracket_is_held_and_alt_bracket_still_arrives() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.await_clipboard_reply(Instant::now() + Duration::from_secs(5));
+        parser.push(b"\x1b]", &mut events);
+        assert!(events.is_empty());
+        assert_eq!(parser.pending_escape_delay(10), Some(CLIPBOARD_REPLY_DELAY));
+        parser.push(b"52;c;aGVsbG8=\x07", &mut events);
+        assert_eq!(events, [Event::Clipboard(b"hello".to_vec())]);
+        assert_eq!(parser.pending_escape_delay(10), None);
+
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b]", &mut events);
+        assert!(events.is_empty());
+        assert_eq!(
+            parser.pending_escape_delay(10),
+            Some(Duration::from_millis(10))
+        );
+        parser.flush_escape(&mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(
+                KeyCode::Char(']'),
+                KeyModifiers::ALT
+            ))]
+        );
+        assert!(parser.is_idle());
     }
 
     #[test]

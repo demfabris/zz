@@ -795,6 +795,7 @@ pub(crate) fn run(
             }
             MainEvent::ClipboardQuery(event_connection) => {
                 if event_connection == connection_id {
+                    event_loop.await_clipboard_reply();
                     renderer.queue_control(clipboard::QUERY.to_vec());
                     renderer
                         .paint(&model, false)

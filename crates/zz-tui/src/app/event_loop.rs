@@ -209,6 +209,7 @@ enum Handoff {
 
 const RELEASE_WAIT: Duration = Duration::from_secs(1);
 const GRAPHICS_REPLY_WAIT: Duration = Duration::from_secs(1);
+const CLIPBOARD_REPLY_WAIT: Duration = Duration::from_secs(5);
 
 pub(super) struct EventLoop {
     client: Option<Arc<InteractiveClient>>,
@@ -360,6 +361,11 @@ impl EventLoop {
         self.tty = Handoff::Own;
         self.tty_reported = None;
         self.buffered = true;
+    }
+
+    pub fn await_clipboard_reply(&mut self) {
+        self.parser
+            .await_clipboard_reply(Instant::now() + CLIPBOARD_REPLY_WAIT);
     }
 
     pub fn await_graphics_reply(&mut self) {

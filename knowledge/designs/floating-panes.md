@@ -131,6 +131,10 @@ keeps `popup_position` (`:43372`), `parse_popup_dimension` (`:49960`) and the po
 | `-N` | accepted, no effect |
 | modal present | silently ignored |
 
+A single empty command argument (`display-popup ""`) is dropped before the request is built, as
+master does (`cmd-display-menu.c:490-491`), so the pane runs `default-command` or the shell; passed
+through, `new-pane` would read it as an empty pane with no process.
+
 A command client blocks on the `-W` wait (`PopupWait`, `:37916`, folds into it) and exits with the
 pane's status, 129 if it was killed.
 
@@ -231,7 +235,10 @@ front after `render_layout` and before `overlays`: an absolute `FloatingSurface`
 `xoff * cell_w, yoff * cell_h` from the canvas origin with this client's cell metrics, clipped,
 titled from `border_status_text`, borderless for `None`. `render_layout` draws `LayoutNode::Empty` as
 the bare canvas, with no drop targets. Title-bar and edge drags preview locally and on release send
-`move-pane -t %N -X x -Y y` or `resize-pane -t %N -x w -y h` (outer cells). A click focuses it like a
+`move-pane -t %N -X x -Y y` for a move and `resize-pane -t %N -x w -y h` for a resize (outer cells).
+`resize-pane` keeps the offsets (`layout.c:907-935`), so when a resize also moved the origin (left or
+top edge, or their corners) the commit is one command list,
+`resize-pane -t %N -x w -y h ; move-pane -t %N -X x -Y y`, which lands on the previewed rectangle. A click focuses it like a
 tiled pane, and the mux raises it. A modal adds an occluding scrim (a click sends `kill-pane` only
 with `close_on_click`), and with `capture_keys` the chrome keymap forwards every key unresolved.
 Delete `popup_overlay` (`:3433`), `PopupPane` (`:575`), `TerminalView::new_popup` and the popup
@@ -292,7 +299,8 @@ goes dead until float.clients.
 8. Daemon tests: with two attached clients, `display-popup -E 'sleep 1'` puts one modal in both
    snapshots, sends no `EventPayload::Popup`, and closes on exit; from a command client
    `display-popup -E 'exit 3'` exits 3; `display-popup -C` kills a `new-pane -O` modal; a second
-   `display-popup` leaves the pane count alone; no `u64::MAX` pane id remains in `crates/zz-daemon/src`.
+   `display-popup` leaves the pane count alone; `display-popup ""` runs `default-command` (or the
+   shell) in a live modal, not an empty pane; no `u64::MAX` pane id remains in `crates/zz-daemon/src`.
 9. PTY sizes follow the allocation rule (float, zoomed float, hidden float, clamp), and a client size
    report for a float changes nothing.
 10. A round-trip test pins the appended snapshot, delta, `LayoutNode::Empty` and `MouseKey.press`
@@ -313,7 +321,9 @@ goes dead until float.clients.
    nothing, and kills a `new-pane -O -C` modal.
 3. A browser pane covered by a float has no kitty placement while covered.
 4. A unit test covers the shared cell-to-pixel rect helper (clipping included) and the drag commit
-   commands; the lane report has desktop and web screenshots of a float, a modal, an over-zoom float
+   commands: a move sends `move-pane -X -Y`, a right or bottom edge resize sends `resize-pane -x -y`, a
+   left, top or top-left corner resize sends `resize-pane -x -y ; move-pane -X -Y` as one command
+   list whose result is the previewed rectangle; the lane report has desktop and web screenshots of a float, a modal, an over-zoom float
    and a window with no tiled pane.
 5. A zz-client test: a focused modal with `capture_keys` sends the prefix key to the pane.
 6. `rg 'PopupState|PopupAction|EventPayload::Popup'` finds nothing under `crates/zz`, `crates/zz-tui`,

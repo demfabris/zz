@@ -5892,7 +5892,7 @@ impl Shared {
             inner.pane_read_observations.clear();
             inner.terminal_spawns.clear();
             inner.terminal_geometries.clear();
-            inner.reported_pane_cells.clear();
+            inner.reported_pane_places.clear();
             inner.attached.clear();
             for client in inner.clients.values_mut() {
                 client.visible_terminals = None;
@@ -10082,7 +10082,7 @@ impl Shared {
                             inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
-                            inner.reported_pane_cells.remove(pane);
+                            inner.reported_pane_places.remove(pane);
                             inner.pane_modes.remove(pane);
                             inner.pane_mode_zooms.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
@@ -21361,8 +21361,8 @@ impl Shared {
                     .engine
                     .set_pane_geometry(pane, reported.columns, reported.rows);
             }
-            if let Some(cell) = inner.engine.pane_geometry(pane) {
-                inner.reported_pane_cells.insert(pane, cell);
+            if let Some(place) = pane_place(&inner, pane) {
+                inner.reported_pane_places.insert(pane, place);
             }
             terminal_resize_for_pane(&inner, pane)
         };
@@ -35379,7 +35379,7 @@ struct ServerState {
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     destroying_unattached: BTreeSet<SessionId>,
     terminal_geometries: BTreeMap<PaneId, BTreeMap<ClientId, TerminalGeometry>>,
-    reported_pane_cells: BTreeMap<PaneId, (u16, u16)>,
+    reported_pane_places: BTreeMap<PaneId, PanePlace>,
     terminal_input_sequence: u64,
     chooser_kill_panes: Vec<PaneId>,
     /// The pane a `copy-mode -k` in the current effect batch armed, consumed
@@ -45954,6 +45954,9 @@ fn remove_client_terminal_geometries(
         !geometries.is_empty()
     });
     for pane in &affected {
+        if !inner.terminal_geometries.contains_key(pane) {
+            inner.reported_pane_places.remove(pane);
+        }
         sync_view_area(inner, *pane, client);
     }
     affected
@@ -46204,6 +46207,36 @@ fn pane_geometry_from(
 /// owner set is already what `aggressive-resize` decides, and a pane whose
 /// owner moved without the layout following would report one size and run at
 /// another.
+#[derive(Clone, Debug, PartialEq)]
+struct PanePlace {
+    path: Vec<(SplitId, bool)>,
+    zoomed: bool,
+}
+
+fn pane_place(inner: &ServerState, pane: PaneId) -> Option<PanePlace> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let window = inner.engine.state.windows.get(&window)?;
+    let mut node = window.layout.project();
+    let mut path = Vec::new();
+    loop {
+        match node {
+            zz_protocol::LayoutNode::Pane(found) => {
+                return (found == pane).then(|| PanePlace {
+                    path,
+                    zoomed: window.zoomed_pane == Some(pane),
+                });
+            }
+            zz_protocol::LayoutNode::Split {
+                id, first, second, ..
+            } => {
+                let in_first = first.contains(pane);
+                path.push((id, in_first));
+                node = if in_first { *first } else { *second };
+            }
+        }
+    }
+}
+
 fn write_back_terminal_geometries(inner: &mut ServerState, panes: &BTreeSet<PaneId>) -> bool {
     let measurements = panes
         .iter()
@@ -46211,10 +46244,11 @@ fn write_back_terminal_geometries(inner: &mut ServerState, panes: &BTreeSet<Pane
             if !inner.terminals.contains_key(pane) {
                 return None;
             }
-            if inner
-                .reported_pane_cells
-                .get(pane)
-                .is_some_and(|cell| Some(*cell) != inner.engine.pane_geometry(*pane))
+            if inner.terminal_geometries.contains_key(pane)
+                && inner
+                    .reported_pane_places
+                    .get(pane)
+                    .is_some_and(|place| Some(place) != pane_place(inner, *pane).as_ref())
             {
                 return None;
             }
@@ -99306,6 +99340,54 @@ bind - split-window -v -c "#{pane_current_path}"
                 panes,
                 format!("{first} 80x23\n{second} 80x23"),
                 "split-window -d {axis} keeps the window at the reported 80x23"
+            );
+
+            let run = |context: &mut ExecutionContext, args: &[&str]| {
+                shared
+                    .execute(
+                        client,
+                        ClientKind::Interactive,
+                        context,
+                        &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                    )
+                    .expect("command")
+                    .output
+            };
+            run(&mut context, &["new-window", QUIET_PANE_COMMAND]);
+            let hidden = context.pane.expect("new window pane");
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ResizeTerminal {
+                        pane: hidden,
+                        columns: 80,
+                        rows: 23,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("client measurement");
+            run(&mut context, &["select-window", "-t", ":0"]);
+            run(
+                &mut context,
+                &["split-window", "-d", axis, "-t", ":1", QUIET_PANE_COMMAND],
+            );
+            run(&mut context, &["select-window", "-t", ":1"]);
+            assert_eq!(
+                run(
+                    &mut context,
+                    &[
+                        "list-panes",
+                        "-t",
+                        ":1",
+                        "-F",
+                        "#{pane_width}x#{pane_height} #{window_width}x#{window_height}",
+                    ],
+                ),
+                format!("{first} 80x23\n{second} 80x23"),
+                "split-window -d {axis} in an unseen window keeps it at 80x23 once selected"
             );
         }
     }

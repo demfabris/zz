@@ -111,6 +111,9 @@ pub(super) fn presize_client_terminals(
                 cell_height_px,
             },
         );
+        if let Some(place) = pane_place(inner, pane) {
+            inner.reported_pane_places.insert(pane, place);
+        }
         seeded.insert(pane);
     }
     seeded

@@ -262,3 +262,7 @@ check `pgrep -af codex` on resume.
   client (control.c never checks the flag; only send-keys does), which reads as an upstream
   oversight. zz keeps read-only meaning read-only on every client type, which `zz share` viewers
   will build on; queries and refresh-client on itself run as in 3.8. Registered native.
+- 2026-10-09 orchestrator: float.clients takes a final fix pass after two reviews (7 P1, mostly one
+  cause: clipping a float rewrote its rect instead of cropping its surface). Because the float track is
+  large and each item's reviews only saw its own slice, one whole-track Codex review
+  (`git diff main...catchup/float.keys`) runs before the track merges to main.

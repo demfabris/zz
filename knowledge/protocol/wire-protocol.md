@@ -848,6 +848,19 @@ history. `ModePresentation` appends
 with an empty `position`. `MouseBindings` grows the `Empty` mouse location after `StatusDefault`,
 which moves every `ControlN` bit up by one kind row.
 
+v108 also carries tmux 3.8's prompt cursor (catch-up item `fix.mode-styles`).
+`CommandPromptState` appends `command_mode: bool` (the vi table's `PROMPT_COMMANDMODE`, which
+draws the client prompt in `message-command-style`) and `prompt_cursor: PromptCursor`, and
+`ConfirmState` appends `prompt_cursor`. `PromptCursor { style: u8, colour: Option<TmuxColour> }`
+is what `prompt_set_options` reads from the session when the prompt opens: `style` is the
+`prompt-cursor-style` index (0 default through 6 bar), `colour` is `prompt-cursor-colour`, `None`
+when empty or `default`. A command prompt in command mode carries the
+`prompt-command-cursor-*` pair instead. The raw TUI sends DECSCUSR and OSC 12 while a client
+prompt or confirm is up and `\e[2 q` and OSC 112 once it is gone, the way `tty_update_cursor`
+does, gated on the terminal's `cstyle` and `ccolour` features. `ChooserPreview::Client` appends `border_style`, the
+`tree-mode-border-style` of the previewed client's current window, which `window_client_draw` draws
+the rule above the client's status rows in.
+
 v108 also carries a control client's guard output as bytes (catch-up item `fix.option-bytes`).
 `EventPayload::ControlCommandGuard.output` becomes `RawText`, like `ControlCommandGuardRaw`
 already was, so a control client that never subscribed gets the bytes tmux 3.8's `cmdq_print`

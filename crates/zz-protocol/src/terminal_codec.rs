@@ -2798,6 +2798,8 @@ mod tests {
                     mode: crate::CommandPromptMode::Text,
                     no_freeze: false,
                     pane: None,
+                    command_mode: false,
+                    prompt_cursor: crate::PromptCursor::default(),
                 }),
             },
         });

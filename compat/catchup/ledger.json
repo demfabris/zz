@@ -186,7 +186,7 @@
       "id": "fix.mode-styles",
       "track": "fix",
       "title": "Raw TUI reads tree-mode styles and prompt cursor style and colour",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon/chooser_presentation.rs",
@@ -203,10 +203,13 @@
         "Both registry groups shrink to what stays native (GUI presentation, copy-mode line numbers, fill-character, message-format if not done)."
       ],
       "branch": "catchup/fix.mode-styles",
-      "sha": null,
+      "sha": "6a5217fa8",
       "notes": [
         "2026-10-09: Lane done at da2a38286: tree-mode styles from options (tui-choosers 86/86), prompt cursor style/colour in the raw TUI (tui-overlays 49/49), registry groups shrunk; wire append under 108 (PromptCursor); found a prompt mode-switch republish bug and fixed it. Follow-ups: mode prompts (chooser filter, customize, switch) ignore prompt cursor style and message-style/message-command-style. Review 1 running.",
-        "2026-10-09: Codex review 1 (fix.mode-styles-1.md): 3 P1 (vi edit keys switch mode without republish, cursor colours not format-expanded, cursor cache advances before paint delivery) + 2 P2; fix pass sent."
+        "2026-10-09: Codex review 1 (fix.mode-styles-1.md): 3 P1 (vi edit keys switch mode without republish, cursor colours not format-expanded, cursor cache advances before paint delivery) + 2 P2; fix pass sent.",
+        "2026-10-09: Fix pass 86e7f0230 (main merged 919a99c61): 5 findings fixed with tests; tui-choosers 104/104, tui-overlays 49/49; ChooserPreview::Client gains border_style under 108. Review 2 running.",
+        "2026-10-09: Codex review 2 (fix.mode-styles-2.md): 1 P1 (cursor teardown flag cleared before delivery); final fix pass sent, merges after it.",
+        "2026-10-09: Merged after the final fix pass (df5067e93); merge checks green (clippy 7 crates incl. zz, zz-protocol 283, zz-client 217, zz-tui 272, zz-mux 680, daemon prompt 65, compat check). Follow-ups: mode prompts (chooser filter/search, customize, switch) ignore prompt cursor style and message-style/message-command-style."
       ]
     },
     {
@@ -249,7 +252,7 @@
       "id": "fix.option-bytes",
       "track": "fix",
       "title": "Bytes survive option, environment, command-block and guard-output paths",
-      "status": "review",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/command.rs",
@@ -271,7 +274,8 @@
         "2026-10-09: found by fix.streams: UserOptions is BTreeMap<String,String> in zz-mux, so non-UTF-8 values read back as U+FFFD; set-option and show-options pass values as String.",
         "2026-10-09: fix.streams handed over its findings 3 and 4 and the guard-output String; measured cases are in protocol.binary-streams' close in compat/tmux-gaps.json.",
         "2026-10-09: Launched in slot g (slot f stays on capture-e-links until its review reports).",
-        "2026-10-09: Lane done at 3f8fc3a2d: user options, command blocks, sourced variables and control guard output keep non-UTF-8 bytes as 3.8 (option-bytes scenario clean, 17 hex rows; options.user-option-bytes closed entry); wire: ControlCommandGuard.output is bytes under 108; UTF-8 config octal escapes >0x7f are single bytes now. Follow-ups: show-options -F option_value, --json, #{O:}, tmux_command_print, resolve_environment still lossy; divergences.md non-UTF-8 argv row stale. Review 1 running."
+        "2026-10-09: Lane done at 3f8fc3a2d: user options, command blocks, sourced variables and control guard output keep non-UTF-8 bytes as 3.8 (option-bytes scenario clean, 17 hex rows; options.user-option-bytes closed entry); wire: ControlCommandGuard.output is bytes under 108; UTF-8 config octal escapes >0x7f are single bytes now. Follow-ups: show-options -F option_value, --json, #{O:}, tmux_command_print, resolve_environment still lossy; divergences.md non-UTF-8 argv row stale. Review 1 running.",
+        "2026-10-09: Codex review 1 (fix.option-bytes-1.md): 1 P1 (byte-parser fallback lossy on env assignment values); final fix pass sent, merges after it."
       ]
     },
     {
@@ -373,7 +377,7 @@
       "id": "pin.control-3-8",
       "track": "pin",
       "title": "Control-mode drift in 3.8",
-      "status": "review",
+      "status": "active",
       "deps": [
         "pin.contract-breaks"
       ],
@@ -394,7 +398,8 @@
       "notes": [
         "2026-10-09: found by pin.contract-breaks.",
         "2026-10-09: Lane done at 0f8b36478: refresh-client -C notifies every sized window every call (zoom unzoom step included), EOF keeps / blank line drops notifications as 3.8, read-only control clients run queries and refresh themselves, respawn drops queued control output (5498); smoke/control-3-8 + control-eof-drain clean; daemon 1697. Needs fabrico: 3.8 lets a read-only control client run new-window, rename-window, set-option, set-buffer, kill-window (refuses only send-keys); zz keeps refusing state changes. Follow-ups: unquoted mid-word #{ accepted where tmux says syntax error; blank-line client still sizes windows. Review 1 running.",
-        "2026-10-09: fabrico ruled: keep refusing state changes for read-only control clients; register a native divergence (reason: control.c never checks the flag, interactive read-only clients are refused in both, zz share viewers build on it). Goes into the fix pass with review 1's findings."
+        "2026-10-09: fabrico ruled: keep refusing state changes for read-only control clients; register a native divergence (reason: control.c never checks the flag, interactive read-only clients are refused in both, zz share viewers build on it). Goes into the fix pass with review 1's findings.",
+        "2026-10-09: Codex review 1 (pin.control-3-8-1.md): 3 P1 (respawn keeps output before queued lines, alias child authorization, manual windows skipped by refresh-client -C) + P2 (register the read-only ruling); fix pass sent with the registry entry."
       ]
     },
     {
@@ -523,7 +528,9 @@
       "sha": null,
       "notes": [
         "2026-10-09: leftovers of pin.hooks-events.",
-        "2026-10-09: From pin.display-panes: inner.pane_mode_transitions.clear() at command end sits outside the hooks-enabled branch, so a transition recorded outside a command and not fired at once is dropped (clock-mode -k and switch-mode exits may leak); 3.8 send-keys to a pane in a mode does nothing without an attached client (window_pane_key), zz passes it to the mode."
+        "2026-10-09: From pin.display-panes: inner.pane_mode_transitions.clear() at command end sits outside the hooks-enabled branch, so a transition recorded outside a command and not fired at once is dropped (clock-mode -k and switch-mode exits may leak); 3.8 send-keys to a pane in a mode does nothing without an attached client (window_pane_key), zz passes it to the mode.",
+        "2026-10-09: Lane done at 44257f9e6: all 7 clauses (prompt events, wait-for -E/-v/-F sink, 10 payload keys + 2 to linked-groups, after-select-pane skip, set-hook -E registry, gap closed, attached-client --client-events PASS); mode transition leak fixed; send-keys to a mode unattached already matched. Follow-ups: zz events still carry d77 payload keys 3.8 dropped (visible in wait-for -E -v); -v prints at wake not per event; pane prompts are per client (close on detach); formats-values session_active list filters fail on main. Review 1 running.",
+        "2026-10-09: Codex review 1 (pin.hooks-events-2-1.md): 4 P1 (format monitors bypass the sink, -v buffered not streamed, interactive clients cannot wait, pane_command uses the current default-shell) + P2 (prompt events carry session keys; also drop d77 keys 3.8 removed); fix pass sent."
       ]
     },
     {
@@ -709,7 +716,7 @@
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "review",
+      "status": "active",
       "deps": [
         "float.core"
       ],
@@ -742,7 +749,8 @@
         "2026-10-09: RESUMED: fast-forwarded to float.core 04ed1a96d; session 1 launched in slot b (raw TUI, zz-client, desktop, web/iOS). Zone clients/gpui-shared/src is now clients/app/src.",
         "2026-10-09: Session 1 done at f61c2f2f1 (float.core 8c786438c merged in): tui-floating.sh 10/10 vs 3.8 on glyphs/cursor/pane list (colours not compared), click/modal clauses, kitty-placement test, zz-client floating tests, modal capture test, popup code gone. Not met: desktop/web screenshots (gamescope vkCreateInstance -9 here; web build works, no headless browser render). Found: display-popup -T draws no title (float.core). Review 1 running on catchup/float.core...HEAD.",
         "2026-10-09: Codex review 1 (float.clients-1.md): 8 P1 (capture modal vs terminal shortcuts, float header steals rows, rejected drag sticks, resize border-status adjust, TUI clip offset, web clip insets, cursor under a float, iOS browsers hidden by any float) + 2 P2 (one command list, screenshots); fix pass sent. Screenshots blocked: the alienware NVIDIA GPU fell off the bus (nvidia-smi Unknown Error), gamescope vkCreateInstance -9; needs a reboot or another machine.",
-        "2026-10-09: Fix pass done at dcecfc5d3 (float.core ae87b1ec0 merged): review 1's 8 P1 fixed with tests, tui-floating 12/12 vs 3.8, drag commits as one command list (run-shell -C list); screenshots open (GPU down). Open: display-popup -T title missing when the popup's pane-border-style/window-style options are set (lane continuing). Review 2 running."
+        "2026-10-09: Fix pass done at dcecfc5d3 (float.core ae87b1ec0 merged): review 1's 8 P1 fixed with tests, tui-floating 12/12 vs 3.8, drag commits as one command list (run-shell -C list); screenshots open (GPU down). Open: display-popup -T title missing when the popup's pane-border-style/window-style options are set (lane continuing). Review 2 running.",
+        "2026-10-09: Codex review 2 (float.clients-2.md): 7 P1 (TUI crop rewrites rect: damage rows, kitty placements, pane-mode re-centre; mode cursor through floats; iOS browsers live under a modal scrim; no-op drag commit sticks; bottom-status resize uses canvas height) + 2 P2 (web title markup, screenshots); final fix pass queued after the -T title fix. A whole-track Codex review runs before the float track merges."
       ]
     },
     {
@@ -819,6 +827,57 @@
       "sha": null,
       "notes": [
         "fabrico 2026-10-09: note down for later."
+      ]
+    },
+    {
+      "id": "fix.formats-values-3-8",
+      "track": "fix",
+      "title": "formats-values scenario is red on main at the 3.8 pin",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src/formats.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "compat/scenarios/formats-values.txt"
+      ],
+      "gaps": [],
+      "accept": [
+        "compat/run.sh --strict-geometry formats-values is clean against tmux 3.8 (45 steps), or each remaining row is 3.8 drift that is matched or registered with its 3.8 source line.",
+        "The cause is named: a regression from a catch-up merge (which commit) or 3.8 drift (which tmux change)."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by pin.hooks-events-2 and confirmed by the orchestrator on main 51adcd7a5: OUT differs (zz prints rows tmux leaves out in the #{session_active} list filters); clean in compat/results/summary.md, which was stamped at the d77c9dc6 pin."
+      ]
+    },
+    {
+      "id": "fix.followups",
+      "track": "fix",
+      "title": "Small follow-ups the catch-up lanes reported",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src",
+        "crates/zz-daemon/src",
+        "crates/zz-terminal/src",
+        "crates/zz-cli/src",
+        "knowledge/tmux/divergences.md"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09 (fix.capture-e-links): capture-pane -M -e (copy-mode styled capture) emits no OSC 8; the capture.terminal-engine-limits reason should mention the -e effects (no id=, back-to-back same-URI links open once).",
+        "2026-10-09 (fix.chooser-preview): refresh_chooser_previews resends the full chooser state to every tree-chooser client on every snapshot publish even when unchanged.",
+        "2026-10-09 (fix.mode-styles): mode prompts (chooser filter/search, customize, switch) ignore prompt-cursor-style/colour (3.8 mode_tree_draw_prompt) and take hard-coded message-style/message-command-style defaults in chooser_presentation::prompt_style.",
+        "2026-10-09 (fix.option-bytes): lossy paths left: show-options -F #{option_value}, --json, #{O:} loops, window-neighbour option copies, tmux_command_print (list-keys, show-hooks), resolve_environment on control lines; divergences.md 'Non-UTF-8 command arguments' row is stale.",
+        "2026-10-09 (pin.control-3-8): zz accepts an unquoted #{ mid-word (display -p foo::#{window_name} in a sourced file, refresh-client -B on a control line); both pins answer syntax error. A control client that read a blank line still sizes windows; tmux ignores it for sizing.",
+        "2026-10-09 (pin.hooks-events-2): zz pane prompts belong to the client (close on detach, a status prompt replaces them); in 3.8 the prompt stays on the pane.",
+        "2026-10-09 (pin.display-panes): with -s naming another window the desktop overlay draws indicators on panes not on screen (desktop renderer)."
       ]
     }
   ]

@@ -100,6 +100,9 @@ out: display-message -p -t alone #{window_layout}
 kill-pane -t alone.0
 out: list-panes -t alone -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
 out: display-message -p -t alone #{window_layout}
+kill-pane -t alone.0
+kill-pane -t alone.0
+err: has-session -t alone
 
 # swap-pane -U/-D skip floats, directional select-pane and compass targets
 # see floats.

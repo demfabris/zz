@@ -17,8 +17,7 @@ use std::{
 
 use zz_daemon::{CommandClient, Daemon, DaemonError, InteractiveClient};
 use zz_protocol::{
-    CommandInvocation, Event, EventPayload, InputMessage, MenuState, PaneId, PopupState,
-    ProtocolMessage,
+    CommandInvocation, Event, EventPayload, InputMessage, MenuState, PaneId, ProtocolMessage,
 };
 use zz_terminal::TerminalColorScheme;
 
@@ -141,20 +140,6 @@ impl Overlays {
     pub fn next_menu_event(&self) -> Option<MenuState> {
         self.await_event(|payload| match payload {
             EventPayload::Menu { state } => Some(state),
-            _ => None,
-        })
-    }
-
-    pub fn await_popup(&self) -> PopupState {
-        self.await_event(|payload| match payload {
-            EventPayload::Popup { state } => state,
-            _ => None,
-        })
-    }
-
-    pub fn await_popup_matching(&self, accept: impl Fn(&PopupState) -> bool) -> PopupState {
-        self.await_event(|payload| match payload {
-            EventPayload::Popup { state: Some(state) } if accept(&state) => Some(state),
             _ => None,
         })
     }

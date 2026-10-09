@@ -589,12 +589,8 @@ mod attachframes_tests;
 const ATTACH_SETTLE_BOUND: Duration = Duration::from_millis(100);
 
 #[cfg(unix)]
-fn client_streams_pane(inner: &ServerState, client: ClientId, pane: PaneId) -> bool {
+fn client_streams_pane(inner: &ServerState, _client: ClientId, pane: PaneId) -> bool {
     inner.terminals.contains_key(&pane)
-        || inner
-            .client(client)
-            .and_then(|c| c.popup.as_ref())
-            .is_some_and(|popup| popup.state.pane == pane)
 }
 
 pub(super) fn control_query_can_defer_wakeup(
@@ -1036,7 +1032,7 @@ impl Shared {
                 .and_then(|c| c.ctrl_subscriptions.as_ref())
                 .copied()
                 .unwrap_or_default();
-            let mut terminals = inner
+            let terminals = inner
                 .client(client)
                 .and_then(|c| c.streamed_terminals.as_ref())
                 .into_iter()
@@ -1048,9 +1044,6 @@ impl Shared {
                         .map(|terminal| (*pane, Arc::clone(terminal)))
                 })
                 .collect::<Vec<_>>();
-            if let Some(popup) = inner.client(client).and_then(|c| c.popup.as_ref()) {
-                terminals.push((popup.state.pane, Arc::clone(&popup.terminal)));
-            }
             let mut overlays = vec![
                 Self::event(EventPayload::CommandPrompt {
                     state: command_prompt_state(&inner, client),
@@ -1077,12 +1070,6 @@ impl Shared {
                         .and_then(|c| c.display_panes.as_ref())
                         .map(|overlay| overlay.state.clone()),
                 }),
-                Self::event(EventPayload::Popup {
-                    state: inner
-                        .client(client)
-                        .and_then(|c| c.popup.as_ref())
-                        .map(|popup| popup.state.clone()),
-                }),
                 Self::event(EventPayload::Menu {
                     state: inner
                         .client(client)
@@ -1106,7 +1093,6 @@ impl Shared {
                             presentation.is_some()
                         }
                         EventPayload::DisplayPanes { state } => state.is_some(),
-                        EventPayload::Popup { state } => state.is_some(),
                         EventPayload::Menu { state } => state.is_some(),
                         EventPayload::Confirm { state } => state.is_some(),
                         _ => true,

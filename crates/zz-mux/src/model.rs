@@ -457,6 +457,11 @@ impl Window {
         &self.z_order
     }
 
+    #[must_use]
+    pub fn last_panes(&self) -> &[PaneId] {
+        &self.last_panes
+    }
+
     pub(crate) fn last_pane(&self) -> Option<PaneId> {
         self.last_panes.first().copied()
     }

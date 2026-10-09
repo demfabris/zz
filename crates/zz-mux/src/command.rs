@@ -9239,7 +9239,17 @@ impl MuxEngine {
                 window.last_extent_probe = Some(probe);
                 break 'probe true;
             }
-            if window.active_pane != pane {
+            let driver = if window.is_floating(window.active_pane) {
+                window
+                    .last_panes()
+                    .iter()
+                    .chain(window.pane_order())
+                    .copied()
+                    .find(|candidate| !window.is_floating(*candidate))
+            } else {
+                Some(window.active_pane)
+            };
+            if driver != Some(pane) {
                 break 'probe false;
             }
             if window.last_extent_probe == Some(probe) {

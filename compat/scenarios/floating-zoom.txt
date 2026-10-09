@@ -3,6 +3,7 @@
 # and a zoomed float takes the window.
 split-window -h -t w.0
 resize-pane -Z -t w.0
+err: break-pane -W -s w.0
 new-pane -A -t w.0
 out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
 out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}

@@ -151,7 +151,6 @@ fn is_absent_overlay(payload: &EventPayload) -> bool {
     matches!(
         payload,
         EventPayload::CommandPrompt { state: None }
-            | EventPayload::Popup { state: None }
             | EventPayload::Menu { state: None }
             | EventPayload::Confirm { state: None }
             | EventPayload::ChooseTree { state: None }
@@ -203,7 +202,7 @@ fn a_fresh_attach_repeats_neither_the_snapshot_nor_an_absent_overlay() {
             .iter()
             .filter(|payload| is_absent_overlay(payload))
             .count(),
-        9,
+        8,
         "a requested resync still clears every overlay"
     );
 }

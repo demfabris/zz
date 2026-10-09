@@ -2823,6 +2823,7 @@ impl Render for AppShell {
                                 .into_iter()
                                 .map(|(pane, _)| (pane, bounds.get(&pane).copied())),
                             &floats,
+                            window.modal.map(|modal| modal.pane),
                         )
                     })
                     .unwrap_or_default()

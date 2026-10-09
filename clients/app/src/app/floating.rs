@@ -343,7 +343,7 @@ impl AppShell {
                 .panes
                 .get(&float.pane)
                 .filter(|_| float.border_status.is_on())
-                .map(|pane| pane.border_status_text.clone())
+                .map(|pane| float_title(&pane.border_status_text))
                 .unwrap_or_default();
             let border_color = if active.active_pane == float.pane {
                 cx.theme().accent
@@ -382,6 +382,16 @@ impl AppShell {
                 .into_any_element()
         })
     }
+}
+
+fn float_title(border_status_text: &str) -> String {
+    zz_protocol::parse_styled_segments(border_status_text)
+        .into_iter()
+        .filter(|segment| segment.style.align != Some(zz_protocol::TmuxAlign::Right))
+        .map(|segment| segment.text)
+        .collect::<String>()
+        .trim_end()
+        .to_owned()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -461,6 +471,7 @@ pub(super) fn float_placement(
 pub(super) fn native_panes_shown(
     tiled: impl IntoIterator<Item = (zz_protocol::PaneId, Option<Bounds<Pixels>>)>,
     floats: &[(zz_protocol::PaneId, FloatPlacement)],
+    modal: Option<zz_protocol::PaneId>,
 ) -> std::collections::BTreeSet<zz_protocol::PaneId> {
     let covered = |bounds: Bounds<Pixels>, front: &[(zz_protocol::PaneId, FloatPlacement)]| {
         front
@@ -478,6 +489,7 @@ pub(super) fn native_panes_shown(
                 .filter(|(index, (_, placed))| !covered(placed.content, &floats[..*index]))
                 .map(|(_, (pane, _))| *pane),
         )
+        .filter(|pane| modal.is_none_or(|modal| modal == *pane))
         .collect()
 }
 
@@ -486,7 +498,7 @@ mod tests {
     use zpui::{Bounds, point, px, size};
     use zz_protocol::{FloatingPaneSnapshot, PaneBorderLines, PaneBorderStatus, PaneId};
 
-    use super::{FloatPlacement, float_placement, native_panes_shown, pane_frame};
+    use super::{FloatPlacement, float_placement, float_title, native_panes_shown, pane_frame};
     use crate::preferences::Preferences;
 
     fn float(pane: u64, xoff: i32, yoff: i32, sx: u16, sy: u16) -> FloatingPaneSnapshot {
@@ -574,15 +586,15 @@ mod tests {
             float_placement(&float(5, 70, 20, 20, 5), cell, canvas).unwrap(),
         );
         assert_eq!(
-            native_panes_shown([left, right], &[]),
+            native_panes_shown([left, right], &[], None),
             [PaneId(1), PaneId(2)].into()
         );
         assert_eq!(
-            native_panes_shown([left, right], &[front]),
+            native_panes_shown([left, right], &[front], None),
             [PaneId(2), PaneId(3)].into()
         );
         assert_eq!(
-            native_panes_shown([left, right], &[front, behind_front, apart]),
+            native_panes_shown([left, right], &[front, behind_front, apart], None),
             [PaneId(3), PaneId(5)].into()
         );
         let border_over_left = (
@@ -591,12 +603,67 @@ mod tests {
         );
         assert!(!border_over_left.1.content.intersects(&left.1.unwrap()));
         assert_eq!(
-            native_panes_shown([left, right], &[border_over_left]),
+            native_panes_shown([left, right], &[border_over_left], None),
             [PaneId(6)].into()
         );
         assert_eq!(
-            native_panes_shown([(PaneId(1), None)], &[front]),
+            native_panes_shown([(PaneId(1), None)], &[front], None),
             [PaneId(3)].into()
         );
+    }
+
+    #[test]
+    fn a_modal_hides_every_native_browser_but_its_own() {
+        let cell = (8.0, 16.0);
+        let canvas = size(px(800.0), px(480.0));
+        let left = (PaneId(1), Some(rect(0.0, 0.0, 400.0, 480.0)));
+        let right = (PaneId(2), Some(rect(400.0, 0.0, 400.0, 480.0)));
+        let modal = (
+            PaneId(3),
+            float_placement(&float(3, 5, 5, 20, 10), cell, canvas).unwrap(),
+        );
+        let behind = (
+            PaneId(4),
+            float_placement(&float(4, 60, 2, 10, 4), cell, canvas).unwrap(),
+        );
+        assert!(!modal.1.frame.intersects(&right.1.unwrap()));
+        assert!(!modal.1.frame.intersects(&behind.1.frame));
+        assert_eq!(
+            native_panes_shown([left, right], &[modal], None),
+            [PaneId(2), PaneId(3)].into()
+        );
+        assert_eq!(
+            native_panes_shown([left, right], &[modal], Some(PaneId(3))),
+            [PaneId(3)].into()
+        );
+        assert_eq!(
+            native_panes_shown([left], &[modal, behind], None),
+            [PaneId(3), PaneId(4)].into()
+        );
+        assert_eq!(
+            native_panes_shown([left], &[modal, behind], Some(PaneId(3))),
+            [PaneId(3)].into()
+        );
+        assert_eq!(
+            native_panes_shown([left, right], &[behind], Some(PaneId(3))),
+            [].into()
+        );
+    }
+
+    #[test]
+    fn a_float_title_drops_tmux_markup_and_the_right_hand_controls() {
+        assert_eq!(
+            float_title(concat!(
+                "#[reverse]0#[default] \"zsh\"#[align=right]",
+                "#[range=control|7][t]#[norange]",
+                "#[range=control|8][z]#[norange]",
+                "#[range=control|9][x]#[norange]",
+            )),
+            "0 \"zsh\""
+        );
+        assert_eq!(float_title("1#[default] \"vim\""), "1 \"vim\"");
+        assert_eq!(float_title("#[fg=red]modal"), "modal");
+        assert_eq!(float_title("100##[x]"), "100#[x]");
+        assert_eq!(float_title(""), "");
     }
 }

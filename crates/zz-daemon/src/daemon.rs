@@ -10108,6 +10108,14 @@ impl Shared {
                         {
                             streamed.remove(pane);
                         }
+                        for feed in inner
+                            .clients
+                            .values()
+                            .filter_map(|c| c.subscriber.as_ref())
+                            .filter_map(|subscriber| subscriber.control_feed())
+                        {
+                            feed.clear_pane(*pane);
+                        }
                         inner.preview_watched.remove(pane);
                         respawned_terminals = true;
                         inner.engine.set_pane_runtime_facts_with_hooks(
@@ -18469,11 +18477,16 @@ impl Shared {
         }
     }
 
-    fn set_control_client_size(&self, client: ClientId, value: &str) -> Result<(), DaemonError> {
+    fn set_control_client_size(
+        self: &Arc<Self>,
+        client: ClientId,
+        value: &str,
+    ) -> Result<(), DaemonError> {
         let update = parse_control_client_size(value)?;
-        let (changed, resizes, notifications) = {
+        let (changed, resizes, mut events) = {
             let mut inner = self.inner.lock();
             let scope = hook_events::HookScope::open(&mut inner.engine);
+            let unzoomed_layouts = zoomed_window_layouts(&inner);
             let mut affected = control_client_sized_panes(&inner, client);
             let output = inner
                 .client_entry(client)
@@ -18491,28 +18504,38 @@ impl Shared {
             affected.extend(control_client_sized_panes(&inner, client));
             let changed = write_back_terminal_geometries(&mut inner, &affected);
             let resizes = terminal_resizes_for_panes(&inner, &affected);
-            let notifications = scope
-                .finish(&inner.engine, "refresh-client")
-                .events
-                .into_iter()
-                .filter(|event| event.name == "window-layout-changed")
-                .collect::<Vec<_>>();
-            (changed, resizes, notifications)
+            let sized = client_sized_windows(&inner);
+            let mut events = scope.finish(&inner.engine, "refresh-client").events;
+            events.retain(|event| !hook_events::is_window_resize_event(event, &sized));
+            events.extend(hook_events::window_resize_events(
+                &inner.engine,
+                &sized,
+                &unzoomed_layouts,
+            ));
+            (changed, resizes, events)
         };
         apply_terminal_resizes(resizes);
         if changed {
             self.publish_snapshot_state();
         }
-        for event in notifications {
+        for event in events
+            .iter_mut()
+            .filter(|event| event.name == "window-layout-changed")
+        {
             self.publish_to_control_clients(
                 EventPayload::HookEvent {
                     name: event.name.to_owned(),
-                    variables: event.variables,
+                    variables: event.variables.clone(),
                 },
                 None,
                 true,
             );
+            event
+                .variables
+                .remove(hook_events::UNZOOMED_LAYOUT_VARIABLE);
+            event.control_notified = true;
         }
+        self.run_event_hooks(events);
         Ok(())
     }
 
@@ -18546,7 +18569,7 @@ impl Shared {
     }
 
     fn refresh_client(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         _kind: ClientKind,
         name: &str,
@@ -41101,6 +41124,40 @@ fn control_client_geometry_from_source(
         .or(output.geometry)
 }
 
+fn zoomed_window_layouts(inner: &ServerState) -> BTreeMap<WindowId, String> {
+    inner
+        .engine
+        .state
+        .windows
+        .iter()
+        .filter(|(_, window)| window.zoomed_pane.is_some())
+        .map(|(id, window)| {
+            (
+                *id,
+                window.layout_string(
+                    zz_mux::LayoutFormat::V2,
+                    inner.engine.state.pane_base_index(*id),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn client_sized_windows(inner: &ServerState) -> Vec<WindowId> {
+    inner
+        .engine
+        .state
+        .windows
+        .iter()
+        .filter(|(_, window)| {
+            window.panes.keys().any(|pane| {
+                pane_geometry_from(inner, *pane, GeometrySource::ClientReport).is_some()
+            })
+        })
+        .map(|(window, _)| *window)
+        .collect()
+}
+
 fn control_client_sized_panes(inner: &ServerState, client: ClientId) -> BTreeSet<PaneId> {
     let Some(output) = inner.client(client).and_then(|c| c.control_output.as_ref()) else {
         return BTreeSet::new();
@@ -42132,8 +42189,42 @@ fn prepare_command_request(
     }
     let guarded = read_only_guard_client(inner, client, &command);
     let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
-        && !command_is_read_only_safe(&command);
+        && !command_is_read_only_safe(&command)
+        && !control_command_is_read_only_safe(inner, client, &command);
     Ok((command, blocked))
+}
+
+fn control_command_is_read_only_safe(
+    inner: &ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+) -> bool {
+    if inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Control) {
+        return false;
+    }
+    if MuxEngine::is_command_alias_group(command) {
+        return MuxEngine::command_alias_group_commands(command).is_ok_and(|commands| {
+            commands.is_some_and(|commands| {
+                commands
+                    .iter()
+                    .all(|command| control_command_is_read_only_safe(inner, client, command))
+            })
+        });
+    }
+    let name = canonical_command(&command.name);
+    if name == "refresh-client" {
+        return parse_buffer_command_args(
+            name,
+            &command.args,
+            &['A', 'B', 'C', 'F', 'f', 'r', 't'],
+            &['c', 'D', 'l', 'L', 'R', 'S', 'U'],
+        )
+        .ok()
+        .and_then(|parsed| parsed.value('t').map(str::to_owned))
+        .and_then(|target| find_attached_client_with_aliases(inner, &target, true))
+        .is_none_or(|target| target == client);
+    }
+    hook_events::command_is_read_only(name, &command.args)
 }
 
 /// `server_client_print` runs `utf8_sanitize` over a message bound for a
@@ -65933,11 +66024,329 @@ mod tests {
         assert_eq!(notifications.len(), 1);
         assert!(snapshot_position < notifications[0]);
         shared.set_control_client_size(control, "100,30").unwrap();
-        assert!(!take_reliable_messages(&mailbox).iter().any(|message| matches!(
-            message,
-            ProtocolMessage::Event(Event { payload: EventPayload::HookEvent { name, .. }, .. })
-                if name == "window-layout-changed"
-        )));
+        let repeated = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed"
+                        && variables.get("hook_window") == Some(&window.to_string())
+                )
+            })
+            .count();
+        assert_eq!(repeated, 1);
+    }
+
+    #[test]
+    fn control_resize_fires_every_sized_window_even_when_no_size_changes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-all", "all");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("new-window", ["-d", "-t", "resize-all"]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-resized",
+                    "set-option -gF @resized '#{@resized}r'",
+                ],
+            ),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-layout-changed",
+                    "set-option -gF @layout '#{@layout}l'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let windows = shared.inner.lock().engine.state.sessions[&session]
+            .windows
+            .clone();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-all".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        let layout_notices = |mailbox: &OutboundMailbox| {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed" => variables.get("hook_window").cloned(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let every_window = windows.iter().map(ToString::to_string).collect::<Vec<_>>();
+        layout_notices(&mailbox);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        shared
+            .set_control_client_size(control, &format!("{}:", windows[1]))
+            .unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        let option = |name: &str| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-options", ["-gv", name]),
+                )
+                .expect("option readback")
+                .output
+                .to_string()
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(option("@resized"), "rrrrrr");
+        assert_eq!(option("@layout"), "llllll");
+    }
+
+    #[test]
+    fn control_resize_of_a_zoomed_window_reports_the_unzoom_step_to_control_only() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-zoom", "zoom");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("split-window", ["-d", "-t", &pane.to_string()]),
+            CommandInvocation::new("resize-pane", ["-Z", "-t", &pane.to_string()]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-layout-changed",
+                    "set-option -gF @seen '#{@seen}[#{unzoomed_layout}]'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let tiled = {
+            let inner = shared.inner.lock();
+            inner.engine.state.windows[&window].layout_string(
+                zz_mux::LayoutFormat::V2,
+                inner.engine.state.pane_base_index(window),
+            )
+        };
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-zoom".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        let unzoomed = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, variables },
+                    ..
+                }) if name == "window-layout-changed"
+                    && variables.get("hook_window") == Some(&window.to_string()) =>
+                {
+                    Some(
+                        variables
+                            .get(zz_protocol::UNZOOMED_LAYOUT_VARIABLE)
+                            .cloned(),
+                    )
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(unzoomed, vec![Some(tiled), None, None]);
+        let seen = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gv", "@seen"]),
+            )
+            .expect("hook readback")
+            .output
+            .to_string();
+        assert_eq!(seen.trim_end(), "[][][]");
+    }
+
+    #[test]
+    fn read_only_control_clients_run_queries_and_refresh_themselves_only() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "ro-control", "ro");
+        let control = |name: &str| {
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Control,
+                Some(name.to_owned()),
+                None,
+                OutboundMailbox::new(),
+            );
+            shared.attach(client, session).unwrap();
+            client
+        };
+        let viewer = control("viewer");
+        let peer = control("peer");
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("watcher".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(interactive, session).unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_flags.insert(viewer);
+            inner.client_flags.insert(interactive);
+        }
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let pane_target = pane.to_string();
+        let mut request_id = 0;
+        let mut run = |client: ClientId, kind: ClientKind, name: &str, args: &[&str]| {
+            request_id += 1;
+            shared.execute_command_request(
+                client,
+                kind,
+                &mut context,
+                request_id,
+                &CommandInvocation::new(name, args.iter().copied()),
+            )
+        };
+        let read_only = |response: &CommandResponse| {
+            matches!(
+                response,
+                CommandResponse::Error {
+                    error: ServerError::InvalidCommand(message),
+                    ..
+                } if message == "client is read-only"
+            )
+        };
+        for (name, args) in [
+            ("list-windows", &["-F", "#{window_index}"][..]),
+            ("display-message", &["-p", "#{client_readonly}"][..]),
+            ("show-options", &["-g", "base-index"][..]),
+            ("capture-pane", &["-p", "-t", pane_target.as_str()][..]),
+            ("has-session", &["-t", "ro-control"][..]),
+            ("list-clients", &[][..]),
+            ("refresh-client", &["-C", "100,30"][..]),
+            (
+                "refresh-client",
+                &["-t", "viewer", "-B", "sub::#{window_id}"][..],
+            ),
+            ("refresh-client", &["-f", "!read-only"][..]),
+        ] {
+            let response = run(viewer, ClientKind::Control, name, args);
+            assert!(
+                matches!(response, CommandResponse::Success { .. }),
+                "{name} {args:?} answered {response:?}"
+            );
+        }
+        for (name, args) in [
+            ("new-window", &["-d"][..]),
+            ("set-option", &["-g", "@ro", "1"][..]),
+            ("send-keys", &["-t", pane_target.as_str(), "x"][..]),
+            ("set-buffer", &["-b", "ro", "x"][..]),
+            ("capture-pane", &["-b", "ro"][..]),
+            ("display-message", &["-I", "-t", pane_target.as_str()][..]),
+            ("refresh-client", &["-t", "peer", "-C", "90,30"][..]),
+            ("kill-session", &["-t", "ro-control"][..]),
+        ] {
+            let response = run(viewer, ClientKind::Control, name, args);
+            assert!(
+                read_only(&response),
+                "{name} {args:?} answered {response:?}"
+            );
+        }
+        let response = run(interactive, ClientKind::Interactive, "list-windows", &[]);
+        assert!(
+            read_only(&response),
+            "interactive list-windows answered {response:?}"
+        );
+        let inner = shared.inner.lock();
+        assert!(inner.client_flags.contains(viewer));
+        assert_eq!(inner.engine.state.sessions[&session].windows.len(), 1);
+        assert!(inner.paste_buffers.iter().all(|buffer| buffer.name != "ro"));
+        assert!(
+            inner
+                .client(peer)
+                .and_then(|c| c.control_output.as_ref())
+                .is_none_or(|output| output.geometry.is_none())
+        );
+    }
+
+    #[test]
+    fn respawn_drops_the_output_control_clients_still_had_queued() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "respawn-feed", "feed");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("respawn-feed".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        let feed = mailbox.ensure_control_feed(&shared.control_wake);
+        feed.queue_at(pane, b"OLD-PROCESS-OUTPUT", Instant::now());
+        assert!(
+            feed.queued_bytes(pane)
+                .windows(18)
+                .any(|bytes| bytes == b"OLD-PROCESS-OUTPUT")
+        );
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("respawn-pane", ["-k", "-t", &pane.to_string()]),
+            )
+            .expect("respawn");
+        assert!(
+            !feed
+                .queued_bytes(pane)
+                .windows(18)
+                .any(|bytes| bytes == b"OLD-PROCESS-OUTPUT")
+        );
     }
 
     #[test]

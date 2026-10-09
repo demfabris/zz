@@ -801,6 +801,13 @@ rewrites the output of a command such a client runs with `zz_mux::legacy_layouts
 returns. Status lines, snapshots and `refresh-client -B`
 subscriptions stay v2 (3.8's `monitor.c` evaluates subscriptions with no client).
 
+Catch-up item `pin.control-3-8` adds no type. A `window-layout-changed` `HookEvent` published to
+control clients may carry an `unzoomed_layout` variable
+(`zz_protocol::UNZOOMED_LAYOUT_VARIABLE`) holding a v2 layout: it marks the unzoom step of a zoomed
+window's resize, and the control client prints that layout as both layouts with the `Z` flag
+removed, which is what 3.8 formats when the event fires. The daemon strips the key before the
+event reaches hooks. A client without it prints the snapshot's layout, as before.
+
 v108 is unreleased as of 2026-10-07. Claude Code agent panes stop going through the
 `claude-agent-acp` adapter: `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` becomes `claude`, and the daemon
 drives the user's own binary over Claude Code's stream-json protocol

@@ -1182,6 +1182,58 @@ fn zoom_cycle_events(
     events
 }
 
+pub(super) const UNZOOMED_LAYOUT_VARIABLE: &str = zz_protocol::UNZOOMED_LAYOUT_VARIABLE;
+
+pub(super) fn is_window_resize_event(event: &PendingHookEvent, windows: &[WindowId]) -> bool {
+    matches!(
+        event.name,
+        "window-layout-changed" | "window-resized" | "window-zoomed" | "window-unzoomed"
+    ) && windows
+        .iter()
+        .any(|window| event.variables.get(HOOK_WINDOW_CONTEXT_FORMAT) == Some(&window.to_string()))
+}
+
+pub(super) fn window_resize_events(
+    engine: &MuxEngine,
+    windows: &[WindowId],
+    unzoomed_layouts: &BTreeMap<WindowId, String>,
+) -> Vec<PendingHookEvent> {
+    if windows.is_empty() {
+        return Vec::new();
+    }
+    let view = MuxHookSnapshot::capture(engine);
+    let mut events = Vec::new();
+    for window in windows {
+        let Some(state) = view.window(*window) else {
+            continue;
+        };
+        if state.zoomed_pane.is_some() {
+            let mut cycle = zoom_cycle_events(engine, *window, &view);
+            if let Some((event, layout)) = cycle
+                .iter_mut()
+                .find(|event| event.name == "window-layout-changed")
+                .zip(unzoomed_layouts.get(window))
+            {
+                event
+                    .variables
+                    .insert(UNZOOMED_LAYOUT_VARIABLE.to_owned(), layout.clone());
+            }
+            events.extend(cycle);
+        }
+        for name in ["window-layout-changed", "window-resized"] {
+            events.push(window_event(
+                name,
+                *window,
+                state.session,
+                state.name,
+                state.active_pane,
+                &view,
+            ));
+        }
+    }
+    events
+}
+
 pub(super) fn apply_operation_events(
     engine: &MuxEngine,
     effects: &[MuxEffect],

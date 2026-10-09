@@ -1946,8 +1946,7 @@ impl WgpuRendererCore {
                         wgpu::LoadOp::Load,
                         "main_pass_continued",
                     );
-                    if let (Some(pending), Some(glass)) = (pending, self.resources.glass.as_ref())
-                    {
+                    if let (Some(pending), Some(glass)) = (pending, self.resources.glass.as_ref()) {
                         glass.draw_pending(
                             &mut pass,
                             pending,

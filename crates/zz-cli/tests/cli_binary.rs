@@ -586,6 +586,82 @@ mod daemon_autostart {
     }
 
     #[test]
+    fn events_session_filter_passes_pane_events_of_that_session_only() {
+        use std::io::BufRead as _;
+
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            eprintln!("SKIPPED: Unix socket binding is unavailable");
+            return;
+        }
+        for name in ["mine", "other"] {
+            let created = fixture.run(&["new-session", "-d", "-s", name]);
+            assert_eq!(created.status.code(), Some(0));
+        }
+        let session = fixture.run(&["display-message", "-p", "-t", "mine", "#{session_id}"]);
+        let session = String::from_utf8(session.stdout).expect("session id");
+        let mut child = fixture
+            .command()
+            .args(["events", "-t", session.trim()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start event stream");
+        let stdout = child.stdout.take().expect("event stdout");
+        let (sender, receiver) = mpsc::sync_channel(32);
+        let reader = thread::spawn(move || {
+            for line in io::BufReader::new(stdout).lines() {
+                if sender.send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let result = (|| -> Result<(), String> {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let next = || -> Result<serde_json::Value, String> {
+                let remaining = deadline
+                    .checked_duration_since(Instant::now())
+                    .ok_or("event deadline elapsed")?;
+                let line = receiver
+                    .recv_timeout(remaining)
+                    .map_err(|error| error.to_string())?
+                    .map_err(|error| error.to_string())?;
+                serde_json::from_str(&line).map_err(|error| error.to_string())
+            };
+            let ready = next()?;
+            if ready["event"] != "ready" {
+                return Err(format!("expected ready first: {ready}"));
+            }
+            for (target, title) in [("other:", "title-other"), ("mine:", "title-mine")] {
+                let titled = fixture.run(&["select-pane", "-t", target, "-T", title]);
+                if !titled.status.success() {
+                    return Err(format!("select-pane failed: {:?}", titled.stderr));
+                }
+            }
+            for _ in 0..20 {
+                let event = next()?;
+                if event["event"] != "pane-title-changed" {
+                    continue;
+                }
+                if event.get("hook_session").is_some() {
+                    return Err(format!("pane event kept hook_session: {event}"));
+                }
+                return match event["hook_new_title"].as_str() {
+                    Some("title-mine") => Ok(()),
+                    _ => Err(format!("event from another session passed: {event}")),
+                };
+            }
+            Err("no pane-title-changed in 20 lines".to_owned())
+        })();
+        let _ = child.kill();
+        let _ = child.wait();
+        drop(receiver);
+        reader.join().expect("event reader");
+        result.expect("only the filtered session's pane event");
+    }
+
+    #[test]
     fn pane_json_contains_format_ids_and_native_kind() {
         let fixture = Fixture::new();
         if !local_socket_bind_available(&fixture.socket) {

@@ -3228,8 +3228,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 327), ("optional", 8), ("required", 250)])
         );
-        assert_eq!((supported, unsupported), (525, 26));
-        assert_eq!(usage_overrides.len(), 25);
+        assert_eq!((supported, unsupported), (573, 12));
+        assert_eq!(usage_overrides.len(), 24);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

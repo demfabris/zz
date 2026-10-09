@@ -173,7 +173,7 @@ stopped with its work committed as WIP.
 
 ## Codex
 
-Codex only reviews. `review.sh` runs `codex review --base main` at high effort with `review.md`
+Codex only reviews. `review.sh` runs `codex exec` read-only at high effort over `git diff main...HEAD`, with `review.md`
 plus the ledger item as the prompt, from the lane's worktree. If Codex is out
 (`^ERROR: You've hit your usage limit`, "model is at capacity"), run the same prompt through an Opus
 subagent instead and note it in the ledger. Killing the orchestrator leaves a running `codex` child;

@@ -368,20 +368,35 @@
       "status": "todo",
       "deps": [
         "float.design",
-        "pin.layout-v2"
+        "pin.layout-v2",
+        "pin.formats-options"
       ],
       "zones": [
         "crates/zz-mux/src",
         "crates/zz-protocol/src/snapshot.rs",
         "crates/zz-protocol/src/tree_delta.rs",
         "crates/zz-protocol/src/message.rs",
-        "crates/zz-daemon/src"
+        "crates/zz-protocol/src/catalog.rs",
+        "crates/zz-daemon/src",
+        "knowledge/protocol/wire-protocol.md",
+        "knowledge/tmux/divergences.md",
+        "compat/scenarios",
+        "compat/tmux-gaps.json"
       ],
       "gaps": [
         "pane.floating-model"
       ],
       "accept": [
-        "As the design's float.core section."
+        "compat/scenarios/floating-panes.txt matches tmux 3.8 under --strict-geometry, printing list-panes geometry, pane_z, floating, active and modal flags after new-pane x2, break-pane -W -x 20 -y 6 -X 10 -Y 3, move-pane -P/-L/-z, resize-pane -x -y on a float, split-window on a float, select-pane raise, swap-pane float<->tiled, self join-pane, kill of a float, resize-window -x 30 -y 10.",
+        "Every error string in the design's commands table answers verbatim.",
+        "Zoom: new-pane -A keeps window_zoomed_flag and shows in window_visible_layout; plain new-pane unzooms; killing the -A float keeps the zoom.",
+        "Modal: new-pane -O pins the active pane, break/join/swap answer 'pane is modal', a second -O errors, killing it restores the previous pane; window_modal_pane and window flag O match 3.8.",
+        "window_layout for a window with tiled splits plus two floats equals 3.8's v2 string (floating leaves placed where 3.8 places them, after their origin cell) and select-layout of it restores the floats.",
+        "display-popup: two attached clients both get the modal in their snapshots, no EventPayload::Popup is sent, -E closes on exit, a command client's 'display-popup -E \"exit 3\"' exits 3, -C kills a new-pane -O modal, a second popup changes nothing, no u64::MAX pane id remains in zz-daemon.",
+        "A float's PTY is sx x sy after create, resize and clamp; client size reports for floats change nothing.",
+        "A round-trip test pins the appended snapshot and delta fields; one move-pane -X emits exactly one TreeOp::WindowLayout.",
+        "The last-tiled-pane rule holds both ways; choose-tree -O z orders panes by pane_z.",
+        "pane.floating-model turns adopted with items closing as proved, the recorded divergences are in divergences.md, just compat check passes."
       ],
       "branch": null,
       "sha": null,
@@ -397,16 +412,24 @@
       ],
       "zones": [
         "crates/zz/src/workspace",
+        "crates/zz/src/mux/client.rs",
+        "crates/zz/src/terminal/view.rs",
         "crates/zz-ui/src/pane.rs",
         "clients/gpui-shared/src",
-        "crates/zz-client/src/layout.rs",
-        "crates/zz-tui/src"
+        "crates/zz-client/src",
+        "crates/zz-tui/src",
+        "compat/tui-floating.sh"
       ],
       "gaps": [
         "pane.floating-model"
       ],
       "accept": [
-        "As the design's float.clients section."
+        "compat/tui-floating.sh matches tmux 3.8 cell for cell: overlapping floats over a split before and after a raise, a -T float with pane-border-status top-floating, pane-border-lines none, display-popup over a zoomed pane.",
+        "Same fixture: a click on an overlap activates the front float; a click outside a modal does nothing, and kills a new-pane -O -C modal.",
+        "A browser pane covered by a float has no kitty placement while covered.",
+        "Unit tests cover the cell-to-pixel float rect helper (with clipping) and the drag commit commands; the lane report has desktop and web screenshots of a float, a modal and an over-zoom float.",
+        "A zz-client test shows a focused modal with capture_keys sends the prefix key to the pane.",
+        "rg 'PopupState|PopupAction|EventPayload::Popup' finds nothing under crates/zz, crates/zz-tui, crates/zz-client or clients/."
       ],
       "branch": null,
       "sha": null,
@@ -424,7 +447,10 @@
       "zones": [
         "crates/zz-protocol/src/key.rs",
         "crates/zz-mux/src",
-        "crates/zz-daemon/src/daemon.rs"
+        "crates/zz-daemon/src",
+        "compat/scenarios/smoke",
+        "compat/tui-mouse.sh",
+        "compat/tmux-gaps.json"
       ],
       "gaps": [
         "keys.move-table",
@@ -432,7 +458,11 @@
         "mouse.bound-context"
       ],
       "accept": [
-        "As the design's float.keys section; keys.move-table closes and list-keys -T move answers the 3.8 rows."
+        "list-keys answers 3.8's lines for prefix * @ g Tab BTab and root C-MouseDrag1Pane, C-MouseDrag1Empty, M-MouseDrag1Pane, M-MouseDrag1Border, MouseDown1Control7; list-keys -T move keeps its 19 rows.",
+        "Attached TUI: prefix * creates a float, prefix g 1 moves it top-left, prefix @ floats and tiles, pane menu f/t/Move work, with geometry equal to tmux.",
+        "compat/tui-mouse.sh: C-drag creates, M-drag moves, border drag resizes, top-border drag moves, matching tmux; flag:move-pane:-M closes in mouse.bound-context.",
+        "With editor set to a script that appends a line, choose-buffer e opens a centred 90% modal and exit 0 updates show-buffer, non-zero leaves it; customize-mode e edits a string option the same way.",
+        "keys.move-table closes; keys.default-prefix drops * @ g Tab BTab; option:editor closes."
       ],
       "branch": null,
       "sha": null,

@@ -21,7 +21,7 @@ use zz_protocol::{
 pub use zz_protocol::{TmuxColour, display_width, indexed_colour_rgb, parse_tmux_colour};
 
 use crate::{
-    MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::layout_format,
+    MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::LayoutFormat,
     terminfo::TtyTerm,
 };
 
@@ -3228,8 +3228,8 @@ impl MuxEngine {
         }
         if dumps.window != Some(window.id) {
             let pane_base_index = self.state.pane_base_index(window.id);
-            dumps.layout = window.layout_string(layout_format(), pane_base_index);
-            dumps.visible = window.visible_layout_string(layout_format(), pane_base_index);
+            dumps.layout = window.layout_string(LayoutFormat::V2, pane_base_index);
+            dumps.visible = window.visible_layout_string(LayoutFormat::V2, pane_base_index);
             dumps.window = Some(window.id);
         }
         context.window_layout.clone_from(&dumps.layout);

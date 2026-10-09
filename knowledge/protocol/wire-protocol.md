@@ -796,8 +796,9 @@ v108 also carries tmux 3.8's JSON v2 layout strings (catch-up item `pin.layout-v
 (`{"V":2,"L":{...}}`, with each leaf's active flag, last-pane index, pane index and pane id), and
 `EventPayload::ControlFlags` appends `new_layouts: bool` with `#[serde(default)]`. A control client
 prints `%layout-change` from the snapshot through `zz_mux::legacy_layout`, the v1 compat copy,
-unless the daemon reported `new_layouts`; commands a control client runs expand
-`#{window_layout}` in v1 under the same rule. Status lines, snapshots and `refresh-client -B`
+unless the daemon reported `new_layouts`. Formats only produce v2; under the same rule the daemon
+rewrites the output of a command such a client runs with `zz_mux::legacy_layouts_in` before it
+returns. Status lines, snapshots and `refresh-client -B`
 subscriptions stay v2 (3.8's `monitor.c` evaluates subscriptions with no client).
 
 v108 is unreleased as of 2026-10-07. Claude Code agent panes stop going through the

@@ -2,7 +2,7 @@ use zz_protocol::{CommandInvocation, PaneId, ServerError};
 
 use crate::{
     CellLayout, ExecutionContext, LayoutFormat, LeafState, MuxEngine, legacy_layout,
-    with_layout_format,
+    legacy_layouts_in,
 };
 
 struct Probe {
@@ -137,19 +137,25 @@ fn control_formats_print_the_v1_compat_copy() {
     probe.run(&["split-window", "-h", "-t", "w:0.2"]);
     probe.run(&["select-pane", "-t", "w:0.0"]);
     probe.run(&["resize-pane", "-Z", "-t", "w:0.1"]);
-    let (layout, visible) = with_layout_format(LayoutFormat::V1, || {
-        (
-            probe.fmt("#{window_layout}"),
-            probe.fmt("#{window_visible_layout}"),
-        )
-    });
+    let layout = "1558,80x24,0,0{40x24,0,0,0,39x24,41,0[39x12,41,0,1,39x11,41,13{19x11,41,13,2,19x11,61,13,3}]}";
+    let shown = probe.fmt("#{window_layout} #{window_visible_layout}");
     assert_eq!(
-        layout,
-        "1558,80x24,0,0{40x24,0,0,0,39x24,41,0[39x12,41,0,1,39x11,41,13{19x11,41,13,2,19x11,61,13,3}]}"
+        legacy_layouts_in(&shown),
+        format!("{layout} b25e,80x24,0,0,1")
     );
-    assert_eq!(visible, "b25e,80x24,0,0,1");
     assert_eq!(legacy_layout(ZOOMED), layout);
     assert_eq!(probe.fmt("#{window_layout}"), ZOOMED);
+    let listed = probe.run(&["list-windows", "-t", "w"]);
+    let converted = legacy_layouts_in(&listed);
+    assert!(
+        converted.contains(&format!("[layout {layout}] @")),
+        "{converted}"
+    );
+    assert_eq!(legacy_layouts_in("no layout {here}"), "no layout {here}");
+    assert_eq!(
+        legacy_layouts_in(r#"cut {"V":2,"L":{"t":"p""#),
+        r#"cut {"V":2,"L":{"t":"p""#
+    );
 }
 
 #[test]
@@ -475,4 +481,23 @@ fn legacy_layout_converts_trees_deeper_than_the_json_parse_limit() {
     assert!(v2.starts_with("{\"V\":2"));
     assert_eq!(legacy_layout(&v2), layout.dump_as(LayoutFormat::V1, &leaf));
     assert_eq!(legacy_layout("{\"V\":2,\"L\":{}}"), "0000,");
+}
+
+#[test]
+fn killing_an_inactive_pane_keeps_the_active_pane_on_the_stack_like_the_pin() {
+    let mut probe = Probe::new();
+    probe.run(&["split-window", "-h", "-t", "w"]);
+    probe.run(&["split-window", "-h", "-t", "w"]);
+    probe.run(&[
+        "select-layout",
+        "-t",
+        "w",
+        r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":26,"h":24,"x":0,"y":0,"l":1,"i":0},{"t":"p","w":26,"h":24,"x":27,"y":0,"i":1},{"t":"p","w":26,"h":24,"x":54,"y":0,"l":0,"i":2}]}}"#,
+    ]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l0 1:%1:a0:l0 2:%2:a1:l1");
+    probe.run(&["kill-pane", "-t", "w:0.1"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l0 1:%2:a1:l1");
+    probe.run(&["last-pane", "-t", "w"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l0 1:%2:a1:l1");
+    assert!(probe.engine.state.validate().is_ok());
 }

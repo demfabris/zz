@@ -70,14 +70,14 @@ use zz_mux::{
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
     CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT, DetachScope,
     Execution, ExecutionContext, FormatClient, FormatMonitorScope, FormatMonitorTarget,
-    FormatNeeds, KeyDecision, KeyEngine, KeyTables, LayoutFormat, MouseEventTarget, MuxEffect,
-    MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
+    FormatNeeds, KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine,
+    PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
     RetainedJobEnvironment, SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort,
     TmuxSortOrder, WindowSize, canonical_command, command_block_body,
     copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
-    send_keys_target_client, validate_static_command_chain, with_layout_format,
+    if_shell_truthy, legacy_layouts_in, parse_tmux_colour, sanitize_client_output,
+    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
 };
 #[cfg(windows)]
 use zz_protocol::read_protocol_message_into;
@@ -6069,167 +6069,155 @@ impl Shared {
         sessions: Option<&BTreeSet<SessionId>>,
         clients: Option<&BTreeSet<ClientId>>,
     ) {
-        with_layout_format(LayoutFormat::V2, || {
-            let startup_ready = *self.startup_ready.lock();
-            let requests = {
-                let mut inner = self.inner.lock();
-                let mut targets = status_targets(&inner, sessions, clients);
-                if clients.is_none() {
-                    targets.retain(|client| {
-                        !inner.client(*client).is_some_and(|c| c.ctrl_initializing)
-                    });
-                }
-                if targets.is_empty() {
-                    return;
-                }
-                inner.engine.set_format_now(unix_timestamp());
-                status_requests_with_selected_facts(
-                    &inner,
-                    targets,
-                    startup_ready,
-                    &self.status_job_needs,
-                )
-            };
-            self.publish_status_requests(&requests);
-        });
+        let startup_ready = *self.startup_ready.lock();
+        let requests = {
+            let mut inner = self.inner.lock();
+            let mut targets = status_targets(&inner, sessions, clients);
+            if clients.is_none() {
+                targets
+                    .retain(|client| !inner.client(*client).is_some_and(|c| c.ctrl_initializing));
+            }
+            if targets.is_empty() {
+                return;
+            }
+            inner.engine.set_format_now(unix_timestamp());
+            status_requests_with_selected_facts(
+                &inner,
+                targets,
+                startup_ready,
+                &self.status_job_needs,
+            )
+        };
+        self.publish_status_requests(&requests);
     }
 
     fn publish_status_requests(&self, requests: &[StatusRequest]) {
-        with_layout_format(LayoutFormat::V2, || {
-            if requests.is_empty() {
-                return;
+        if requests.is_empty() {
+            return;
+        }
+        let changed = {
+            let _round_trips = zz_terminal::forbid_actor_round_trips();
+            self.status.lock().render_changed(requests)
+        };
+        if !changed.is_empty() {
+            let mut inner = self.inner.lock();
+            for (client, status) in &changed {
+                inner
+                    .client_entry(*client)
+                    .status_rows
+                    .replace((status.rows.clone(), status.base_style.clone()));
             }
-            let changed = {
-                let _round_trips = zz_terminal::forbid_actor_round_trips();
-                self.status.lock().render_changed(requests)
-            };
-            if !changed.is_empty() {
-                let mut inner = self.inner.lock();
-                for (client, status) in &changed {
-                    inner
-                        .client_entry(*client)
-                        .status_rows
-                        .replace((status.rows.clone(), status.base_style.clone()));
-                }
-            }
-            for (client, status) in changed {
-                self.publish_to_client(client, EventPayload::StatusChanged { status });
-            }
-        });
+        }
+        for (client, status) in changed {
+            self.publish_to_client(client, EventPayload::StatusChanged { status });
+        }
     }
 
     fn refresh_modes(&self, clients: &BTreeSet<ClientId>) {
-        with_layout_format(LayoutFormat::V2, || {
-            let updates = {
-                let inner = self.inner.lock();
-                let clients = status_targets(&inner, None, Some(clients));
-                if clients.is_empty() {
-                    return;
-                }
-                let copy_modes = Arc::new(copy_mode_format_facts(&inner));
-                clients
-                    .iter()
-                    .filter_map(|client| {
-                        let session = client_attached_session(&inner, *client)?;
-                        let facts = FormatHookFacts {
-                            copy_modes: Arc::clone(&copy_modes),
-                            client: Some(client_format_facts(&inner, *client, session)),
-                            ..FormatHookFacts::default()
-                        };
-                        let requests = mode_requests(&inner, *client, session, FormatNeeds::NONE);
-                        Some((
-                            *client,
-                            crate::status::expand_modes(&requests, &facts, &inner.engine),
-                        ))
-                    })
-                    .collect::<Vec<_>>()
-            };
-            for (client, modes) in updates {
-                let status = self.status.lock().republish_modes(client, modes);
-                if let Some(status) = status {
-                    self.publish_to_client(client, EventPayload::StatusChanged { status });
-                }
+        let updates = {
+            let inner = self.inner.lock();
+            let clients = status_targets(&inner, None, Some(clients));
+            if clients.is_empty() {
+                return;
             }
-        });
+            let copy_modes = Arc::new(copy_mode_format_facts(&inner));
+            clients
+                .iter()
+                .filter_map(|client| {
+                    let session = client_attached_session(&inner, *client)?;
+                    let facts = FormatHookFacts {
+                        copy_modes: Arc::clone(&copy_modes),
+                        client: Some(client_format_facts(&inner, *client, session)),
+                        ..FormatHookFacts::default()
+                    };
+                    let requests = mode_requests(&inner, *client, session, FormatNeeds::NONE);
+                    Some((
+                        *client,
+                        crate::status::expand_modes(&requests, &facts, &inner.engine),
+                    ))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (client, modes) in updates {
+            let status = self.status.lock().republish_modes(client, modes);
+            if let Some(status) = status {
+                self.publish_to_client(client, EventPayload::StatusChanged { status });
+            }
+        }
     }
 
     fn refresh_control_subscriptions(&self) {
-        with_layout_format(LayoutFormat::V2, || {
-            let events = {
-                let mut inner = self.inner.lock();
-                inner.engine.set_format_now(unix_timestamp());
-                let clients = inner
-                    .clients
-                    .iter()
-                    .filter_map(|(id, client)| {
-                        client.control_output.as_ref().map(|value| (id, value))
-                    })
-                    .filter(|(_, output)| !output.subscriptions.is_empty())
-                    .filter_map(|(client, _)| {
-                        Some((*client, client_attached_session(&inner, *client)?))
-                    })
-                    .collect::<Vec<_>>();
-                if clients.is_empty() {
-                    return;
-                }
-                let mut events = Vec::new();
-                for (client, session) in clients {
-                    let client_facts = client_format_facts(&inner, client, session);
-                    let mut subscriptions = inner
-                        .client_mut(client)
-                        .and_then(|c| c.control_output.as_mut())
-                        .map(|output| std::mem::take(&mut output.subscriptions))
-                        .unwrap_or_default();
-                    let mut facts = borrowed_format_hook_facts(&inner);
-                    facts.seed.client = Some(client_facts);
-                    let contexts = inner
-                        .engine
-                        .format_context_snapshot(FormatClient::Attached(session));
-                    for (name, subscription) in &mut subscriptions {
-                        let mut current = BTreeMap::new();
-                        for target in
-                            control_subscription_targets(&inner, session, subscription.scope)
-                        {
-                            let mut context = contexts.status_context(
-                                Some(target.session),
-                                target.window,
-                                target.pane,
-                            );
-                            context.set_format_value("config_files", inner.config_files.clone());
-                            let mut hooks = DaemonFormatHooks::command(&facts)
-                                .with_option_engine(&inner.engine);
-                            let value =
-                                expand_format_values(&subscription.format, &context, &mut hooks);
-                            if subscription.previous.get(&target) != Some(&value) {
-                                events.push((
-                                    client,
-                                    EventPayload::SubscriptionChanged {
-                                        name: name.clone(),
-                                        session: target.session,
-                                        window: target.window,
-                                        window_index: target.window_index,
-                                        pane: target.pane,
-                                        value: value.clone(),
-                                    },
-                                ));
-                            }
-                            current.insert(target, value);
-                        }
-                        subscription.previous = current;
-                    }
-                    if let Some(output) = inner
-                        .client_mut(client)
-                        .and_then(|c| c.control_output.as_mut())
-                    {
-                        output.subscriptions = subscriptions;
-                    }
-                }
-                events
-            };
-            for (client, payload) in events {
-                self.publish_to_client(client, payload);
+        let events = {
+            let mut inner = self.inner.lock();
+            inner.engine.set_format_now(unix_timestamp());
+            let clients = inner
+                .clients
+                .iter()
+                .filter_map(|(id, client)| client.control_output.as_ref().map(|value| (id, value)))
+                .filter(|(_, output)| !output.subscriptions.is_empty())
+                .filter_map(|(client, _)| {
+                    Some((*client, client_attached_session(&inner, *client)?))
+                })
+                .collect::<Vec<_>>();
+            if clients.is_empty() {
+                return;
             }
-        });
+            let mut events = Vec::new();
+            for (client, session) in clients {
+                let client_facts = client_format_facts(&inner, client, session);
+                let mut subscriptions = inner
+                    .client_mut(client)
+                    .and_then(|c| c.control_output.as_mut())
+                    .map(|output| std::mem::take(&mut output.subscriptions))
+                    .unwrap_or_default();
+                let mut facts = borrowed_format_hook_facts(&inner);
+                facts.seed.client = Some(client_facts);
+                let contexts = inner
+                    .engine
+                    .format_context_snapshot(FormatClient::Attached(session));
+                for (name, subscription) in &mut subscriptions {
+                    let mut current = BTreeMap::new();
+                    for target in control_subscription_targets(&inner, session, subscription.scope)
+                    {
+                        let mut context = contexts.status_context(
+                            Some(target.session),
+                            target.window,
+                            target.pane,
+                        );
+                        context.set_format_value("config_files", inner.config_files.clone());
+                        let mut hooks =
+                            DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
+                        let value =
+                            expand_format_values(&subscription.format, &context, &mut hooks);
+                        if subscription.previous.get(&target) != Some(&value) {
+                            events.push((
+                                client,
+                                EventPayload::SubscriptionChanged {
+                                    name: name.clone(),
+                                    session: target.session,
+                                    window: target.window,
+                                    window_index: target.window_index,
+                                    pane: target.pane,
+                                    value: value.clone(),
+                                },
+                            ));
+                        }
+                        current.insert(target, value);
+                    }
+                    subscription.previous = current;
+                }
+                if let Some(output) = inner
+                    .client_mut(client)
+                    .and_then(|c| c.control_output.as_mut())
+                {
+                    output.subscriptions = subscriptions;
+                }
+            }
+            events
+        };
+        for (client, payload) in events {
+            self.publish_to_client(client, payload);
+        }
     }
 
     /// `monitor_timer`: every second each `set-hook -B` subscription
@@ -7634,21 +7622,29 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
-        let layout_format = control_layout_format(
+        let legacy = control_reads_legacy_layouts(
             &self.inner.lock(),
             format_provenance_client(context, client),
         );
-        with_layout_format(layout_format, || {
-            self.execution_item()
-                .execute_with_mux_source_routed_for_terminal_in_queue_in_item(
-                    client,
-                    kind,
-                    context,
-                    command,
-                    mux_source,
-                    client_terminal,
-                    queue_execution,
-                )
+        let previous_legacy = context.legacy_layouts();
+        context.set_legacy_layouts(legacy);
+        let result = self
+            .execution_item()
+            .execute_with_mux_source_routed_for_terminal_in_queue_in_item(
+                client,
+                kind,
+                context,
+                command,
+                mux_source,
+                client_terminal,
+                queue_execution,
+            );
+        context.set_legacy_layouts(previous_legacy);
+        result.map(|mut execution| {
+            if legacy {
+                legacy_command_output(&mut execution);
+            }
+            execution
         })
     }
 
@@ -28549,16 +28545,14 @@ impl Shared {
     }
 
     fn publish_snapshot_state_except(&self, detached: Option<ClientId>) {
-        with_layout_format(LayoutFormat::V2, || {
-            self.note_published();
-            self.publish_mux_snapshots_except(true, true, detached);
-            self.refresh_terminal_visibility();
-            #[cfg(feature = "agent")]
-            self.refresh_agent_visibility();
-            self.refresh_choose_trees();
-            self.refresh_choose_buffers();
-            self.refresh_display_panes();
-        });
+        self.note_published();
+        self.publish_mux_snapshots_except(true, true, detached);
+        self.refresh_terminal_visibility();
+        #[cfg(feature = "agent")]
+        self.refresh_agent_visibility();
+        self.refresh_choose_trees();
+        self.refresh_choose_buffers();
+        self.refresh_display_panes();
     }
 
     fn publish_mux_snapshots(&self) {
@@ -28579,65 +28573,63 @@ impl Shared {
         with_status: bool,
         detached: Option<ClientId>,
     ) {
-        with_layout_format(LayoutFormat::V2, || {
-            let startup_ready = with_status.then(|| *self.startup_ready.lock());
-            let order = self.snapshot_order.lock();
-            let (snapshots, appearance_updates, requests) = {
-                let mut inner = self.inner.lock();
-                let ServerState {
-                    engine,
-                    window_latest_clients,
-                    ..
-                } = &mut *inner;
-                window_latest_clients.retain(|window, _| engine.state.windows.contains_key(window));
-                release_chooser_zooms(&mut inner);
-                let generation = inner.engine.state.generation();
-                let tracked = owns_generation || inner.last_published_mux_generation == generation;
-                if tracked {
-                    inner.last_published_mux_generation = generation;
-                }
-                let appearance_updates = if inner.engine.has_window_style_settings() {
-                    terminal_appearance_updates(&inner)
-                } else {
-                    Vec::new()
-                };
-                let mut targets = startup_ready
-                    .map(|_| status_targets(&inner, None, None))
-                    .unwrap_or_default();
-                targets.retain(|client| {
-                    Some(*client) != detached
-                        && !inner.client(*client).is_some_and(|c| c.ctrl_initializing)
-                });
-                if inner.clients.values().all(|c| c.subscriber.is_none()) {
-                    (Vec::new(), appearance_updates, Vec::new())
-                } else {
-                    if !targets.is_empty() {
-                        inner.engine.set_format_now(unix_timestamp());
-                    }
-                    let snapshot = inner.engine.state.snapshot();
-                    let facts = format_hook_facts(&inner);
-                    let snapshots = stamped_snapshot_sends(&mut inner, tracked, &snapshot, &facts);
-                    let requests = status_requests(
-                        &inner,
-                        targets,
-                        &snapshot,
-                        &facts,
-                        startup_ready.unwrap_or_default(),
-                        &self.status_job_needs,
-                    );
-                    (snapshots, appearance_updates, requests)
-                }
+        let startup_ready = with_status.then(|| *self.startup_ready.lock());
+        let order = self.snapshot_order.lock();
+        let (snapshots, appearance_updates, requests) = {
+            let mut inner = self.inner.lock();
+            let ServerState {
+                engine,
+                window_latest_clients,
+                ..
+            } = &mut *inner;
+            window_latest_clients.retain(|window, _| engine.state.windows.contains_key(window));
+            release_chooser_zooms(&mut inner);
+            let generation = inner.engine.state.generation();
+            let tracked = owns_generation || inner.last_published_mux_generation == generation;
+            if tracked {
+                inner.last_published_mux_generation = generation;
+            }
+            let appearance_updates = if inner.engine.has_window_style_settings() {
+                terminal_appearance_updates(&inner)
+            } else {
+                Vec::new()
             };
-            for (terminal, appearance) in appearance_updates {
-                terminal.set_appearance(appearance);
+            let mut targets = startup_ready
+                .map(|_| status_targets(&inner, None, None))
+                .unwrap_or_default();
+            targets.retain(|client| {
+                Some(*client) != detached
+                    && !inner.client(*client).is_some_and(|c| c.ctrl_initializing)
+            });
+            if inner.clients.values().all(|c| c.subscriber.is_none()) {
+                (Vec::new(), appearance_updates, Vec::new())
+            } else {
+                if !targets.is_empty() {
+                    inner.engine.set_format_now(unix_timestamp());
+                }
+                let snapshot = inner.engine.state.snapshot();
+                let facts = format_hook_facts(&inner);
+                let snapshots = stamped_snapshot_sends(&mut inner, tracked, &snapshot, &facts);
+                let requests = status_requests(
+                    &inner,
+                    targets,
+                    &snapshot,
+                    &facts,
+                    startup_ready.unwrap_or_default(),
+                    &self.status_job_needs,
+                );
+                (snapshots, appearance_updates, requests)
             }
-            for (subscriber, snapshot) in snapshots {
-                Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
-            }
-            self.publish_compact_trees();
-            drop(order);
-            self.publish_status_requests(&requests);
-        });
+        };
+        for (terminal, appearance) in appearance_updates {
+            terminal.set_appearance(appearance);
+        }
+        for (subscriber, snapshot) in snapshots {
+            Self::send_event(&subscriber, EventPayload::Snapshot(snapshot));
+        }
+        self.publish_compact_trees();
+        drop(order);
+        self.publish_status_requests(&requests);
     }
 
     fn refresh_choose_trees(&self) {
@@ -49024,8 +49016,8 @@ const fn control_flag_state(output: &ControlClientOutput) -> (bool, Option<u64>,
     )
 }
 
-fn control_layout_format(inner: &ServerState, client: Option<ClientId>) -> LayoutFormat {
-    let old = client
+fn control_reads_legacy_layouts(inner: &ServerState, client: Option<ClientId>) -> bool {
+    client
         .and_then(|client| inner.client(client))
         .is_some_and(|client| {
             client.kind == Some(ClientKind::Control)
@@ -49033,11 +49025,15 @@ fn control_layout_format(inner: &ServerState, client: Option<ClientId>) -> Layou
                     .control_output
                     .as_ref()
                     .is_some_and(|output| output.new_layouts)
-        });
-    if old {
-        LayoutFormat::V1
-    } else {
-        LayoutFormat::V2
+        })
+}
+
+fn legacy_command_output(execution: &mut Execution) {
+    let Ok(text) = std::str::from_utf8(execution.output.as_bytes()) else {
+        return;
+    };
+    if let Cow::Owned(converted) = legacy_layouts_in(text) {
+        execution.output = RawText::from(converted);
     }
 }
 
@@ -64379,6 +64375,69 @@ mod tests {
                 .iter()
                 .all(|right| right.contains(r#"{"V":2,"L":{"t":"v""#)),
             "{rights:?}"
+        );
+    }
+
+    #[test]
+    fn a_control_command_leaves_another_clients_chooser_layouts_in_v2() {
+        let shared = Arc::new(Shared::new(1));
+        let ((alpha, alpha_mailbox, a), _) = two_session_pair(&shared);
+        let (window, pane) = {
+            let inner = shared.inner.lock();
+            let window = inner.engine.state.sessions[&a].active_window;
+            (window, inner.engine.state.windows[&window].active_pane)
+        };
+        let mut context = ExecutionContext::new(Some(a), Some(window), Some(pane));
+        for args in [
+            &["set-buffer", "-b", "one", "value"][..],
+            &["choose-buffer", "-F", "#{window_layout}"][..],
+        ] {
+            shared
+                .execute(
+                    alpha,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("open layout chooser");
+        }
+        take_reliable_messages(&alpha_mailbox);
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared.attach(control, a).expect("attach control");
+        let mut control_context = ExecutionContext::new(Some(a), Some(window), Some(pane));
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("set-buffer", ["-b", "two", "value"]),
+            )
+            .expect("control set-buffer");
+        let rows = take_reliable_messages(&alpha_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooseBuffer {
+                            state: Some(state), ..
+                        },
+                    ..
+                }) => Some(state.items),
+                _ => None,
+            })
+            .flatten()
+            .map(|item| item.text)
+            .collect::<Vec<_>>();
+        assert!(rows.len() >= 2, "{rows:?}");
+        assert!(
+            rows.iter().all(|row| row.starts_with(r#"{"V":2,"L":"#)),
+            "{rows:?}"
         );
     }
 

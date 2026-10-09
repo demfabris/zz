@@ -64,8 +64,7 @@ pub use formats::{
 pub use honest_knobs::{BellAction, PresetOptions, VisualBell, WindowSize};
 pub use journal::{ChangeWindow, JournalChanges, PaneImage, SessionImage, Tracked, WindowImage};
 pub use layout::{
-    CellLayout, LayoutFormat, LeafState, SplitSize, layout_format, legacy_layout,
-    with_layout_format,
+    CellLayout, LayoutFormat, LeafState, SplitSize, legacy_layout, legacy_layouts_in,
 };
 pub use localtime::local_time;
 pub use model::{

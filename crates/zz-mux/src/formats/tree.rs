@@ -233,7 +233,7 @@ impl FormatTree<'_> {
             FormatBacking::WindowLayout => Cow::Owned(
                 window
                     .map(|window| {
-                        window.layout_string(layout_format(), state.pane_base_index(window.id))
+                        window.layout_string(LayoutFormat::V2, state.pane_base_index(window.id))
                     })
                     .unwrap_or_default(),
             ),
@@ -241,7 +241,7 @@ impl FormatTree<'_> {
                 window
                     .map(|window| {
                         window.visible_layout_string(
-                            layout_format(),
+                            LayoutFormat::V2,
                             state.pane_base_index(window.id),
                         )
                     })

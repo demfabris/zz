@@ -17,8 +17,7 @@ use crate::{
     PresetOptions,
     journal::{ChangeJournal, Tracked},
     layout::{
-        CellGeometry, CellLayout, LayoutError, LayoutFormat, LeafState, SplitSize,
-        carve_border_row, layout_format,
+        CellGeometry, CellLayout, LayoutError, LayoutFormat, LeafState, SplitSize, carve_border_row,
     },
 };
 
@@ -433,8 +432,8 @@ impl Window {
             .dump_as(format, &|pane| self.leaf_state(pane, pane_base_index))
     }
 
-    fn saved_layout(&self) -> SavedLayout {
-        let selection = (layout_format() == LayoutFormat::V2).then(|| SavedSelection {
+    fn saved_layout(&self, legacy: bool) -> SavedLayout {
+        let selection = (!legacy).then(|| SavedSelection {
             pane_order: self.pane_order.clone(),
             active: self.active_pane,
             last_panes: self
@@ -481,6 +480,7 @@ pub struct MuxState {
     marked_pane: Option<(SessionId, WindowId, PaneId)>,
     pub(crate) global_pane_base_index: u32,
     pub(crate) window_pane_base_indices: BTreeMap<WindowId, u32>,
+    pub(crate) legacy_layout_saves: bool,
     pub sessions: Tracked<SessionId, Session>,
     pub windows: Tracked<WindowId, Window>,
     pub(crate) journal: ChangeJournal,
@@ -1682,7 +1682,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window)
             .expect("window was resolved");
-        let previous = window.saved_layout();
+        let previous = window.saved_layout(self.legacy_layout_saves);
         window
             .layout
             .apply_preset(preset, &panes, options, &mut ids);
@@ -1747,7 +1747,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window)
             .expect("window was resolved");
-        let previous = window.saved_layout();
+        let previous = window.saved_layout(self.legacy_layout_saves);
         window.layout = next;
         window.z_order = window.layout.panes_in_order();
         window.previous_layout = Some(Box::new(previous));
@@ -1791,7 +1791,7 @@ impl MuxState {
                 .windows
                 .get_mut(&mut self.journal, &window)
                 .expect("window was resolved");
-            window.previous_layout = Some(Box::new(window.saved_layout()));
+            window.previous_layout = Some(Box::new(window.saved_layout(self.legacy_layout_saves)));
             return Ok(());
         }
         let (pane_order, split_count) = {
@@ -1822,7 +1822,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window)
             .expect("window was resolved");
-        let current = window.saved_layout();
+        let current = window.saved_layout(self.legacy_layout_saves);
         let SavedLayout {
             layout: mut restored,
             selection,
@@ -1886,7 +1886,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window_id)
             .expect("pane window exists");
-        let previous = window.saved_layout();
+        let previous = window.saved_layout(self.legacy_layout_saves);
         window
             .layout
             .spread(pane)
@@ -4630,14 +4630,10 @@ fn lose_window_pane(window: &mut Window, pane: PaneId) {
 }
 
 fn normalize_window_history(window: &mut Window) {
-    let active = window.active_pane;
     let panes = &window.panes;
     window
         .last_panes
-        .retain(|candidate| *candidate != active && panes.contains_key(candidate));
-    window
-        .last_panes
-        .truncate(window.panes.len().saturating_sub(1));
+        .retain(|candidate| panes.contains_key(candidate));
 }
 
 fn insert_pane_order(

@@ -753,6 +753,7 @@ pub struct ExecutionContext {
     invoking_mouse: Option<MouseEventTarget>,
     replay_client: Option<ClientId>,
     control_command_target: Option<(ClientId, u8)>,
+    legacy_layouts: bool,
     refuse_new_session_attach: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
@@ -858,6 +859,7 @@ impl fmt::Debug for ExecutionContext {
             .field("invoking_mouse", &self.invoking_mouse)
             .field("replay_client", &self.replay_client)
             .field("control_command_target", &self.control_command_target)
+            .field("legacy_layouts", &self.legacy_layouts)
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
             .field("no_hooks", &self.no_hooks)
             .field("format_variables", &self.format_variables)
@@ -891,6 +893,7 @@ impl Default for ExecutionContext {
             invoking_mouse: None,
             replay_client: None,
             control_command_target: None,
+            legacy_layouts: false,
             refuse_new_session_attach: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
@@ -1083,6 +1086,15 @@ impl ExecutionContext {
 
     pub fn set_control_command_target(&mut self, target: Option<(ClientId, u8)>) {
         self.control_command_target = target;
+    }
+
+    #[must_use]
+    pub fn legacy_layouts(&self) -> bool {
+        self.legacy_layouts
+    }
+
+    pub fn set_legacy_layouts(&mut self, legacy: bool) {
+        self.legacy_layouts = legacy;
     }
 
     #[must_use]
@@ -8550,6 +8562,18 @@ impl MuxEngine {
     }
 
     fn select_layout(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[RawText],
+        command: &str,
+    ) -> Result<Execution, ServerError> {
+        self.state.legacy_layout_saves = context.legacy_layouts();
+        let result = self.select_layout_with(context, args, command);
+        self.state.legacy_layout_saves = false;
+        result
+    }
+
+    fn select_layout_with(
         &mut self,
         context: &ExecutionContext,
         args: &[RawText],

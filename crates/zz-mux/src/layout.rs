@@ -3,7 +3,7 @@
 mod json;
 
 use std::{
-    cell::Cell,
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
 };
@@ -24,26 +24,6 @@ pub enum LayoutFormat {
     V1,
     #[default]
     V2,
-}
-
-thread_local! {
-    static LAYOUT_FORMAT: Cell<LayoutFormat> = const { Cell::new(LayoutFormat::V2) };
-}
-
-#[must_use]
-pub fn layout_format() -> LayoutFormat {
-    LAYOUT_FORMAT.with(Cell::get)
-}
-
-pub fn with_layout_format<R>(format: LayoutFormat, body: impl FnOnce() -> R) -> R {
-    struct Restore(LayoutFormat);
-    impl Drop for Restore {
-        fn drop(&mut self) {
-            LAYOUT_FORMAT.with(|value| value.set(self.0));
-        }
-    }
-    let _restore = Restore(LAYOUT_FORMAT.with(|value| value.replace(format)));
-    body()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -979,6 +959,57 @@ pub fn legacy_layout(layout: &str) -> String {
             |_| "0000,".to_owned(),
             |root| dump_v1(tiled_copy_parsed(&root)),
         )
+}
+
+#[must_use]
+pub fn legacy_layouts_in(text: &str) -> Cow<'_, str> {
+    const MARKER: &str = "{\"V\":2,\"L\":";
+    if !text.contains(MARKER) {
+        return Cow::Borrowed(text);
+    }
+    let mut output = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(MARKER) {
+        output.push_str(&rest[..start]);
+        let candidate = &rest[start..];
+        let Some(end) = json_object_end(candidate) else {
+            output.push_str(candidate);
+            return Cow::Owned(output);
+        };
+        output.push_str(&legacy_layout(&candidate[..end]));
+        rest = &candidate[end..];
+    }
+    output.push_str(rest);
+    Cow::Owned(output)
+}
+
+fn json_object_end(text: &str) -> Option<usize> {
+    let mut depth = 0_usize;
+    let mut in_string = false;
+    let mut escaped = false;
+    for (index, byte) in text.bytes().enumerate() {
+        if in_string {
+            match byte {
+                _ if escaped => escaped = false,
+                b'\\' => escaped = true,
+                b'"' => in_string = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_string = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn tiled_copy(node: &CellNode, floating: &dyn Fn(PaneId) -> bool) -> Option<CellNode> {

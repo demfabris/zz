@@ -79,6 +79,15 @@ class TrackerTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "proof pin"):
             tracker.validate(self.root, self.data)
 
+    def test_a_closed_campaign_keeps_the_pin_its_proofs_used(self):
+        for item in self.data["items"]:
+            item.update(status="verified", proof=self.proof())
+        (self.root / "compat/tmux-oracle.json").write_text(json.dumps({"pin": "d" * 40}))
+        tracker.validate(self.root, self.data)
+        self.data["items"][1].update(status="review")
+        with self.assertRaisesRegex(ValueError, "oracle pin"):
+            tracker.validate(self.root, self.data)
+
     def test_verified_requires_complete_proof_and_verified_dependencies(self):
         self.data["items"][1]["status"] = "verified"
         with self.assertRaisesRegex(ValueError, "requires proof"):

@@ -508,7 +508,7 @@ collect_geometry() {
   printf 'LIST-WINDOWS w\n' >>"$snapshot"
   if query_side "$side" "$windows_file" "$errors" "list-windows -t w geometry" \
     list-windows -t w -F '#{window_index}:#{window_width}x#{window_height}:#{window_layout}'; then
-    cat "$windows_file" >>"$snapshot"
+    python3 "$COMPAT_DIR/layout-v1.py" <"$windows_file" >>"$snapshot"
     while IFS=: read -r window_index _; do
       [ -n "$window_index" ] || continue
       printf 'LIST-PANES w:%s\n' "$window_index" >>"$snapshot"

@@ -49,9 +49,10 @@ ITEM_PATTERNS = [
     re.compile(r"^flag-arity:[a-z0-9][a-z0-9-]*:-[A-Za-z0-9]$"),
     re.compile(r"^positional-(?:min|max):[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^option:[a-z0-9][a-z0-9-]*$"),
+    re.compile(r"^option-(?:scope|default):[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^format:[a-z0-9][a-z0-9_]*$"),
     re.compile(r"^(?:native-)?context-format:[a-z0-9][a-z0-9-]*:[a-z0-9][a-z0-9_]*$"),
-    re.compile(r"^hook:[a-z0-9][a-z0-9-]*$"),
+    re.compile(r"^(?:native-)?hook:[a-z0-9][a-z0-9-]*$"),
     re.compile(r"^key:[a-z0-9][a-z0-9-]*:.+$"),
     re.compile(r"^binding:[a-z0-9][a-z0-9-]*:.+$"),
     re.compile(r"^native-key:[a-z0-9][a-z0-9-]*:.+$"),
@@ -335,8 +336,8 @@ def validate_manifest(manifest, oracle, include_report):
                 + ", ".join(sorted(expected_oracle))
                 + f"; got {', '.join(sorted(oracle))}"
             )
-        if oracle.get("schema") != 5:
-            errors.append("compat/tmux-oracle.json schema must be 5")
+        if oracle.get("schema") != 6:
+            errors.append("compat/tmux-oracle.json schema must be 6")
         if oracle.get("pin") != pin:
             errors.append("manifest and oracle pins differ")
         if not isinstance(oracle.get("version"), str) or not oracle.get("version"):
@@ -443,7 +444,38 @@ def validate_manifest(manifest, oracle, include_report):
             name = item.removeprefix("args-parse:")
             if name not in args_parse:
                 errors.append(f"stale args-parse item: {item}")
-        for field in ("options", "formats", "hooks"):
+        options = oracle.get("options")
+        if not isinstance(options, list) or not options:
+            errors.append("compat/tmux-oracle.json options must be a nonempty array")
+            options = []
+        option_names = []
+        for index, option in enumerate(options):
+            location = f"oracle.options[{index}]"
+            if not isinstance(option, dict) or set(option) != {"name", "scope", "array", "default"}:
+                errors.append(f"{location} fields must be array, default, name, scope")
+                continue
+            name = option.get("name")
+            if not isinstance(name, str) or re.fullmatch(r"[a-z0-9][a-z0-9-]*", name) is None:
+                errors.append(f"{location}.name is not normalized: {name!r}")
+                continue
+            option_names.append(name)
+            if option.get("scope") not in {"server", "session", "window", "window-pane"}:
+                errors.append(f"{location}.scope is not a tmux option scope: {option.get('scope')!r}")
+            if not isinstance(option.get("array"), bool):
+                errors.append(f"{location}.array must be a boolean")
+            default = option.get("default")
+            if option.get("array") is True:
+                if not isinstance(default, list) or not all(isinstance(value, str) for value in default):
+                    errors.append(f"{location}.default must be an array of strings")
+            elif not isinstance(default, str):
+                errors.append(f"{location}.default must be a string")
+        if option_names != sorted(option_names) or len(option_names) != len(set(option_names)):
+            errors.append("oracle.options must be unique and sorted by name")
+        for item in items:
+            for prefix in ("option-scope:", "option-default:"):
+                if item.startswith(prefix) and item.removeprefix(prefix) not in option_names:
+                    errors.append(f"stale {prefix.rstrip(':')} item: {item}")
+        for field in ("formats", "hooks"):
             values = string_list(oracle.get(field), f"oracle.{field}", errors, allow_empty=False)
             if values != sorted(values):
                 errors.append(f"oracle.{field} must be sorted")
@@ -459,7 +491,7 @@ def validate_manifest(manifest, oracle, include_report):
         if not isinstance(format_contexts, dict):
             errors.append("compat/tmux-oracle.json format_contexts must be an object")
             format_contexts = {}
-        expected_context_fields = {"literal_scopes", "derived_families", "propagation"}
+        expected_context_fields = {"literal_scopes", "derived_families", "event_payload", "propagation"}
         if set(format_contexts) != expected_context_fields:
             errors.append(
                 "oracle.format_contexts fields must be "
@@ -495,9 +527,9 @@ def validate_manifest(manifest, oracle, include_report):
                     literal_names.add(name)
         if literal_order != sorted(literal_order) or len(literal_order) != len(set(literal_order)):
             errors.append("oracle.format_contexts.literal_scopes must be unique and sorted")
-        if (len(literal_scopes), len(literal_pairs), len(literal_names)) != (31, 153, 108):
+        if (len(literal_scopes), len(literal_pairs), len(literal_names)) != (37, 204, 122):
             errors.append(
-                "oracle format literals must contain 31 scopes, 153 scoped pairs, and 108 unique names"
+                "oracle format literals must contain 37 scopes, 204 scoped pairs, and 122 unique names"
             )
         derived_families = format_contexts.get("derived_families")
         if not isinstance(derived_families, list):
@@ -542,8 +574,54 @@ def validate_manifest(manifest, oracle, include_report):
                 errors.append(f"{location}.producers must be unique and sorted")
         if derived_order != sorted(derived_order) or len(derived_order) != len(set(derived_order)):
             errors.append("oracle.format_contexts.derived_families must be unique and sorted")
-        if len(derived_families) != 10:
-            errors.append("oracle.format_contexts.derived_families must contain 10 families")
+        if len(derived_families) != 5:
+            errors.append("oracle.format_contexts.derived_families must contain 5 families")
+        event_payload = format_contexts.get("event_payload")
+        if not isinstance(event_payload, dict) or set(event_payload) != {"consumers", "keys", "patterns"}:
+            errors.append("oracle.format_contexts.event_payload fields must be consumers, keys, patterns")
+            event_payload = {}
+
+        def check_producers(producers, location):
+            if not isinstance(producers, list) or not producers:
+                errors.append(f"{location}.producers must be a nonempty array")
+                return
+            order = []
+            for producer in producers:
+                if not isinstance(producer, dict) or set(producer) != {"path", "function"}:
+                    errors.append(f"{location}.producers entries must be function, path")
+                    return
+                order.append((producer["path"], producer["function"]))
+            if order != sorted(order) or len(order) != len(set(order)):
+                errors.append(f"{location}.producers must be unique and sorted")
+
+        consumers = event_payload.get("consumers", [])
+        if not isinstance(consumers, list) or [
+            consumer.get("prefix") for consumer in consumers if isinstance(consumer, dict)
+        ].count("hook_") != 1:
+            errors.append("oracle.format_contexts.event_payload must have exactly one hook_ consumer")
+        payload_keys = event_payload.get("keys", [])
+        key_names = []
+        for index, entry in enumerate(payload_keys if isinstance(payload_keys, list) else []):
+            location = f"oracle.format_contexts.event_payload.keys[{index}]"
+            if not isinstance(entry, dict) or set(entry) != {"key", "types", "named", "producers"}:
+                errors.append(f"{location} fields must be key, named, producers, types")
+                continue
+            if not isinstance(entry["key"], str) or re.fullmatch(r"[a-z0-9][a-z0-9_]*", entry["key"]) is None:
+                errors.append(f"{location}.key is not normalized: {entry['key']!r}")
+            key_names.append(entry["key"])
+            if not isinstance(entry["named"], bool):
+                errors.append(f"{location}.named must be a boolean")
+            string_list(entry["types"], f"{location}.types", errors, allow_empty=False)
+            check_producers(entry["producers"], location)
+        if not key_names or key_names != sorted(key_names) or len(key_names) != len(set(key_names)):
+            errors.append("oracle.format_contexts.event_payload.keys must be nonempty, unique and sorted")
+        payload_patterns = event_payload.get("patterns", [])
+        for index, entry in enumerate(payload_patterns if isinstance(payload_patterns, list) else []):
+            location = f"oracle.format_contexts.event_payload.patterns[{index}]"
+            if not isinstance(entry, dict) or set(entry) != {"pattern", "types", "producers"}:
+                errors.append(f"{location} fields must be pattern, producers, types")
+                continue
+            check_producers(entry["producers"], location)
         propagation = format_contexts.get("propagation")
         if not isinstance(propagation, list):
             errors.append("oracle.format_contexts.propagation must be an array")
@@ -570,8 +648,8 @@ def validate_manifest(manifest, oracle, include_report):
         )
         if format_modifiers != sorted(format_modifiers):
             errors.append("oracle.format_modifiers must be sorted")
-        if len(format_modifiers) != 36:
-            errors.append("oracle.format_modifiers must contain 36 tokens")
+        if len(format_modifiers) != 37:
+            errors.append("oracle.format_modifiers must contain 37 tokens")
         key_bindings = oracle.get("key_bindings")
         if not isinstance(key_bindings, list):
             errors.append("compat/tmux-oracle.json key_bindings must be an array")
@@ -736,10 +814,13 @@ def render_report(manifest, oracle):
         "native-command",
         "native-alias",
         "option",
+        "option-scope",
+        "option-default",
         "format",
         "context-format",
         "native-context-format",
         "hook",
+        "native-hook",
         "key",
         "binding",
         "native-key",
@@ -811,7 +892,10 @@ def render_report(manifest, oracle):
         f"{item_counts['format']} known limited formats, "
         f"{item_counts['context-format']} scoped context-format gaps, "
         f"{item_counts['native-context-format']} accepted-native context-format names, "
+        f"{item_counts['option-scope']} option scope mismatches, "
+        f"{item_counts['option-default']} option default mismatches, "
         f"{item_counts['hook']} currently documented hook-producer gaps, "
+        f"{item_counts['native-hook']} zz-only hook names, "
         f"{item_counts['key']} omitted default keys, "
         f"{item_counts['binding']} divergent shared default bindings, "
         f"{item_counts['native-key']} zz-only default keys.",
@@ -819,8 +903,8 @@ def render_report(manifest, oracle):
         "## Enforcement boundary",
         "",
         "The gate reconciles command names, aliases, flag arities, positional bounds, custom",
-        "`args_parse` rules, option names, global formats, scoped and derived context producers,",
-        "format modifiers, hook names,",
+        "`args_parse` rules, option names, scopes and defaults, global formats, scoped and derived",
+        "context producers, event payload keys, format modifiers, hook names,",
         "and default key presence against the clean pinned tmux source and binary. It also reconciles",
         "options absent from `BEHAVES`, constant-backed formats against the live registry, omitted",
         "and zz-only default keys against zz's key tables, rendered commands plus repeat bits for",

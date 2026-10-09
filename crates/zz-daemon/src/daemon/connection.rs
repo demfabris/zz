@@ -170,6 +170,7 @@ impl Session {
         }
         warm_terminfo_entries(&hello.environment);
         let registration = ClientRegistrationGuard::new(shared, client);
+        shared.client_lifecycle_hook("client-created", client);
         log::debug!(
             target: "zz_daemon::diagnostics::connection",
             "registered client={client} kind={:?} hello={hello:#?}",

@@ -479,3 +479,36 @@ fn a_refused_float_split_leaves_the_float_its_size() {
         );
     }
 }
+
+#[test]
+fn a_titled_popup_float_reads_its_own_border_status_and_format() {
+    use crate::{ExecutionContext, MuxEngine};
+    use zz_protocol::{CommandInvocation, PaneBorderStatus};
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "s", "-x", "80", "-y", "24"]),
+        )
+        .unwrap();
+    context.set_spawn_pane_options(vec![
+        ("pane-border-status".to_owned(), "top".to_owned()),
+        ("pane-border-format".to_owned(), "#{pane_title}".to_owned()),
+    ]);
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-pane", ["-O", "-T", "POPUP-TITLE"]),
+        )
+        .unwrap();
+    let modal = context.pane.unwrap();
+    assert_eq!(
+        engine.floating_pane_border_status(modal),
+        PaneBorderStatus::Top
+    );
+    assert_eq!(engine.pane_border_format(modal), "#{pane_title}");
+    let window = engine.state.window_for_pane(modal).unwrap();
+    assert!(!engine.pane_border_status(window).is_on());
+}

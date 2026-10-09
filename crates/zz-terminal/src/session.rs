@@ -19274,7 +19274,7 @@ mod tests {
                 | TerminalEvent::CopyReady { .. }
                 | TerminalEvent::ClipboardSet { .. }
                 | TerminalEvent::Bell
-                        | TerminalEvent::RenameWindow(_)
+                | TerminalEvent::RenameWindow(_)
                 | TerminalEvent::PlaceholderBound { .. }
                 | TerminalEvent::PendingPasteExpired { .. } => {
                     panic!("unexpected event in queue invariant test")

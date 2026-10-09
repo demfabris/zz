@@ -30,6 +30,46 @@ git -C ~/src/zed format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu 
 
 Limit the pathspec to the crates the fix touches. Paths match upstream, so patches apply as-is.
 
+## Liquid glass
+
+Glass shows what was painted under it through a lens: the rim pulls the backdrop inward like the
+thick edge of a drop, the face is frosted and tinted, a thin glint runs along the edge facing the
+light, and shapes painted as one body melt into each other.
+
+```rust
+// Any element, in its own shape.
+div().size(px(64.)).rounded_full().glass(GlassMaterial::regular())
+
+// Glass that swells and glows where it is pressed, and lenses in and out.
+liquid_glass("play", GlassMaterial::regular()).size(px(44.)).rounded_full().child("▶")
+
+// Buttons that melt into their neighbors when a press swells them.
+glass_group("toolbar", GlassMaterial::regular().merge(px(18.)))
+    .flex()
+    .gap(px(12.))
+    .children(buttons)
+
+// Or paint it yourself, one body made of up to eight shapes.
+window.paint_glass_shapes(&shapes, &material);
+```
+
+`GlassMaterial` holds every knob: blur (frost), bezel and refraction (the lens), dispersion,
+tint, saturation, brightness, contrast, specular and glint width, light angle, fresnel, edge shadow
+and width, grain, touch glow, merge radius, and opacity. The presets `regular`, `clear`,
+`frosted`, `bubble`, and `smoked` are starting points, and materials interpolate, so springs and
+animations can carry one into another; `vanished()` is the identity glass appears from.
+`LiquidRect` moves a shape on springs and stretches it along its velocity.
+
+Metal and wgpu draw it from the same WGSL (`crates/gpui/src/glass.wgsl`; Metal translates it with
+naga). Each batch of glass costs one render pass break, a copy of only the glass regions, a dual
+Kawase blur over just those regions down to half resolution, and one analytic draw per body. At
+5344x2964 on Apple silicon the first glass in a frame costs about 0.06 ms and a frosted sidebar
+0.18 ms (`cargo test -p gpui_apple --release bench_glass -- --ignored --nocapture`). Renderers
+that cannot read back their frame (DirectX, WebGL) paint a translucent fill instead.
+
+Try it with `cargo run -p gpui --example liquid_glass`, or in a browser from the web gallery
+(`/liquid-glass`).
+
 ## License
 
 Apache-2.0, same as upstream. See `LICENSE-APACHE`. The bundled fonts keep their own licenses

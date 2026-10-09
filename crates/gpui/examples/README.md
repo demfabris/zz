@@ -24,6 +24,7 @@ Open <http://localhost:8080/> to choose an example:
 | `/text-layout` | Alignment and decorations |
 | `/text-wrapper` | Wrapping and truncation |
 | `/input` | Text input and selection |
+| `/liquid-glass` | Liquid glass and its material knobs |
 | `/dynamic-fonts` | Download a font on missing-glyph notifications |
 | `/prime-sieve` | Background task demo |
 

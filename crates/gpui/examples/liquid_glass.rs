@@ -315,7 +315,9 @@ impl LiquidGlassDemo {
 
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.lens_grab = None;
-        self.knob_drag = None;
+        if self.knob_drag.take().is_some() {
+            log::info!("{}", material_snippet(&self.material));
+        }
         cx.notify();
     }
 
@@ -575,6 +577,17 @@ impl LiquidGlassDemo {
             .child(presets)
             .child(toggle)
             .children(rows)
+            .child(
+                div()
+                    .mt(px(8.))
+                    .p(px(10.))
+                    .rounded(px(12.))
+                    .bg(hsla(0., 0., 0., 0.25))
+                    .font_family("Lilex")
+                    .text_size(px(11.))
+                    .whitespace_normal()
+                    .child(SharedString::from(material_snippet(&self.material))),
+            )
     }
 }
 
@@ -846,6 +859,27 @@ impl Render for LiquidGlassDemo {
             .child(layer)
             .child(self.knob_panel(cx))
     }
+}
+
+/// The material as the builder calls that make it, to paste into code.
+fn material_snippet(material: &GlassMaterial) -> String {
+    let tint = material.tint;
+    let mut lines = vec!["GlassMaterial::regular()".to_string()];
+    for knob in KNOBS {
+        let value = (knob.get)(material);
+        match knob.name {
+            "tint" | "tint lightness" => {}
+            "blur" | "bezel" | "refraction" | "glint width" | "edge width" | "merge" => {
+                lines.push(format!(".{}(px({value:.2}))", knob.name.replace(' ', "_")))
+            }
+            name => lines.push(format!(".{}({value:.3})", name.replace(' ', "_"))),
+        }
+    }
+    lines.push(format!(
+        ".tint(hsla({:.3}, {:.3}, {:.3}, {:.3}))",
+        tint.h, tint.s, tint.l, tint.a
+    ));
+    lines.join("\n    ")
 }
 
 fn centered(center: Point<Pixels>, extent: gpui::Size<Pixels>, scale: f32) -> Bounds<Pixels> {

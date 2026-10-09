@@ -559,6 +559,17 @@ so a centred or pointer-placed menu lands on the same cells. What differs: a sec
 window does not see the menu, and a status-line window menu for a window the client is not showing
 opens over the current window. Registry: `menus.client-owned`.
 
+## `clear-on-attach` in the desktop client (2026-10-09)
+
+tmux 3.8 adds the server flag `clear-on-attach` (on): `tty_start_tty` enters the alternate screen
+and clears it, and with the flag off it makes the whole screen the scroll region, moves to the last
+row and scrolls one more line than the screen holds, so what the terminal showed before the attach
+stays in its scrollback; `tty_stop_tty` then clears instead of leaving the alternate screen. zz's
+raw TUI does the same from the option it reads in the server hello and on resume
+(`crates/zz-tui/src/tty.rs`). The desktop client draws into its own window and has no host
+terminal, no alternate screen and no scrollback to keep, so the flag has nothing to change there
+and the GUI ignores it.
+
 ## `display-panes` argument blocks
 
 The `display-panes` member of the shared commands-or-string rule closed on 2026-08-28 without a wire

@@ -108,6 +108,7 @@ enum TimerKey {
     Diagnostics,
     CopyRefresh,
     ClockMode,
+    StatusCycle,
     Callback(u64),
     #[cfg(unix)]
     Shutdown,
@@ -129,6 +130,7 @@ enum Expiry {
     Diagnostics,
     CopyRefresh,
     ClockMode,
+    StatusCycle,
     Callback(u64),
     #[cfg(unix)]
     Shutdown,
@@ -215,7 +217,12 @@ struct ClientTimers {
 
 impl ClientTimers {
     fn sync(&mut self, shared: &Shared, deadlines: &mut Deadlines, now: Instant) {
+        let animating = !shared.status.lock().animating_clients().is_empty();
         let inner = shared.inner.lock();
+        let animating = animating
+            || inner
+                .border_cycle
+                .load(std::sync::atomic::Ordering::Relaxed);
         let intervals = Shared::status_timer_sessions(&inner)
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -272,6 +279,12 @@ impl ClientTimers {
                 Expiry::ClockMode,
                 clock_mode_timer_needed(&inner),
                 duration_to_next_second(),
+            ),
+            (
+                TimerKey::StatusCycle,
+                Expiry::StatusCycle,
+                animating,
+                crate::status::STATUS_CYCLE_PERIOD,
             ),
             (
                 TimerKey::Diagnostics,
@@ -498,7 +511,10 @@ impl LoopTimers {
                         self.clients.peer_running = shared.start_peer_scan(&self.completion_sender);
                     }
                 }
-                Expiry::Monitors | Expiry::CopyRefresh | Expiry::ClockMode => {
+                Expiry::Monitors
+                | Expiry::CopyRefresh
+                | Expiry::ClockMode
+                | Expiry::StatusCycle => {
                     recurring_due = true;
                     shared.run_timer_expiry(expiry, now);
                 }
@@ -824,6 +840,20 @@ impl Shared {
             }
             Expiry::ClockMode => {
                 if clock_mode_timer_needed(&self.inner.lock()) {
+                    self.publish_mux_snapshots();
+                }
+            }
+            Expiry::StatusCycle => {
+                let clients = self.status.lock().animating_clients();
+                if !clients.is_empty() {
+                    self.refresh_status_filtered(None, Some(&clients));
+                }
+                if self
+                    .inner
+                    .lock()
+                    .border_cycle
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                {
                     self.publish_mux_snapshots();
                 }
             }

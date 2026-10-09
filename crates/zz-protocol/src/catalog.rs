@@ -632,10 +632,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("copy-mode", "[-dekHMqSu] [-s src-pane] [-t target-pane]"),
     (
-        "display-message",
-        "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
-    ),
-    (
         "join-pane",
         "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
     ),
@@ -2353,7 +2349,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-message",
         aliases: &["display"],
         description: "Display or print a formatted message",
-        usage: "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+        usage: "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
         options: &[
             CommandOptionSpec::flag("-p", "print the message"),
             CommandOptionSpec::flag("-C", "keep terminal updates flowing while it shows"),
@@ -2369,7 +2365,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
                 "-I",
                 "write the caller's standard input into the target empty pane",
             ),
-            CommandOptionSpec::unsupported_flag("-j"),
+            CommandOptionSpec::flag("-j", "parse the message as JSON and print it compacted"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -3245,8 +3241,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 309), ("optional", 8), ("required", 234)])
         );
-        assert_eq!((supported, unsupported), (525, 26));
-        assert_eq!(usage_overrides.len(), 25);
+        assert_eq!((supported, unsupported), (526, 25));
+        assert_eq!(usage_overrides.len(), 24);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

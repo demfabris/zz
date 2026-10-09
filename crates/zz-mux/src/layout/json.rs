@@ -2,7 +2,7 @@ const ERROR_CONTEXT: usize = 8;
 const PARSE_DEPTH_MAX: usize = 200;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum Json<'a> {
+pub(crate) enum Json<'a> {
     String(&'a str),
     Number(i64),
     Boolean(bool),
@@ -72,6 +72,49 @@ impl<'a> Json<'a> {
             _ => unreachable!(),
         }
     }
+
+    pub(crate) fn to_json(&self) -> String {
+        let mut out = String::new();
+        self.append(&mut out);
+        out
+    }
+
+    fn append(&self, out: &mut String) {
+        match self {
+            Self::String(value) => {
+                out.push('"');
+                out.push_str(value);
+                out.push('"');
+            }
+            Self::Number(value) => out.push_str(&value.to_string()),
+            Self::Boolean(value) => out.push_str(if *value { "true" } else { "false" }),
+            Self::Object(fields) => {
+                let mut sorted = fields.iter().collect::<Vec<_>>();
+                sorted.sort_by_key(|(key, _)| *key);
+                out.push('{');
+                for (index, (key, value)) in sorted.into_iter().enumerate() {
+                    if index != 0 {
+                        out.push(',');
+                    }
+                    out.push('"');
+                    out.push_str(key);
+                    out.push_str("\":");
+                    value.append(out);
+                }
+                out.push('}');
+            }
+            Self::Array(members) => {
+                out.push('[');
+                for (index, member) in members.iter().enumerate() {
+                    if index != 0 {
+                        out.push(',');
+                    }
+                    member.append(out);
+                }
+                out.push(']');
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -94,7 +137,7 @@ struct Token {
     len: usize,
 }
 
-pub(super) fn parse(input: &str) -> Result<Json<'_>, String> {
+pub(crate) fn parse(input: &str) -> Result<Json<'_>, String> {
     parse_within(input, PARSE_DEPTH_MAX)
 }
 
@@ -425,6 +468,25 @@ mod tests {
         for (input, expected) in cases {
             let result = parse(input).err().unwrap_or_default();
             assert_eq!(result, expected, "{input}");
+        }
+    }
+
+    #[test]
+    fn to_json_sorts_keys_and_keeps_escapes_like_json_to_string() {
+        let cases = [
+            ("{}", "{}"),
+            (
+                " { \"b\" : 2 , \"a\":\"x\\ny\", \"B\":true } ",
+                "{\"B\":true,\"a\":\"x\\ny\",\"b\":2}",
+            ),
+            (
+                "{\"L\":[{\"z\":-0,\"y\":false},{}],\"V\":2}",
+                "{\"L\":[{\"y\":false,\"z\":0},{}],\"V\":2}",
+            ),
+            ("{\"u\":\"\\u00e9\"}", "{\"u\":\"\\u00e9\"}"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(parse(input).unwrap().to_json(), expected, "{input}");
         }
     }
 

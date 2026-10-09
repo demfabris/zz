@@ -362,3 +362,55 @@ fn a_blocked_monitor_hook_does_not_delay_subscription_deadlines() {
         thread::sleep(Duration::from_millis(1));
     }
 }
+
+#[test]
+fn animated_status_and_border_formats_arm_the_cycle_deadline() {
+    let (shared, mut context, _client, _poll, waker, mut timers) = fixture();
+    model(
+        &shared,
+        &mut context,
+        &["set", "-g", "status-interval", "0"],
+    );
+    shared.refresh_status();
+    sync(&shared, &mut timers, &waker);
+    assert!(timers.deadlines.get(TimerKey::StatusCycle).is_none());
+
+    model(
+        &shared,
+        &mut context,
+        &["set", "-g", "status-left", "#{A:a,b}"],
+    );
+    shared.refresh_status();
+    sync(&shared, &mut timers, &waker);
+    assert!(timers.deadlines.get(TimerKey::StatusCycle).is_some());
+
+    model(
+        &shared,
+        &mut context,
+        &["set", "-g", "status-left", "#{A:a}"],
+    );
+    shared.refresh_status();
+    sync(&shared, &mut timers, &waker);
+    assert!(timers.deadlines.get(TimerKey::StatusCycle).is_none());
+
+    model(
+        &shared,
+        &mut context,
+        &["set", "-g", "pane-border-status", "top"],
+    );
+    model(
+        &shared,
+        &mut context,
+        &["set", "-g", "pane-border-format", "#{A:x,y}"],
+    );
+    shared.publish_mux_snapshots();
+    assert!(
+        shared
+            .inner
+            .lock()
+            .border_cycle
+            .load(std::sync::atomic::Ordering::Relaxed)
+    );
+    sync(&shared, &mut timers, &waker);
+    assert!(timers.deadlines.get(TimerKey::StatusCycle).is_some());
+}

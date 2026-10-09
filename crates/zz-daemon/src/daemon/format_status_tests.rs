@@ -1312,6 +1312,7 @@ fn completed_status_shares_internal_output_and_keeps_wire_and_mode_updates_indep
         line_numbers: 0,
         line_number_style: String::new(),
         current_line_number_style: String::new(),
+        current_line_style: String::new(),
     }];
     let updated = renderer
         .republish_modes(request.client, modes.clone())
@@ -1613,4 +1614,28 @@ fn status_dependencies_capture_only_rows_that_are_rendered() {
             "{status}"
         );
     }
+}
+
+#[test]
+fn an_animated_status_line_is_redrawn_on_every_cycle_frame_and_bypasses_the_cache() {
+    let (_, _, request) = completed_request("#{A:a,b}");
+    let mut renderer = StatusRenderer::default();
+    let first = renderer.render_forced_at(&request, 1_700_000_000);
+    assert!(matches!(first.left.as_str(), "a" | "b"), "{first:?}");
+    assert_eq!(
+        renderer.animating_clients(),
+        BTreeSet::from([request.client])
+    );
+    assert!(renderer.take_animation_started());
+    assert!(!renderer.take_animation_started());
+    let expansions = renderer.expansions;
+    std::thread::sleep(crate::status::STATUS_CYCLE_PERIOD + std::time::Duration::from_millis(20));
+    let second = renderer.render_forced_at(&request, 1_700_000_000);
+    assert!(matches!(second.left.as_str(), "a" | "b"), "{second:?}");
+    assert_eq!(renderer.expansions, expansions + 1);
+
+    let (_, _, still) = completed_request("#{A:a}");
+    assert_eq!(renderer.render_forced_at(&still, 1_700_000_000).left, "a");
+    assert!(renderer.animating_clients().is_empty());
+    assert!(!renderer.take_animation_started());
 }

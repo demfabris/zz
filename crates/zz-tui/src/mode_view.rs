@@ -131,6 +131,19 @@ pub(crate) fn line_number_segment(
     }
 }
 
+pub(crate) fn current_line(
+    mode: &ModePresentation,
+    viewport: &TerminalViewport,
+    theme: &ThemeColours,
+) -> Option<(u16, TmuxStyle)> {
+    let style = resolved_style(&mode.current_line_style, theme)?;
+    let cursor = viewport
+        .overlays
+        .iter()
+        .find(|overlay| overlay.kind() == OverlayKind::CopyCursor)?;
+    Some((cursor.row, style))
+}
+
 pub(crate) fn resolved_style(value: &str, theme: &ThemeColours) -> Option<TmuxStyle> {
     if value.is_empty() {
         return None;
@@ -344,6 +357,7 @@ mod tests {
             line_numbers: 0,
             line_number_style: String::new(),
             current_line_number_style: String::new(),
+            current_line_style: String::new(),
         }
     }
 

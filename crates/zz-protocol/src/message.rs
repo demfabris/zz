@@ -232,10 +232,11 @@ pub enum MuxOptionKey {
     FocusFollowsMouse,
     ExtendedKeys,
     FocusEvents,
+    ClearOnAttach,
 }
 
 impl MuxOptionKey {
-    pub const ALL: [Self; 20] = [
+    pub const ALL: [Self; 21] = [
         Self::Prefix,
         Self::ModeKeys,
         Self::HistoryLimit,
@@ -256,6 +257,7 @@ impl MuxOptionKey {
         Self::FocusFollowsMouse,
         Self::ExtendedKeys,
         Self::FocusEvents,
+        Self::ClearOnAttach,
     ];
 
     #[must_use]
@@ -281,6 +283,7 @@ impl MuxOptionKey {
             Self::FocusFollowsMouse => "focus-follows-mouse",
             Self::ExtendedKeys => "extended-keys",
             Self::FocusEvents => "focus-events",
+            Self::ClearOnAttach => "clear-on-attach",
         }
     }
 
@@ -307,6 +310,7 @@ impl MuxOptionKey {
             "focus-follows-mouse" => Some(Self::FocusFollowsMouse),
             "extended-keys" => Some(Self::ExtendedKeys),
             "focus-events" => Some(Self::FocusEvents),
+            "clear-on-attach" => Some(Self::ClearOnAttach),
             _ => None,
         }
     }
@@ -327,7 +331,7 @@ impl MuxOptionKey {
             | Self::ExtendedKeys
             | Self::FocusEvents => "off".to_owned(),
             Self::HistoryTrickle => "2000".to_owned(),
-            Self::Mouse => "on".to_owned(),
+            Self::Mouse | Self::ClearOnAttach => "on".to_owned(),
             Self::EscapeTime => "10".to_owned(),
             Self::Prefix2 => "None".to_owned(),
             Self::AgentCommand => DEFAULT_AGENT_COMMAND.to_owned(),
@@ -582,6 +586,8 @@ pub struct ModePresentation {
     pub line_number_style: String,
     #[serde(deserialize_with = "deserialize_status_text")]
     pub current_line_number_style: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub current_line_style: String,
 }
 
 fn deserialize_mode_presentations<'de, D>(

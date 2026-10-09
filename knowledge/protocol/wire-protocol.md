@@ -848,6 +848,14 @@ history. `ModePresentation` appends
 with an empty `position`. `MouseBindings` grows the `Empty` mouse location after `StatusDefault`,
 which moves every `ControlN` bit up by one kind row.
 
+v108 also carries the rest of tmux 3.8's formats and options (catch-up item
+`pin.formats-options-2`). `MuxOptionKey` appends `ClearOnAttach` after `FocusEvents`: the server
+`clear-on-attach` flag, which the raw TUI reads when it takes the terminal (alternate screen and a
+clear when on; the old screen scrolled into the terminal's history when off). `ModePresentation`
+appends `current_line_style` after `current_line_number_style`: the expanded
+`copy-mode-current-line-style`, empty while the option is `default`, which the raw TUI lays over
+the copy cursor's row.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

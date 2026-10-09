@@ -182,6 +182,12 @@ pub(crate) fn handle(
             crate::tty::note_secondary_device_attributes(kind);
             Ok(InputOutcome::None)
         }
+        TerminalEvent::SynchronizedOutput(supported) => {
+            if supported {
+                crate::tty::note_synchronized_output();
+            }
+            Ok(InputOutcome::None)
+        }
         TerminalEvent::ExtendedDeviceAttributes(name) => {
             crate::tty::note_extended_device_attributes(&name);
             Ok(InputOutcome::None)
@@ -2329,6 +2335,7 @@ mod tests {
                 line_numbers: 1,
                 line_number_style: String::new(),
                 current_line_number_style: String::new(),
+                current_line_style: String::new(),
             });
         let content = crate::layout::Rect {
             x: 0,

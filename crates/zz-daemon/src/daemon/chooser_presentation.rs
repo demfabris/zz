@@ -137,7 +137,9 @@ const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
     ),
     concat!(
         "              #[#{E:tree-mode-border-style},acs]x#[default] ",
-        window_client_feature!("usstyle")
+        window_client_feature!("usstyle"),
+        " ",
+        window_client_feature!("utf8")
     ),
     "#[#{E:tree-mode-border-style},acs]qqqqqqqqqqqqqqn#{R:q,#{window_width}}#[default]",
     concat!(
@@ -151,15 +153,17 @@ const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
     ),
     concat!(
         "#[fg=themelightgrey]set-clipboard #[#{E:tree-mode-border-style},acs]x#[default] ",
-        "#{?#{!=:#{set-clipboard},off},#{?#{I/f:clipboard},,",
+        "#{?#{!=:#{set-clipboard},off},#{?#{I/c:Ms},,",
         "#[fg=themered]}#{set-clipboard},#[fg=themelightgrey]off} ",
-        "#{?#{I/f:clipboard},,#[align=right]unavailable: [Ms] missing}"
+        "#{?#{I/c:Ms},,#[align=right]unavailable: [Ms] ",
+        "#{?clipboard_invalid,invalid,missing}}"
     ),
     concat!(
         "#[fg=themelightgrey]get-clipboard #[#{E:tree-mode-border-style},acs]x#[default] ",
-        "#{?#{!=:#{get-clipboard},off},#{?#{I/f:clipboard},,",
+        "#{?#{!=:#{get-clipboard},off},#{?#{I/c:Ms},,",
         "#[fg=themered]}#{get-clipboard},#[fg=themelightgrey]off} ",
-        "#{?#{I/f:clipboard},,#[align=right]unavailable: [Ms] missing}"
+        "#{?#{I/c:Ms},,#[align=right]unavailable: [Ms] ",
+        "#{?clipboard_invalid,invalid,missing}}"
     ),
     concat!(
         "#[fg=themelightgrey]focus-events  #[#{E:tree-mode-border-style},acs]x#[default] ",
@@ -321,12 +325,22 @@ fn client_info_lines(inner: &ServerState, client: ClientId) -> Vec<String> {
     context.config_files.clone_from(&inner.config_files);
     context.format_now = i64::try_from(unix_timestamp()).ok().filter(|now| *now != 0);
     let mut facts = borrowed_format_hook_facts(inner);
-    facts.seed.client = Some(client_format_facts(inner, client, session_id));
+    let client_facts = client_format_facts(inner, client, session_id);
+    let clipboard_invalid = client_facts
+        .terminal
+        .as_ref()
+        .is_some_and(|terminal| terminal.clipboard_invalid());
+    let variables = BTreeMap::from([(
+        "clipboard_invalid".to_owned(),
+        u8::from(clipboard_invalid).to_string(),
+    )]);
+    facts.seed.client = Some(client_facts);
     WINDOW_CLIENT_INFO_LINES
         .iter()
         .map(|line| {
             let line = line.replace(TREE_MODE_BORDER_STYLE_FORMAT, TREE_MODE_BORDER_STYLE);
-            let mut hooks = DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
+            let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables)
+                .with_option_engine(&inner.engine);
             expand_format_values(&line, &context, &mut hooks)
         })
         .collect()

@@ -380,7 +380,6 @@
         "crates/zz-protocol/src/catalog.rs",
         "crates/zz-daemon/src",
         "knowledge/protocol/wire-protocol.md",
-        "knowledge/tmux/divergences.md",
         "compat/scenarios",
         "compat/tmux-gaps.json"
       ],
@@ -388,16 +387,17 @@
         "pane.floating-model"
       ],
       "accept": [
-        "compat/scenarios/floating-panes.txt matches tmux 3.8 under --strict-geometry, printing list-panes geometry, pane_z, floating, active and modal flags after new-pane x2, break-pane -W -x 20 -y 6 -X 10 -Y 3, move-pane -P/-L/-z, resize-pane -x -y on a float, split-window on a float, select-pane raise, swap-pane float<->tiled, self join-pane, kill of a float, resize-window -x 30 -y 10.",
+        "compat/scenarios/floating-panes.txt matches tmux 3.8 under --strict-geometry, printing list-panes geometry, pane_z, floating, active and modal flags and #{window_layout} after: two new-pane, new-pane with the first of two tiles active, new-pane -t a float, break-pane -W -x 20 -y 6 -X 10 -Y 3, move-pane -P bottom-right, move-pane -L 2, move-pane -z 1, resize-pane -x 30 -y 8 on a float, split-window -h on a float, select-pane of the back float, swap-pane float with tiled, self join-pane, kill of a float, select-layout even-horizontal, resize-window -x 30 -y 10.",
+        "In [A, (B / C)], break-pane -W -t A then join-pane -s A -t A restores A beside the whole B/C column with 3.8's geometry.",
         "Every error string in the design's commands table answers verbatim.",
-        "Zoom: new-pane -A keeps window_zoomed_flag and shows in window_visible_layout; plain new-pane unzooms; killing the -A float keeps the zoom.",
-        "Modal: new-pane -O pins the active pane, break/join/swap answer 'pane is modal', a second -O errors, killing it restores the previous pane; window_modal_pane and window flag O match 3.8.",
-        "window_layout for a window with tiled splits plus two floats equals 3.8's v2 string (floating leaves placed where 3.8 places them, after their origin cell) and select-layout of it restores the floats.",
-        "display-popup: two attached clients both get the modal in their snapshots, no EventPayload::Popup is sent, -E closes on exit, a command client's 'display-popup -E \"exit 3\"' exits 3, -C kills a new-pane -O modal, a second popup changes nothing, no u64::MAX pane id remains in zz-daemon.",
-        "A float's PTY is sx x sy after create, resize and clamp; client size reports for floats change nothing.",
-        "A round-trip test pins the appended snapshot and delta fields; one move-pane -X emits exactly one TreeOp::WindowLayout.",
-        "The last-tiled-pane rule holds both ways; choose-tree -O z orders panes by pane_z.",
-        "pane.floating-model turns adopted with items closing as proved, the recorded divergences are in divergences.md, just compat check passes."
+        "Zoom: after resize-pane -Z on a tile, new-pane -A keeps window_zoomed_flag 1 with the float in window_visible_layout; a plain new-pane from that over-zoom float keeps the window zoomed on the new pane; a plain new-pane from a tile unzooms; killing the -A float keeps the zoom; resize-pane -Z on a 20x6 float gives it the window's size and unzoom gives back 20x6; all as 3.8.",
+        "Modal: after new-pane -O, select-pane elsewhere keeps it active, break-pane/join-pane/swap-pane answer 'pane is modal', a second -O errors, killing it restores the previous pane, killing the previous pane first makes the close fall back as window_lost_pane does; window_modal_pane and window flag O match 3.8.",
+        "select-layout with each window_layout string from the scenario restores the same tree and floats.",
+        "No tiled pane: break-pane -W of the sole tile, its kill, and a plain break-pane or join-pane of it into another window each leave a window of floats whose list-panes and window_layout match 3.8; a self join-pane there tiles the float to the whole window; the window closes with its last pane; the snapshot carries LayoutNode::Empty.",
+        "Daemon tests: with two attached clients, display-popup -E 'sleep 1' puts one modal in both snapshots, sends no EventPayload::Popup, and closes on exit; from a command client display-popup -E 'exit 3' exits 3; display-popup -C kills a new-pane -O modal; a second display-popup leaves the pane count alone; display-popup \"\" runs default-command (or the shell) in a live modal, not an empty pane; no u64::MAX pane id remains in crates/zz-daemon/src.",
+        "PTY sizes follow the allocation rule (float, zoomed float, hidden float, clamp), and a client size report for a float changes nothing.",
+        "A round-trip test pins the appended snapshot, delta, LayoutNode::Empty and MouseKey.press encodings; one move-pane -X emits exactly one TreeOp::WindowLayout.",
+        "choose-tree -O z lists panes in pane_z order; pane.floating-model turns adopted with each item closing as proved (option:editor in float.keys, nested-attach-in-popup keeps its fixture requirement); just compat check passes."
       ],
       "branch": null,
       "sha": null,
@@ -425,10 +425,10 @@
         "pane.floating-model"
       ],
       "accept": [
-        "compat/tui-floating.sh matches tmux 3.8 cell for cell: overlapping floats over a split before and after a raise, a -T float with pane-border-status top-floating, pane-border-lines none, display-popup over a zoomed pane.",
+        "compat/tui-floating.sh matches tmux 3.8 cell for cell: overlapping floats over a vertical split before and after select-pane raises the back one, a -T float under pane-border-status top-floating, pane-border-lines none, display-popup over a zoomed pane, a window with no tiled pane and two floats.",
         "Same fixture: a click on an overlap activates the front float; a click outside a modal does nothing, and kills a new-pane -O -C modal.",
         "A browser pane covered by a float has no kitty placement while covered.",
-        "Unit tests cover the cell-to-pixel float rect helper (with clipping) and the drag commit commands; the lane report has desktop and web screenshots of a float, a modal and an over-zoom float.",
+        "A unit test covers the shared cell-to-pixel rect helper (clipping included) and the drag commit commands: a move sends move-pane -X -Y, a right or bottom edge resize sends resize-pane -x -y, a left, top or top-left corner resize sends resize-pane -x -y ; move-pane -X -Y as one command list whose result is the previewed rectangle; the lane report has desktop and web screenshots of a float, a modal, an over-zoom float and a window with no tiled pane.",
         "A zz-client test shows a focused modal with capture_keys sends the prefix key to the pane.",
         "rg 'PopupState|PopupAction|EventPayload::Popup' finds nothing under crates/zz, crates/zz-tui, crates/zz-client or clients/."
       ],
@@ -449,6 +449,7 @@
         "crates/zz-protocol/src/key.rs",
         "crates/zz-mux/src",
         "crates/zz-daemon/src",
+        "crates/zz-tui/src/input.rs",
         "compat/scenarios/smoke",
         "compat/tui-mouse.sh",
         "compat/tmux-gaps.json"
@@ -461,7 +462,7 @@
       "accept": [
         "list-keys answers 3.8's lines for prefix * @ g Tab BTab and root C-MouseDrag1Pane, C-MouseDrag1Empty, M-MouseDrag1Pane, M-MouseDrag1Border, MouseDown1Control7; list-keys -T move keeps its 19 rows.",
         "Attached TUI: prefix * creates a float, prefix g 1 moves it top-left, prefix @ floats and tiles, pane menu f/t/Move work, with geometry equal to tmux.",
-        "compat/tui-mouse.sh: C-drag creates, M-drag moves, border drag resizes, top-border drag moves, matching tmux; flag:move-pane:-M closes in mouse.bound-context.",
+        "compat/tui-mouse.sh, geometry equal to tmux: C-drag from a pane and from empty space creates a float spanning press to pointer (the TUI sends MouseKey.press), M-drag moves, border drag resizes, top-border drag moves, and each gesture's later reports drive the same pane until release; flag:move-pane:-M closes in mouse.bound-context.",
         "With editor set to a script that appends a line, choose-buffer e opens a centred 90% modal and exit 0 updates show-buffer, non-zero leaves it; customize-mode e edits a string option the same way.",
         "keys.move-table closes; keys.default-prefix drops * @ g Tab BTab; option:editor closes."
       ],

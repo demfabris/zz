@@ -191,15 +191,12 @@ unattached command or initial Control reports `no current client`; initial Contr
 arguments` before its overlay no-op and returns a flag-1 `%error`; EOF after that frame exits 1.
 Interactive menu ordering remains unchanged. The daemon strips the structural
 wrapper only from a typed action before its fresh selection parse; a quoted brace action stays
-literal. `display-panes` accepts an optional string or typed template, while `-d` and `-t` values
-remain strings. Every typed child constructs before parent option-type or arity validation. Stored
-bindings retain canonical child readback across aliases and prefixes.
-Daemon targetless routing resolves the current attached client before duration validation: no
-attached client reports `no current client`, while an ordinary Command uses an available attached
-Interactive client. The strict 22-check fixture covers the exact parser and routing boundary. The
-custom selection template remains a runtime gap because mux execution rejects the positional value
-instead of substituting the selected `%pane` for `%%%` and executing with the original queue state;
-tmux's omitted template is `select-pane -t "%%%"`. `choose-buffer` and `choose-tree` each accept
+literal. `display-panes` accepts an optional string or typed template, while `-d`, `-s` and `-t`
+values remain strings. Every typed child constructs before parent option-type or arity validation.
+Stored bindings retain canonical child readback across aliases and prefixes.
+In 3.8 `-t` is a target pane and `-s` a source window, both resolved before `-d`; `-b` is gone and
+the strict 23-check fixture covers the parser and those errors. The mode runs the template with
+the chosen `%pane` for `%%%`; tmux's omitted template is `select-pane -t "%%%"`. `choose-buffer` and `choose-tree` each accept
 zero or one string-or-typed template while `-F`, `-f`, `-K`, `-O`, and `-t` values remain strings.
 Typed children construct before parent type, arity, target, or effects. Typed templates store their
 constructed canonical text; string templates stay raw until selection. Both paths substitute the

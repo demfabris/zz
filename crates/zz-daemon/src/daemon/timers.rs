@@ -94,7 +94,6 @@ pub(super) struct PeerProbe {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum TimerKey {
-    DisplayPanes(ClientId),
     KeyTable(ClientId),
     Silence(WindowId),
     ClientMessage(ClientId),
@@ -116,7 +115,6 @@ enum TimerKey {
 
 #[derive(Clone, Copy)]
 enum Expiry {
-    DisplayPanes(DisplayPanesDeadline),
     KeyTable(ClientId),
     Silence(SilenceDeadline),
     ClientMessage(ClientMessageDeadline),
@@ -141,7 +139,6 @@ pub(super) enum TimerInput {
         deadline: Option<Instant>,
         callback: Box<dyn FnOnce() + Send>,
     },
-    DisplayPanes(DisplayPanesDeadlineCommand),
     KeyTable(KeyTableDeadlineCommand),
     Silence(SilenceDeadlineCommand),
     ClientMessage(ClientMessageDeadlineCommand),
@@ -716,30 +713,6 @@ impl Shared {
                     .store(false, Ordering::Release);
                 self.refresh_status_notifications();
             }
-            TimerInput::DisplayPanes(DisplayPanesDeadlineCommand::Schedule(deadline)) => {
-                if self.read_client(deadline.client, |c| {
-                    c.and_then(|c| c.display_panes.as_ref())
-                        .is_some_and(|overlay| {
-                            overlay.token == deadline.token
-                                && overlay.deadline == Some(deadline.deadline)
-                        })
-                }) {
-                    deadlines.insert(
-                        TimerKey::DisplayPanes(deadline.client),
-                        deadline.deadline,
-                        Expiry::DisplayPanes(deadline),
-                    );
-                }
-            }
-            TimerInput::DisplayPanes(DisplayPanesDeadlineCommand::Cancel { client, token }) => {
-                let key = TimerKey::DisplayPanes(client);
-                if matches!(
-                    deadlines.get(key),
-                    Some(Expiry::DisplayPanes(deadline)) if deadline.token == token
-                ) {
-                    deadlines.remove(key);
-                }
-            }
             TimerInput::KeyTable(KeyTableDeadlineCommand::Schedule(client, deadline)) => {
                 if self.read_client(client, |c| c.and_then(|c| c.key_table_deadline)) != deadline {
                     return;
@@ -826,9 +799,6 @@ impl Shared {
     fn expire_timer(self: &Arc<Self>, expiry: Expiry, now: Instant) {
         match expiry {
             Expiry::Callback(_) => unreachable!(),
-            Expiry::DisplayPanes(deadline) => {
-                self.expire_display_panes(deadline, now);
-            }
             Expiry::KeyTable(client) => self.sync_key_table(client, false),
             Expiry::Silence(deadline) => self.expire_window_silence(deadline, now),
             Expiry::ClientMessage(deadline) => self.expire_client_message(deadline, now),

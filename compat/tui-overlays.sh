@@ -371,12 +371,12 @@ client_on_both() {
   done
 }
 PIN_DISPLAY_PANES_MODE=0
-DISPLAY_PANES_MODE=same
-DISPLAY_PANES_OWNER=gap:pin.display-panes
-DISPLAY_PANES_REASON='PIN 3.8, gap:pin.display-panes: 3.8 made display-panes a pane mode (window-panes.c) with no -b and a target pane for -t, so the pin draws its labels as a mode of the target pane while zz still raises the d77c9dc6 client overlay'
+ZOOM_REFLOW_MODE=same
+ZOOM_REFLOW_OWNER=gap:terminal.zoom-reflow
+ZOOM_REFLOW_REASON='gap:terminal.zoom-reflow (accepted engine limit, fabrico 2026-09-18): 3.8 display-panes zooms its pane, and libghostty and the pin reflow a pane whose history holds a wrapped line differently on a width change (resize-pane -Z twice shows the same split), so the pane content after the mode, and the live copy the mode redraws at a new size, differ while the mode screen itself is asserted'
 display_panes_on_both() {
   if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
-    side_command zz display-panes -b -d 0 -t "$(client_name zz)" || die 'zz refused display-panes'
+    side_command zz display-panes -d 0 || die 'zz refused display-panes'
     side_command tmux display-panes -d 0 || die 'tmux refused display-panes'
   else
     client_on_both display-panes -b -d 0 -t CLIENT
@@ -870,12 +870,13 @@ display_panes_case() {
   wait_for 'the zz labels' screen_differs_from zz "$zz_before"
   wait_for 'the tmux labels' screen_differs_from tmux "$tmux_before"
   settle_both MARK-panes 'the pane labels'
-  verdict panes-shown "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-shown same
   resize_both_to 80 30
   settle_both MARK-panes 'the pane labels at 80x30'
-  verdict panes-resized "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
-  [ "$PIN_DISPLAY_PANES_MODE" -eq 0 ] ||
-    tmux_inner_command copy-mode -q -t "=$INNER_SESSION:0.0" || die 'tmux refused copy-mode -q'
+  verdict panes-resized "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
+  if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
+    run_on_both copy-mode -q -t "=$INNER_SESSION:0.0"
+  fi
   resize_both_to 80 24
   mark_both panesback
   zz_before="$(capture_screen zz)"
@@ -888,7 +889,7 @@ display_panes_case() {
   wait_for 'zz selected pane 1' active_pane_index_is zz 1
   wait_for 'tmux selected pane 1' active_pane_index_is tmux 1
   settle_both MARK-panes 'the digit selection'
-  verdict panes-selected same
+  verdict panes-selected "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
 
   mark_both panesz
   zz_before="$(capture_screen zz)"
@@ -899,7 +900,7 @@ display_panes_case() {
   settle_both MARK-panesz 'the pane labels'
   type_on_both Z
   settle_both MARK-panesz 'the labels closed by a non-pane key'
-  verdict panes-closed-by-key "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-closed-by-key "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
   [ "$PIN_DISPLAY_PANES_MODE" -eq 0 ] || type_on_both Enter
   DIVIDER_RULE=0
 }
@@ -992,12 +993,12 @@ odd_size_case() {
   wait_for 'the zz coloured labels' screen_differs_from zz "$zz_before"
   wait_for 'the tmux coloured labels' screen_differs_from tmux "$tmux_before"
   settle_both MARK-colours 'the coloured pane labels'
-  verdict panes-coloured-shown "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-coloured-shown same
   type_on_both 1
   wait_for 'zz selected pane 1 from the coloured labels' active_pane_index_is zz 1
   wait_for 'tmux selected pane 1 from the coloured labels' active_pane_index_is tmux 1
   settle_both MARK-colours 'the coloured labels closed by a digit'
-  verdict panes-coloured-selected same
+  verdict panes-coloured-selected "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
   DIVIDER_RULE=0
 }
 
@@ -1011,7 +1012,7 @@ wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 if ! tmux_inner_command -f /dev/null start-server \; list-commands display-panes 2>/dev/null |
   grep -q -- '-b'; then
   PIN_DISPLAY_PANES_MODE=1
-  DISPLAY_PANES_MODE=record
+  ZOOM_REFLOW_MODE=record
 fi
 
 run_cases() {
@@ -1186,27 +1187,23 @@ run_self_check() {
   type_on_both Escape
   both_screen_lacks OVERLAY-MENU 'the equivalent menu cancelled'
 
-  if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
-    printf 'note  self-check display-panes colour skipped: %s\n' "$DISPLAY_PANES_REASON"
-  else
-    CASE_LABEL='self-check display-panes colour'
-    side_command zz set-option -g display-panes-active-colour colour124 || die 'zz refused set-option'
-    run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
-    run_on_both select-pane -t "=$INNER_SESSION:0.0"
-    DIVIDER_RULE=1
-    mark_both colour
-    local zz_before tmux_before
-    zz_before="$(capture_screen zz)"
-    tmux_before="$(capture_screen tmux)"
-    display_panes_on_both
-    wait_for 'the zz one-sided labels' screen_differs_from zz "$zz_before"
-    wait_for 'the tmux one-sided labels' screen_differs_from tmux "$tmux_before"
-    settle_both MARK-colour 'the one-sided pane colour'
-    compare_rows self-check-panes-colour styled || true
-    self_check_case 'display-panes, a display-panes-active-colour only one side sets' rows
-    type_on_both Escape
-    DIVIDER_RULE=0
-  fi
+  CASE_LABEL='self-check display-panes colour'
+  side_command zz set-option -g display-panes-active-colour colour124 || die 'zz refused set-option'
+  run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  DIVIDER_RULE=1
+  mark_both colour
+  local zz_before tmux_before
+  zz_before="$(capture_screen zz)"
+  tmux_before="$(capture_screen tmux)"
+  display_panes_on_both
+  wait_for 'the zz one-sided labels' screen_differs_from zz "$zz_before"
+  wait_for 'the tmux one-sided labels' screen_differs_from tmux "$tmux_before"
+  settle_both MARK-colour 'the one-sided pane colour'
+  compare_rows self-check-panes-colour styled || true
+  self_check_case 'display-panes, a display-panes-active-colour only one side sets' rows
+  type_on_both Escape
+  DIVIDER_RULE=0
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

@@ -8673,14 +8673,14 @@ tmux set-option -g @plugin loaded
                         .iter()
                         .filter(|candidate| candidate.as_str() == line)
                         .count(),
-                    0
+                    1
                 );
                 assert_eq!(
                     guarded
                         .iter()
                         .filter(|candidate| candidate.as_str() == line)
                         .count(),
-                    1
+                    0
                 );
             }
         }

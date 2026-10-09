@@ -4578,6 +4578,7 @@ struct PendingHookEvent {
     context: ExecutionContext,
     variables: BTreeMap<String, String>,
     exclude_client: Option<ClientId>,
+    control_notified: bool,
 }
 
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
@@ -4739,6 +4740,7 @@ impl PendingHookEvent {
             name,
             context: ExecutionContext::new(Some(session), Some(window), Some(pane)),
             exclude_client: None,
+            control_notified: false,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
@@ -4768,6 +4770,7 @@ impl PendingHookEvent {
             context,
             variables,
             exclude_client: (name == "client-detached").then_some(client),
+            control_notified: false,
         }
     }
 
@@ -4776,6 +4779,7 @@ impl PendingHookEvent {
             name,
             context: ExecutionContext::new(None, None, None),
             exclude_client: None,
+            control_notified: false,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 ("hook_paste_buffer".to_owned(), buffer),
@@ -6738,7 +6742,10 @@ impl Shared {
             }
             return false;
         }
-        if !self.publish_effective_mux_options_to(client, outbound) || !outbound.is_open() {
+        if !self.publish_effective_mux_options_to(client, outbound)
+            || !self.publish_terminal_negotiation_to(client, outbound)
+            || !outbound.is_open()
+        {
             if let Some(output_id) = startup_delivery.command_output() {
                 self.retire_command_output_if_exact(client, output_id);
             }
@@ -9028,40 +9035,8 @@ impl Shared {
         state: &mut EventQueueFrame,
         event: PendingHookEvent,
     ) -> Option<InsertedQueueChild> {
-        let attached_only = matches!(
-            event.name,
-            "window-layout-changed"
-                | "window-linked"
-                | "window-unlinked"
-                | "window-renamed"
-                | "client-session-changed"
-        );
-        let mut control_variables = event.variables.clone();
-        if event.name == "client-session-changed"
-            && let Some(session) = event.context.session
-        {
-            control_variables.insert("hook_session".to_owned(), session.to_string());
-            if let Some(name) = self
-                .inner
-                .lock()
-                .engine
-                .state
-                .sessions
-                .get(&session)
-                .map(|session| session.name.clone())
-            {
-                control_variables.insert("hook_session_name".to_owned(), name);
-            }
-        }
-        if state.publish_control {
-            state.notifications.push((
-                EventPayload::HookEvent {
-                    name: event.name.to_owned(),
-                    variables: control_variables,
-                },
-                event.exclude_client,
-                attached_only,
-            ));
+        if state.publish_control && !event.control_notified {
+            state.notifications.push(self.event_control_notification(&event));
         }
         if self
             .command_item
@@ -9100,6 +9075,53 @@ impl Shared {
             guard: None,
             leaf_name: None,
         })
+    }
+
+    fn event_control_notification(
+        &self,
+        event: &PendingHookEvent,
+    ) -> (EventPayload, Option<ClientId>, bool) {
+        let attached_only = matches!(
+            event.name,
+            "window-layout-changed"
+                | "window-linked"
+                | "window-unlinked"
+                | "window-renamed"
+                | "client-session-changed"
+        );
+        let mut control_variables = event.variables.clone();
+        if event.name == "client-session-changed"
+            && let Some(session) = event.context.session
+        {
+            control_variables.insert("hook_session".to_owned(), session.to_string());
+            if let Some(name) = self
+                .inner
+                .lock()
+                .engine
+                .state
+                .sessions
+                .get(&session)
+                .map(|session| session.name.clone())
+            {
+                control_variables.insert("hook_session_name".to_owned(), name);
+            }
+        }
+        (
+            EventPayload::HookEvent {
+                name: event.name.to_owned(),
+                variables: control_variables,
+            },
+            event.exclude_client,
+            attached_only,
+        )
+    }
+
+    fn publish_event_control_notifications(&self, events: &mut [PendingHookEvent]) {
+        for event in events.iter_mut().filter(|event| !event.control_notified) {
+            let (payload, exclude_client, attached_only) = self.event_control_notification(event);
+            self.publish_to_control_clients(payload, exclude_client, attached_only);
+            event.control_notified = true;
+        }
     }
 
     fn finish_event_queue_notifications(
@@ -9205,6 +9227,7 @@ impl Shared {
         let mut activity_requeues = Vec::new();
         let mut silence_schedules = Vec::new();
         let mut monitor_silence_changed = false;
+        let mut client_terminal_changed = false;
         let mut attach = None;
         let mut detach = None;
         let mut import_tmux_config = None;
@@ -11209,6 +11232,7 @@ impl Shared {
                         }
                     }
                     MuxEffect::MonitorSilenceChanged => monitor_silence_changed = true,
+                    MuxEffect::ClientTerminalChanged => client_terminal_changed = true,
                     MuxEffect::StatusFormatsChanged { session } => match session {
                         Some(session) => {
                             status_refresh_sessions.insert(*session);
@@ -11786,6 +11810,9 @@ impl Shared {
         for pane in removed_panes {
             self.cancel_pane_files(pane);
             self.publish(EventPayload::PaneRemoved(pane));
+        }
+        if client_terminal_changed {
+            self.publish_terminal_negotiation();
         }
         if mux_options_event {
             self.publish_effective_mux_options(None);
@@ -12448,6 +12475,7 @@ impl Shared {
         if notifications_only {
             self.run_event_hooks(pending_hook_events);
         } else if let Some(queue_execution) = queue_execution {
+            self.publish_event_control_notifications(&mut pending_hook_events);
             queue_execution
                 .pending_event_hooks
                 .borrow_mut()
@@ -18185,18 +18213,10 @@ impl Shared {
                 }
                 sync_control_feed(&inner, client, &self.control_wake);
             }
-            paused.map(|paused| {
-                (
-                    inner
-                        .client(client)
-                        .and_then(|c| c.subscriber.as_ref())
-                        .cloned(),
-                    EventPayload::PaneOutputState { pane, paused },
-                )
-            })
+            paused.map(|paused| EventPayload::PaneOutputState { pane, paused })
         };
-        if let Some((Some(subscriber), payload)) = event {
-            Self::send_event(&subscriber, payload);
+        if let Some(payload) = event {
+            self.publish_to_client(client, payload);
         }
     }
 
@@ -23657,9 +23677,10 @@ impl Shared {
         client: ClientId,
         pane: PaneId,
         input: &zz_terminal::KeyInput,
+        bytes: &[u8],
     ) -> Option<u64> {
         let inner = self.inner.lock();
-        if client_active_pane(&inner, client) != Some(pane) {
+        if client_active_pane(&inner, client) != Some(pane) || inner.engine.user_key_claims(bytes) {
             return None;
         }
         plain_key_generation_locked(&inner, client, pane, input)
@@ -29128,15 +29149,17 @@ impl Shared {
         if layout_hook {
             self.publish_compact_trees();
         }
-        let message = Self::event(payload);
+        let capture_item = matches!(&payload, EventPayload::HookEvent { .. })
+            .then(|| self.command_item.as_ref().map(|item| item.lock().id))
+            .flatten();
         let subscribers = {
-            let inner = self.inner.lock();
-            inner
+            let mut inner = self.inner.lock();
+            let recipients = inner
                 .clients
                 .iter()
-                .filter_map(|(id, client)| client.subscriber.as_ref().map(|value| (id, value)))
-                .filter(|(client, _)| {
-                    inner.client(**client).and_then(|c| c.kind) == Some(ClientKind::Control)
+                .filter(|(client, state)| {
+                    state.subscriber.is_some()
+                        && inner.client(**client).and_then(|c| c.kind) == Some(ClientKind::Control)
                         && Some(**client) != exclude
                         && (!attached_only
                             || inner
@@ -29144,9 +29167,29 @@ impl Shared {
                                 .values()
                                 .any(|attached| attached.contains(client)))
                 })
-                .map(|(_, subscriber)| Arc::clone(subscriber))
-                .collect::<Vec<_>>()
+                .map(|(client, _)| *client)
+                .collect::<Vec<_>>();
+            let mut subscribers = Vec::with_capacity(recipients.len());
+            for client in recipients {
+                if let Some(item) = capture_item
+                    && let Some(capture) = inner
+                        .control_command_event_captures
+                        .get_mut(&(client, item))
+                        .and_then(|captures| captures.last_mut())
+                {
+                    capture.events.push(payload.clone());
+                    continue;
+                }
+                if let Some(subscriber) = inner.client(client).and_then(|c| c.subscriber.as_ref()) {
+                    subscribers.push(Arc::clone(subscriber));
+                }
+            }
+            subscribers
         };
+        if subscribers.is_empty() {
+            return;
+        }
+        let message = Self::event(payload);
         let Ok(encoded) = zz_protocol::encode_protocol_message(&message).map(Arc::<[u8]>::from)
         else {
             return;
@@ -29218,6 +29261,8 @@ impl Shared {
             &payload,
             EventPayload::ControlCommandGuard { .. }
                 | EventPayload::ControlCommandGuardRaw { .. }
+                | EventPayload::HookEvent { .. }
+                | EventPayload::PaneOutputState { .. }
                 | EventPayload::ControlSourceFile { .. }
                 | EventPayload::ControlCommandOutput { .. }
                 | EventPayload::ControlConfigError { .. }
@@ -30028,6 +30073,38 @@ impl Shared {
             .published_mux_options
             .replace(options);
         true
+    }
+
+    fn publish_terminal_negotiation(&self) {
+        let recipients = {
+            let mut inner = self.inner.lock();
+            let clients = inner
+                .clients
+                .iter()
+                .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| *id))
+                .collect::<Vec<_>>();
+            clients
+                .into_iter()
+                .filter_map(|client| {
+                    take_terminal_negotiation(&mut inner, client).map(|payload| (client, payload))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (client, payload) in recipients {
+            self.publish_to_client(client, payload);
+        }
+    }
+
+    fn publish_terminal_negotiation_to(
+        &self,
+        client: ClientId,
+        outbound: &Arc<OutboundMailbox>,
+    ) -> bool {
+        let mut inner = self.inner.lock();
+        let Some(payload) = take_terminal_negotiation(&mut inner, client) else {
+            return outbound.is_open();
+        };
+        outbound.enqueue_reliable(&Self::event(payload))
     }
 
     fn refresh_published_appearance(&self) {
@@ -35130,19 +35207,17 @@ struct PendingCommittedText {
 struct ClientFlagState {
     read_only: bool,
     ignore_size: bool,
-    active_pane: bool,
     no_detach_on_destroy: bool,
 }
 
 impl ClientFlagState {
     const fn is_empty(self) -> bool {
-        !self.read_only && !self.ignore_size && !self.active_pane && !self.no_detach_on_destroy
+        !self.read_only && !self.ignore_size && !self.no_detach_on_destroy
     }
 
     fn reconnect_flags(self) -> String {
         [
             ("ignore-size", self.ignore_size),
-            ("active-pane", self.active_pane),
             ("no-detach-on-destroy", self.no_detach_on_destroy),
         ]
         .into_iter()
@@ -35193,7 +35268,6 @@ impl ClientFlags {
             match flag {
                 "read-only" if !clear => state.read_only = true,
                 "ignore-size" => state.ignore_size = !clear,
-                "active-pane" => state.active_pane = !clear,
                 "no-detach-on-destroy" => state.no_detach_on_destroy = !clear,
                 _ => {}
             }
@@ -35314,6 +35388,7 @@ struct Client {
     terminal_preview: bool,
     visible_agents: Option<BTreeSet<PaneId>>,
     published_mux_options: Option<MuxOptions>,
+    published_terminal_negotiation: Option<TerminalNegotiation>,
     command_output: Option<CommandOutputSession>,
     command_streams: Option<CommandStreams>,
     subscriber: Option<Arc<OutboundMailbox>>,
@@ -40254,9 +40329,6 @@ fn format_client_flags_from_source(inner: &ClientFormatSource<'_>, client: Clien
     if requested.read_only {
         flags.push("read-only".to_owned());
     }
-    if requested.active_pane {
-        flags.push("active-pane".to_owned());
-    }
     if client_uses_utf8_from_source(inner, client) {
         flags.push("UTF-8".to_owned());
     }
@@ -40392,6 +40464,45 @@ fn client_feature_mask_from_source(inner: &ClientFormatSource<'_>, client: Clien
         features |= terminal_feature_mask(term.requested_features());
     }
     features
+}
+
+type TerminalNegotiation = (Vec<String>, Vec<String>);
+
+fn client_terminal_negotiation(
+    inner: &ServerState,
+    client: ClientId,
+) -> Option<TerminalNegotiation> {
+    let source = ClientFormatSource::from_inner(inner);
+    client_colour_count_from_source(&source, client)?;
+    let features = terminal_features_list(client_feature_mask_from_source(&source, client));
+    Some((
+        features
+            .split(',')
+            .filter(|feature| !feature.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        inner.engine.user_keys_option(),
+    ))
+}
+
+fn take_terminal_negotiation(inner: &mut ServerState, client: ClientId) -> Option<EventPayload> {
+    let negotiation = client_terminal_negotiation(inner, client)?;
+    if inner
+        .client(client)
+        .and_then(|c| c.published_terminal_negotiation.as_ref())
+        == Some(&negotiation)
+    {
+        return None;
+    }
+    inner
+        .client_entry(client)
+        .published_terminal_negotiation
+        .replace(negotiation.clone());
+    let (features, user_keys) = negotiation;
+    Some(EventPayload::TerminalNegotiation {
+        features,
+        user_keys,
+    })
 }
 
 fn client_colour_count_with_from_source(
@@ -44500,7 +44611,8 @@ fn command_prompt_edit_key(
         | zz_terminal::KeyCode::PageUp
         | zz_terminal::KeyCode::PageDown
         | zz_terminal::KeyCode::Function(_)
-        | zz_terminal::KeyCode::Unidentified => PromptKeyAction::Handled,
+        | zz_terminal::KeyCode::Unidentified
+        | zz_terminal::KeyCode::User(_) => PromptKeyAction::Handled,
     }
 }
 
@@ -104060,7 +104172,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "0",
                 "111",
                 "56",
-                "attached,focused,read-only,active-pane,UTF-8",
+                "attached,focused,read-only,UTF-8",
                 "43",
                 "copy-mode",
                 "format-last",
@@ -104542,12 +104654,12 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("attach with requested flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "attached,focused,ignore-size,no-detach-on-destroy,read-only"
         );
         let flags = shared.inner.lock().client_flags.get(client);
         assert_eq!(
             flags.reconnect_flags(),
-            "ignore-size,active-pane,no-detach-on-destroy"
+            "ignore-size,no-detach-on-destroy"
         );
         let messages = take_reliable_messages(&mailbox);
         assert!(messages.iter().any(|message| matches!(
@@ -104556,7 +104668,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 read_only: true,
                 client_flags,
                 ..
-            } if client_flags == "ignore-size,active-pane,no-detach-on-destroy"
+            } if client_flags == "ignore-size,no-detach-on-destroy"
         )));
         assert!(client_ignores_size(&shared.inner.lock(), client));
 
@@ -104577,12 +104689,12 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.detach(client);
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "focused,ignore-size,no-detach-on-destroy,read-only"
         );
         shared.attach(client, a).expect("plain reattach");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "attached,focused,ignore-size,no-detach-on-destroy,read-only"
         );
 
         shared
@@ -104655,7 +104767,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("control attach flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,control-mode,ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3,read-only,active-pane"
+            "attached,focused,control-mode,ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3,read-only"
         );
 
         shared
@@ -104752,14 +104864,21 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-s", "fresh", "-f", "active-pane"],
+                    ["-s", "fresh", "-f", "no-detach-on-destroy"],
                 ),
             ),
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "open terminal failed: not a terminal"
         ));
         assert_eq!(shared.inner.lock().engine.state.sessions.len(), sessions);
-        assert!(!shared.inner.lock().client_flags.get(client).active_pane);
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .client_flags
+                .get(client)
+                .no_detach_on_destroy
+        );
 
         shared
             .execute(
@@ -104768,11 +104887,18 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-d", "-s", "detached", "-f", "active-pane"],
+                    ["-d", "-s", "detached", "-f", "no-detach-on-destroy"],
                 ),
             )
             .expect("detached creation ignores client flags");
-        assert!(!shared.inner.lock().client_flags.get(client).active_pane);
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .client_flags
+                .get(client)
+                .no_detach_on_destroy
+        );
     }
 
     #[test]
@@ -105093,10 +105219,9 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("create and attach with flags");
         let flags = shared.inner.lock().client_flags.get(client);
         assert!(flags.ignore_size);
-        assert!(flags.active_pane);
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,ignore-size,active-pane"
+            "attached,focused,ignore-size"
         );
     }
 

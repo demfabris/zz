@@ -1337,7 +1337,7 @@ fn handle_protocol<W: Write>(
                 output.pane_output(&render_pane_output(pane, &bytes))?;
             }
             EventPayload::PaneOutputState { pane, paused } => {
-                output.notify_in_block(
+                output.notify(
                     format!("%{} {pane}", if paused { "pause" } else { "continue" }).as_bytes(),
                 )?;
             }
@@ -2312,15 +2312,6 @@ impl<W: Write> ControlWriter<W> {
             self.output.flush()?;
         }
         Ok(())
-    }
-
-    /// `control_pause_pane` and `control_continue_pane` reach `control_write`
-    /// straight from `refresh-client`, so their line lands inside the running
-    /// command's guard; the notify queue's own lines drain after it instead.
-    fn notify_in_block(&mut self, line: &[u8]) -> io::Result<()> {
-        self.output.write_all(line)?;
-        self.output.write_all(b"\n")?;
-        self.output.flush()
     }
 
     fn notify(&mut self, line: &[u8]) -> io::Result<()> {
@@ -5035,11 +5026,11 @@ mod tests {
             assert_eq!(
                 writer.output,
                 b"%output %7 before\n\
-                  %begin 21 1 1\n%pause %7\n%continue %7\nbody\n%end 21 1 1\n\
-                  %window-add @3\n\
+                  %begin 21 1 1\nbody\n%end 21 1 1\n\
+                  %pause %7\n%window-add @3\n\
                   %begin 22 2 1\ndiagnostic\n%error 22 2 1\n\
                   %begin 23 3 0\nguard\n%end 23 3 0\n\
-                  source\ncommand\n%exit\n"
+                  source\ncommand\n%continue %7\n%exit\n"
             );
         }
     }

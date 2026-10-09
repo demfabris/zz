@@ -3142,7 +3142,7 @@ probe_requested_client_flags() {
   local fresh_session="requested-flags-fresh"
   local detached_session="requested-flags-detached"
   local missing_session="z"
-  local full_flags="ignore-size,no-detach-on-destroy,read-only,active-pane"
+  local full_flags="ignore-size,no-detach-on-destroy,read-only"
   local read_only_flags
 
   wait_for_terminal_ready "$side"

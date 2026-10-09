@@ -67,7 +67,7 @@
       "id": "fix.capture-links",
       "track": "fix",
       "title": "capture-pane -H and the derivable -F line flags",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-terminal/src/session.rs",
@@ -84,7 +84,32 @@
       ],
       "branch": "catchup/fix.capture-links",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at 6b4a587a8 (-H and -F match; link identity is by URI since libghostty exposes no OSC 8 id, recorded); integration pass merging main (3.8) sent"
+      ]
+    },
+    {
+      "id": "fix.capture-e-links",
+      "track": "fix",
+      "title": "capture-pane -e keeps OSC 8 hyperlinks",
+      "status": "todo",
+      "deps": [
+        "fix.capture-links"
+      ],
+      "zones": [
+        "crates/zz-terminal/src/session.rs",
+        "crates/zz-daemon/src/daemon.rs"
+      ],
+      "gaps": [],
+      "accept": [
+        "On link rows capture-pane -e emits \\033]8;;uri\\033\\\\ around the linked text exactly where the pin does (measure on tmux 3.8); zz emits SGR only today.",
+        "A scenario or daemon test pins it against recorded pin output."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by fix.capture-links; zz can read per-cell URIs now."
+      ]
     },
     {
       "id": "fix.chooser-preview",

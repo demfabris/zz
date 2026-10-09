@@ -42,7 +42,7 @@
       "id": "fix.streams",
       "track": "fix",
       "title": "Close the last two caller-stream refusals",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -59,7 +59,9 @@
       ],
       "branch": "catchup/fix.streams",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at ad7a35ca9 (clauses met; show-buffer vis-escape claim in the clause was wrong for this pin: cmdq_print_data parses, matched the pin); integration pass merging main (3.8) sent"
+      ]
     },
     {
       "id": "fix.capture-links",
@@ -158,7 +160,32 @@
       ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'."
+      ]
+    },
+    {
+      "id": "fix.option-bytes",
+      "track": "fix",
+      "title": "User option values keep their bytes",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src/command.rs",
+        "crates/zz-mux/src/model.rs",
+        "crates/zz-mux/src/tmux_options.rs",
+        "crates/zz-daemon/src/daemon.rs"
+      ],
+      "gaps": [],
+      "accept": [
+        "set -g @x a\\376b (argv or source-file -) stores the bytes; show-options -g @x prints a\\376b as the pin does, and #{@x} expands to the same bytes as the pin for UTF-8 and non-UTF-8 clients.",
+        "A registry item records the divergence first if the store change is split across commits, and closes with it."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by fix.streams: UserOptions is BTreeMap<String,String> in zz-mux, so non-UTF-8 values read back as U+FFFD; set-option and show-options pass values as String."
+      ]
     },
     {
       "id": "pin.move",

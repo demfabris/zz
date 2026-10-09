@@ -26,6 +26,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runners (`run-N.js`); closed 2026-09-20 at 18/18
+- `compat/catchup/` — tmux catch-up campaign (stale refusals, pin to 3.8, floating panes): rules and resume steps in `README.md`, work items in `ledger.json`
 - `knowledge/` — OKF knowledge bundle for the whole system (start at `index.md`)
 - `scripts/` — build, packaging, and profiling scripts
 - `bench/` — terminal throughput benchmark harness

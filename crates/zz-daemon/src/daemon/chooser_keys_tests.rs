@@ -396,3 +396,47 @@ fn preview_flags_open_each_chooser_off_or_big_and_v_cycles_from_there() {
         assert_eq!(preview, cycled != ChooserPreviewSize::Off);
     }
 }
+
+#[test]
+fn snapshot_publishes_resend_a_chooser_only_when_it_changed() {
+    let chooser_events = |scene: &Scene| {
+        take_reliable_messages(&scene.outbound)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ChooseTree { .. }
+                            | EventPayload::ChooseTreeUpdate { .. }
+                            | EventPayload::ChooseBuffer { .. }
+                            | EventPayload::ChooseBufferUpdate { .. }
+                            | EventPayload::ChooserPresentation { .. },
+                        ..
+                    })
+                )
+            })
+            .count()
+    };
+    for (command, buffer) in [("choose-tree", false), ("choose-buffer", true)] {
+        let mut scene = attached_scene();
+        scene.open("set-buffer", &["-b", "alpha", "alpha"]);
+        scene.open(command, &[]);
+        scene.shared.publish_snapshot();
+        chooser_events(&scene);
+        for _ in 0..3 {
+            scene.shared.publish_snapshot();
+        }
+        assert_eq!(chooser_events(&scene), 0, "{command} unchanged");
+        if buffer {
+            scene.open("set-buffer", &["-b", "beta", "beta"]);
+        } else {
+            scene.open("rename-window", &["-t", "two", "renamed"]);
+        }
+        scene.shared.publish_snapshot();
+        assert!(chooser_events(&scene) > 0, "{command} changed");
+        scene.shared.publish_snapshot();
+        assert_eq!(chooser_events(&scene), 0, "{command} settled");
+        scene.press(key('j', Modifiers::default()), buffer);
+        assert!(chooser_events(&scene) > 0, "{command} moved");
+    }
+}

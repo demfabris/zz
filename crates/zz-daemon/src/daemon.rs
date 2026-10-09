@@ -10866,6 +10866,7 @@ impl Shared {
                         inner.client_entry(client).chooser_under =
                             chooser_under(&inner, client, *pane);
                         inner.client_entry(client).choose_tree.replace(chooser);
+                        inner.client_entry(client).published_chooser = Default::default();
                         direct_events.push(EventPayload::ChooseTree {
                             state: chooser_shown(&inner, client).then_some(state),
                         });
@@ -10936,6 +10937,7 @@ impl Shared {
                         inner.client_entry(client).chooser_under =
                             chooser_under(&inner, client, *pane);
                         inner.client_entry(client).choose_buffer.replace(chooser);
+                        inner.client_entry(client).published_chooser = Default::default();
                         direct_events.push(EventPayload::ChooseBuffer {
                             state: chooser_shown(&inner, client).then_some(state),
                         });
@@ -27196,6 +27198,9 @@ impl Shared {
             });
             let command_prompt = command_prompt_state(&inner, client);
             let chooser_shown = chooser_shown(&inner, client);
+            if let Some(entry) = inner.client_mut(client) {
+                entry.published_chooser = Default::default();
+            }
             let choose_tree = inner
                 .client(client)
                 .and_then(|c| c.choose_tree.as_ref())
@@ -29582,6 +29587,15 @@ impl Shared {
         payload: EventPayload,
         callback_parse_event: Option<Arc<()>>,
     ) {
+        if let Some(slot) = published_chooser_slot(&payload) {
+            let mut inner = self.inner.lock();
+            if let Some(entry) = inner.client_mut(client) {
+                if entry.published_chooser[slot].as_ref() == Some(&payload) {
+                    return;
+                }
+                entry.published_chooser[slot] = Some(payload.clone());
+            }
+        }
         if matches!(
             &payload,
             EventPayload::ControlCommandGuard { .. }
@@ -35720,6 +35734,7 @@ struct Client {
     command_prompt: Option<CommandPrompt>,
     choose_tree: Option<ChooseTreeSession>,
     choose_buffer: Option<ChooseBufferSession>,
+    published_chooser: [Option<EventPayload>; 3],
     chooser_zoom: Option<WindowId>,
     chooser_under: ChooserUnder,
     display_panes: Option<DisplayPanesSession>,
@@ -38821,6 +38836,15 @@ enum Overlay {
     Popup,
     Menu,
     Confirm,
+}
+
+fn published_chooser_slot(payload: &EventPayload) -> Option<usize> {
+    match payload {
+        EventPayload::ChooseTree { .. } => Some(0),
+        EventPayload::ChooseBuffer { .. } => Some(1),
+        EventPayload::ChooserPresentation { .. } => Some(2),
+        _ => None,
+    }
 }
 
 fn dismiss_overlays(

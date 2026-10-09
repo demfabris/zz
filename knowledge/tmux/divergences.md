@@ -1581,7 +1581,10 @@ updates, so with two attached clients, resizing the older one logs the other cli
 `list-sessions` and `list-panes` rows carried no format client at the d77c9dc6 pin, because all
 three called `format_defaults(ft, NULL, ...)`. tmux 3.8 (`d9692f7e`) passes the invoking client
 (`cmdq_get_client`) instead, so a row reads that client's `session_active`, `#{S:}` active branch
-and client-scoped names, and zz now does the same from `ExecutionContext::format_client`. And
+and client-scoped names, and zz now does the same from `ExecutionContext::format_client`. An
+unattached command client answers what the pin gives it, on those rows and on `new-session -P`:
+its `client-PID` name and pid, `focused` (plus `UTF-8`), key table `root`, width 80, prefix,
+readonly and control mode 0, `window_bigger` 0, and null height, session and offsets. And
 `display-message -a` walks `format_each`: the 198-entry table in declaration order minus every
 entry whose callback returns NULL, then the command's own tree, which puts `command=display-message`
 after the whole table (scenario `smoke/format-listing`).

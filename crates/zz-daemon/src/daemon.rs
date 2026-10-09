@@ -4711,7 +4711,8 @@ struct PendingHookEvent {
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
 const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_CLIENT_CONTEXT_FORMAT: &str = "hook_client";
-const INVOKING_CLIENT_ROW_COMMANDS: [&str; 3] = ["list-windows", "list-sessions", "list-panes"];
+const INVOKING_CLIENT_COMMANDS: [&str; 4] =
+    ["list-windows", "list-sessions", "list-panes", "new-session"];
 const HOOK_PANE_CONTEXT_FORMAT: &str = "hook_pane";
 const HOOK_SESSION_CONTEXT_FORMAT: &str = "hook_session";
 const HOOK_SESSION_NAME_CONTEXT_FORMAT: &str = "hook_session_name";
@@ -9440,11 +9441,21 @@ impl Shared {
                 && kind != ClientKind::Control
                 && nested_attach_refusal(&inner, client).is_some())
             .then(|| format_hook_facts_for_client(&inner, client, context));
-            if INVOKING_CLIENT_ROW_COMMANDS.contains(&command_name)
-                && !matches!(context.format_client(), FormatClient::Attached(_))
+            if INVOKING_CLIENT_COMMANDS.contains(&command_name)
                 && let Some(seed) = command_seed.as_mut()
             {
-                seed.client = None;
+                match context.format_client() {
+                    FormatClient::Attached(_) => {}
+                    FormatClient::Unattached => {
+                        seed.client = format_provenance_client(context, client)
+                            .filter(|client| inner.client(*client).is_some())
+                            .map(|client| match client_attached_session(&inner, client) {
+                                Some(session) => client_format_facts(&inner, client, session),
+                                None => unattached_client_format_facts(&inner, client),
+                            });
+                    }
+                    FormatClient::NoClient => seed.client = None,
+                }
             }
             if command_name == "display-message" && !facts_unread {
                 let (target, target_client) = inner
@@ -41421,6 +41432,47 @@ fn client_format_facts(
     session: SessionId,
 ) -> ClientFormatFacts {
     client_format_facts_from_source(&ClientFormatSource::from_inner(inner), client, session)
+}
+
+fn unattached_client_format_facts(inner: &ServerState, client: ClientId) -> ClientFormatFacts {
+    let source = ClientFormatSource::from_inner(inner);
+    let registered = source.clients.get(&client);
+    let (written, discarded) = registered
+        .and_then(|c| c.subscriber.as_ref())
+        .map_or((0, 0), |subscriber| subscriber.stats());
+    ClientFormatFacts {
+        activity: client_format_time(registered.and_then(|c| c.activity_time)),
+        control_mode: usize::from(registered.and_then(|c| c.kind) == Some(ClientKind::Control))
+            .to_string(),
+        created: client_format_time(registered.and_then(|c| c.created_time)),
+        discarded: discarded.to_string(),
+        flags: format_client_flags_from_source(&source, client),
+        key_table: "root".to_owned(),
+        name: client_format_name_from_source(&source, client),
+        pid: registered
+            .and_then(|c| c.pid)
+            .filter(|pid| *pid != 0)
+            .map(|pid| pid.to_string())
+            .unwrap_or_default(),
+        prefix: "0".to_owned(),
+        readonly: usize::from(source.client_flags.contains(client)).to_string(),
+        termname: client_environment_value_from_source(&source, client, "TERM")
+            .filter(|term| !term.is_empty())
+            .unwrap_or("unknown")
+            .to_owned(),
+        tty: registered
+            .and_then(|c| c.tty.as_ref())
+            .cloned()
+            .unwrap_or_default(),
+        uid: source.engine.format_uid().to_owned(),
+        user: source.engine.format_user().to_owned(),
+        utf8: usize::from(client_uses_utf8_from_source(&source, client)).to_string(),
+        width: "80".to_owned(),
+        written: written.to_string(),
+        environment: registered.and_then(|c| c.environment.as_ref()).cloned(),
+        viewport: Some(ClientViewportFacts::default()),
+        ..ClientFormatFacts::default()
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -106263,21 +106315,57 @@ bind - split-window -v -c "#{pane_current_path}"
             vec!["rows-attached=[1]:[rows-client]\nrows-other=[0]:[rows-client]"; 3]
         );
 
-        let (command_client, _) = shared.register_subscribed(
-            ClientKind::Command,
-            Some("rows-command".to_owned()),
-            None,
-            OutboundMailbox::new(),
+        let (command_client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared
+            .inner
+            .lock()
+            .client_entry(command_client)
+            .pid
+            .replace(4242);
+        assert_eq!(
+            lists(command_client, ClientKind::Command),
+            vec!["rows-attached=[0]:[client-4242]\nrows-other=[0]:[client-4242]"; 3]
         );
-        let unattached = lists(command_client, ClientKind::Command);
-        for rows in &unattached {
-            let actives = rows
-                .lines()
-                .map(|row| row.split(':').next().unwrap_or_default())
-                .collect::<Vec<_>>();
-            assert_eq!(actives, ["rows-attached=[0]", "rows-other=[0]"]);
-            assert!(!rows.contains("rows-bystander"), "{rows}");
-        }
+
+        let unattached_facts = "#{client_pid}|#{client_flags}|#{client_key_table}|#{client_width}|#{client_height}|#{client_session}|#{client_prefix}|#{client_readonly}|#{client_control_mode}|#{window_bigger}|#{window_offset_x}";
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let filtered = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-windows",
+                    ["-a", "-f", "#{client_pid}", "-F", unattached_facts],
+                ),
+            )
+            .expect("unattached list rows");
+        assert_eq!(
+            filtered.output,
+            "4242|focused|root|80|||0|0|0|0|\n".repeat(2).trim_end()
+        );
+
+        let mut context = ExecutionContext::default();
+        let created = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-P",
+                        "-s",
+                        "rows-new",
+                        "-F",
+                        "#{client_name}|#{session_active}",
+                    ],
+                ),
+            )
+            .expect("new-session -P from an unattached client");
+        assert_eq!(created.output, "client-4242|0");
     }
 
     #[test]

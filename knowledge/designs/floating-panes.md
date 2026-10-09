@@ -299,6 +299,21 @@ Recorded by float.core (sessions 1 and 2, 2026-10-09); 3.8 wins where this plan 
 - zz back-solves the window extent from one pane's size report; while a float is active that pane is
   the most recent tiled one.
 
+# Where the float.clients build differs
+
+Recorded by float.clients (2026-10-09).
+
+- `compat/tui-floating.sh` compares the decoded glyphs of every cell, the cursor and the pane list
+  against tmux 3.8; it does not compare colours. While `display-popup` is up it compares the screen
+  only, because 3.8's popup is a client overlay and zz's is a modal pane.
+- The drag commit `resize-pane -x -y ; move-pane -X -Y` is two `CommandInvocation`s sent in order
+  on one connection (`zz_client::floating::float_drag_commands`), which is how a GUI client sends a
+  command list.
+- `EventPayload::Popup` and `InputMessage::Popup` are renamed `RetiredPopup` in Rust with their serde
+  names kept, so clients match the retired tag without naming the popup.
+- The raw TUI fills a window with no tiled pane with the default `fill-character` inside cell
+  (`bg=themedarkgrey`); a user `fill-character` is not read.
+
 # zz-only extensions
 
 - `new-pane --kind terminal|browser|picker|agent [--profile] [--provider]`, inherited from

@@ -848,7 +848,8 @@ variant `Empty`, which `WindowSnapshot.layout` holds when the window has no tile
 of the button-down that latched the gesture. `float_wire_tests` pins the encodings.
 `display-popup` is now a modal floating pane, so `EventPayload::Popup` and `InputMessage::Popup`
 keep their tags but the daemon never sends the event and ignores the input; they go at the next
-version.
+version. In Rust both are named `RetiredPopup` with `#[serde(rename = "Popup")]`, so the tag and
+the encoding are unchanged and no client names the popup any more.
 
 # Versioning & compatibility
 

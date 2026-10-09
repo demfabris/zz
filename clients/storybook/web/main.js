@@ -24,7 +24,7 @@ let current = null;
 function parseHash() {
     const [path, query = ""] = location.hash.replace(/^#\/?/, "").split("?");
     const [story, section] = path.split("/");
-    return { story, section, params: new URLSearchParams(query) };
+    return { story, section, query, params: new URLSearchParams(query) };
 }
 
 function knobValue(name) {
@@ -191,9 +191,11 @@ show(initial.story, initial.section);
 form.addEventListener("input", applyKnobs);
 form.addEventListener("reset", () => setTimeout(applyKnobs));
 window.addEventListener("hashchange", () => {
-    const { story, section, params } = parseHash();
-    loadKnobs(params);
-    applyKnobs();
+    const { story, section, query, params } = parseHash();
+    if (query) {
+        loadKnobs(params);
+        applyKnobs();
+    }
     show(story, section);
 });
 matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyKnobs);

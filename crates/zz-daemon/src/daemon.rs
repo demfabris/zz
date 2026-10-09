@@ -578,9 +578,17 @@ fn client_lifecycle_event(
     if !matches!(kind, ClientKind::Interactive | ClientKind::Control) {
         return None;
     }
-    let context = client_attached_session(inner, client).map_or_else(ExecutionContext::default, |session| {
-        hook_events::live_session_context(&inner.engine.state, session)
-    });
+    let context = client_attached_session(inner, client).map_or_else(
+        || {
+            inner.engine.state.most_recent_context().map_or_else(
+                ExecutionContext::default,
+                |(session, window, pane)| {
+                    ExecutionContext::new(Some(session), Some(window), Some(pane))
+                },
+            )
+        },
+        |session| hook_events::live_session_context(&inner.engine.state, session),
+    );
     let client_name = client_format_name(inner, client);
     let mut event = PendingHookEvent::client(name, context, client, Some(client_name.as_str()));
     if let Some(session) = event.context.session {
@@ -9390,7 +9398,10 @@ impl Shared {
             let monitors_before = inner.engine.has_format_monitors();
             let refresh_before = (!read_only).then(|| copy_mode_refresh_needed(&inner));
             let clock_before = (!read_only).then(|| clock_mode_timer_needed(&inner));
-            let hook_scope = captures.then(|| hook_events::HookScope::open(&mut inner.engine));
+            let hook_scope = captures.then(|| {
+                hook_events::HookScope::open(&mut inner.engine)
+                    .watching_borders(&inner.engine, command_name)
+            });
             let pane_focus_before = (event_hooks_enabled && captures).then(|| {
                 hook_events::FocusProbeScope::open_within(
                     &mut inner,
@@ -11518,6 +11529,7 @@ impl Shared {
                     }
                     MuxEffect::KillServer => force_shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
+                    MuxEffect::PaneMovedInWindow { .. } | MuxEffect::ZoomCycled { .. } => {}
                     MuxEffect::ModeStylesChanged => mode_styles_changed = true,
                     MuxEffect::UserOptionChanged { channel } => {
                         option_signals.push(channel.clone());
@@ -11601,8 +11613,18 @@ impl Shared {
                 let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
                 let anchor = pending_hook_events.len();
                 {
+                    let transitions = std::mem::take(&mut inner.pane_mode_transitions);
                     let mut diff = scope.finish(&inner.engine, command_name);
+                    hook_events::apply_operation_events(
+                        &inner.engine,
+                        &execution.effects,
+                        &mut diff.events,
+                    );
                     pending_hook_events.append(&mut diff.events);
+                    pending_hook_events.extend(hook_events::server_mode_hook_events(
+                        &inner.engine,
+                        transitions,
+                    ));
                     for session in diff.closed_sessions(&inner.engine.state) {
                         if let Some(clients) = inner.attached.get(&session) {
                             for attached_client in clients {
@@ -11631,6 +11653,7 @@ impl Shared {
                     splice_pane_focus_events(&mut pending_hook_events, anchor, focus);
                 }
             }
+            inner.pane_mode_transitions.clear();
             debug_assert!(
                 !read_only || pending_hook_events.len() == hook_events_before,
                 "read-only {command_name} raised hook events"
@@ -11677,6 +11700,14 @@ impl Shared {
 
         for (name, commands, context) in immediate_hooks {
             let mut variables = context.format_variables.clone();
+            if name.starts_with('@')
+                && variables.get("hook_event") == Some(&name)
+                && !variables.contains_key("hook_client")
+                && client != ClientId(u64::MAX)
+            {
+                let client_name = client_format_name(&self.inner.lock(), client);
+                variables.insert("hook_client".to_owned(), client_name);
+            }
             variables.insert("hook".to_owned(), name);
             let hook_output = self.run_hook_commands(
                 client,
@@ -23365,6 +23396,19 @@ impl Shared {
         pane: PaneId,
         input: PaneModeInput<'_>,
     ) -> bool {
+        let handled = self.pane_mode_input_inner(client, context, pane, input);
+        let events = take_pane_mode_hook_events(&mut self.inner.lock());
+        self.run_event_hooks(events);
+        handled
+    }
+
+    fn pane_mode_input_inner(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        input: PaneModeInput<'_>,
+    ) -> bool {
         let Some(mode) = self
             .inner
             .lock()
@@ -28532,6 +28576,7 @@ impl Shared {
         if let Some(hook) = activity_hook {
             self.run_event_hooks(vec![hook]);
         }
+        self.raise_shell_marks(pane, terminal);
         if let Some(deadline) = silence_schedule {
             let _ = self.timer_tx.send(timers::TimerInput::Silence(
                 SilenceDeadlineCommand::Schedule(deadline),
@@ -30700,24 +30745,31 @@ impl Shared {
         }
     }
 
-    fn raise_shell_mark(self: &Arc<Self>, pane: PaneId, mark: zz_terminal::ShellMark) {
-        let name = match mark.kind {
-            zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
-            zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
-            zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
-        };
-        let event = {
-            let inner = self.inner.lock();
-            pane_event_if_hooked(&inner, name, pane).map(|mut event| {
-                if mark.kind != zz_terminal::ShellMarkKind::Prompt {
-                    add_command_payload(&inner, &mut event, pane, &mark.facts);
-                }
-                event
-            })
-        };
-        if let Some(event) = event {
-            self.run_event_hooks(vec![event]);
+    fn raise_shell_marks(self: &Arc<Self>, pane: PaneId, terminal: &TerminalSession) {
+        let marks = terminal.take_shell_marks();
+        if marks.is_empty() {
+            return;
         }
+        let events = {
+            let inner = self.inner.lock();
+            marks
+                .into_iter()
+                .filter_map(|mark| {
+                    let name = match mark.kind {
+                        zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
+                        zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
+                        zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
+                    };
+                    pane_event_if_hooked(&inner, name, pane).map(|mut event| {
+                        if mark.kind != zz_terminal::ShellMarkKind::Prompt {
+                            add_command_payload(&inner, &mut event, pane, &mark.facts);
+                        }
+                        event
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        self.run_event_hooks(events);
     }
 
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
@@ -35681,6 +35733,7 @@ struct ServerState {
     /// `window_pane_reset_mode` runs.
     copy_kill_panes: Vec<PaneId>,
     pane_modes: BTreeMap<PaneId, Vec<PaneModeRequest>>,
+    pane_mode_transitions: Vec<PaneModeTransition>,
     pane_mode_zooms: BTreeSet<PaneId>,
     pane_mode_kill_panes: Vec<PaneId>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
@@ -47176,7 +47229,50 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
     }
 }
 
-fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeRequest) -> bool {
+struct PaneModeTransition {
+    pane: PaneId,
+    entered: bool,
+    previous: Option<&'static str>,
+    current: Option<&'static str>,
+}
+
+fn pane_mode_name(mode: &PaneModeRequest) -> &'static str {
+    match mode {
+        PaneModeRequest::Clock => "clock-mode",
+        PaneModeRequest::Customize(_) => "options-mode",
+        PaneModeRequest::Switch(_) => "switch-mode",
+    }
+}
+
+fn top_pane_mode_name(inner: &ServerState, pane: PaneId) -> Option<&'static str> {
+    inner
+        .pane_modes
+        .get(&pane)
+        .and_then(|modes| modes.last())
+        .map(pane_mode_name)
+}
+
+fn take_pane_mode_hook_events(inner: &mut ServerState) -> Vec<PendingHookEvent> {
+    let transitions = std::mem::take(&mut inner.pane_mode_transitions);
+    hook_events::server_mode_hook_events(&inner.engine, transitions)
+}
+
+fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mode: PaneModeRequest) -> bool {
+    let previous = top_pane_mode_name(inner, pane);
+    let current = pane_mode_name(&mode);
+    let pushed = push_pane_mode_entry(inner, pane, mode);
+    if pushed {
+        inner.pane_mode_transitions.push(PaneModeTransition {
+            pane,
+            entered: true,
+            previous,
+            current: Some(current),
+        });
+    }
+    pushed
+}
+
+fn push_pane_mode_entry(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeRequest) -> bool {
     let modes = inner.pane_modes.entry(pane).or_default();
     let existing = modes
         .iter()
@@ -47223,6 +47319,15 @@ fn pop_pane_mode(inner: &mut ServerState, pane: PaneId) -> bool {
     if modes.is_empty() {
         inner.pane_modes.remove(&pane);
     }
+    if let Some(popped) = mode.as_ref() {
+        let current = top_pane_mode_name(inner, pane);
+        inner.pane_mode_transitions.push(PaneModeTransition {
+            pane,
+            entered: false,
+            previous: Some(pane_mode_name(popped)),
+            current,
+        });
+    }
     if let Some((kill_source, _)) = mode
         .as_ref()
         .filter(|mode| !matches!(mode, PaneModeRequest::Clock))
@@ -47267,6 +47372,13 @@ fn consume_pane_mode_mouse(
         if modes.is_empty() {
             inner.pane_modes.remove(&pane);
         }
+        let current = top_pane_mode_name(inner, pane);
+        inner.pane_mode_transitions.push(PaneModeTransition {
+            pane,
+            entered: false,
+            previous: Some("clock-mode"),
+            current,
+        });
     }
     true
 }

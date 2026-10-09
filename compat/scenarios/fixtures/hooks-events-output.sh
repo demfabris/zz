@@ -68,13 +68,36 @@ wait_option @hev-started
 wait_option @hev-finished
 main_client kill-pane -t "$pane"
 
-main_client set-hook -g client-created "set -gF @hev-created '#{hook}/#{hook_event}'"
+main_client set-hook -g client-created "set -gF @hev-created '#{hook}/#{hook_event}/#{hook_session_name}/#{hook_window_index}/#{!=:#{hook_pane},}'"
 main_client set-hook -g client-closed "set -gF @hev-closed '#{hook}/#{hook_event}'"
 control_client </dev/null >/dev/null 2>&1 || true
 wait_option @hev-created
 wait_option @hev-closed
 main_client set-hook -gu client-created
 main_client set-hook -gu client-closed
+
+cat >"$work/burst.sh" <<'BURST'
+#!/bin/sh
+while [ ! -e "$1" ]; do sleep 0.05; done
+printf '\033]133;A\007\033]133;C\007\033]133;D;1\007\033]133;A\007\033]133;C\007\033]133;D;2\007\033]133;A\007'
+sleep 300
+BURST
+burst="$(main_client split-window -d -P -F '#{pane_id}' -t w:0 "sh '$work/burst.sh' '$work/burst-go'")"
+main_client set-option -g @hev-burst ''
+main_client set-hook -p -t "$burst" pane-shell-prompt "set -gaF @hev-burst 'A+'"
+main_client set-hook -p -t "$burst" pane-command-started "set -gaF @hev-burst 'C+'"
+main_client set-hook -p -t "$burst" pane-command-finished "set -gaF @hev-burst 'D#{hook_command_status}+'"
+: >"$work/burst-go"
+attempt=0
+while [ "$attempt" -lt 200 ]; do
+    case "$(main_client show-options -gqv @hev-burst)" in
+        *D2+A+) break ;;
+    esac
+    attempt=$((attempt + 1))
+    sleep 0.05
+done
+seen="$seen burst=$(main_client show-options -gqv @hev-burst)"
+main_client kill-pane -t "$burst"
 
 main_client set-option -t w @hev-flag 0
 main_client set-option -g @hev-monlog ''

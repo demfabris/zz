@@ -84,6 +84,7 @@ pub(super) fn unread_format_facts() -> &'static FormatHookFacts {
 pub(super) struct HookScope {
     window: Option<ChangeWindow>,
     before: Option<MuxHookSnapshot>,
+    borders: Option<BTreeMap<WindowId, PaneBorderStatus>>,
 }
 
 pub(super) struct HookDiff<'a> {
@@ -110,7 +111,15 @@ impl HookScope {
         Self {
             before: cfg!(debug_assertions).then(|| MuxHookSnapshot::capture(engine)),
             window: Some(engine.state.open_change_window()),
+            borders: None,
         }
+    }
+
+    pub(super) fn watching_borders(mut self, engine: &MuxEngine, command: &str) -> Self {
+        if matches!(command, "set-option" | "set-window-option") {
+            self.borders = Some(border_statuses(engine));
+        }
+        self
     }
 
     pub(super) fn change_window(&self) -> Option<&ChangeWindow> {
@@ -123,7 +132,16 @@ impl HookScope {
             .map(|window| engine.state.changes_since(window))
     }
 
-    pub(super) fn finish<'a>(self, engine: &'a MuxEngine, command: &str) -> HookDiff<'a> {
+    pub(super) fn finish<'a>(mut self, engine: &'a MuxEngine, command: &str) -> HookDiff<'a> {
+        let borders = self.borders.take();
+        let mut diff = self.diff(engine, command);
+        if let Some(before) = borders {
+            diff.events.extend(border_resize_events(engine, &before));
+        }
+        diff
+    }
+
+    fn diff<'a>(self, engine: &'a MuxEngine, command: &str) -> HookDiff<'a> {
         let border = |window: WindowId| engine.pane_border_status(window);
         let Some(window) = self.window else {
             let before = self
@@ -168,6 +186,49 @@ impl HookScope {
             events,
         }
     }
+}
+
+fn border_statuses(engine: &MuxEngine) -> BTreeMap<WindowId, PaneBorderStatus> {
+    engine
+        .state
+        .windows
+        .keys()
+        .map(|window| (*window, engine.pane_border_status(*window)))
+        .collect()
+}
+
+fn border_resize_events(
+    engine: &MuxEngine,
+    before: &BTreeMap<WindowId, PaneBorderStatus>,
+) -> Vec<PendingHookEvent> {
+    let changed = border_statuses(engine)
+        .into_iter()
+        .filter(|(window, status)| before.get(window).is_some_and(|old| old != status))
+        .collect::<Vec<_>>();
+    if changed.is_empty() {
+        return Vec::new();
+    }
+    let view = MuxHookSnapshot::capture(engine);
+    let mut events = Vec::new();
+    for (window, status) in changed {
+        let Some(state) = engine.state.windows.get(&window) else {
+            continue;
+        };
+        for pane in state.panes.keys() {
+            let old = state
+                .layout
+                .displayed_pane_size(*pane, state.zoomed_pane, before[&window]);
+            let new = state
+                .layout
+                .displayed_pane_size(*pane, state.zoomed_pane, status);
+            if let (Some(old), Some(new)) = (old, new)
+                && old != new
+            {
+                events.push(pane_resized_event(*pane, window, new, old, &view));
+            }
+        }
+    }
+    events
 }
 
 fn describe_events(events: &[PendingHookEvent]) -> Vec<String> {
@@ -1084,6 +1145,62 @@ pub(super) fn mux_hook_events_in(
     events
 }
 
+pub(super) fn apply_operation_events(
+    engine: &MuxEngine,
+    effects: &[MuxEffect],
+    events: &mut Vec<PendingHookEvent>,
+) {
+    for effect in effects {
+        match effect {
+            MuxEffect::PaneCreated {
+                pane, empty: true, ..
+            } => {
+                let pane = pane.to_string();
+                for event in events.iter_mut().filter(|event| {
+                    event.name == "pane-created"
+                        && event.variables.get(HOOK_PANE_CONTEXT_FORMAT) == Some(&pane)
+                }) {
+                    event
+                        .variables
+                        .insert("hook_created_empty".to_owned(), "1".to_owned());
+                }
+            }
+            MuxEffect::PaneMovedInWindow { pane } => {
+                let Some(window) = engine.state.window_for_pane(*pane) else {
+                    continue;
+                };
+                let view = MuxHookSnapshot::capture(engine);
+                events.push(pane_moved_event(*pane, window, window, &view, &view));
+            }
+            MuxEffect::ZoomCycled { window } => {
+                let id = window.to_string();
+                events.retain(|event| {
+                    !matches!(event.name, "window-zoomed" | "window-unzoomed")
+                        || event.variables.get(HOOK_WINDOW_CONTEXT_FORMAT) != Some(&id)
+                });
+                let view = MuxHookSnapshot::capture(engine);
+                events.push(window_payload_event("window-unzoomed", *window, &view));
+                events.push(window_payload_event("window-zoomed", *window, &view));
+            }
+            MuxEffect::PaneRespawned { pane, empty, .. } => {
+                let Some(window) = engine.state.window_for_pane(*pane) else {
+                    continue;
+                };
+                let view = MuxHookSnapshot::capture(engine);
+                let mut event = pane_created_event(*pane, window, &view);
+                event
+                    .variables
+                    .insert("hook_created_empty".to_owned(), u8::from(*empty).to_string());
+                event
+                    .variables
+                    .insert("hook_created_respawn".to_owned(), "1".to_owned());
+                events.push(event);
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(super) fn pane_mode_hook_events(
     engine: &MuxEngine,
     before: &impl HookView,
@@ -1115,6 +1232,41 @@ pub(super) fn pane_mode_hook_events(
                 .collect::<Vec<_>>()
         })
         .collect()
+}
+
+pub(super) fn server_mode_hook_events(
+    engine: &MuxEngine,
+    transitions: Vec<PaneModeTransition>,
+) -> Vec<PendingHookEvent> {
+    let mut events = Vec::new();
+    for transition in transitions {
+        let edge = if transition.entered {
+            "pane-mode-entered"
+        } else {
+            "pane-mode-exited"
+        };
+        for name in [edge, "pane-mode-changed"] {
+            let Some(mut event) = PendingHookEvent::live_pane(name, transition.pane, engine) else {
+                continue;
+            };
+            if let Some(current) = transition.current {
+                event
+                    .variables
+                    .insert("hook_current_mode".to_owned(), current.to_owned());
+            }
+            if let Some(previous) = transition.previous {
+                event
+                    .variables
+                    .insert("hook_previous_mode".to_owned(), previous.to_owned());
+            }
+            event.variables.insert(
+                "hook_mode_entered".to_owned(),
+                u8::from(transition.entered).to_string(),
+            );
+            events.push(event);
+        }
+    }
+    events
 }
 
 pub(super) fn copy_mode_exit_hook_events(pane: PaneId, engine: &MuxEngine) -> Vec<PendingHookEvent> {

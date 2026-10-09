@@ -296,6 +296,7 @@ const MAX_CLIPBOARD_WRITE_BYTES: usize = 8 * 1024 * 1024;
 const CLIPBOARD_TEXT_MIME: &str = "text/plain";
 const MAX_PENDING_ACTOR_COMMANDS: usize = 1;
 const MAX_PENDING_RELIABLE_EVENTS: usize = 4;
+const MAX_PENDING_SHELL_MARKS: usize = 65_536;
 const MAX_PENDING_RELIABLE_EVENT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PENDING_TERMINAL_EVENTS: usize = MAX_PENDING_RELIABLE_EVENTS + 1;
 const RETAINED_CELL_PLANES: usize = 2;
@@ -1762,8 +1763,6 @@ pub enum TerminalEvent {
     RenameWindow(String),
     /// The program rang BEL. Raised once per occurrence.
     Bell,
-    /// The program wrote an OSC 133 prompt, command start or command end mark.
-    ShellMark(ShellMark),
     PlaceholderBound {
         token: u64,
         number: u32,
@@ -2125,6 +2124,8 @@ struct PublishedViewports {
     search_string: String,
     sunk: Vec<TerminalViewId>,
     size: (u16, u16),
+    shell_marks: VecDeque<ShellMark>,
+    shell_marks_dropped: u64,
 }
 
 impl PublishedViewports {
@@ -2142,6 +2143,8 @@ impl PublishedViewports {
             facts: TerminalFacts::default(),
             search_string: String::new(),
             sunk: Vec::new(),
+            shell_marks: VecDeque::new(),
+            shell_marks_dropped: 0,
         }
     }
 }
@@ -2854,6 +2857,23 @@ impl TerminalSession {
     #[must_use]
     pub fn last_command_status(&self) -> Option<i32> {
         self.latest.read().last_command_status
+    }
+
+    /// The OSC 133 marks the pane wrote since the last call, oldest first.
+    #[must_use]
+    pub fn take_shell_marks(&self) -> Vec<ShellMark> {
+        let mut latest = self.latest.write();
+        if latest.shell_marks.is_empty() {
+            return Vec::new();
+        }
+        latest.shell_marks.drain(..).collect()
+    }
+
+    /// How many OSC 133 marks were dropped because the daemon fell
+    /// `MAX_PENDING_SHELL_MARKS` behind.
+    #[must_use]
+    pub fn shell_marks_dropped(&self) -> u64 {
+        self.latest.read().shell_marks_dropped
     }
 
     #[must_use]
@@ -5745,6 +5765,20 @@ impl Publisher {
         self.latest.write().last_command_status = status;
     }
 
+    fn push_shell_marks(&self, marks: Vec<ShellMark>) {
+        if marks.is_empty() {
+            return;
+        }
+        let mut latest = self.latest.write();
+        for mark in marks {
+            if latest.shell_marks.len() == MAX_PENDING_SHELL_MARKS {
+                latest.shell_marks.pop_front();
+                latest.shell_marks_dropped += 1;
+            }
+            latest.shell_marks.push_back(mark);
+        }
+    }
+
     fn set_program_status(&self, status: ProgramStatus) {
         self.latest.write().program_status = Arc::new(status);
         self.notify_latest();
@@ -6036,10 +6070,6 @@ impl Publisher {
         }
     }
 
-    fn shell_mark(&self, mark: ShellMark) -> Result<(), WorkerError> {
-        self.send_user_action(TerminalEvent::ShellMark(mark), "shell mark")
-    }
-
     fn placeholder_bound(&self, token: u64, number: u32) -> Result<(), WorkerError> {
         self.send_reliable(TerminalEvent::PlaceholderBound { token, number })
     }
@@ -6075,7 +6105,6 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
         TerminalEvent::ViewportReady { .. }
         | TerminalEvent::ViewClosed(_)
         | TerminalEvent::Bell
-        | TerminalEvent::ShellMark(_)
         | TerminalEvent::PlaceholderBound { .. }
         | TerminalEvent::PendingPasteExpired { .. } => 0,
     };
@@ -19245,8 +19274,7 @@ mod tests {
                 | TerminalEvent::CopyReady { .. }
                 | TerminalEvent::ClipboardSet { .. }
                 | TerminalEvent::Bell
-                | TerminalEvent::ShellMark(_)
-                | TerminalEvent::RenameWindow(_)
+                        | TerminalEvent::RenameWindow(_)
                 | TerminalEvent::PlaceholderBound { .. }
                 | TerminalEvent::PendingPasteExpired { .. } => {
                     panic!("unexpected event in queue invariant test")

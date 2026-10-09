@@ -1319,6 +1319,16 @@ pub enum MuxEffect {
         from: SessionId,
         to: SessionId,
     },
+    /// `window_fire_pane_moved` for a pane `join-pane` or `move-pane` placed
+    /// again inside its own window, which no before-and-after diff can see.
+    PaneMovedInWindow {
+        pane: PaneId,
+    },
+    /// `window_push_zoom` then `window_pop_zoom` on a zoomed window: one
+    /// `window-unzoomed` and one `window-zoomed` though the zoom ends as it began.
+    ZoomCycled {
+        window: WindowId,
+    },
     SendKeys {
         pane: PaneId,
         keys: Vec<KeyToken>,
@@ -7652,6 +7662,10 @@ impl MuxEngine {
                 window: None,
                 pane: Some(source),
             });
+        } else {
+            execution
+                .effects
+                .push(MuxEffect::PaneMovedInWindow { pane: source });
         }
         Ok(execution)
     }
@@ -8280,14 +8294,33 @@ impl MuxEngine {
             .expect("resolved target pane has a window");
         let source_session = self.state.windows[&source_window].session;
         let target_session = self.state.windows[&target_window].session;
+        let zoomed_before = [source_window, target_window]
+            .map(|window| self.state.windows[&window].zoomed_pane.is_some());
         self.state
             .swap_panes(source, target, options.has("-d"), options.has("-Z"))?;
+        let zoom_cycles = [source_window, target_window]
+            .into_iter()
+            .zip(zoomed_before)
+            .enumerate()
+            .filter(|(index, (window, was_zoomed))| {
+                *was_zoomed
+                    && options.has("-Z")
+                    && (*index == 0 || *window != source_window)
+                    && self
+                        .state
+                        .windows
+                        .get(window)
+                        .is_some_and(|state| state.zoomed_pane.is_some())
+            })
+            .map(|(_, (window, _))| MuxEffect::ZoomCycled { window })
+            .collect::<Vec<_>>();
         let active = self.state.windows[&target_window].active_pane;
         let context_target = ExecutionContext::for_pane(&self.state, active)
             .expect("the target window retains an active pane after a swap");
         context.retarget(&context_target);
 
         let mut execution = Execution::default();
+        execution.effects.extend(zoom_cycles);
         if source_session != target_session && source != target {
             execution.effects.extend([
                 MuxEffect::PaneRelocated {
@@ -10789,6 +10822,23 @@ impl MuxEngine {
         };
         let mut hook_context = target_context;
         let mut variables = BTreeMap::from([("hook_event".to_owned(), name.clone())]);
+        let client = expand_format_with_hooks(
+            "#{client_name}",
+            self,
+            FormatContext {
+                session: hook_context.session,
+                window: hook_context.window,
+                pane: hook_context.pane,
+                active_session: context.session,
+                format_client: context.target_format_client(),
+                format_type: FormatType::Pane,
+            },
+            hooks,
+        )
+        .to_string();
+        if !client.is_empty() {
+            variables.insert("hook_client".to_owned(), client);
+        }
         if let Some(session) = hook_context.session {
             variables.insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
             if let Some(state) = self.state.sessions.get(&session) {

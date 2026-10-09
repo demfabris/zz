@@ -1,7 +1,7 @@
 # set-hook -E fires a user event through the @ hook set-hook stored, with the
 # target's session, window and pane as its payload, and wait-for -l and -w on a
 # plain channel with no waiters list nothing and wake nobody.
-set-hook -g @ping "set -gF @pong '#{hook}/#{hook_event}/#{hook_session_name}/#{hook_window_index}/#{hook_pane}'"
+set-hook -g @ping "set -gF @pong '#{hook}/#{hook_event}/#{hook_session_name}/#{hook_window_index}/#{hook_pane}/#{!=:#{hook_client},}'"
 set-hook -E -t w:0 @ping
 out: show -gv @pong
 set-hook -E ping

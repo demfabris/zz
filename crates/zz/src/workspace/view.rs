@@ -6916,7 +6916,7 @@ mod tests {
             cx.run_until_parked();
         };
         let activate = |pane: PaneId, cx: &mut zz_gpui::VisualTestContext| {
-            publish(two_pane_snapshot(pane), cx)
+            publish(two_pane_snapshot(pane), cx);
         };
 
         publish(one_pane_snapshot(1), cx);

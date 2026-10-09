@@ -7460,16 +7460,15 @@ impl Shared {
             .get(&pane)
             .filter(|terminal| terminal.completion().is_some())
             .map(|terminal| pane_wait_exit_code(terminal, &terminal.latest_viewport().status));
-        match exit_code {
-            Some(exit_code) => Self::wake_pane_exit_wait(inner, pane, exit_code),
-            None => {
-                if let Some(entry) = inner.pane_exit_waits.get(&pane) {
-                    entry.current.kill();
-                }
-                pane_exit::remove_unused(inner, pane);
-                terminal_reads::pane_changed(inner, pane);
-            }
+        if let Some(exit_code) = exit_code {
+            Self::wake_pane_exit_wait(inner, pane, exit_code);
+            return;
         }
+        if let Some(entry) = inner.pane_exit_waits.get(&pane) {
+            entry.current.kill();
+        }
+        pane_exit::remove_unused(inner, pane);
+        terminal_reads::pane_changed(inner, pane);
     }
 
     fn wake_pane_exit_wait(inner: &mut ServerState, pane: PaneId, exit_code: u8) {

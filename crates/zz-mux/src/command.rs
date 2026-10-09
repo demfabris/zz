@@ -979,6 +979,7 @@ impl fmt::Debug for ExecutionContext {
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
             .field("no_hooks", &self.no_hooks)
             .field("format_variables", &self.format_variables)
+            .field("spawn_pane_options", &self.spawn_pane_options)
             .finish()
     }
 }

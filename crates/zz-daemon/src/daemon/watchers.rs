@@ -530,10 +530,19 @@ impl TerminalWatcher {
                         .as_ref()
                         .is_none_or(|previous| !Arc::ptr_eq(previous, &program_status))
                 {
-                    self.previous_program_status = Some(Arc::clone(&program_status));
+                    let worked = self
+                        .previous_program_status
+                        .replace(Arc::clone(&program_status))
+                        .map_or(0, |previous| previous.work_starts())
+                        != program_status.work_starts();
                     let terminal = Arc::clone(terminal);
                     shared.defer_watcher_effect(move |shared| {
-                        shared.synchronize_pane_program_status(pane, &terminal, &program_status);
+                        shared.synchronize_pane_program_status(
+                            pane,
+                            &terminal,
+                            &program_status,
+                            worked,
+                        );
                     });
                 }
                 if terminal.take_preview_ready() {

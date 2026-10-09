@@ -93,6 +93,7 @@ pub(crate) enum ProgramStatusReport {
 pub struct ProgramStatus {
     records: Vec<ProgramStatusRecord>,
     reported: bool,
+    work_starts: u64,
 }
 
 impl ProgramStatus {
@@ -104,6 +105,11 @@ impl ProgramStatus {
     #[must_use]
     pub const fn reported(&self) -> bool {
         self.reported
+    }
+
+    #[must_use]
+    pub const fn work_starts(&self) -> u64 {
+        self.work_starts
     }
 
     #[must_use]
@@ -145,7 +151,11 @@ impl ProgramStatus {
             }
             ProgramStatusReport::Update(record) if self.records.last() == Some(&record) => false,
             ProgramStatusReport::Update(record) => {
-                if let Some(index) = self.records.iter().position(|old| old.id == record.id) {
+                let index = self.records.iter().position(|old| old.id == record.id);
+                let starts = record.state == ProgramState::Working
+                    && index.is_none_or(|index| self.records[index].state != ProgramState::Working);
+                self.work_starts += u64::from(starts);
+                if let Some(index) = index {
                     self.records.remove(index);
                 } else if self.records.len() >= MAX_PROGRAM_STATUS_RECORDS {
                     self.records.remove(0);
@@ -166,7 +176,10 @@ impl ProgramStatus {
 
     pub(crate) fn reset(&mut self) -> bool {
         let changed = self.reported || !self.records.is_empty();
-        *self = Self::default();
+        *self = Self {
+            work_starts: self.work_starts,
+            ..Self::default()
+        };
         changed
     }
 }
@@ -580,5 +593,24 @@ mod tests {
         assert!(status.reset());
         assert!(!status.reported());
         assert!(!status.reset());
+    }
+
+    #[test]
+    fn work_starts_count_each_entry_into_working() {
+        let mut status = ProgramStatus::default();
+        for (id, state) in [
+            ("a", ProgramState::Working),
+            ("a", ProgramState::Working),
+            ("b", ProgramState::Working),
+            ("a", ProgramState::Done),
+            ("a", ProgramState::Working),
+        ] {
+            let mut report = record(id, state);
+            report.progress = Some(status.work_starts().try_into().unwrap());
+            status.apply(ProgramStatusReport::Update(report));
+        }
+        assert_eq!(status.work_starts(), 3);
+        status.reset();
+        assert_eq!(status.work_starts(), 3);
     }
 }

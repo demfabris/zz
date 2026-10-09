@@ -153,6 +153,7 @@ pub(super) enum TimerInput {
     #[cfg(all(feature = "agent", unix))]
     PeerSample {
         pane: PaneId,
+        pid: Option<u32>,
         value: String,
     },
     MonitorHook {
@@ -428,8 +429,9 @@ impl LoopTimers {
                     TimerInput::HookReady => {}
                     TimerInput::Hooks(events) => self.hooks.events(shared, events),
                     #[cfg(feature = "agent")]
-                    TimerInput::PeerSample { pane, value } => {
+                    TimerInput::PeerSample { pane, pid, value } => {
                         let target = pane.to_string();
+                        let pid = pid.map(|pid| pid.to_string()).unwrap_or_default();
                         self.hooks.command(
                             shared,
                             ExecutionContext::default(),
@@ -439,7 +441,9 @@ impl LoopTimers {
                                     "-F",
                                     "-t",
                                     &target,
-                                    "#{?pane_status_reported,,1}",
+                                    &format!(
+                                        "#{{?pane_status_reported,,#{{==:#{{pane_pid}},{pid}}}}}"
+                                    ),
                                     &format!("set-option -p -t {target} @agent_state {value}"),
                                 ],
                             ),

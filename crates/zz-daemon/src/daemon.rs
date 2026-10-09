@@ -27969,6 +27969,7 @@ impl Shared {
         pane: PaneId,
         terminal: &Arc<TerminalSession>,
         status: &ProgramStatus,
+        worked: bool,
     ) {
         let headline = status.headline().map(|record| PaneStatus {
             state: match record.state {
@@ -28024,6 +28025,9 @@ impl Shared {
             self.publish_snapshot();
         }
         if let Some(value) = agent_state {
+            if worked && value == "idle" {
+                self.write_pane_agent_state(pane, "working");
+            }
             self.write_pane_agent_state(pane, value);
         }
     }
@@ -33068,7 +33072,7 @@ impl Shared {
             if self.loop_active.load(Ordering::Acquire) {
                 let _ = self
                     .timer_tx
-                    .send(timers::TimerInput::PeerSample { pane, value });
+                    .send(timers::TimerInput::PeerSample { pane, pid, value });
             } else {
                 self.write_pane_agent_state(pane, &value);
             }
@@ -81798,6 +81802,22 @@ set-option -g @alias-mixed-next yes
                 .status
                 .clone()
         };
+        let peer_sample = |pid: &str| {
+            run(&[
+                "if-shell",
+                "-F",
+                "-t",
+                &target,
+                &format!("#{{?pane_status_reported,,#{{==:#{{pane_pid}},{pid}}}}}"),
+                &format!("set-option -p -t {target} @agent_state working"),
+            ]);
+        };
+        let pane_pid = || {
+            run(&["display-message", "-p", "-t", &target, "#{pane_pid}"])
+                .output
+                .trim()
+                .to_owned()
+        };
         run(&[
             "set-option",
             "-p",
@@ -81829,14 +81849,8 @@ set-option -g @alias-mixed-next yes
             })
         );
 
-        run(&[
-            "if-shell",
-            "-F",
-            "-t",
-            &target,
-            "#{?pane_status_reported,,1}",
-            &format!("set-option -p -t {target} @agent_state working"),
-        ]);
+        let old_pid = pane_pid();
+        peer_sample(&old_pid);
         settle("#{agent_state}", "blocked");
 
         run(&[
@@ -81893,6 +81907,19 @@ set-option -g @alias-mixed-next yes
         run(&["respawn-pane", "-k", "-t", &target]);
         settle("#{pane_status}|#{agent_state}", "|idle");
         assert_eq!(tree_status(), None);
+        peer_sample(&old_pid);
+        settle("#{agent_state}", "idle");
+
+        run(&[
+            "agent-send",
+            "-t",
+            &target,
+            "--wait",
+            "--timeout",
+            "10",
+            "printf '\\033]7501;state=working\\007\\033]7501;state=done\\007'",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "done|idle");
         shared.request_shutdown();
     }
 

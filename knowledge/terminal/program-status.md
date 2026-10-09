@@ -4,7 +4,7 @@ title: Program status (OSC 7501)
 description: How zz reads the Program Status Protocol from pane output, keeps one record per id for each pane, and shows the most urgent record in formats, the tree, @agent_state, and the desktop sidebar.
 resource: crates/zz-terminal/src/program_status.rs
 tags: [osc, osc-7501, program-status, agent-state, sidebar, formats]
-timestamp: 2026-10-08T12:00:00-03:00
+timestamp: 2026-10-09T12:00:00-03:00
 ---
 
 # Overview
@@ -28,10 +28,11 @@ Upstream libghostty-vt added a parser and an embedder callback in ghostty-org/gh
 (merge `a4aacd91`, 2026-10-06), 134 commits past the fork's base; zz does not need it.
 
 The filter keeps at most 64 bytes of an ordinary OSC, and up to the spec's 4096-byte sequence
-for one that starts `7501;`. `parse_program_status` in `program_status.rs` applies the spec's
-grammar and limits: malformed pairs and unknown keys are skipped, while a missing or unknown
-`state`, a bad `id`, a value over its limit, or text that does not decode discards the whole
-report. Decoded `title` and `msg` text must be UTF-8 without C0, DEL or C1 controls. Bidi
+for one that starts `7501;`. The pin drops C0 bytes inside an OSC, and so does the filter, but
+a `7501;` payload still counts them toward the 4096 bytes. `parse_program_status` in
+`program_status.rs` applies the spec's grammar and limits: malformed pairs and unknown keys
+are skipped, while a missing or unknown `state`, a bad `id`, a value over its limit, or text
+that does not decode discards the whole report. Decoded `title` and `msg` text must be UTF-8 without C0, DEL or C1 controls. Bidi
 controls, zero-width spaces, word joiners and the BOM are removed before the text is stored,
 because every place zz shows it is outside the terminal grid.
 
@@ -76,14 +77,18 @@ answer first. Surfaces without a PTY (agent pane projections and output views) l
   `PaneSnapshot.status` and `TreeOp::PaneStatus` (wire v108).
 - `@agent_state`: `working`, `blocked`, `error` as `failed`, and `idle` for `idle`, `done` or
   no record, so `agent-send --wait`, `zz events`, `wait-for '@agent_state@%N'` and
-  `agent-state-changed` work for any program that reports. After a pane's first report, the
-  OSC 9;4 bridge and the Claude peer-registry sampler stop writing `@agent_state` for it until
-  a full reset, as the spec asks of OSC 9;4. The daemon remembers which panes the protocol
+  `agent-state-changed` work for any program that reports. The watcher only sees the latest
+  records, so `ProgramStatus::work_starts` counts every report that moves a record into
+  `working`; when that count moved but the headline maps to `idle`, the daemon writes
+  `working` before `idle`, and a waiter still sees a turn that started and finished between
+  two looks. After a pane's first report, the OSC 9;4 bridge and the Claude peer-registry
+  sampler stop writing `@agent_state` for it until a full reset, as the spec asks of OSC 9;4. The daemon remembers which panes the protocol
   owns (`program_status_panes`): a full reset or `respawn-pane` on such a pane writes `idle`,
   hands it back to the heuristics, and drops the peer sampler's memo so its next sample lands.
   A peer sample waits in the loop's hook queue as
-  `if-shell -F '#{?pane_status_reported,,1}' 'set-option … @agent_state …'`, so a report that
-  lands while it waits still wins.
+  `if-shell -F '#{?pane_status_reported,,#{==:#{pane_pid},PID}}' 'set-option … @agent_state …'`,
+  so a report that lands while it waits still wins, and a sample taken before `respawn-pane`
+  does not land on the new process.
 - Desktop sidebar: every terminal pane feeds the same `AgentAttentionTracker` as Agent panes,
   idle until it reports. `blocked` shows the needs-input badge and rings, even on a pane's first
   report; `error` shows failed; and `working` to `done` or `idle` rings and leaves the finished

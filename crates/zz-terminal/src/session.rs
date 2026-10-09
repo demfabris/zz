@@ -443,6 +443,7 @@ struct EngineFilter {
     /// engine as it is read; `osc_overflowed` once it outgrew the cap and only
     /// its command number can still be parsed.
     osc: Vec<u8>,
+    osc_dropped: usize,
     osc_overflowed: bool,
     integration_title: bool,
     program_title_writes: u64,
@@ -717,16 +718,19 @@ impl EngineFilter {
             if self.osc_overflowed {
                 return;
             }
-            if byte < 0x20 {
+            let program_status = self.osc.starts_with(PROGRAM_STATUS_PREFIX);
+            if byte < 0x20 && !program_status {
                 continue;
             }
-            let cap = if self.osc.starts_with(PROGRAM_STATUS_PREFIX) {
+            let cap = if program_status {
                 MAX_PROGRAM_STATUS_OSC_BYTES
             } else {
                 MAX_ENGINE_OSC_BYTES
             };
-            if self.osc.len() == cap {
+            if self.osc.len() + self.osc_dropped == cap {
                 self.osc_overflowed = true;
+            } else if byte < 0x20 {
+                self.osc_dropped += 1;
             } else {
                 self.osc.push(byte);
             }
@@ -741,6 +745,7 @@ impl EngineFilter {
     ) {
         let osc = std::mem::take(&mut self.osc);
         let overflowed = std::mem::take(&mut self.osc_overflowed);
+        self.osc_dropped = 0;
         let integration_title = std::mem::take(&mut self.integration_title);
         self.metadata_hint |= overflowed || osc_touches_metadata(&osc);
         if matches!(osc_command(&osc), Some((0 | 2, _))) {
@@ -17083,6 +17088,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             [(crate::ProgramState::Done, "Done")]
         );
+
+        let padded = format!("\x1b]7501;{}state=clear\x07", "\t".repeat(4100));
+        write(&mut filter, padded.as_bytes());
+        assert!(filter.take_program_status().is_none());
+        write(&mut filter, b"\x1b]7501;\t\tstate=clear\x07");
+        let status = filter.take_program_status().expect("clear");
+        assert!(status.records().is_empty());
 
         write(&mut filter, b"text\x1bcmore");
         let status = filter.take_program_status().expect("reset");

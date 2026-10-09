@@ -373,7 +373,7 @@ client_on_both() {
 PIN_DISPLAY_PANES_MODE=0
 ZOOM_REFLOW_MODE=same
 ZOOM_REFLOW_OWNER=gap:terminal.zoom-reflow
-ZOOM_REFLOW_REASON='gap:terminal.zoom-reflow: 3.8 display-panes zooms its pane, and libghostty and the pin reflow a pane whose history holds a wrapped line differently on a width change (resize-pane -Z twice shows the same split), so the pane content after the mode, and the live copy the mode redraws at a new size, differ while the mode screen itself is asserted'
+ZOOM_REFLOW_REASON='gap:terminal.zoom-reflow (accepted engine limit, fabrico 2026-09-18): 3.8 display-panes zooms its pane, and libghostty and the pin reflow a pane whose history holds a wrapped line differently on a width change (resize-pane -Z twice shows the same split), so the pane content after the mode, and the live copy the mode redraws at a new size, differ while the mode screen itself is asserted'
 CENTRE_MENU_MODE=same
 CENTRE_MENU_OWNER=gap:pin.keys-copy
 CENTRE_MENU_REASON='PIN 3.8, gap:pin.keys-copy: 3.8 menus belong to the window (ad6832e6), so display-menu -x C -y C centres on the window and the pin draws the menu a row above the client-centred row zz still uses at an odd height'

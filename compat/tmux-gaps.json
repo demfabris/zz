@@ -1721,11 +1721,11 @@
     },
     {
       "id": "terminal.zoom-reflow",
-      "title": "Reflow a zoomed pane's history the way the pin does",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "hard",
+      "title": "Keep the VT engine's own reflow of a zoomed pane's history",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
       "impact": [
         "daily"
       ],
@@ -1736,14 +1736,14 @@
       "evidence": [
         "resource:crates/zz-terminal/src/session.rs",
         "resource:third_party/rust/libghostty-vt-sys/src/bindings.rs",
+        "resource:knowledge/designs/tui-parity.md",
         "file:compat/tui-overlays.sh"
       ],
       "acceptance": [
-        "A pane whose history holds a wrapped line keeps the pin's visible rows across a width change and back: resize-pane -Z twice, and display-panes, which zooms its pane in 3.8, leave the same screen as the pin.",
-        "compat/tui-overlays.sh asserts panes-resized, panes-selected, panes-closed-by-key and panes-coloured-selected."
+        "A width round trip leaves the rows libghostty's reflow gives, and compat/tui-overlays.sh records panes-resized, panes-selected, panes-closed-by-key and panes-coloured-selected under this gap while it asserts the display-panes mode screen itself."
       ],
       "depends_on": [],
-      "reason": "Registered 2026-10-09 by catch-up item pin.display-panes. 3.8's display-panes zooms its pane, so every C-b q is a width round trip. After printf '\\033[H\\033[2JMARK-%s\\n' with a command line that wraps at 40 columns, resize-pane -Z twice leaves libghostty showing the wrapped row's tail above the mark with history_size unchanged, while the pin rewraps the history and grows history_size; compat/tui-overlays.sh shows the same split after display-panes, and at a new size the mode's live copy of the zoomed pane differs the same way."
+      "reason": "The pin owns its terminal, so how a pane's history rewraps on a width change comes from its grid there and from the engine here. Measured against tmux 3.8 (7f2a35ad) on 2026-10-09 with a raw client attached to a 40-column left pane: after printf '\\033[H\\033[2JMARK-%s\\n' with a command line that wraps at 40 columns, resize-pane -Z twice (80 columns and back) leaves libghostty showing the wrapped command's second row above MARK with history_size unchanged, while grid_reflow on the pin rewraps the history line in place and grows history_size, so the visible rows differ. 3.8's display-panes zooms its pane (window-panes.c), so every C-b q is that round trip: compat/tui-overlays.sh shows the same split on the screen after a digit closes the mode (panes-selected, panes-coloured-selected) and after a non-index key does (panes-closed-by-key), and at 80x30 the mode's live copy of the zoomed pane differs the same way (panes-resized), while panes-shown and panes-coloured-shown, the mode screen itself, are identical. Matching the pin needs grid surgery across the scrollback boundary that libghostty's resize does not expose, and zz carries no patch on the vendored terminal engine (fabrico, 2026-09-18, knowledge/designs/tui-parity.md). Reopen if libghostty grows a reflow mode that keeps rewrapped history out of the active area."
     }
   ],
   "closed": [

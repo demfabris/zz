@@ -19,9 +19,9 @@ Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
 Tracked gap groups: **50**. Classified items: **413**.
 
-- Status: open: 8, accepted: 42.
-- Decision: adopt: 8, native: 33, never: 9.
-- Priority: now: 1, next: 7, none: 42.
+- Status: open: 7, accepted: 43.
+- Decision: adopt: 7, native: 34, never: 9.
+- Priority: now: 1, next: 6, none: 43.
 - Closed history entries: 217.
 - Surface: command: 3, flag: 36, extension-flag: 10, native-command: 26, option: 33, format: 47, hook: 21, native-hook: 1, key: 33, binding: 42, native-key: 92, semantic: 60, presentation: 8, protocol: 1.
 
@@ -63,7 +63,6 @@ structure as proof.
 | `pin.keys-copy` | Adopt the 3.8 default keys, menus and copy commands | adopt | open | medium | protocol | daily | none |
 | `pane.floating-model` | Build floating panes in the mux model as tmux 3.8 does | adopt | open | hard | mux | daily, scripts, gui | none |
 | `pin.hooks-events` | Fire the 3.8 hooks and event payloads | adopt | open | hard | daemon | scripts | none |
-| `terminal.zoom-reflow` | Reflow a zoomed pane's history the way the pin does | adopt | open | hard | terminal | daily | none |
 
 ## None
 
@@ -111,6 +110,7 @@ structure as proof.
 | `protocol.socket-interop` | Do not speak tmux private protocol | never | accepted | none | protocol | admin | none |
 | `sessions.linked-groups` | Do not add linked session groups | never | accepted | none | mux | scripts, admin | none |
 | `terminal.resize-pane-trim` | Keep the scrollback out of the active grid | never | accepted | none | terminal | daily, scripts | none |
+| `terminal.zoom-reflow` | Keep the VT engine's own reflow of a zoomed pane's history | native | accepted | none | terminal | daily | none |
 
 ## Gap details
 
@@ -1086,13 +1086,13 @@ The acceptance had asked for one atomic terminal action that trims cursor-derive
 - Acceptance:
   - `resize-pane -T stays refused rather than silently doing nothing, because libghostty cannot pull scrollback rows back into the active grid and a no-op would be a screen-visible divergence.`
 
-### `terminal.zoom-reflow`: Reflow a zoomed pane's history the way the pin does
+### `terminal.zoom-reflow`: Keep the VT engine's own reflow of a zoomed pane's history
 
-Registered 2026-10-09 by catch-up item pin.display-panes. 3.8's display-panes zooms its pane, so every C-b q is a width round trip. After printf '\033[H\033[2JMARK-%s\n' with a command line that wraps at 40 columns, resize-pane -Z twice leaves libghostty showing the wrapped row's tail above the mark with history_size unchanged, while the pin rewraps the history and grows history_size; compat/tui-overlays.sh shows the same split after display-panes, and at a new size the mode's live copy of the zoomed pane differs the same way.
+The pin owns its terminal, so how a pane's history rewraps on a width change comes from its grid there and from the engine here. Measured against tmux 3.8 (7f2a35ad) on 2026-10-09 with a raw client attached to a 40-column left pane: after printf '\033[H\033[2JMARK-%s\n' with a command line that wraps at 40 columns, resize-pane -Z twice (80 columns and back) leaves libghostty showing the wrapped command's second row above MARK with history_size unchanged, while grid_reflow on the pin rewraps the history line in place and grows history_size, so the visible rows differ. 3.8's display-panes zooms its pane (window-panes.c), so every C-b q is that round trip: compat/tui-overlays.sh shows the same split on the screen after a digit closes the mode (panes-selected, panes-coloured-selected) and after a non-index key does (panes-closed-by-key), and at 80x30 the mode's live copy of the zoomed pane differs the same way (panes-resized), while panes-shown and panes-coloured-shown, the mode screen itself, are identical. Matching the pin needs grid surgery across the scrollback boundary that libghostty's resize does not expose, and zz carries no patch on the vendored terminal engine (fabrico, 2026-09-18, knowledge/designs/tui-parity.md). Reopen if libghostty grows a reflow mode that keeps rewrapped history out of the active area.
 
-- Decision: `adopt`
-- Status: `open`
-- Priority and ease: `next` / `hard`
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
 - Owner: `terminal`
 - User impact: daily
 - Items: `semantic:zoom-round-trip-reflow`
@@ -1100,10 +1100,10 @@ Registered 2026-10-09 by catch-up item pin.display-panes. 3.8's display-panes zo
 - Evidence:
   - `resource:crates/zz-terminal/src/session.rs`
   - `resource:third_party/rust/libghostty-vt-sys/src/bindings.rs`
+  - `resource:knowledge/designs/tui-parity.md`
   - `file:compat/tui-overlays.sh`
 - Acceptance:
-  - `A pane whose history holds a wrapped line keeps the pin's visible rows across a width change and back: resize-pane -Z twice, and display-panes, which zooms its pane in 3.8, leave the same screen as the pin.`
-  - `compat/tui-overlays.sh asserts panes-resized, panes-selected, panes-closed-by-key and panes-coloured-selected.`
+  - `A width round trip leaves the rows libghostty's reflow gives, and compat/tui-overlays.sh records panes-resized, panes-selected, panes-closed-by-key and panes-coloured-selected under this gap while it asserts the display-panes mode screen itself.`
 
 ## Known differential scenarios
 

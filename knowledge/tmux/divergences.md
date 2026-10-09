@@ -559,6 +559,19 @@ so a centred or pointer-placed menu lands on the same cells. What differs: a sec
 window does not see the menu, and a status-line window menu for a window the client is not showing
 opens over the current window. Registry: `menus.client-owned`.
 
+## Pane prompts stay client prompts (2026-10-09)
+
+tmux 3.8's `command-prompt -P` hangs the prompt on the target pane (`window_pane_set_prompt`), so it
+outlives the client that raised it. Measured on tmux 3.8 with one attached 80x24 pty client: a
+`command-prompt -b -P -p PANEPROMPT` raised from a command client is drawn again after that client
+detaches and another attaches, keys typed into the pane go to it (a second client's `prefix :` lands
+in the pane prompt), and it is still drawn after that second client detaches. zz keeps the pane
+prompt on the client that raised it, drawn over its pane: it closes when that client detaches, a
+status prompt on the same client replaces it, and `command-prompt -P` from a command client answers
+`command-prompt requires an interactive client`. Moving prompt ownership to the pane would rebuild
+prompt key routing, waiters and the per-client prompt surface, the same model change `menus.client-owned`
+declined for menus.
+
 ## `display-panes` argument blocks
 
 The `display-panes` member of the shared commands-or-string rule closed on 2026-08-28 without a wire

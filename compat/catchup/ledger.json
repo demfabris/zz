@@ -430,12 +430,13 @@
         "-b removed; -k, -Z and -s source-window accepted; -t is a target pane (1a02c995).",
         "display-panes-active-colour, -colour, -format and -time are window options; display-panes-border-style exists.",
         "Raw TUI matches the pin's mode screen; desktop keeps its native overlay.",
-        "compat/attached-client.sh passes at 3.8: today it stops tmux-side in probe_display_panes_target_no_select ('can't find pane: missing', display-panes -t is a pane now), so the probes after it (probe_requested_client_flags and others) never run. This fixture restamps CI's summary at milestones."
+        "compat/attached-client.sh gets past every display-panes probe at 3.8 (probe_display_panes_target_no_select and later display-panes probes); its full PASS is owned by pin.hooks-events-2, where the fixture stops next (probe_client_event_hooks)."
       ],
       "branch": "catchup/pin.display-panes",
       "sha": null,
       "notes": [
-        "2026-10-09: lane done at 123fd791c: all 11 items closed; tui-overlays mode screen asserted; terminal.zoom-reflow ruled an engine limit (native) by the orchestrator under the no-engine-patch ruling; integration merge sent"
+        "2026-10-09: lane done at 123fd791c: all 11 items closed; tui-overlays mode screen asserted; terminal.zoom-reflow ruled an engine limit (native) by the orchestrator under the no-engine-patch ruling; integration merge sent",
+        "2026-10-09: codex review 1: 4 P1 + 5 P2 (template lost when -k host chosen, desktop routing by invoking client, -k dropped on desktop, wrong window unzoomed, ...); fix pass sent; full attached-client PASS moved to pin.hooks-events-2"
       ]
     },
     {

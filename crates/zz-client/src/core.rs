@@ -295,6 +295,7 @@ pub struct ClientCore {
     appearance: Option<Box<TerminalAppearance>>,
     appearance_provenance: AppearanceProvenance,
     mux_options: MuxOptions,
+    terminal_negotiation: Option<(Vec<String>, Vec<String>)>,
     prefix_keys: PrefixKeys,
     key_tables: Vec<KeyTableSnapshot>,
     key_tables_hash: u64,
@@ -511,6 +512,11 @@ impl ClientCore {
     #[must_use]
     pub const fn mux_options(&self) -> &MuxOptions {
         &self.mux_options
+    }
+
+    #[must_use]
+    pub const fn terminal_negotiation(&self) -> Option<&(Vec<String>, Vec<String>)> {
+        self.terminal_negotiation.as_ref()
     }
 
     #[must_use]
@@ -890,6 +896,13 @@ impl ClientCore {
             EventPayload::MuxOptionsPatched { options } => {
                 self.mux_options.merge(options);
                 self.refresh_prefix_keys();
+                self.events.push_back(CoreEvent::MuxOptionsChanged);
+            }
+            EventPayload::TerminalNegotiation {
+                features,
+                user_keys,
+            } => {
+                self.terminal_negotiation = Some((features, user_keys));
                 self.events.push_back(CoreEvent::MuxOptionsChanged);
             }
             EventPayload::StatusChanged { status } => {
@@ -1695,11 +1708,17 @@ mod tests {
             client_flags: "ignore-size,no-detach-on-destroy".to_owned(),
         });
         assert!(core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "ignore-size,no-detach-on-destroy");
+        assert_eq!(
+            core.attached_client_flags(),
+            "ignore-size,no-detach-on-destroy"
+        );
 
         core.handle_message(event(EventPayload::detached_requested(session, None)));
         assert!(core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "ignore-size,no-detach-on-destroy");
+        assert_eq!(
+            core.attached_client_flags(),
+            "ignore-size,no-detach-on-destroy"
+        );
 
         core.clear_attachment();
         assert!(!core.attached_read_only());
@@ -2784,6 +2803,21 @@ mod tests {
                 pane,
                 damage: ViewportDamage::Rows(Vec::new()),
             }]
+        );
+    }
+
+    #[test]
+    fn a_terminal_negotiation_is_kept_for_the_terminal_client() {
+        let mut core = ClientCore::new();
+        assert!(core.terminal_negotiation().is_none());
+        core.handle_message(event(EventPayload::TerminalNegotiation {
+            features: vec!["RGB".to_owned()],
+            user_keys: vec!["\x1b[99~".to_owned()],
+        }));
+        assert_eq!(drain(&mut core), [CoreEvent::MuxOptionsChanged]);
+        assert_eq!(
+            core.terminal_negotiation(),
+            Some(&(vec!["RGB".to_owned()], vec!["\x1b[99~".to_owned()]))
         );
     }
 

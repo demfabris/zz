@@ -25,6 +25,10 @@
 # Reference checkouts read but never built; the UPSTREAM.md records are the tracked part.
 /third_party/.cache/
 
+# Zig unpacks Ghostty's packages next to its build.zig.zon.
+/third_party/ghostty/zig-pkg/
+/third_party/ghostty/.zig-cache/
+
 # tmux differential compatibility harness scratch and captured results.
 /compat/.cache/
 /compat/results/*

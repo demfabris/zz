@@ -252,7 +252,7 @@ with `close_on_click`), and with `capture_keys` the chrome keymap forwards every
 Delete `popup_overlay` (`:3433`), `PopupPane` (`:575`), `TerminalView::new_popup` and the popup
 handling in `crates/zz/src/mux/client.rs:3992`.
 
-**Web and iOS** (`clients/gpui-shared/src/app.rs`). The same, inside `workspace` (`:1514`), replacing
+**Web and iOS** (`clients/app/src/app.rs`). The same, inside `workspace` (`:1514`), replacing
 `terminal_overlay` (`:2687`). Compact iPhone pages floats like any pane (a page zooms its pane; a
 window whose only pane is a float shows it at its cell); the modal and visible over-zoom floats draw
 over the page. Native browser views under a visible float hide, as under popups today (`:2853`).
@@ -352,7 +352,7 @@ goes dead until float.clients.
     `semantic:nested-attach-in-popup` keeps its fixture requirement); `just compat check` passes.
 
 **float.clients.** Zones: `crates/zz/src/{workspace,mux/client.rs,terminal/view.rs}`,
-`crates/zz-ui/src/pane.rs`, `clients/gpui-shared/src`, `crates/zz-client/src`, `crates/zz-tui/src`,
+`crates/zz-ui/src/pane.rs`, `clients/app/src`, `crates/zz-client/src`, `crates/zz-tui/src`,
 `compat/tui-floating.sh`.
 
 1. `compat/tui-floating.sh` matches tmux 3.8 cell for cell on: two overlapping floats over a vertical

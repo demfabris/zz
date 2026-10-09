@@ -426,7 +426,7 @@ impl SettingsView {
                                 .small()
                                 .label("Choose…")
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    let selected = cx.prompt_for_paths(gpui::PathPromptOptions {
+                                    let selected = cx.prompt_for_paths(zpui::PathPromptOptions {
                                         files: true,
                                         directories: false,
                                         multiple: false,
@@ -782,10 +782,10 @@ fn option_choices(key: FileKey, scheme: TerminalColorScheme) -> Vec<(String, Str
 mod tests {
     use super::*;
 
-    #[gpui::test]
-    fn terminal_preview_uses_drafts_without_changing_saved_settings(cx: &mut gpui::TestAppContext) {
-        use gpui::EntityInputHandler as _;
+    #[zpui::test]
+    fn terminal_preview_uses_drafts_without_changing_saved_settings(cx: &mut zpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
+        use zpui::EntityInputHandler as _;
 
         cx.update(zz_ui::init);
         let captured = Rc::new(RefCell::new(None));

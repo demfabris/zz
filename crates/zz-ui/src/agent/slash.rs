@@ -1,4 +1,4 @@
-use gpui::{App, Div, ElementId, IntoElement, Pixels, SharedString, Stateful, div, prelude::*, px};
+use zpui::{App, Div, ElementId, IntoElement, Pixels, SharedString, Stateful, div, prelude::*, px};
 
 use crate::{ActiveTheme as _, StyledExt as _, h_flex, v_flex};
 
@@ -31,7 +31,7 @@ pub fn suggestion_row(
         .px_3()
         .cursor_pointer()
         .border(px(0.5))
-        .border_color(gpui::transparent_white())
+        .border_color(zpui::transparent_white())
         .when(selected, |row| row.selection_highlight(cx))
         .when(!selected, |row| {
             row.hover(|row| row.selection_highlight(cx))
@@ -49,7 +49,7 @@ pub fn suggestion_row(
                         .text_ellipsis()
                         .whitespace_nowrap()
                         .text_size(crate::rems_from_px(13.0))
-                        .font_weight(gpui::FontWeight::MEDIUM)
+                        .font_weight(zpui::FontWeight::MEDIUM)
                         .child(format!("/{name}")),
                 )
                 .when_some(description, |column, description| {

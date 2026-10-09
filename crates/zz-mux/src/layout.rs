@@ -314,6 +314,28 @@ impl CellLayout {
         Some(carve_border_row(geometry, self.root.geometry(), status))
     }
 
+    #[must_use]
+    pub fn displayed_pane_size(
+        &self,
+        pane: PaneId,
+        zoomed: Option<PaneId>,
+        status: PaneBorderStatus,
+    ) -> Option<(u16, u16)> {
+        if zoomed == Some(pane) {
+            let (sx, sy) = self.extent();
+            let full = CellGeometry {
+                sx,
+                sy,
+                xoff: 0,
+                yoff: 0,
+            };
+            let geometry = carve_border_row(full, full, status);
+            return Some((geometry.sx, geometry.sy));
+        }
+        self.pane_geometry_with_border(pane, status)
+            .map(|geometry| (geometry.sx, geometry.sy))
+    }
+
     pub(crate) fn contains(&self, pane: PaneId) -> bool {
         self.pane_geometry(pane).is_some()
     }

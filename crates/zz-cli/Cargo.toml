@@ -16,14 +16,13 @@ path = "src/main.rs"
 env_logger.workspace = true
 log.workspace = true
 mimalloc.workspace = true
-serde.workspace = true
 serde_json.workspace = true
-zz-config = { path = "../zz-config" }
-zz-daemon = { path = "../zz-daemon" }
-zz-mux = { path = "../zz-mux" }
-zz-protocol = { path = "../zz-protocol" }
-zz-terminal = { path = "../zz-terminal" }
-zz-tui = { path = "../zz-tui" }
+zz-config.workspace = true
+zz-daemon = { workspace = true, features = ["default"] }
+zz-mux.workspace = true
+zz-protocol.workspace = true
+zz-terminal = { workspace = true, features = ["default"] }
+zz-tui.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 libc.workspace = true

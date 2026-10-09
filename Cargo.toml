@@ -1,13 +1,15 @@
 [workspace]
 members = [
+    "clients/app",
+    "clients/ios",
     "crates/zz",
     "crates/zz-browser",
     "crates/zz-chrome-import",
     "crates/zz-cli",
     "crates/zz-client",
     "crates/zz-config",
-    "crates/zz-gpui-ios",
     "crates/zz-hotreload",
+    "crates/zz-kit",
     "crates/zz-client-ffi",
     "crates/zz-daemon",
     "crates/zz-mux",
@@ -20,6 +22,8 @@ members = [
 ]
 exclude = [
     "clients/web",
+    "zpui",
+    "third_party/rust/libghostty-vt",
     "third_party/rust/libghostty-vt-sys",
 ]
 resolver = "3"
@@ -32,11 +36,10 @@ repository = "https://github.com/demfabris/zz"
 rust-version = "1.97"
 
 [workspace.dependencies]
-agent-client-protocol = "2.1.0"
 aes = "=0.9.3"
 aes-gcm = { version = "=0.11.1", default-features = false, features = ["aes", "alloc"] }
+agent-client-protocol = "2.1.0"
 async-channel = "2.5.0"
-async-signal = "0.2.14"
 base64 = "0.23.1"
 block2 = "0.6.2"
 cargo_metadata = "0.23.1"
@@ -47,23 +50,22 @@ core-foundation = "=0.10.1"
 core-video = "=0.5.2"
 crossbeam-channel = "0.5.17"
 csscolorparser = "=0.8.4"
-filedescriptor = "0.8.3"
 env_logger = "0.11.11"
+filedescriptor = "0.8.3"
 foldhash = "0.2.0"
+futures = "0.3.34"
 futures-lite = "2.6.1"
-gpui = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde" }
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_wgpu = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde" }
 getrandom = "0.4.3"
 ignore = "0.4.33"
 image = { version = "=0.25.10", default-features = false }
-libc = "0.2.189"
 interprocess = "2.4.4"
-libghostty-vt = { version = "=0.2.1", git = "https://github.com/demfabris/libghostty-rs", rev = "0db98a206681fd60c2b1a1719daf14049eda8c30", default-features = false }
+libc = "0.2.189"
+libghostty-vt = { path = "third_party/rust/libghostty-vt", default-features = false }
 log = "0.4.34"
 memchr = "2.8.3"
 merman = { version = "=0.6.2", features = ["render"] }
 mimalloc = "0.1.52"
+naga = { version = "=30.0.1", features = ["glsl-in", "wgsl-in", "wgsl-out"] }
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSOpenPanel", "NSPanel", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSView", "NSWindow"] }
 objc2-core-foundation = "0.3.2"
@@ -82,9 +84,9 @@ raw-window-handle = "0.6.2"
 regex = "1.13.1"
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 rustix = { version = "1.1.4", features = ["event", "pipe", "process", "termios"] }
+security-framework = "=3.7.0"
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.151"
-security-framework = "=3.7.0"
 sha1 = "=0.11.0"
 sha2 = "=0.11.0"
 smallvec = { version = "=1.16.1", features = ["serde"] }
@@ -92,19 +94,37 @@ smol = "=2.0.2"
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
+unicode-width = "0.2.2"
 url = "=2.5.8"
 wayland-client = "0.31.15"
+web-time = "1.1.0"
 wgpu = "=30.0.1"
-naga = { version = "=30.0.1", features = ["glsl-in", "wgsl-in", "wgsl-out"] }
 windows = "=0.62.2"
 x11rb = "0.13.2"
 zeroize = "=1.9.0"
 
+zpui = { path = "zpui/crates/zpui" }
+zpui_platform = { path = "zpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+zpui_wgpu = { path = "zpui/crates/zpui_wgpu" }
+zpui_ios = { path = "zpui/crates/zpui_ios" }
+sum_tree = { path = "zpui/crates/sum_tree" }
+zz = { path = "crates/zz" }
+zz-app = { path = "clients/app" }
+zz-browser = { path = "crates/zz-browser" }
+zz-chrome-import = { path = "crates/zz-chrome-import" }
+zz-cli = { path = "crates/zz-cli" }
+zz-client = { path = "crates/zz-client" }
+zz-config = { path = "crates/zz-config" }
+zz-daemon = { path = "crates/zz-daemon", default-features = false }
+zz-kit = { path = "crates/zz-kit" }
+zz-mux = { path = "crates/zz-mux" }
+zz-protocol = { path = "crates/zz-protocol" }
+zz-terminal = { path = "crates/zz-terminal", default-features = false }
+zz-tui = { path = "crates/zz-tui" }
+zz-ui = { path = "crates/zz-ui" }
+
 [patch.crates-io]
 cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
-
-[patch."https://github.com/demfabris/libghostty-rs"]
-libghostty-vt-sys = { path = "third_party/rust/libghostty-vt-sys" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"
@@ -131,7 +151,7 @@ cast_sign_loss = "allow"
 float_cmp = "allow"
 struct_excessive_bools = "allow"
 type_complexity = "allow"
-# gpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
+# zpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
 # and view methods take &self for organization before they need it.
 used_underscore_binding = "allow"
 unused_self = "allow"
@@ -145,7 +165,7 @@ opt-level = 2
 [profile.dev.package.taffy]
 opt-level = 3
 
-[profile.dev.package.gpui]
+[profile.dev.package.zpui]
 opt-level = 3
 
 [profile.release]

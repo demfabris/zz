@@ -1,6 +1,6 @@
 use std::{collections::HashMap, ops::Range, rc::Rc, sync::Arc};
 
-use gpui::{
+use zpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render,
     ScrollStrategy, SharedString, Task, UniformListScrollHandle, Window, div, prelude::*, px,
     uniform_list,
@@ -604,7 +604,7 @@ impl PathPickerView {
         selected: bool,
         picker: Entity<Self>,
         cx: &App,
-    ) -> gpui::Div {
+    ) -> zpui::Div {
         let hover = picker.clone();
         let click = picker;
         let muted_prefix = row.label.rfind('/').map_or(0, |index| index + 1);

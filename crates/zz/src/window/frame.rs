@@ -1,6 +1,6 @@
 // Adapted from gpui-component's Apache-2.0 Linux client-side window border:
 // https://github.com/longbridge/gpui-component/blob/b004e595cf5de98a73b6b561394a559a94ae1e2a/crates/zz-ui/src/window_border.rs
-use gpui::{
+use zpui::{
     AnyElement, App, BorderStyle, Bounds, CursorStyle, Decorations, Edges, Hsla,
     InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, Point, RenderOnce,
     ResizeEdge, Size, Styled as _, Tiling, Window, canvas, div, point, prelude::FluentBuilder as _,
@@ -52,7 +52,7 @@ impl RenderOnce for RoundedWindowFrame {
 
         div()
             .id("rounded-window-backdrop")
-            .bg(gpui::transparent_black())
+            .bg(zpui::transparent_black())
             .map(|frame| match decorations {
                 Decorations::Server => frame,
                 Decorations::Client { tiling } => frame
@@ -108,7 +108,7 @@ impl RenderOnce for RoundedWindowFrame {
                                         surface.pr(WINDOW_FRAME_BORDER_SIZE)
                                     })
                                     .when(!tiling.is_tiled(), |surface| {
-                                        surface.shadow(vec![gpui::BoxShadow {
+                                        surface.shadow(vec![zpui::BoxShadow {
                                             color: cx.theme().scrim,
                                             blur_radius: visual_shadow / 2.0,
                                             spread_radius: px(0.0),
@@ -183,7 +183,7 @@ fn border_ring(tiling: Tiling, radius: Pixels, color: Hsla) -> impl IntoElement 
             window.paint_quad(quad(
                 bounds,
                 corners.radii(radius),
-                gpui::transparent_black(),
+                zpui::transparent_black(),
                 client_frame_insets(WINDOW_FRAME_BORDER_SIZE, tiling),
                 color,
                 BorderStyle::default(),

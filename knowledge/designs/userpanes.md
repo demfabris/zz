@@ -108,7 +108,7 @@ browser's main-frame URL before honoring any query, so a compromised or navigate
 keep driving the mux.
 
 **The shim** is TypeScript bundled by the existing esbuild pipeline
-(`crates/zz-browser/picker/`, second entry point, same `build.mjs --check` staleness gate in CI),
+(`crates/zz-client/picker/`, second entry point, same `build.mjs --check` staleness gate in CI),
 `include_str!`'d like the picker script. Its whole API:
 
 ```ts

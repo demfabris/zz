@@ -979,3 +979,190 @@ fn a_terminal_client_hello_skips_the_status_its_attach_sends() {
     shared.publish_snapshot();
     assert_eq!(status_renders(&take_reliable_messages(&mailbox)), 1);
 }
+
+fn negotiations(mailbox: &OutboundMailbox) -> Vec<(Vec<String>, Vec<String>)> {
+    take_reliable_messages(mailbox)
+        .into_iter()
+        .flat_map(|message| match message {
+            ProtocolMessage::Batch(batch) => batch.messages().expect("children"),
+            message => vec![message],
+        })
+        .filter_map(|message| match message {
+            ProtocolMessage::Event(Event {
+                payload:
+                    EventPayload::TerminalNegotiation {
+                        features,
+                        user_keys,
+                    },
+                ..
+            }) => Some((features, user_keys)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn tui_on(
+    shared: &Arc<Shared>,
+    name: &str,
+    term: &str,
+) -> Option<(ClientId, Arc<OutboundMailbox>)> {
+    let (session, _, _) = switch_test_session(shared, name);
+    let (client, mailbox) = terminal_client(shared, (80, 24));
+    shared.attach(client, session).expect("attach client");
+    let mut inner = shared.inner.lock();
+    inner.client_entry(client).has_terminal = true;
+    inner
+        .client_entry(client)
+        .environment
+        .replace(Arc::new(ClientEnvironmentBlob::from_map(BTreeMap::from([
+            ("TERM".into(), term.into()),
+        ]))));
+    let resolved = client_terminal_negotiation(&inner, client)?;
+    drop(inner);
+    let _ = take_reliable_messages(&mailbox);
+    (!resolved.0.is_empty()).then_some((client, mailbox))
+}
+
+#[test]
+fn a_tc_override_reaches_the_raw_tui_as_rgb_on_xterm_256color() {
+    let shared = Arc::new(Shared::new(1));
+    let Some((client, mailbox)) = tui_on(&shared, "tc-override", "xterm-256color") else {
+        return;
+    };
+    let colours = |features: &[String]| {
+        terminal_colour_count(
+            "xterm-256color",
+            "",
+            terminal_feature_mask(features.iter().map(String::as_str)),
+        )
+    };
+    let before = client_terminal_negotiation(&shared.inner.lock(), client).expect("terminal");
+    assert_eq!(colours(&before.0), 256);
+    assert!(
+        !before.0.iter().any(|feature| feature == "RGB"),
+        "{before:?}"
+    );
+
+    let mut context = ExecutionContext::default();
+    command(
+        &shared,
+        &mut context,
+        &["set-option", "-sa", "terminal-overrides", ",*:Tc"],
+    );
+    let sent = negotiations(&mailbox);
+    let [(features, user_keys)] = sent.as_slice() else {
+        panic!("one negotiation after the override: {sent:?}");
+    };
+    assert!(
+        features.iter().any(|feature| feature == "RGB"),
+        "{features:?}"
+    );
+    assert_eq!(colours(features), 16_777_216);
+    assert!(user_keys.is_empty());
+    assert_eq!(
+        client_colour_count(&shared.inner.lock(), client),
+        Some(colours(features))
+    );
+
+    command(
+        &shared,
+        &mut context,
+        &["set-option", "-sa", "terminal-overrides", ",*:Tc"],
+    );
+    assert!(negotiations(&mailbox).is_empty());
+}
+
+#[test]
+fn a_terminal_features_entry_hands_the_raw_tui_extkeys() {
+    let shared = Arc::new(Shared::new(1));
+    let Some((_, mailbox)) = tui_on(&shared, "array-extkeys", "xterm-256color") else {
+        return;
+    };
+    let mut context = ExecutionContext::default();
+    command(
+        &shared,
+        &mut context,
+        &["set-option", "-sa", "terminal-features", "xterm*:extkeys"],
+    );
+    let sent = negotiations(&mailbox);
+    let [(features, _)] = sent.as_slice() else {
+        panic!("one negotiation after the array entry: {sent:?}");
+    };
+    assert!(
+        features.iter().any(|feature| feature == "extkeys"),
+        "{features:?}"
+    );
+}
+
+#[test]
+fn user_keys_reach_the_raw_tui_by_index_and_fire_their_bindings() {
+    let shared = Arc::new(Shared::new(1));
+    let Some((_, mailbox)) = tui_on(&shared, "user-keys", "xterm-256color") else {
+        return;
+    };
+    let mut context = ExecutionContext::default();
+    command(
+        &shared,
+        &mut context,
+        &["set-option", "-s", "user-keys[2]", "\x1b[99~"],
+    );
+    let sent = negotiations(&mailbox);
+    let [(_, user_keys)] = sent.as_slice() else {
+        panic!("one negotiation after user-keys: {sent:?}");
+    };
+    assert_eq!(user_keys, &["", "", "\x1b[99~"]);
+    assert!(shared.inner.lock().engine.user_key_claims(b"\x1b[99~"));
+    assert!(shared.inner.lock().engine.user_key_claims(b"\x1b[9"));
+    assert!(!shared.inner.lock().engine.user_key_claims(b"\x1b[A"));
+
+    let (shared, client, mut context, pane, _) =
+        super::tests::key_table_fixture("user-key-binding");
+    command(
+        &shared,
+        &mut context,
+        &[
+            "bind-key",
+            "-n",
+            "User2",
+            "set-option",
+            "-g",
+            "@user-key",
+            "fired",
+        ],
+    );
+    let user_key = |number| zz_terminal::KeyInput {
+        action: zz_terminal::KeyAction::Press,
+        key: zz_terminal::KeyCode::User(number),
+        modifiers: zz_terminal::Modifiers::default(),
+        text: None,
+        unshifted_codepoint: None,
+    };
+    for number in [1, 2] {
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut ExecutionContext::default(),
+                InputMessage::Key {
+                    pane,
+                    input: user_key(number),
+                    text_follows: false,
+                },
+            )
+            .expect("user key");
+        let fired = shared
+            .execute(
+                COMMAND_CLIENT,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@user-key"]),
+            )
+            .expect("show-options")
+            .output;
+        assert_eq!(
+            fired,
+            if number == 2 { "fired" } else { "" },
+            "User{number}"
+        );
+    }
+}

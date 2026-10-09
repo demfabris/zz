@@ -595,6 +595,7 @@ pub(crate) fn run(
     model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
     model.begin_client_focus_attach();
     let mut event_loop = EventLoop::new(&client).map_err(|error| error.to_string())?;
+    event_loop.adopt_negotiation(&core);
     if terminal.kitty_probe_sent() {
         event_loop.await_graphics_reply();
     }
@@ -721,6 +722,7 @@ pub(crate) fn run(
                                         | CoreEvent::KeyTablesChanged
                                 ) {
                                     refresh_terminal_options(&mut model, &core, &escape_time);
+                                    event_loop.adopt_negotiation(&core);
                                 }
                                 let popup_lifecycle_changed = matches!(
                                     &*event,

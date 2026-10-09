@@ -40,13 +40,15 @@ cargo watch \
     --watch clients/web/Cargo.toml \
     --watch clients/web/Cargo.lock \
     --watch clients/web/src \
-    --watch clients/gpui-shared/src \
+    --watch clients/app/src \
     --watch clients/web/web \
     --watch crates/zz-client/src \
     --watch crates/zz-protocol/src \
     --watch crates/zz-terminal/src \
     --watch crates/zz-ui/src \
-    --watch crates/zz-ui/assets \
+    --watch crates/zz-kit/src \
+    --watch crates/zz-kit/assets \
+    --watch zpui/crates \
     --watch clients/web/assets/fonts \
     --watch scripts/build-web-wasm.sh \
     --shell "$WEB_ROOT/scripts/build-web-wasm.sh"

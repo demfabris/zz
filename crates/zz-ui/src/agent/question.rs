@@ -1,6 +1,6 @@
 use std::{rc::Rc, sync::Arc};
 
-use gpui::{
+use zpui::{
     AnyElement, App, Context, Div, Entity, Focusable as _, FontWeight, IntoElement, SharedString,
     Subscription, Window, div, prelude::*, px,
 };
@@ -421,7 +421,7 @@ impl QuestionCardState {
             .border_1()
             .border_color(cx.theme().accent.outline())
             .bg(cx.theme().background.raised(1).opaque())
-            .when(cx.theme().shadow, gpui::Styled::shadow_xs)
+            .when(cx.theme().shadow, zpui::Styled::shadow_xs)
             .p_3()
             .children(
                 card.questions()

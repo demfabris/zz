@@ -8,9 +8,9 @@ use std::{
     time::Duration,
 };
 
-use gpui::{App, Bounds, Context, DisplayId, Pixels, Size, Window, WindowBounds, point, px, size};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use zpui::{App, Bounds, Context, DisplayId, Pixels, Size, Window, WindowBounds, point, px, size};
 
 use crate::{
     config::atomic_write,

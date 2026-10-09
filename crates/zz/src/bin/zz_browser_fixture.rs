@@ -14,16 +14,16 @@ use std::sync::Arc;
 
 use env_logger::{Builder, Env, WriteStyle};
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use gpui::{
+use image::{Frame as ImageFrame, ImageBuffer, Rgba};
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use parking_lot::Mutex;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use zpui::{
     App, Bounds, Context, ObjectFit, Render, RenderImage, Window, WindowBounds, WindowOptions, div,
     external_texture, img, prelude::*, px, size,
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use gpui_platform::application;
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use image::{Frame as ImageFrame, ImageBuffer, Rgba};
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use parking_lot::Mutex;
+use zpui_platform::application;
 #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 use zz_browser::FrameTier;
 use zz_browser::{
@@ -678,7 +678,7 @@ enum FixturePaintSurface {
         device_size: (u32, u32),
         pool_generation: u64,
         sequence: u64,
-        texture: gpui::wgpu::Texture,
+        texture: zpui::wgpu::Texture,
     },
 }
 
@@ -1123,7 +1123,7 @@ impl Render for SharedTextureSpikeView {
         self.record_paint_submission();
         window.request_animation_frame();
 
-        let content = div().size_full().bg(gpui::rgb(0x10_13_18));
+        let content = div().size_full().bg(zpui::rgb(0x10_13_18));
         match self.surface.as_ref() {
             Some(FixturePaintSurface::OwnedBgra { image, .. }) => {
                 content.child(img(image.clone()).object_fit(ObjectFit::Fill).size_full())
@@ -1139,7 +1139,7 @@ impl Render for SharedTextureSpikeView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(gpui::rgb(0xe8_ee_f7))
+                    .text_color(zpui::rgb(0xe8_ee_f7))
                     .child("Waiting for the first CEF frame…"),
             ),
         }

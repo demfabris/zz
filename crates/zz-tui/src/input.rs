@@ -2252,6 +2252,7 @@ fn key_code(code: TerminalKeyCode) -> KeyCode {
         TerminalKeyCode::Right => KeyCode::ArrowRight,
         TerminalKeyCode::F(number) => KeyCode::Function(number),
         TerminalKeyCode::Unidentified => KeyCode::Unidentified,
+        TerminalKeyCode::User(number) => KeyCode::User(number),
     }
 }
 

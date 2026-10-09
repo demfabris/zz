@@ -422,7 +422,7 @@ remain unchanged.
 Deferred event hooks clear the Control target and remain separate. Command replay retains the
 caller cwd for sourced hooks; Control hook framing clears the replay client, so sourced-hook cwd is
 a Control-only gap. Event-hook cwd and the three missing pane-event producers stay under their
-named gaps. Pinned `after-queue` is explicit-only and needs no automatic producer.
+named gaps. The 3.8 pin removed `after-queue` and zz no longer registers it.
 
 Command and Interactive replay transcripts closed without another wire field. Each source invocation
 appends its complete verbose batch, replay output, and buffered command-name or parser diagnostics in
@@ -825,6 +825,16 @@ terminal an OSC 52 query (`\e]52;;?\a`, `tty_clipboard_query`) and keeps the que
 decoded bytes of the terminal's OSC 52 answer. The daemon stores them as a new automatic buffer, as
 `tty_keys_clipboard` does with `paste_add`, only while a query to that client is pending; a reply
 outside that window is dropped. Clients that do not answer OSC 52 ignore the query.
+
+v108 also carries the raw TUI's terminal negotiation (2026-10-09). `EventPayload` appends
+`TerminalNegotiation { features: Vec<String>, user_keys: Vec<String> }` after
+`ClipboardQuery`. The daemon sends it to an interactive client with a terminal at attach
+and again whenever `user-keys`, `terminal-features` or `terminal-overrides` changes: `features`
+is the roster behind `#{client_termfeatures}` (the client's `TERM`, `COLORTERM`, both arrays and
+what it reported), and `user_keys` is the `user-keys` array by index, empty for an unset slot.
+The TUI raises its colour depth and arms extended keys from `features` and decodes each sequence
+in `user_keys` before the built-in keys. `zz_terminal::KeyCode` appends `User(u16)`, which
+`input_key_name` spells `UserN`; a pane writes nothing for it.
 
 v108 also carries tmux 3.8's floating panes (catch-up item `float.core`,
 [design](/designs/floating-panes.md)). `WindowSnapshot` appends `floating:

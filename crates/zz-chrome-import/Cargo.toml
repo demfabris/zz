@@ -18,7 +18,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 url.workspace = true
 zeroize.workspace = true
-zz-browser = { path = "../zz-browser", default-features = false }
+zz-browser.workspace = true
 
 # Chrome derives its cookie key with PBKDF2-HMAC-SHA1 and seals values with
 # AES-128-CBC everywhere except Windows, which uses AES-256-GCM instead.

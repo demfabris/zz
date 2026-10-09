@@ -11,19 +11,19 @@ publish = false
 crate-type = ["lib", "staticlib", "cdylib"]
 
 [dependencies]
-zz-config = { path = "../zz-config" }
+zz-config = { workspace = true, features = ["update"] }
 rustix.workspace = true
 serde.workspace = true
 agent-client-protocol-schema = "1.7.0"
 serde_json.workspace = true
 zeroize.workspace = true
-zz-client = { path = "../zz-client" }
-zz-daemon = { path = "../zz-daemon", default-features = false }
-zz-protocol = { path = "../zz-protocol" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-client.workspace = true
+zz-daemon.workspace = true
+zz-protocol.workspace = true
+zz-terminal.workspace = true
 
 [dev-dependencies]
-zz-daemon = { path = "../zz-daemon" }
+zz-daemon = { workspace = true, features = ["default"] }
 
 [lints.rust]
 unsafe_code = "allow"

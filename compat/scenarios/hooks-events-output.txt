@@ -1,0 +1,8 @@
+# The 3.8 events a pane's output raises (pane-activity, pane-bell and the OSC
+# 133 trio) and the control client lifecycle pair, polled from a fixture since
+# they land asynchronously.
+shim:
+stage: fixtures/hooks-events-output.sh ~/hooks-events-output.sh
+out: set-environment -gu HOOKS_EVENTS_OUTPUT
+run-shell 'sh ~/hooks-events-output.sh'
+out: show-environment -g HOOKS_EVENTS_OUTPUT

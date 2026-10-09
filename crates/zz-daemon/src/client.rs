@@ -2507,7 +2507,8 @@ pub fn client_terminal_colour_count() -> u32 {
         &std::env::var("TERM").unwrap_or_default(),
         &std::env::var("COLORTERM").unwrap_or_default(),
         crate::terminal_features::terminal_feature_mask(flags.features.iter().map(String::as_str))
-            | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed),
+            | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed)
+            | NEGOTIATED_TERMINAL_FEATURES.load(Ordering::Relaxed),
     )
 }
 
@@ -2532,6 +2533,15 @@ fn client_utf8_capability(capabilities: &mut Vec<String>) {
 /// keeps it for the next hello and reports it over the connection it already
 /// holds.
 static LEARNED_TERMINAL_FEATURES: AtomicU32 = AtomicU32::new(0);
+
+static NEGOTIATED_TERMINAL_FEATURES: AtomicU32 = AtomicU32::new(0);
+
+pub fn adopt_negotiated_terminal_features(features: &[String]) {
+    NEGOTIATED_TERMINAL_FEATURES.fetch_or(
+        crate::terminal_features::terminal_feature_mask(features.iter().map(String::as_str)),
+        Ordering::Relaxed,
+    );
+}
 
 static INTERACTIVE_WRITER: Mutex<Option<Weak<Mutex<ProtocolSender<ClientStream>>>>> =
     Mutex::new(None);
@@ -2559,6 +2569,7 @@ pub fn client_terminal_feature_mask() -> u32 {
     crate::terminal_features::terminal_feature_mask(
         client_terminal_flags().features.iter().map(String::as_str),
     ) | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed)
+        | NEGOTIATED_TERMINAL_FEATURES.load(Ordering::Relaxed)
 }
 
 fn report_learned_terminal_features(learned: u32) {
@@ -3334,7 +3345,14 @@ mod tests {
             ),
             zz_protocol::CommandInvocation::new(
                 "attach-session",
-                ["-d", "-r", "-f", "ignore-size,!no-detach-on-destroy", "-t", "work",],
+                [
+                    "-d",
+                    "-r",
+                    "-f",
+                    "ignore-size,!no-detach-on-destroy",
+                    "-t",
+                    "work",
+                ],
             )
         );
     }

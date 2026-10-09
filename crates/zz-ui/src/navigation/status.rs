@@ -4,7 +4,7 @@ mod pane_deck;
 pub use pane_deck::{StatusPaneEntry, status_pane_deck};
 pub use zz_client::AgentAttentionStatus;
 
-use gpui::{
+use zpui::{
     AnyElement, App, ElementId, IntoElement, MouseButton, SharedString, Window, div, prelude::*, px,
 };
 
@@ -138,7 +138,7 @@ pub fn status_window(
             div()
                 .flex_none()
                 .invisible()
-                .group_hover(group, gpui::Styled::visible)
+                .group_hover(group, zpui::Styled::visible)
                 .child(
                     workspace_tree_action_button(
                         ElementId::Name(format!("status-window-close-{id:?}").into()),
@@ -289,7 +289,7 @@ pub fn status_agents(
         )
         .tooltip("Agent activity")
         .disabled(!connected)
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+        .dropdown_menu_with_anchor(zpui::Anchor::TopRight, move |menu, _, _| {
             agents
                 .iter()
                 .fold(menu.label("Agent activity"), |menu, entry| {
@@ -312,8 +312,8 @@ pub fn status_agents(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
     use std::cell::Cell;
+    use zpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
 
     fn agent(status: Option<AgentAttentionStatus>) -> StatusAgentEntry {
         StatusAgentEntry {
@@ -395,7 +395,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn menus_select_their_targets_and_disable_when_disconnected(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let selected = Rc::new(Cell::new(0));

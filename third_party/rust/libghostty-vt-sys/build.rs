@@ -2,10 +2,6 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// Pinned ghostty commit. Update this to pull a newer version.
-const GHOSTTY_REPO: &str = "https://github.com/demfabris/ghostty.git";
-const GHOSTTY_COMMIT: &str = "e482b03688ccc9eebd6304176aa85bd5d81f0bfa";
-
 /// File name of the static archive on Windows. Ghostty installs it under this
 /// name for every Windows ABI so it does not collide with `ghostty-vt.lib`,
 /// the import library for `ghostty-vt.dll`. Validation and link emission must
@@ -121,19 +117,25 @@ fn build_vendored(link_mode: LinkMode, target: &str) {
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR must be set"));
     let host = env::var("HOST").expect("HOST must be set");
 
-    // Locate ghostty source: env override > fetch into OUT_DIR.
-    let ghostty_dir = match env::var("GHOSTTY_SOURCE_DIR") {
-        Ok(dir) => {
-            let p = PathBuf::from(dir);
-            assert!(
-                p.join("build.zig").exists(),
-                "GHOSTTY_SOURCE_DIR does not contain build.zig: {}",
-                p.display()
-            );
-            p
-        }
-        Err(_) => fetch_ghostty(&out_dir),
-    };
+    // Locate ghostty source: env override > the vendored tree in third_party/ghostty.
+    let ghostty_dir = env::var("GHOSTTY_SOURCE_DIR").map_or_else(
+        |_| {
+            PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"))
+                .join("../../ghostty")
+        },
+        PathBuf::from,
+    );
+    assert!(
+        ghostty_dir.join("build.zig").exists(),
+        "no build.zig in the Ghostty source at {}",
+        ghostty_dir.display()
+    );
+    for input in ["build.zig", "build.zig.zon", "include", "pkg", "src"] {
+        println!(
+            "cargo:rerun-if-changed={}",
+            ghostty_dir.join(input).display()
+        );
+    }
 
     // Build libghostty-vt via zig.
     let install_prefix = out_dir.join("ghostty-install");
@@ -411,53 +413,6 @@ fn zig_optimize_mode() -> &'static str {
         Ok("s") | Ok("z") => "ReleaseSmall",
         _ => "ReleaseFast",
     }
-}
-
-/// Clone ghostty at the pinned commit into OUT_DIR/ghostty-src.
-/// Reuses an existing clone if the commit matches.
-fn fetch_ghostty(out_dir: &Path) -> PathBuf {
-    let src_dir = out_dir.join("ghostty-src");
-    let stamp = src_dir.join(".ghostty-commit");
-
-    // Skip fetch if we already have the right commit.
-    if stamp.exists()
-        && let Ok(existing) = std::fs::read_to_string(&stamp)
-        && existing.trim() == GHOSTTY_COMMIT
-    {
-        return src_dir;
-    }
-
-    // Clean and clone fresh.
-    if src_dir.exists() {
-        std::fs::remove_dir_all(&src_dir)
-            .unwrap_or_else(|e| panic!("failed to remove {}: {e}", src_dir.display()));
-    }
-
-    eprintln!("Fetching ghostty {GHOSTTY_COMMIT} ...");
-
-    let mut clone = Command::new("git");
-    // Cargo's nested OUT_DIR plus Ghostty's fuzz corpus names can exceed
-    // Windows MAX_PATH. Scope long-path support to this fetched repository.
-    clone
-        .arg("clone")
-        .arg("--config")
-        .arg("core.longpaths=true")
-        .arg("--filter=blob:none")
-        .arg("--no-checkout")
-        .arg(GHOSTTY_REPO)
-        .arg(&src_dir);
-    run(clone, "git clone ghostty");
-
-    let mut checkout = Command::new("git");
-    checkout
-        .arg("checkout")
-        .arg(GHOSTTY_COMMIT)
-        .current_dir(&src_dir);
-    run(checkout, "git checkout ghostty commit");
-
-    std::fs::write(&stamp, GHOSTTY_COMMIT).unwrap_or_else(|e| panic!("failed to write stamp: {e}"));
-
-    src_dir
 }
 
 fn run(mut command: Command, context: &str) {

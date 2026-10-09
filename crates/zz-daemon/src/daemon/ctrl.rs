@@ -1129,6 +1129,16 @@ impl Shared {
         }
         if full {
             self.send_compact_keys(client, outbound);
+            let negotiation = {
+                let mut inner = self.inner.lock();
+                if let Some(entry) = inner.client_mut(client) {
+                    entry.published_terminal_negotiation = None;
+                }
+                take_terminal_negotiation(&mut inner, client)
+            };
+            if let Some(payload) = negotiation {
+                Self::send_event(outbound, payload);
+            }
         }
         if let Some(options) = options {
             let mut inner = self.inner.lock();

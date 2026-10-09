@@ -11111,7 +11111,6 @@ dependencies = [
  "zed-font-kit",
  "zpui-macros",
  "zpui-platform",
- "zpui-refineable-derive",
 ]
 
 [[package]]
@@ -11289,15 +11288,6 @@ dependencies = [
  "zpui-web",
  "zpui-wgpu",
  "zpui-windows",
-]
-
-[[package]]
-name = "zpui-refineable-derive"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]

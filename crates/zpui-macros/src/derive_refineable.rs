@@ -6,8 +6,7 @@ use syn::{
     WherePredicate, parse_macro_input, parse_quote,
 };
 
-#[proc_macro_derive(Refineable, attributes(refineable))]
-pub fn derive_refineable(input: TokenStream) -> TokenStream {
+pub(crate) fn derive_refineable(input: TokenStream) -> TokenStream {
     let DeriveInput {
         ident,
         data,

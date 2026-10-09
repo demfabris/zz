@@ -2,6 +2,7 @@ mod bench;
 mod derive_action;
 mod derive_app_context;
 mod derive_into_element;
+mod derive_refineable;
 mod derive_render;
 mod derive_visual_context;
 mod property_test;
@@ -34,6 +35,11 @@ pub fn register_action(ident: TokenStream) -> TokenStream {
 #[proc_macro_derive(IntoElement)]
 pub fn derive_into_element(input: TokenStream) -> TokenStream {
     derive_into_element::derive_into_element(input)
+}
+
+#[proc_macro_derive(Refineable, attributes(refineable))]
+pub fn derive_refineable(input: TokenStream) -> TokenStream {
+    derive_refineable::derive_refineable(input)
 }
 
 #[proc_macro_derive(Render)]

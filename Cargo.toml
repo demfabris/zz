@@ -188,7 +188,6 @@ zpui-linux = { path = "crates/zpui-linux", default-features = false }
 zpui-macos = { path = "crates/zpui-macos", default-features = false }
 zpui-macros = { path = "crates/zpui-macros" }
 zpui-platform = { path = "crates/zpui-platform", default-features = false }
-derive_refineable = { path = "crates/zpui-refineable-derive", package = "zpui-refineable-derive" }
 zpui-web = { path = "crates/zpui-web" }
 zpui-wgpu = { path = "crates/zpui-wgpu" }
 zpui-windows = { path = "crates/zpui-windows", default-features = false }
@@ -253,7 +252,6 @@ zpui-linux = { opt-level = 2 }
 zpui-macos = { opt-level = 2 }
 zpui-macros = { opt-level = 2 }
 zpui-platform = { opt-level = 2 }
-zpui-refineable-derive = { opt-level = 2 }
 zpui-web = { opt-level = 2 }
 zpui-wgpu = { opt-level = 2 }
 zpui-windows = { opt-level = 2 }

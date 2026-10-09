@@ -121,7 +121,6 @@ web-time.workspace = true
 heapless.workspace = true
 
 bytes.workspace = true
-derive_refineable.workspace = true
 flume.workspace = true
 http.workspace = true
 http-body.workspace = true

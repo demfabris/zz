@@ -753,6 +753,7 @@ pub struct ExecutionContext {
     invoking_mouse: Option<MouseEventTarget>,
     replay_client: Option<ClientId>,
     control_command_target: Option<(ClientId, u8)>,
+    legacy_layouts: bool,
     refuse_new_session_attach: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
@@ -858,6 +859,7 @@ impl fmt::Debug for ExecutionContext {
             .field("invoking_mouse", &self.invoking_mouse)
             .field("replay_client", &self.replay_client)
             .field("control_command_target", &self.control_command_target)
+            .field("legacy_layouts", &self.legacy_layouts)
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
             .field("no_hooks", &self.no_hooks)
             .field("format_variables", &self.format_variables)
@@ -891,6 +893,7 @@ impl Default for ExecutionContext {
             invoking_mouse: None,
             replay_client: None,
             control_command_target: None,
+            legacy_layouts: false,
             refuse_new_session_attach: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
@@ -1083,6 +1086,15 @@ impl ExecutionContext {
 
     pub fn set_control_command_target(&mut self, target: Option<(ClientId, u8)>) {
         self.control_command_target = target;
+    }
+
+    #[must_use]
+    pub fn legacy_layouts(&self) -> bool {
+        self.legacy_layouts
+    }
+
+    pub fn set_legacy_layouts(&mut self, legacy: bool) {
+        self.legacy_layouts = legacy;
     }
 
     #[must_use]
@@ -2318,8 +2330,6 @@ pub struct MuxEngine {
     session_base_indices: BTreeMap<SessionId, u32>,
     global_renumber_windows: bool,
     session_renumber_windows: BTreeMap<SessionId, bool>,
-    global_pane_base_index: u32,
-    window_pane_base_indices: BTreeMap<WindowId, u32>,
     global_word_separators: String,
     session_word_separators: BTreeMap<SessionId, String>,
     global_mouse: bool,
@@ -2674,8 +2684,6 @@ impl Default for MuxEngine {
             session_base_indices: BTreeMap::new(),
             global_renumber_windows: DEFAULT_RENUMBER_WINDOWS,
             session_renumber_windows: BTreeMap::new(),
-            global_pane_base_index: DEFAULT_PANE_BASE_INDEX,
-            window_pane_base_indices: BTreeMap::new(),
             global_word_separators: DEFAULT_WORD_SEPARATORS.to_owned(),
             session_word_separators: BTreeMap::new(),
             global_mouse: DEFAULT_MOUSE,
@@ -4974,10 +4982,7 @@ impl MuxEngine {
     }
 
     fn pane_base_index_for_window(&self, window: WindowId) -> u32 {
-        self.window_pane_base_indices
-            .get(&window)
-            .copied()
-            .unwrap_or(self.global_pane_base_index)
+        self.state.pane_base_index(window)
     }
 
     #[must_use]
@@ -5765,8 +5770,12 @@ impl MuxEngine {
             window_menu_selected_styles,
             window_menu_border_styles,
             window_menu_border_lines,
-            window_pane_base_indices,
         );
+        let before = self.state.window_pane_base_indices.len();
+        self.state
+            .window_pane_base_indices
+            .retain(|window, _| windows.contains_key(window));
+        removed |= self.state.window_pane_base_indices.len() != before;
         retain_live!(
             |pane| panes.contains(pane);
             pane_user_options,
@@ -8563,6 +8572,18 @@ impl MuxEngine {
         args: &[RawText],
         command: &str,
     ) -> Result<Execution, ServerError> {
+        self.state.legacy_layout_saves = context.legacy_layouts();
+        let result = self.select_layout_with(context, args, command);
+        self.state.legacy_layout_saves = false;
+        result
+    }
+
+    fn select_layout_with(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[RawText],
+        command: &str,
+    ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options(command, args)?;
         if positional.len() > usize::from(command == "select-layout") {
             return Err(ServerError::CommandParse(format!(
@@ -8612,7 +8633,7 @@ impl MuxEngine {
             }
             self.state.restore_previous_layout(window)?;
         } else if let Some(name) = positional.first() {
-            if let Some(preset) = parse_layout_preset(name)? {
+            if let Some(preset) = parse_layout_preset(name) {
                 self.state.select_layout(window, preset, &preset_options)?;
             } else {
                 self.state.select_layout_string(window, name)?;
@@ -8620,6 +8641,7 @@ impl MuxEngine {
         } else if let Some(last) = self.state.last_layout(window)? {
             self.state.select_layout(window, last, &preset_options)?;
         }
+        self.restore_manual_window_extents(Some(window));
         Ok(Execution::default())
     }
 
@@ -12496,6 +12518,7 @@ impl MuxEngine {
                     .map(|value| (value.as_str().to_owned(), false))
                     .or_else(inherited),
                 "pane-base-index" => self
+                    .state
                     .window_pane_base_indices
                     .get(&window)
                     .map(|value| (value.to_string(), false))
@@ -12633,7 +12656,7 @@ impl MuxEngine {
             "message-limit" => self.message_limit.to_string(),
             "mode-keys" => self.global_mode_keys.as_str().to_owned(),
             "mouse" => tmux_flag(self.global_mouse).to_owned(),
-            "pane-base-index" => self.global_pane_base_index.to_string(),
+            "pane-base-index" => self.state.global_pane_base_index.to_string(),
             "prefix" => tmux_key_display(self.keys.prefix()),
             "renumber-windows" => tmux_flag(self.global_renumber_windows).to_owned(),
             "repeat-time" => self.global_repeat_time_ms.to_string(),
@@ -13539,7 +13562,7 @@ impl MuxEngine {
                     return already_set_or_quiet(options, "pane-base-index");
                 }
                 TmuxOptionTarget::Window(window)
-                    if self.window_pane_base_indices.contains_key(&window) =>
+                    if self.state.window_pane_base_indices.contains_key(&window) =>
                 {
                     return already_set_or_quiet(options, "pane-base-index");
                 }
@@ -13562,8 +13585,8 @@ impl MuxEngine {
                     MAX_PANE_BASE_INDEX,
                 )?
             };
-            if self.global_pane_base_index != next {
-                self.global_pane_base_index = next;
+            if self.state.global_pane_base_index != next {
+                self.state.global_pane_base_index = next;
                 self.state.bump_generation();
             }
             return Ok(Execution::default());
@@ -13574,7 +13597,7 @@ impl MuxEngine {
         };
         let previous = self.pane_base_index_for_window(window);
         if unset {
-            self.window_pane_base_indices.remove(&window);
+            self.state.window_pane_base_indices.remove(&window);
         } else {
             let next = parse_index_option(
                 value.ok_or_else(|| {
@@ -13584,7 +13607,7 @@ impl MuxEngine {
                 })?,
                 MAX_PANE_BASE_INDEX,
             )?;
-            self.window_pane_base_indices.insert(window, next);
+            self.state.window_pane_base_indices.insert(window, next);
         }
         if self.pane_base_index_for_window(window) != previous {
             self.state.bump_generation();
@@ -16009,25 +16032,18 @@ fn parse_pane_percentage(value: &str) -> Result<u8, ServerError> {
     Ok(percentage)
 }
 
-fn parse_layout_preset(value: &str) -> Result<Option<LayoutPreset>, ServerError> {
+fn parse_layout_preset(value: &str) -> Option<LayoutPreset> {
     if let Some(exact) = LayoutPreset::ALL
         .into_iter()
         .find(|preset| preset.name() == value)
     {
-        return Ok(Some(exact));
+        return Some(exact);
     }
     let mut matches = LayoutPreset::ALL
         .into_iter()
         .filter(|preset| preset.name().starts_with(value));
-    let Some(first) = matches.next() else {
-        return Ok(None);
-    };
-    if matches.next().is_some() {
-        return Err(ServerError::InvalidCommand(format!(
-            "ambiguous layout: {value}"
-        )));
-    }
-    Ok(Some(first))
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 fn already_set_or_quiet(options: &Options, option: &str) -> Result<Execution, ServerError> {
@@ -45049,7 +45065,7 @@ mod tests {
 
         assert!(matches!(
             engine.execute(&mut context, &command("select-layout", &["main"])),
-            Err(ServerError::InvalidCommand(message)) if message.contains("ambiguous")
+            Err(ServerError::InvalidCommand(message)) if message == "malformed layout header: main"
         ));
         assert!(matches!(
             engine.execute(
@@ -45057,7 +45073,7 @@ mod tests {
                 &command("select-layout", &["b25f,80x24,0,0{40x24,0,0,0}"]),
             ),
             Err(ServerError::InvalidCommand(message))
-                if message == "invalid layout: b25f,80x24,0,0{40x24,0,0,0}"
+                if message == "invalid layout checksum: b25f,80x24,0,0{40x24,0,0,0}"
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("next-layout", &["-n"])),
@@ -45098,7 +45114,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        let first_dump = "6e85,120x30,0,0{50x30,0,0,0,69x30,51,0[69x14,51,0,1,69x15,51,15,2]}";
+        let first_dump = r#"{"V":2,"L":{"t":"h","w":120,"h":30,"x":0,"y":0,"c":[{"t":"p","w":50,"h":30,"x":0,"y":0,"l":1,"i":0,"I":"%0"},{"t":"v","w":69,"h":30,"x":51,"y":0,"c":[{"t":"p","w":69,"h":14,"x":51,"y":0,"l":0,"i":1,"I":"%1"},{"t":"p","w":69,"h":15,"x":51,"y":15,"a":true,"i":2,"I":"%2"}]}]}}"#;
         assert_eq!(
             engine
                 .execute(
@@ -45139,7 +45155,7 @@ mod tests {
                 &command("select-layout", &["-t", "w:0", "0000,80x24,0,0,0"],),
             ),
             Err(ServerError::InvalidCommand(
-                "invalid layout: 0000,80x24,0,0,0".to_owned()
+                "invalid layout checksum: 0000,80x24,0,0,0".to_owned()
             ))
         );
         assert_eq!(engine.state.windows[&window].layout, before);
@@ -45208,7 +45224,8 @@ mod tests {
         let generation = engine.state.generation();
         assert!(matches!(
             engine.execute(&mut context, &command("select-layout", &["bogus"])),
-            Err(ServerError::InvalidCommand(message)) if message == "invalid layout: bogus"
+            Err(ServerError::InvalidCommand(message))
+                if message == "malformed layout header: bogus"
         ));
         assert_eq!(engine.state.windows[&window].layout, layout);
         assert_eq!(engine.state.windows[&window].zoomed_pane, None);

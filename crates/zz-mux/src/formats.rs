@@ -21,7 +21,7 @@ use zz_protocol::{
 pub use zz_protocol::{TmuxColour, display_width, indexed_colour_rgb, parse_tmux_colour};
 
 use crate::{
-    MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::CellLayout,
+    MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::LayoutFormat,
     terminfo::TtyTerm,
 };
 
@@ -3227,11 +3227,9 @@ impl MuxEngine {
             context.window_manual_height = Some(window.manual_extent.1);
         }
         if dumps.window != Some(window.id) {
-            dumps.layout = window.layout.dump();
-            dumps.visible = window.zoomed_pane.map_or_else(
-                || dumps.layout.clone(),
-                |pane| CellLayout::new(pane, width, height).dump(),
-            );
+            let pane_base_index = self.state.pane_base_index(window.id);
+            dumps.layout = window.layout_string(LayoutFormat::V2, pane_base_index);
+            dumps.visible = window.visible_layout_string(LayoutFormat::V2, pane_base_index);
             dumps.window = Some(window.id);
         }
         context.window_layout.clone_from(&dumps.layout);
@@ -8191,7 +8189,7 @@ mod tests {
             zoomed
                 .variable("window_visible_layout")
                 .unwrap()
-                .ends_with(&format!(",{}", second_pane.0))
+                .ends_with(&format!(",\"I\":\"%{}\"}}}}", second_pane.0))
         );
     }
 

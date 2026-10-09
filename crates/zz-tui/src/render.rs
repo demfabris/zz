@@ -759,7 +759,9 @@ impl Renderer {
         let style = wanted.style.min(6);
         if writes_style && self.cursor_style != Some(style) {
             let _ = write!(self.output, "\x1b[{} q", if style == 0 { 2 } else { style });
-            crate::tty::note_cursor_style(style != 0);
+            if style != 0 {
+                crate::tty::note_cursor_style_sent();
+            }
             self.cursor_style = Some(style);
             self.cursor_written = true;
         }
@@ -5660,6 +5662,37 @@ mod tests {
             written(&mut renderer, &model),
             "\x1b]12;rgb:80/00/00\x07\x1b[6 q",
             "a cursor the terminal could not take yet is sent once it can"
+        );
+    }
+
+    #[test]
+    fn a_cursor_style_is_restored_at_teardown_even_when_its_reset_was_only_built() {
+        let mut model = block_model(40, 10);
+        model.set_status(block_status(vec!["ROW"], false));
+        model.command_prompt = Some(zz_protocol::CommandPromptState {
+            prompt: ":".to_owned(),
+            input: String::new(),
+            cursor: 0,
+            kind: zz_protocol::CommandPromptKind::Command,
+            history: Vec::new(),
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: zz_protocol::CommandPromptMode::Text,
+            no_freeze: false,
+            pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor {
+                style: 6,
+                colour: None,
+            },
+        });
+        let mut renderer = Renderer::new();
+        renderer.write_terminal_cursor(&model, true, true);
+        model.command_prompt = None;
+        renderer.write_terminal_cursor(&model, true, true);
+        assert!(String::from_utf8_lossy(&renderer.output).ends_with("\x1b[2 q"));
+        assert!(
+            crate::tty::cursor_style_needs_restore(),
+            "a reset that may never reach the terminal leaves the teardown restore armed"
         );
     }
 

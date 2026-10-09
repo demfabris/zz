@@ -18186,18 +18186,10 @@ impl Shared {
                 }
                 sync_control_feed(&inner, client, &self.control_wake);
             }
-            paused.map(|paused| {
-                (
-                    inner
-                        .client(client)
-                        .and_then(|c| c.subscriber.as_ref())
-                        .cloned(),
-                    EventPayload::PaneOutputState { pane, paused },
-                )
-            })
+            paused.map(|paused| EventPayload::PaneOutputState { pane, paused })
         };
-        if let Some((Some(subscriber), payload)) = event {
-            Self::send_event(&subscriber, payload);
+        if let Some(payload) = event {
+            self.publish_to_client(client, payload);
         }
     }
 
@@ -29243,6 +29235,7 @@ impl Shared {
             EventPayload::ControlCommandGuard { .. }
                 | EventPayload::ControlCommandGuardRaw { .. }
                 | EventPayload::HookEvent { .. }
+                | EventPayload::PaneOutputState { .. }
                 | EventPayload::ControlSourceFile { .. }
                 | EventPayload::ControlCommandOutput { .. }
                 | EventPayload::ControlConfigError { .. }

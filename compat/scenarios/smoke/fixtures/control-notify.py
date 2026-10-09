@@ -190,6 +190,8 @@ try:
     control.phase("inserted-rename", "run-shell -C 'rename-window -t notify-main:0 inserted'", until="%window-renamed ")
     control.phase("percent-word", "refresh-client -A " + pane + ":pause")
     control.phase("percent-recover", "refresh-client -A '" + pane + ":continue'")
+    control.phase("nested-pause", "run-shell -C { run-shell -C { rename-window -t notify-main:0 nested ; refresh-client -A '" + pane + ":pause' } }", until="%pause ")
+    control.phase("nested-continue", "refresh-client -A '" + pane + ":continue'", until="%continue ")
     control.phase("message", actions=[("display-message", "-c", target, "NOTIFY_MESSAGE")], until="%message ")
     bad = ROOT / "invalid.conf"
     bad.write_text("definitely-no-such-command\n")

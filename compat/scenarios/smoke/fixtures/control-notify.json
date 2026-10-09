@@ -152,6 +152,23 @@
       "%begin T B 1",
       "%end T B 1"
     ],
+    "nested-pause": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%begin T B 1",
+      "%end T B 1",
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-renamed @0 nested",
+      "%begin T B 1",
+      "%end T B 1",
+      "%pause %1"
+    ],
+    "nested-continue": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%continue %1"
+    ],
     "message": [
       "%message NOTIFY_MESSAGE"
     ],
@@ -380,6 +397,23 @@
     "percent-recover": [
       "%begin T B 1",
       "%end T B 1"
+    ],
+    "nested-pause": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%begin T B 1",
+      "%end T B 1",
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-renamed @0 nested",
+      "%begin T B 1",
+      "%end T B 1",
+      "%pause %1"
+    ],
+    "nested-continue": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%continue %1"
     ],
     "message": [
       "%message NOTIFY_MESSAGE"

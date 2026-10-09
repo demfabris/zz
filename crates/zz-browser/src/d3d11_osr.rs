@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use cef::AcceleratedPaintInfo;
-use gpui::windows::{
+use parking_lot::Mutex;
+use thiserror::Error;
+use zpui::windows::{
     Win32::{
         Foundation::HANDLE,
         Graphics::{
@@ -17,8 +19,6 @@ use gpui::windows::{
     },
     core::Interface as _,
 };
-use parking_lot::Mutex;
-use thiserror::Error;
 
 use crate::{
     BrowserGpuContext, Viewport, WinGpuTexture,

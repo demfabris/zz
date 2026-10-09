@@ -2,7 +2,7 @@
 type: Concept
 title: In-page element picker
 description: A token-guarded, single-use overlay that lets the user pick a DOM element in the page and returns a bounded, sanitized source-context string plus an optional screenshot of the picked area.
-resource: crates/zz-browser/src/element_picker.rs
+resource: crates/zz-client/src/element_picker.rs
 tags: [browser, element-picker, devtools, message-router]
 timestamp: 2026-09-13T00:00:00Z
 ---

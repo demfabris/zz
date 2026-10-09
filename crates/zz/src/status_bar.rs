@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui::{
+use zpui::{
     AnyElement, App, Entity, IntoElement, MouseButton, Pixels, SharedString, Stateful, Window, div,
     prelude::*, px,
 };
@@ -36,7 +36,7 @@ pub(crate) fn render_gui_status_bar(
     window_controls: Option<AnyElement>,
     _window: &mut Window,
     cx: &mut App,
-) -> Stateful<gpui::Div> {
+) -> Stateful<zpui::Div> {
     let (snapshot, attached_host, attached, connected) = {
         let mux = mux.read(cx);
         (
@@ -205,7 +205,7 @@ fn render_update(show: bool, cx: &App) -> Option<AnyElement> {
         .px(px(6.0))
         .rounded(cx.theme().control_radius())
         .when(cx.theme().shadow, |item| {
-            item.border(px(0.5)).border_color(gpui::transparent_white())
+            item.border(px(0.5)).border_color(zpui::transparent_white())
         })
         .cursor_pointer()
         .hover(move |item| {

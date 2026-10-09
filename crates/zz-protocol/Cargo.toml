@@ -16,8 +16,8 @@ serde.workspace = true
 serde_bytes = "0.11.19"
 smallvec.workspace = true
 thiserror.workspace = true
-unicode-width = "0.2.2"
-zz-terminal = { path = "../zz-terminal", default-features = false }
+unicode-width.workspace = true
+zz-terminal.workspace = true
 
 [lints]
 workspace = true

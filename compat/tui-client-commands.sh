@@ -730,9 +730,6 @@ known_drift() {
     customize-array-key-values)
     printf 'gap:pin.formats-options'
     ;;
-  hooks-show-global)
-    printf 'gap:pin.hooks-events'
-    ;;
   esac
 }
 
@@ -743,9 +740,6 @@ known_drift_reason() {
     ;;
   customize-*)
     printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 rebuilt customize mode (window-customize.c: Session Hooks, Window & Pane Hooks, Global and Session Environment sections in the tree, e to edit, C for changed only, editable array keys); zz still draws the d77c9dc6 tree"
-    ;;
-  hooks-*)
-    printf '%s' "PIN 3.8, gap:pin.hooks-events: 3.8 removed the after-queue hook, which zz still lists under show-hooks -g"
     ;;
   esac
 }

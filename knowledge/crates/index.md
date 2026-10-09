@@ -14,8 +14,9 @@
 * [zz crate (the GPUI client)](zz.md) - The long-lived GPUI desktop client, linking zz-cli for CLI dispatch, daemon spawning, and terminal attach, and hosting terminal, Chromium browser, and native Agent panes.
 <!-- okf:listing:end -->
 
-Workspace members without a crate page here: `zz-ui` (maintained gpui-component fork), `zz-tui`
-(the library behind `zz attach`), and `zz-gpui-ios` (experimental UIKit GPUI backend and terminal).
+Workspace members without a crate page here: `zz-kit` (widget kit, a maintained gpui-component fork),
+`zz-ui` (zz's application UI), `zz-tui` (the library behind `zz attach`), `zz-app` (the thin-client app
+web and iOS share, in `clients/app`), and `zz-ios` (the iOS entry point, in `clients/ios`).
 `zz-web` serves the [browser client](/playbooks/browser-client.md), whose GPUI/WASM frontend lives
 in the separate `clients/web` workspace.
 The map in

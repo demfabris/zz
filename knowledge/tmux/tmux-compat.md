@@ -103,11 +103,12 @@ rendered command and repeat bit or requires a named `binding:` divergence. The g
 counts. The structural matches divide into 67 copy-mode, 78 copy-mode-vi, 19 move, 57 prefix, and
 12 root entries.
 
-Slice 10l closes hook-producer discovery with a daemon-owned source invariant. It names 30 explicit
-event producers and derives 37 generic `after-<command>` producers whose suffix names an implemented
-command. A later pin audit classifies `after-queue` as explicit-only: ordinary queues do not
-produce it, while `set-hook -R` runs it. The current partition contains those 66 automatic hooks
-and the explicit-only hook, with no tracked hook gap left. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
+Slice 10l closes hook-producer discovery with a daemon-owned source invariant. At the 3.8 pin it
+names 47 explicit event producers and derives 38 generic `after-<command>` producers whose suffix
+names an implemented command. 3.8 removed `after-queue` and zz dropped it with catch-up item
+pin.hooks-events. The 89 pinned hooks partition into those 85 produced hooks and four tracked gaps:
+`pane-prompt-opened` and `pane-prompt-closed` under `pin.hooks-events`, and the two session-group
+hooks under `sessions.linked-groups`. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
 closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves commands and
 unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
 unbound after ensuring its table. Structural key equality still does not prove every downstream
@@ -264,8 +265,8 @@ differential raises the accepted artifact to 101 scenarios and 1,540 steps with 
 `PASS` and SHA-256
 `afd1fdf9a79e06f449e8c43abd63b14a2a4968338110223750d4171889c34aaf`.
 
-The same audit closes `hooks.queue`: pinned `after-queue` is explicit-only and the existing
-three-step set-hook differential proves ordinary queue inactivity plus exact manual execution. The
+The same audit closed `hooks.queue` when the pin still had `after-queue`; 3.8 removed the hook and
+zz followed. The
 10aa close then moves `session_active` into direct mux backing. An explicit `FormatClient` records
 no client, an unattached client, or the attached session. Command execution keeps the raw invoking
 client separate from the current or explicitly selected target client so each producer follows the

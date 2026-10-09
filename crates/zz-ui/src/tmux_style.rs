@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use gpui::{
+use zpui::{
     App, FontStyle, FontWeight, HighlightStyle, Hsla, Rgba, SharedString, StrikethroughStyle,
     StyledText, UnderlineStyle, px,
 };

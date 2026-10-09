@@ -6,7 +6,7 @@
 pub(crate) mod controller {
     use std::sync::Arc;
 
-    use gpui::{App, Context, EventEmitter, Task};
+    use zpui::{App, Context, EventEmitter, Task};
     use zz_browser::BrowserEvent;
     use zz_protocol::PaneId;
 
@@ -63,13 +63,13 @@ pub(crate) mod controller {
 }
 
 pub(crate) mod recent_pages {
-    use gpui::App;
+    use zpui::App;
 
     pub fn init(_cx: &mut App) {}
 }
 
 pub(crate) mod view {
-    use gpui::{App, Context, Entity, FocusHandle, Window, div, prelude::*};
+    use zpui::{App, Context, Entity, FocusHandle, Window, div, prelude::*};
     use zz_protocol::{BrowserCommand, BrowserDescriptor, PaneId};
     use zz_ui::{ActiveTheme as _, Colorize as _};
 

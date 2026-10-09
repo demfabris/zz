@@ -1,4 +1,5 @@
 use zz_mux::{ChangeWindow, JournalChanges, MuxState};
+use zz_protocol::PaneBorderStatus;
 
 use super::*;
 
@@ -83,6 +84,7 @@ pub(super) fn unread_format_facts() -> &'static FormatHookFacts {
 pub(super) struct HookScope {
     window: Option<ChangeWindow>,
     before: Option<MuxHookSnapshot>,
+    borders: Option<BTreeMap<WindowId, PaneBorderStatus>>,
 }
 
 pub(super) struct HookDiff<'a> {
@@ -109,7 +111,15 @@ impl HookScope {
         Self {
             before: cfg!(debug_assertions).then(|| MuxHookSnapshot::capture(engine)),
             window: Some(engine.state.open_change_window()),
+            borders: None,
         }
+    }
+
+    pub(super) fn watching_borders(mut self, engine: &MuxEngine, command: &str) -> Self {
+        if matches!(command, "set-option" | "set-window-option") {
+            self.borders = Some(border_statuses(engine));
+        }
+        self
     }
 
     pub(super) fn change_window(&self) -> Option<&ChangeWindow> {
@@ -122,13 +132,23 @@ impl HookScope {
             .map(|window| engine.state.changes_since(window))
     }
 
-    pub(super) fn finish<'a>(self, engine: &'a MuxEngine, command: &str) -> HookDiff<'a> {
+    pub(super) fn finish<'a>(mut self, engine: &'a MuxEngine, command: &str) -> HookDiff<'a> {
+        let borders = self.borders.take();
+        let mut diff = self.diff(engine, command);
+        if let Some(before) = borders {
+            diff.events.extend(border_resize_events(engine, &before));
+        }
+        diff
+    }
+
+    fn diff<'a>(self, engine: &'a MuxEngine, command: &str) -> HookDiff<'a> {
+        let border = |window: WindowId| engine.pane_border_status(window);
         let Some(window) = self.window else {
             let before = self
                 .before
                 .expect("a snapshot scope holds its before state");
             let after = MuxHookSnapshot::capture(engine);
-            let events = mux_hook_events(&before, &after, command);
+            let events = mux_hook_events_in(&before, &after, command, &border);
             return HookDiff {
                 before: BeforeView::Snapshot(before),
                 events,
@@ -145,10 +165,15 @@ impl HookScope {
         let events = if before.changes.sessions.is_empty() && before.changes.windows.is_empty() {
             Vec::new()
         } else {
-            mux_hook_events(&before, &after, command)
+            mux_hook_events_in(&before, &after, command, &border)
         };
         if let Some(full_before) = &self.before {
-            let expected = mux_hook_events(full_before, &MuxHookSnapshot::capture(engine), command);
+            let expected = mux_hook_events_in(
+                full_before,
+                &MuxHookSnapshot::capture(engine),
+                command,
+                &border,
+            );
             assert!(
                 events == expected,
                 "the change journal missed a hook for {command:?}: journal {:?}, snapshots {:?}",
@@ -161,6 +186,49 @@ impl HookScope {
             events,
         }
     }
+}
+
+fn border_statuses(engine: &MuxEngine) -> BTreeMap<WindowId, PaneBorderStatus> {
+    engine
+        .state
+        .windows
+        .keys()
+        .map(|window| (*window, engine.pane_border_status(*window)))
+        .collect()
+}
+
+fn border_resize_events(
+    engine: &MuxEngine,
+    before: &BTreeMap<WindowId, PaneBorderStatus>,
+) -> Vec<PendingHookEvent> {
+    let changed = border_statuses(engine)
+        .into_iter()
+        .filter(|(window, status)| before.get(window).is_some_and(|old| old != status))
+        .collect::<Vec<_>>();
+    if changed.is_empty() {
+        return Vec::new();
+    }
+    let view = MuxHookSnapshot::capture(engine);
+    let mut events = Vec::new();
+    for (window, status) in changed {
+        let Some(state) = engine.state.windows.get(&window) else {
+            continue;
+        };
+        for pane in state.panes.keys() {
+            let old = state
+                .layout
+                .displayed_pane_size(*pane, state.zoomed_pane, before[&window]);
+            let new = state
+                .layout
+                .displayed_pane_size(*pane, state.zoomed_pane, status);
+            if let (Some(old), Some(new)) = (old, new)
+                && old != new
+            {
+                events.push(pane_resized_event(*pane, window, new, old, &view));
+            }
+        }
+    }
+    events
 }
 
 fn describe_events(events: &[PendingHookEvent]) -> Vec<String> {
@@ -200,6 +268,7 @@ pub(super) fn journal_belled_panes(changes: &JournalChanges) -> BTreeSet<PaneId>
 #[derive(Clone, Copy)]
 pub(super) struct WindowFacts<'a> {
     session: SessionId,
+    index: u32,
     name: &'a str,
     active_pane: PaneId,
     zoomed_pane: Option<PaneId>,
@@ -234,6 +303,7 @@ fn live_window(engine: &MuxEngine, window: WindowId) -> Option<WindowFacts<'_>> 
     let state = engine.state.windows.get(&window)?;
     Some(WindowFacts {
         session: state.session,
+        index: state.index,
         name: &state.name,
         active_pane: state.active_pane,
         zoomed_pane: state.zoomed_pane,
@@ -268,6 +338,7 @@ impl HookView for MuxHookSnapshot {
     fn window(&self, window: WindowId) -> Option<WindowFacts<'_>> {
         self.windows.get(&window).map(|state| WindowFacts {
             session: state.session,
+            index: state.index,
             name: &state.name,
             active_pane: state.active_pane,
             zoomed_pane: state.zoomed_pane,
@@ -352,6 +423,7 @@ impl HookView for JournalView<'_> {
         match self.changes.windows.get(&window) {
             Some(image) => image.map(|image| WindowFacts {
                 session: image.session,
+                index: image.index,
                 name: &image.name,
                 active_pane: image.active_pane,
                 zoomed_pane: image.zoomed_pane,
@@ -691,18 +763,174 @@ pub(super) fn pane_event(
     PendingHookEvent::pane_named(name, pane, session, window, session_name, window_name)
 }
 
+fn put_session(
+    variables: &mut BTreeMap<String, String>,
+    key: &str,
+    session: SessionId,
+    view: &impl HookView,
+) {
+    variables.insert(format!("hook_{key}"), session.to_string());
+    if let Some((name, _)) = view.session(session) {
+        variables.insert(format!("hook_{key}_name"), name.to_owned());
+    }
+}
+
+fn put_window(
+    variables: &mut BTreeMap<String, String>,
+    key: &str,
+    window: WindowId,
+    view: &impl HookView,
+) {
+    variables.insert(format!("hook_{key}"), window.to_string());
+    if let Some(state) = view.window(window) {
+        variables.insert(format!("hook_{key}_name"), state.name.to_owned());
+    }
+}
+
+fn payload_event(
+    name: &'static str,
+    context: ExecutionContext,
+    variables: BTreeMap<String, String>,
+) -> PendingHookEvent {
+    PendingHookEvent {
+        name,
+        context,
+        exclude_client: None,
+        control_notified: false,
+        variables,
+    }
+}
+
+fn hook_variables(name: &str) -> BTreeMap<String, String> {
+    BTreeMap::from([(HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned())])
+}
+
+fn window_payload_event(
+    name: &'static str,
+    window: WindowId,
+    view: &impl HookView,
+) -> PendingHookEvent {
+    let mut variables = hook_variables(name);
+    put_window(&mut variables, "window", window, view);
+    payload_event(name, window_context(view, window), variables)
+}
+
+fn pane_context(view: &impl HookView, pane: PaneId, window: WindowId) -> ExecutionContext {
+    let session = view.window(window).map(|state| state.session);
+    ExecutionContext::new(session, Some(window), Some(pane))
+}
+
+fn pane_payload(
+    name: &'static str,
+    pane: PaneId,
+    window: WindowId,
+    view: &impl HookView,
+) -> BTreeMap<String, String> {
+    let mut variables = hook_variables(name);
+    variables.insert(HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string());
+    put_window(&mut variables, "window", window, view);
+    variables
+}
+
+fn pane_created_event(pane: PaneId, window: WindowId, view: &impl HookView) -> PendingHookEvent {
+    let mut variables = pane_payload("pane-created", pane, window, view);
+    if let Some(state) = view.window(window) {
+        put_session(&mut variables, "session", state.session, view);
+        variables.insert("hook_window_index".to_owned(), state.index.to_string());
+    }
+    variables.insert("hook_created_empty".to_owned(), "0".to_owned());
+    variables.insert("hook_created_respawn".to_owned(), "0".to_owned());
+    payload_event("pane-created", pane_context(view, pane, window), variables)
+}
+
+fn pane_resized_event(
+    pane: PaneId,
+    window: WindowId,
+    size: (u16, u16),
+    old: (u16, u16),
+    view: &impl HookView,
+) -> PendingHookEvent {
+    let mut variables = pane_payload("pane-resized", pane, window, view);
+    variables.insert("hook_width".to_owned(), size.0.to_string());
+    variables.insert("hook_height".to_owned(), size.1.to_string());
+    variables.insert("hook_old_width".to_owned(), old.0.to_string());
+    variables.insert("hook_old_height".to_owned(), old.1.to_string());
+    payload_event("pane-resized", pane_context(view, pane, window), variables)
+}
+
+fn pane_moved_event(
+    pane: PaneId,
+    old_window: WindowId,
+    window: WindowId,
+    before: &impl HookView,
+    after: &impl HookView,
+) -> PendingHookEvent {
+    let mut variables = pane_payload("pane-moved", pane, window, after);
+    put_window(&mut variables, "new_window", window, after);
+    put_window(&mut variables, "old_window", old_window, before);
+    if let Some(state) = before.window(old_window) {
+        variables.insert("hook_old_window_index".to_owned(), state.index.to_string());
+    }
+    if let Some(state) = after.window(window) {
+        variables.insert("hook_window_index".to_owned(), state.index.to_string());
+        variables.insert("hook_new_window_index".to_owned(), state.index.to_string());
+    }
+    payload_event("pane-moved", pane_context(after, pane, window), variables)
+}
+
+fn pane_size(
+    view: &impl HookView,
+    window: WindowId,
+    pane: PaneId,
+    border: &dyn Fn(WindowId) -> PaneBorderStatus,
+) -> Option<(u16, u16)> {
+    let state = view.window(window)?;
+    state
+        .layout
+        .displayed_pane_size(pane, state.zoomed_pane, border(window))
+}
+
+#[cfg(test)]
 pub(super) fn mux_hook_events(
     before: &impl HookView,
     after: &impl HookView,
     command: &str,
 ) -> Vec<PendingHookEvent> {
+    mux_hook_events_in(before, after, command, &|_| PaneBorderStatus::Off)
+}
+
+pub(super) fn mux_hook_events_in(
+    before: &impl HookView,
+    after: &impl HookView,
+    command: &str,
+    border: &dyn Fn(WindowId) -> PaneBorderStatus,
+) -> Vec<PendingHookEvent> {
     let mut events = Vec::new();
     let before_links = before.links();
     let after_links = after.links();
+    let before_panes = before
+        .listed_panes()
+        .into_iter()
+        .map(|(pane, state)| (pane, (state.window, state.session, state.title.to_owned())))
+        .collect::<BTreeMap<_, _>>();
+    let after_panes = after
+        .listed_panes()
+        .into_iter()
+        .map(|(pane, state)| (pane, (state.window, state.session, state.title.to_owned())))
+        .collect::<BTreeMap<_, _>>();
+    let mut created_windows = BTreeSet::new();
     for (session, window) in after_links.difference(&before_links) {
         if let (Some((session_name, _)), Some(window_state)) =
             (after.session(*session), after.window(*window))
         {
+            if before.window(*window).is_none() && created_windows.insert(*window) {
+                for (pane, _) in after_panes.iter().filter(|(pane, (owner, _, _))| {
+                    *owner == *window && !before_panes.contains_key(pane)
+                }) {
+                    events.push(pane_created_event(*pane, *window, after));
+                }
+                events.push(window_payload_event("window-created", *window, after));
+            }
             events.push(winlink_event(
                 "window-linked",
                 *session,
@@ -725,11 +953,17 @@ pub(super) fn mux_hook_events(
     if command == "rename-session" {
         for session in after.listed_sessions() {
             if let Some((name, _)) = after.session(session)
-                && before
-                    .session(session)
-                    .is_some_and(|(previous, _)| previous != name)
+                && let Some((previous, _)) = before.session(session)
+                && previous != name
             {
-                events.push(session_event("session-renamed", session, name, after));
+                let mut event = session_event("session-renamed", session, name, after);
+                event
+                    .variables
+                    .insert("hook_old_name".to_owned(), previous.to_owned());
+                event
+                    .variables
+                    .insert("hook_new_name".to_owned(), name.to_owned());
+                events.push(event);
             }
         }
     }
@@ -753,18 +987,69 @@ pub(super) fn mux_hook_events(
         }
     }
     for window in after.listed_windows() {
-        let (Some(previous), Some(state)) = (before.window(window), after.window(window)) else {
+        let Some(state) = after.window(window) else {
+            continue;
+        };
+        let previous = before.window(window);
+        let geometry_changed = previous.is_none_or(|previous| {
+            previous.layout != state.layout
+                || previous.zoomed_pane != state.zoomed_pane
+                || previous.extent != state.extent
+        });
+        let mut created = Vec::new();
+        let mut moved = Vec::new();
+        for (pane, (owner, _, _)) in &after_panes {
+            if *owner != window {
+                continue;
+            }
+            let old_size = match before_panes.get(pane) {
+                Some((old_window, _, _)) if *old_window == window => {
+                    if !geometry_changed {
+                        continue;
+                    }
+                    pane_size(before, window, *pane, border)
+                }
+                Some((old_window, _, _)) => {
+                    moved.push((*pane, *old_window));
+                    pane_size(before, *old_window, *pane, border)
+                }
+                None if previous.is_some() => {
+                    created.push(*pane);
+                    Some(state.extent)
+                }
+                None => continue,
+            };
+            if let (Some(old), Some(size)) = (old_size, pane_size(after, window, *pane, border))
+                && old != size
+            {
+                events.push(pane_resized_event(*pane, window, size, old, after));
+            }
+        }
+        for pane in created {
+            events.push(pane_created_event(pane, window, after));
+        }
+        for (pane, old_window) in moved {
+            events.push(pane_moved_event(pane, old_window, window, before, after));
+        }
+        let Some(previous) = previous else {
             continue;
         };
         if previous.name != state.name {
-            events.push(window_event(
+            let mut event = window_event(
                 "window-renamed",
                 window,
                 state.session,
                 state.name,
                 state.active_pane,
                 after,
-            ));
+            );
+            event
+                .variables
+                .insert("hook_old_name".to_owned(), previous.name.to_owned());
+            event
+                .variables
+                .insert("hook_new_name".to_owned(), state.name.to_owned());
+            events.push(event);
         }
         if previous.active_pane != state.active_pane {
             events.push(window_event(
@@ -775,6 +1060,14 @@ pub(super) fn mux_hook_events(
                 state.active_pane,
                 after,
             ));
+        }
+        if previous.zoomed_pane != state.zoomed_pane {
+            if previous.zoomed_pane.is_some() {
+                events.push(window_payload_event("window-unzoomed", window, after));
+            }
+            if state.zoomed_pane.is_some() {
+                events.push(window_payload_event("window-zoomed", window, after));
+            }
         }
         if previous.layout != state.layout || previous.zoomed_pane != state.zoomed_pane {
             events.push(window_event(
@@ -797,22 +1090,16 @@ pub(super) fn mux_hook_events(
             }
         }
     }
-    let before_panes = before
-        .listed_panes()
-        .into_iter()
-        .collect::<BTreeMap<_, _>>();
-    for (pane, state) in after.listed_panes() {
+    for (pane, (window, session, title)) in &after_panes {
         if before_panes
-            .get(&pane)
-            .is_some_and(|previous| previous.title != state.title)
+            .get(pane)
+            .is_some_and(|(_, _, previous)| previous != title)
         {
-            events.push(pane_event(
-                "pane-title-changed",
-                pane,
-                state.session,
-                state.window,
-                after,
-            ));
+            let mut event = pane_event("pane-title-changed", *pane, *session, *window, after);
+            event
+                .variables
+                .insert("hook_new_title".to_owned(), title.clone());
+            events.push(event);
         }
     }
     let removed_links = before_links
@@ -830,6 +1117,12 @@ pub(super) fn mux_hook_events(
             ))
         })
         .collect::<Vec<_>>();
+    let closed_windows = before
+        .listed_windows()
+        .into_iter()
+        .filter(|window| after.window(*window).is_none())
+        .map(|window| window_payload_event("window-closed", window, before))
+        .collect::<Vec<_>>();
     let closed_sessions = before
         .listed_sessions()
         .into_iter()
@@ -842,11 +1135,107 @@ pub(super) fn mux_hook_events(
     if command == "kill-session" {
         events.extend(closed_sessions);
         events.extend(removed_links);
+        events.extend(closed_windows);
     } else {
         events.extend(removed_links);
+        events.extend(closed_windows);
         events.extend(closed_sessions);
     }
     events
+}
+
+fn zoom_cycle_events(
+    engine: &MuxEngine,
+    window: WindowId,
+    view: &MuxHookSnapshot,
+) -> Vec<PendingHookEvent> {
+    let Some(state) = view.window(window) else {
+        return Vec::new();
+    };
+    let layout_changed = || {
+        window_event(
+            "window-layout-changed",
+            window,
+            state.session,
+            state.name,
+            state.active_pane,
+            view,
+        )
+    };
+    let border = engine.pane_border_status(window);
+    let resized = state.zoomed_pane.and_then(|pane| {
+        let zoomed = state.layout.displayed_pane_size(pane, Some(pane), border)?;
+        let tiled = state.layout.displayed_pane_size(pane, None, border)?;
+        (zoomed != tiled).then_some((pane, zoomed, tiled))
+    });
+    let mut events = Vec::new();
+    if let Some((pane, zoomed, tiled)) = resized {
+        events.push(pane_resized_event(pane, window, tiled, zoomed, view));
+    }
+    events.push(window_payload_event("window-unzoomed", window, view));
+    events.push(layout_changed());
+    if let Some((pane, zoomed, tiled)) = resized {
+        events.push(pane_resized_event(pane, window, zoomed, tiled, view));
+    }
+    events.push(window_payload_event("window-zoomed", window, view));
+    events.push(layout_changed());
+    events
+}
+
+pub(super) fn apply_operation_events(
+    engine: &MuxEngine,
+    effects: &[MuxEffect],
+    events: &mut Vec<PendingHookEvent>,
+) {
+    for effect in effects {
+        match effect {
+            MuxEffect::PaneCreated {
+                pane, empty: true, ..
+            } => {
+                let pane = pane.to_string();
+                for event in events.iter_mut().filter(|event| {
+                    event.name == "pane-created"
+                        && event.variables.get(HOOK_PANE_CONTEXT_FORMAT) == Some(&pane)
+                }) {
+                    event
+                        .variables
+                        .insert("hook_created_empty".to_owned(), "1".to_owned());
+                }
+            }
+            MuxEffect::PaneMovedInWindow { pane } => {
+                let Some(window) = engine.state.window_for_pane(*pane) else {
+                    continue;
+                };
+                let view = MuxHookSnapshot::capture(engine);
+                events.push(pane_moved_event(*pane, window, window, &view, &view));
+            }
+            MuxEffect::ZoomCycled { window } => {
+                let id = window.to_string();
+                events.retain(|event| {
+                    !matches!(event.name, "window-zoomed" | "window-unzoomed")
+                        || event.variables.get(HOOK_WINDOW_CONTEXT_FORMAT) != Some(&id)
+                });
+                let view = MuxHookSnapshot::capture(engine);
+                events.extend(zoom_cycle_events(engine, *window, &view));
+            }
+            MuxEffect::PaneRespawned { pane, empty, .. } => {
+                let Some(window) = engine.state.window_for_pane(*pane) else {
+                    continue;
+                };
+                let view = MuxHookSnapshot::capture(engine);
+                let mut event = pane_created_event(*pane, window, &view);
+                event.variables.insert(
+                    "hook_created_empty".to_owned(),
+                    u8::from(*empty).to_string(),
+                );
+                event
+                    .variables
+                    .insert("hook_created_respawn".to_owned(), "1".to_owned());
+                events.push(event);
+            }
+            _ => {}
+        }
+    }
 }
 
 pub(super) fn pane_mode_hook_events(
@@ -857,23 +1246,95 @@ pub(super) fn pane_mode_hook_events(
 ) -> Vec<PendingHookEvent> {
     before_modes
         .symmetric_difference(after_modes)
-        .filter_map(|pane| {
-            PendingHookEvent::live_pane("pane-mode-changed", *pane, engine).or_else(|| {
-                before.pane(*pane).map(|state| {
-                    pane_event(
-                        "pane-mode-changed",
-                        *pane,
-                        state.session,
-                        state.window,
-                        before,
-                    )
+        .flat_map(|pane| {
+            let entered = after_modes.contains(pane);
+            ["pane-mode-entered", "pane-mode-exited", "pane-mode-changed"]
+                .into_iter()
+                .filter(|name| match *name {
+                    "pane-mode-entered" => entered,
+                    "pane-mode-exited" => !entered,
+                    _ => true,
                 })
-            })
+                .filter_map(|name| {
+                    PendingHookEvent::live_pane(name, *pane, engine).or_else(|| {
+                        before.pane(*pane).map(|state| {
+                            pane_event(name, *pane, state.session, state.window, before)
+                        })
+                    })
+                })
+                .map(|mut event| {
+                    event.add_copy_mode_payload(entered);
+                    event
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect()
+}
+
+pub(super) fn server_mode_hook_events(
+    engine: &MuxEngine,
+    transitions: Vec<PaneModeTransition>,
+) -> Vec<PendingHookEvent> {
+    let mut events = Vec::new();
+    for transition in transitions {
+        let edge = if transition.entered {
+            "pane-mode-entered"
+        } else {
+            "pane-mode-exited"
+        };
+        for name in [edge, "pane-mode-changed"] {
+            let Some(mut event) = PendingHookEvent::live_pane(name, transition.pane, engine) else {
+                continue;
+            };
+            if let Some(current) = transition.current {
+                event
+                    .variables
+                    .insert("hook_current_mode".to_owned(), current.to_owned());
+            }
+            if let Some(previous) = transition.previous {
+                event
+                    .variables
+                    .insert("hook_previous_mode".to_owned(), previous.to_owned());
+            }
+            event.variables.insert(
+                "hook_mode_entered".to_owned(),
+                u8::from(transition.entered).to_string(),
+            );
+            events.push(event);
+        }
+    }
+    events
+}
+
+pub(super) fn copy_mode_exit_hook_events(
+    pane: PaneId,
+    engine: &MuxEngine,
+) -> Vec<PendingHookEvent> {
+    ["pane-mode-exited", "pane-mode-changed"]
+        .into_iter()
+        .filter_map(|name| PendingHookEvent::live_pane(name, pane, engine))
+        .map(|mut event| {
+            event.add_copy_mode_payload(false);
+            event
         })
         .collect()
 }
 
 impl PendingHookEvent {
+    fn add_copy_mode_payload(&mut self, entered: bool) {
+        let key = if entered {
+            "hook_current_mode"
+        } else {
+            "hook_previous_mode"
+        };
+        self.variables
+            .insert(key.to_owned(), "copy-mode".to_owned());
+        self.variables.insert(
+            "hook_mode_entered".to_owned(),
+            u8::from(entered).to_string(),
+        );
+    }
+
     pub(super) fn live_pane(name: &'static str, pane: PaneId, engine: &MuxEngine) -> Option<Self> {
         let window = engine.state.window_for_pane(pane)?;
         let window_state = engine.state.windows.get(&window)?;

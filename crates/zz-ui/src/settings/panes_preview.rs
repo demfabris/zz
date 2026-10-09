@@ -5,7 +5,7 @@ use crate::{
         pane_split_surface, pane_surface,
     },
 };
-use gpui::{App, Corners, IntoElement, Pixels, RenderOnce, Window, div, prelude::*, px};
+use zpui::{App, Corners, IntoElement, Pixels, RenderOnce, Window, div, prelude::*, px};
 
 #[derive(Clone, Copy, IntoElement)]
 pub struct PanesPreview {
@@ -28,7 +28,7 @@ impl RenderOnce for PanesPreview {
         let height = (f32::from(window.viewport_size().height) * 0.32)
             .clamp(180.0, 280.0)
             .max(f32::from(margin) * 3.0 + f32::from(border) * 4.0 + 112.0);
-        let pane = |index: usize, content: gpui::Div| {
+        let pane = |index: usize, content: zpui::Div| {
             let active = selected == index;
             pane_surface(
                 ("settings-preview-pane", index),
@@ -132,7 +132,7 @@ impl RenderOnce for PanesPreview {
     }
 }
 
-fn sample_surface(cx: &App) -> gpui::Div {
+fn sample_surface(cx: &App) -> zpui::Div {
     div()
         .flex()
         .flex_col()
@@ -147,7 +147,7 @@ fn sample_surface(cx: &App) -> gpui::Div {
             .opacity(cx.theme().pane_background_opacity))
 }
 
-fn sample_header(icon: IconName, title: &'static str, cx: &App) -> gpui::Div {
+fn sample_header(icon: IconName, title: &'static str, cx: &App) -> zpui::Div {
     div()
         .flex()
         .items_center()
@@ -172,7 +172,7 @@ fn sample_header(icon: IconName, title: &'static str, cx: &App) -> gpui::Div {
         )
 }
 
-fn terminal_sample(cx: &App) -> gpui::Div {
+fn terminal_sample(cx: &App) -> zpui::Div {
     sample_surface(cx)
         .child(sample_header(IconName::SquareTerminal, "Terminal", cx))
         .child(
@@ -209,7 +209,7 @@ fn terminal_sample(cx: &App) -> gpui::Div {
         )
 }
 
-fn agent_sample(cx: &App) -> gpui::Div {
+fn agent_sample(cx: &App) -> zpui::Div {
     sample_surface(cx)
         .child(sample_header(IconName::Bot, "Agent", cx))
         .child(
@@ -245,7 +245,7 @@ fn agent_sample(cx: &App) -> gpui::Div {
         )
 }
 
-fn browser_sample(content_radius: Pixels, cx: &App) -> gpui::Div {
+fn browser_sample(content_radius: Pixels, cx: &App) -> zpui::Div {
     sample_surface(cx)
         .child(sample_header(IconName::Globe, "Browser", cx))
         .child(
@@ -270,7 +270,7 @@ fn browser_sample(content_radius: Pixels, cx: &App) -> gpui::Div {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
+    use zpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
 
     struct PreviewTest(PanesPreview);
 
@@ -297,7 +297,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn clicking_samples_changes_selection_and_preserves_it_on_settings_updates(
         cx: &mut TestAppContext,
     ) {
@@ -329,7 +329,7 @@ mod tests {
         assert!(cx.debug_bounds("settings-preview-active-0-true").is_none());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn spacing_and_border_updates_use_workspace_pixel_geometry(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, _| PreviewTest(preview()));

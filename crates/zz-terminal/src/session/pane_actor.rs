@@ -540,6 +540,8 @@ impl PaneActor {
         if let Some(status) = self.engine_last_command_status.take() {
             self.publisher.set_last_command_status(status.code());
         }
+        self.publisher
+            .push_shell_marks(self.engine_filter.take_shell_marks());
         let synchronized_output_deadline = self.frames.synchronized_output_deadline;
         let synchronized_output_due =
             synchronized_output_deadline.is_some_and(|deadline| now >= deadline);
@@ -619,6 +621,7 @@ impl PaneActor {
         for name in self.engine_renames.drain(..) {
             self.publisher.rename_window(name)?;
         }
+
         if !self.output_pending {
             settle_unwatched(
                 &mut self.terminal,
@@ -2089,6 +2092,7 @@ impl PaneActor {
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
         }
+        publisher.push_shell_marks(engine_filter.take_shell_marks());
         engine_filter.program_status_changed |= engine_filter.program_status.program_left();
         if let Some(status) = engine_filter.take_program_status() {
             publisher.set_program_status(status);

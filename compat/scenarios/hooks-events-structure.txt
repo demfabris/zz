@@ -1,0 +1,90 @@
+# The 3.8 window and pane lifecycle events, each hook recording its last
+# payload in an option of its own so firing order cannot change the readback.
+set-hook -g window-created "set -gF @wc '#{hook}/#{hook_event}/#{hook_window}/#{hook_window_name}'"
+set-hook -g window-closed "set -gF @wx '#{hook}/#{hook_event}/#{hook_window}'"
+set-hook -g pane-created "set -gF @pc '#{hook}/#{hook_pane}/#{hook_window}/#{hook_window_index}/#{hook_session}/#{hook_session_name}/#{hook_created_empty}/#{hook_created_respawn}'"
+set-hook -g pane-resized "set -gF @pr '#{hook}/#{hook_pane}/#{hook_window}/#{hook_width}x#{hook_height}/#{hook_old_width}x#{hook_old_height}'"
+set-hook -g pane-moved "set -gF @pm '#{hook}/#{hook_pane}/#{hook_window}/#{hook_old_window}/#{hook_new_window}/#{hook_old_window_index}/#{hook_window_index}/#{hook_new_window_index}'"
+set-hook -g window-zoomed "set -gF @wz '#{hook}/#{hook_event}/#{hook_window}'"
+set-hook -g window-unzoomed "set -gF @wu '#{hook}/#{hook_event}/#{hook_window}'"
+new-window -d -t w:5 -n made
+out: show -gv @wc
+out: show -gv @pc
+split-window -d -t w:5
+out: show -gv @pr
+out: show -gv @pc
+resize-pane -Z -t w:5.0
+out: show -gv @wz
+out: show -gv @pr
+resize-pane -Z -t w:5.0
+out: show -gv @wu
+out: show -gv @pr
+break-pane -d -s w:5.1 -t w:6
+out: show -gv @pm
+join-pane -d -s w:6.0 -t w:5.0
+out: show -gv @pm
+out: show -gv @wx
+kill-window -t w:5
+out: show -gv @wx
+set-hook -gu window-created
+set-hook -gu window-closed
+set-hook -gu pane-created
+set-hook -gu pane-resized
+set-hook -gu pane-moved
+set-hook -gu window-zoomed
+set-hook -gu window-unzoomed
+set-hook -g after-select-window "set -gF @asp '#{hook}/#{hook_event}/#{command}/#{hook_arguments}/#{hook_flag_t}/#{hook_argument_0}'"
+select-window -t w:0
+out: show -gv @asp
+set-hook -gu after-select-window
+set -g @mk ''
+set-hook -g marked-pane-changed "set -gaF @mk '#{hook}/#{hook_event}/#{hook_pane}/#{hook_new_pane}/#{hook_old_pane}/#{hook_window}/#{hook_marked}+'"
+select-pane -m -t w:0
+out: show -gv @mk
+select-pane -m -t w:0
+out: show -gv @mk
+select-pane -M -t w:0
+out: show -gv @mk
+set-hook -gu marked-pane-changed
+set-hook -g pane-created "set -gF @pc2 '#{hook}/#{hook_pane}/#{hook_window}/#{hook_created_empty}/#{hook_created_respawn}'"
+set-hook -g pane-mode-entered "set -gF @me '#{hook}/#{hook_pane}/#{hook_current_mode}/#{hook_previous_mode}/#{hook_mode_entered}'"
+set-hook -g pane-mode-exited "set -gF @mx '#{hook}/#{hook_pane}/#{hook_current_mode}/#{hook_previous_mode}/#{hook_mode_entered}'"
+clock-mode -t w:0.0
+out: show -gv @me
+respawn-pane -k -t w:0.0
+out: show -gv @mx
+out: show -gv @pc2
+respawn-window -k -t w:0
+out: show -gv @pc2
+split-window -d -E -t w:0
+out: show -gv @pc2
+set-hook -gu pane-created
+set-hook -gu pane-mode-entered
+set-hook -gu pane-mode-exited
+set-hook -g pane-moved "set -gF @pm2 '#{hook}/#{hook_pane}/#{hook_window}/#{hook_old_window}/#{hook_new_window}/#{hook_old_window_index}/#{hook_new_window_index}'"
+move-pane -h -s w:0.1 -t w:0.0
+out: show -gv @pm2
+set-hook -gu pane-moved
+set -g @zc ''
+set-hook -g window-zoomed "set -gaF @zc '#{hook}/#{hook_window}+'"
+set-hook -g window-unzoomed "set -gaF @zc '#{hook}/#{hook_window}+'"
+resize-pane -Z -t w:0.0
+set-hook -g window-layout-changed "set -gaF @zc '#{hook}/#{hook_window}+'"
+set-hook -g pane-resized "set -gaF @zc '#{hook}/#{hook_pane}/#{hook_width}x#{hook_height}/#{hook_old_width}x#{hook_old_height}+'"
+swap-pane -Z -s w:0.0 -t w:0.0
+out: show -gv @zc
+set-hook -gu window-layout-changed
+set-hook -gu pane-resized
+resize-pane -Z -t w:0.0
+set-hook -gu window-zoomed
+set-hook -gu window-unzoomed
+set -g @brn ''
+set-hook -g pane-resized "set -gaF @brn '+'"
+set-hook -p -t w:0.0 pane-resized "set -gF @br0 '#{hook}/#{hook_pane}/#{hook_width}x#{hook_height}/#{hook_old_width}x#{hook_old_height}'"
+set -g pane-border-status top
+out: show -gv @br0
+out: show -gv @brn
+set -g pane-border-status off
+set-hook -gu pane-resized
+set-hook -pu -t w:0.0 pane-resized
+kill-pane -t w:0.1

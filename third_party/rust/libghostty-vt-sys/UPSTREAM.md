@@ -8,18 +8,17 @@ This directory is a source snapshot of `libghostty-vt-sys` from
 - Upstream crate version: `0.2.1` (no newer release exists; the stack is unreleased)
 - Upstream wrapper Ghostty pin: `56dbc4a768778753737a3b9cbe0a3f9b4e434553`
 - Upstream Ghostty base: `6301810a48aaa3426887a4316668f18833a40138` (main, 2026-09-25)
-- Published Ghostty pin: `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on `demfabris/ghostty` branch `zz-2026-10-04` (two commits, the render state clip `0ab7941cb98263423377627b8b17d8d090c504bd` and the trimmed row copy, on `189df4a1f6403f5bdc349fe44d1d2809741a4c1d`), pinned in `build.rs`. `zz-2026-10-02` keeps `189df4a1` (the one-call row cell copy, on `67351380b6dc30124938d809809ac0aa42813283`) and `zz-2026-09-30` keeps `67351380`. The branch fast-forwards retain copy snapshots `7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774` in their history.
+- Ghostty source: vendored in `third_party/ghostty` since 2026-10-09: the upstream base above, trimmed by `scripts/vendor-ghostty.sh`, with the eight fork commits below replayed as zz commits (`git log -- third_party/ghostty`). Before that, `build.rs` fetched `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` from `demfabris/ghostty` branch `zz-2026-10-04`; `zz-2026-10-02` keeps `189df4a1` and `zz-2026-09-30` keeps `67351380`, and the fork commit IDs in this record refer to those branches.
 - Fork history: eight commits on upstream: the C ABI signal-stack option (`6fce227c`, still on `zz-2026-09-25`), the PageList spare-page reuse (`713374af`: line-limit pruning keeps the last pruned pool page resident for the next grow instead of decommitting and refaulting it; `compress` releases it and trims the last page), the trim fix (`c3941417`: preserves live cell blocks after history erase), owned copy snapshots (`7823f65d`), copied active pages at their used size (`67351380`), the one-call row cell copy (`189df4a1`, `ghostty_render_state_row_cells_copy`), the render state clip (`0ab7941c`, `GHOSTTY_RENDER_STATE_OPTION_CLIP`) and trimmed row copies (`e482b036`, `GHOSTTY_RENDER_STATE_ROW_CELLS_COPY_TRIM`). `zz-2026-09-29` keeps `713374af`; the previous pin `fa7986a9` stays on `codex/cabi-signal-stack`
 - License: MIT OR Apache-2.0; the upstream MIT license is retained here.
-- Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs),
-  published commit `0db98a206681fd60c2b1a1719daf14049eda8c30` on new branch
-  `zz-2026-10-04` (the clip and trimmed copy API), pinned in the workspace manifest.
-  `f5f826018e290e776c8bc4e5969c562efe530846` (row copies `d975339f` plus the row and cell
-  iteration lifetime fix) stays on `zz-2026-10-02`, `8e40135f` on `zz-2026-09-30`. Its
-  parent `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`.
-- Local override: the workspace patches the git-sourced sys package to this adjacent
-  snapshot. The safe wrapper comes from the dependency fork, with owned copy
-  snapshots and bounded row references. zz does not vendor the safe wrapper.
+- Wrapper source: [`demfabris/libghostty-rs`](https://github.com/demfabris/libghostty-rs)
+  commit `0db98a206681fd60c2b1a1719daf14049eda8c30` (the clip and trimmed copy API), vendored
+  next to this crate as `../libghostty-vt` (see its `UPSTREAM.md`). `f5f826018e290e776c8bc4e5969c562efe530846`
+  (row copies `d975339f` plus the row and cell iteration lifetime fix) stays on `zz-2026-10-02`,
+  `8e40135f` on `zz-2026-09-30`. Its parent `359ef751c189540eafb9110b2de89ad95ce48fc3`
+  remains on `zz-2026-09-25`.
+- Both crates live in this repo. The workspace depends on `../libghostty-vt` by path and the
+  wrapper depends on this crate by path; there is no git source and no `[patch]`.
 
 ## Why an unreleased wrapper
 
@@ -32,18 +31,20 @@ behind `6301810a`. The only header change in those ten commits is additive (rend
 overscan and row ids), so the wrapper at #99 builds unchanged and its 22 unit tests, 3 sys
 tests, and 20 doctests pass against `6301810a` with bindings regenerated from its headers.
 
-The base wrapper commit lives on a PR branch that Uzaaft rebases, so the workspace fetches
-the copy API from the `demfabris/libghostty-rs` fork's `zz-2026-10-04` branch.
-Branch `zz-2026-09-25` keeps the base commit reachable.
+The base wrapper commit lives on a PR branch that Uzaaft rebases, so zz vendors the wrapper
+from the `demfabris/libghostty-rs` fork's `zz-2026-10-04` branch. Branch `zz-2026-09-25`
+keeps the base commit reachable.
 Move back to upstream at the first libghostty-rs release that contains this stack (likely
-0.3.0), and change both the dependency URL and the `[patch]` key in `Cargo.toml`.
+0.3.0) by swapping the workspace's path dependency for the published version.
 
 ## Local delta
 
 `build.rs` is the upstream file at the wrapper commit with these changes:
 
-- `GHOSTTY_REPO` and `GHOSTTY_COMMIT` point at the fork commit above.
-- `cargo:rerun-if-changed` names this snapshot's own `build.rs`.
+- The Ghostty fetch is gone. The source defaults to `../../ghostty`, the vendored tree;
+  `GHOSTTY_SOURCE_DIR` overrides it.
+- `cargo:rerun-if-changed` names this snapshot's own `build.rs` and the Ghostty source's
+  `build.zig`, `build.zig.zon`, `include`, `pkg` and `src`.
 - The Zig mode follows Cargo's `PROFILE`, not `DEBUG`: `debug` (dev and test) builds
   `ReleaseSafe` instead of upstream's `Debug` (the unoptimized VT parser is about 6x
   slower and blows the daemon's 2 s command budgets under test load); release-family
@@ -78,8 +79,8 @@ before emitting link metadata. A compatible installed archive must export it as 
 The Kitty temporary-file medium API is fixed in this wrapper
 (`set_kitty_image_temp_file_dir`); `zz-terminal` still does not call it.
 
-When replacing this snapshot, remove its git-source patch from the workspace if the
-release covers the fork pin, refresh `Cargo.lock`, and run the focused terminal tests
+When replacing this snapshot with a release that covers the fork pin, swap both path
+dependencies for the published crates, refresh `Cargo.lock`, and run the focused terminal tests
 plus the real macOS bundle build.
 
 ## Native memory patch
@@ -112,17 +113,16 @@ Validation for this pin: the wrapper's own tests against the fork source,
 `cargo test -p zz-terminal`, and the real macOS bundle build. Ghostty's Debug
 test suite supplies its own `std_options`, so it does not exercise this option.
 
-The normal build fetches the pinned native fork commit without rewriting source.
-`GHOSTTY_SOURCE_DIR` selects a local checkout directly. An enabled `pkg-config` feature
+The normal build uses the vendored tree in `third_party/ghostty` without rewriting source.
+`GHOSTTY_SOURCE_DIR` selects another checkout directly. An enabled `pkg-config` feature
 can select an installed library with `ghostty_terminal_clone_screen`.
-When comparing overrides, use distinct source paths or rebuild the sys package:
-Cargo tracks the override environment value, not edits inside that directory.
+Cargo reruns the native build when the source's `build.zig`, `build.zig.zon`, `include`,
+`pkg` or `src` change, for the vendored tree and overrides alike.
 
 This is a native dependency. Maintain it using the native Ghostty section in
-`.agents/skills/fork-rebase/SKILL.md`. Preserve published commits through a
-retained branch or tag before rebasing. Drop the signal-stack change when upstream provides
-the same allocation behavior in ReleaseSafe, or when zz stops building
-ReleaseSafe, then repin and rerun the terminal suite plus the real macOS bundle
+`.agents/skills/fork-rebase/SKILL.md`; `just vendor ghostty <rev>` syncs upstream. Drop the
+signal-stack change when upstream provides the same allocation behavior in ReleaseSafe, or
+when zz stops building ReleaseSafe, then rerun the terminal suite plus the real macOS bundle
 build. No binding or safe-wrapper change is needed for this option.
 
 ## Copy snapshots

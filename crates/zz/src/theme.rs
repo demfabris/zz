@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui::{App, Global, Hsla, SharedString, Window};
+use zpui::{App, Global, Hsla, SharedString, Window};
 use zz_terminal::TerminalAppearance;
 use zz_ui::{Colorize as _, Theme, ThemeMode};
 
@@ -109,7 +109,7 @@ fn apply_zz_overrides(cx: &mut App) {
         .map(|font| font.family);
     let ui_font_family = config::ui_font_family(cx)
         .value
-        .map_or_else(|| gpui::Font::default().family, SharedString::from);
+        .map_or_else(|| zpui::Font::default().family, SharedString::from);
     let widget_corner_radius = config::widget_corner_radius(cx);
     let chrome_contrast = config::chrome_contrast(cx);
     let shadow_strength = config::shadow_strength(cx);
@@ -244,8 +244,8 @@ mod tests {
         );
     }
 
-    #[gpui::test]
-    fn returning_to_system_restores_the_last_os_mode(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn returning_to_system_restores_the_last_os_mode(cx: &mut zpui::TestAppContext) {
         cx.update(zz_ui::init);
         cx.update(|cx| {
             cx.set_global(SystemThemeMode(ThemeMode::Dark));
@@ -262,8 +262,8 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn terminal_opacity_never_reaches_chrome_or_app_panes(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn terminal_opacity_never_reaches_chrome_or_app_panes(cx: &mut zpui::TestAppContext) {
         cx.update(zz_ui::init);
         cx.update(|cx| {
             set_terminal_appearance(
@@ -297,8 +297,8 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn app_panes_ignore_translucent_chrome_overrides(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn app_panes_ignore_translucent_chrome_overrides(cx: &mut zpui::TestAppContext) {
         cx.update(zz_ui::init);
         cx.update(|cx| {
             Theme::global_mut(cx).colors.background =
@@ -309,8 +309,8 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn unsupported_compositor_keeps_the_chrome_opaque(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn unsupported_compositor_keeps_the_chrome_opaque(cx: &mut zpui::TestAppContext) {
         cx.update(zz_ui::init);
         cx.update(|cx| {
             let mut config = config::AppConfig::default();

@@ -374,11 +374,38 @@ const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] =
 const HOOK_PAYLOAD_CONTEXT_FORMATS: &[&str] = &[
     HOOK_ARGUMENTS_CONTEXT_FORMAT,
     "hook_client",
+    "hook_command_duration",
+    "hook_command_end_time",
+    "hook_command_start_time",
+    "hook_command_status",
+    "hook_created_empty",
+    "hook_created_respawn",
+    "hook_current_mode",
+    "hook_event",
+    "hook_height",
     HOOK_LAST_CONTEXT_FORMAT,
+    "hook_marked",
+    "hook_mode_entered",
+    "hook_new_name",
+    "hook_new_pane",
+    "hook_new_title",
+    "hook_new_window",
+    "hook_new_window_index",
+    "hook_new_window_name",
+    "hook_old_height",
+    "hook_old_name",
+    "hook_old_pane",
+    "hook_old_width",
+    "hook_old_window",
+    "hook_old_window_index",
+    "hook_old_window_name",
     HOOK_PANE_CONTEXT_FORMAT,
+    "hook_paste_buffer",
+    "hook_previous_mode",
     HOOK_SESSION_CONTEXT_FORMAT,
     HOOK_SESSION_NAME_CONTEXT_FORMAT,
     HOOK_VALUE_CONTEXT_FORMAT,
+    "hook_width",
     HOOK_WINDOW_CONTEXT_FORMAT,
     HOOK_WINDOW_INDEX_CONTEXT_FORMAT,
     HOOK_WINDOW_NAME_CONTEXT_FORMAT,
@@ -1292,6 +1319,16 @@ pub enum MuxEffect {
         from: SessionId,
         to: SessionId,
     },
+    /// `window_fire_pane_moved` for a pane `join-pane` or `move-pane` placed
+    /// again inside its own window, which no before-and-after diff can see.
+    PaneMovedInWindow {
+        pane: PaneId,
+    },
+    /// `window_push_zoom` then `window_pop_zoom` on a zoomed window: one
+    /// `window-unzoomed` and one `window-zoomed` though the zoom ends as it began.
+    ZoomCycled {
+        window: WindowId,
+    },
     SendKeys {
         pane: PaneId,
         keys: Vec<KeyToken>,
@@ -2061,6 +2098,7 @@ struct FormatMonitorEntry {
     scope: FormatMonitorScope,
     format: String,
     session: Option<SessionId>,
+    notify_true: bool,
     previous: BTreeMap<FormatMonitorTarget, String>,
 }
 
@@ -2961,6 +2999,59 @@ impl MuxEngine {
             })
             .or_else(|| self.global_window_hooks.get(option.name))
             .map(|hooks| hooks.values().cloned().collect())
+    }
+
+    fn marked_pane_changed(
+        &self,
+        context: &ExecutionContext,
+        start: PaneId,
+        old: Option<PaneId>,
+    ) -> Execution {
+        let mut execution = Execution::default();
+        if context.no_hooks {
+            return execution;
+        }
+        let marked = self.state.marked_pane();
+        let pane = marked.or(old).unwrap_or(start);
+        let Some(mut hook_context) = ExecutionContext::for_pane(&self.state, pane) else {
+            return execution;
+        };
+        let Some(commands) = self
+            .event_hook_commands(&hook_context, "marked-pane-changed")
+            .filter(|commands| !commands.is_empty())
+        else {
+            return execution;
+        };
+        let mut variables = BTreeMap::from([
+            ("hook_event".to_owned(), "marked-pane-changed".to_owned()),
+            (HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string()),
+            (
+                "hook_marked".to_owned(),
+                u8::from(marked.is_some()).to_string(),
+            ),
+        ]);
+        if let Some(window) = self.state.window_for_pane(pane) {
+            variables.insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+            if let Some(state) = self.state.windows.get(&window) {
+                variables.insert(
+                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+            }
+        }
+        if let Some(marked) = marked {
+            variables.insert("hook_new_pane".to_owned(), marked.to_string());
+        }
+        if let Some(old) = old {
+            variables.insert("hook_old_pane".to_owned(), old.to_string());
+        }
+        hook_context.format_variables = variables;
+        execution.effects.push(MuxEffect::RunHook {
+            name: "marked-pane-changed".to_owned(),
+            commands,
+            context: hook_context,
+        });
+        execution
     }
 
     fn user_hook_commands(
@@ -7571,6 +7662,10 @@ impl MuxEngine {
                 window: None,
                 pane: Some(source),
             });
+        } else {
+            execution
+                .effects
+                .push(MuxEffect::PaneMovedInWindow { pane: source });
         }
         Ok(execution)
     }
@@ -8052,12 +8147,13 @@ impl MuxEngine {
             if options.has("-m") && !self.pane_is_visible(start) {
                 return Ok(Execution::default());
             }
+            let old = self.state.marked_pane();
             if options.has("-M") {
                 self.state.clear_marked_pane();
             } else {
                 self.state.toggle_marked_pane(start)?;
             }
-            return Ok(Execution::default());
+            return Ok(self.marked_pane_changed(context, start, old));
         }
         let mut execution = Execution::default();
         if let Some(style) = options.value("-P") {
@@ -8198,14 +8294,33 @@ impl MuxEngine {
             .expect("resolved target pane has a window");
         let source_session = self.state.windows[&source_window].session;
         let target_session = self.state.windows[&target_window].session;
+        let zoomed_before = [source_window, target_window]
+            .map(|window| self.state.windows[&window].zoomed_pane.is_some());
         self.state
             .swap_panes(source, target, options.has("-d"), options.has("-Z"))?;
+        let zoom_cycles = [source_window, target_window]
+            .into_iter()
+            .zip(zoomed_before)
+            .enumerate()
+            .filter(|(index, (window, was_zoomed))| {
+                *was_zoomed
+                    && options.has("-Z")
+                    && (*index == 0 || *window != source_window)
+                    && self
+                        .state
+                        .windows
+                        .get(window)
+                        .is_some_and(|state| state.zoomed_pane.is_some())
+            })
+            .map(|(_, (window, _))| MuxEffect::ZoomCycled { window })
+            .collect::<Vec<_>>();
         let active = self.state.windows[&target_window].active_pane;
         let context_target = ExecutionContext::for_pane(&self.state, active)
             .expect("the target window retains an active pane after a swap");
         context.retarget(&context_target);
 
         let mut execution = Execution::default();
+        execution.effects.extend(zoom_cycles);
         if source_session != target_session && source != target {
             execution.effects.extend([
                 MuxEffect::PaneRelocated {
@@ -10562,6 +10677,9 @@ impl MuxEngine {
             .len()
             .saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("set-hook", &invocation.args)?;
+        if options.has("-E") {
+            return self.set_hook_event(context, &options, &positional, hooks);
+        }
         if let Some(subscription) = options.value("-B") {
             let subscription = subscription.to_owned();
             if positional.len() > 1 {
@@ -10677,6 +10795,66 @@ impl MuxEngine {
         self.set_hook_array_option(target, table_option.name, parsed.index, value, &options)
     }
 
+    fn set_hook_event(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        positional: &[RawText],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let Some(argument) = positional.first() else {
+            return Err(ServerError::InvalidCommand("missing argument".to_owned()));
+        };
+        if positional.len() != 1 {
+            return Err(ServerError::InvalidCommand("too many arguments".to_owned()));
+        }
+        let (name, target_context) = self.expand_hook_name(context, options, argument, hooks)?;
+        if !name.starts_with('@') {
+            return Err(ServerError::InvalidCommand(
+                "event name must start with @".to_owned(),
+            ));
+        }
+        let Some(commands) = self
+            .user_hook_commands(&target_context, &name)
+            .filter(|commands| !commands.is_empty())
+        else {
+            return Ok(Execution::default());
+        };
+        let mut hook_context = target_context;
+        let mut variables = BTreeMap::from([("hook_event".to_owned(), name.clone())]);
+        if let Some(session) = hook_context.session {
+            variables.insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
+            if let Some(state) = self.state.sessions.get(&session) {
+                variables.insert(
+                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+            }
+        }
+        if let Some(window) = hook_context.window
+            && let Some(state) = self.state.windows.get(&window)
+        {
+            variables.insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+            variables.insert(
+                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                state.name.clone(),
+            );
+            variables.insert(
+                HOOK_WINDOW_INDEX_CONTEXT_FORMAT.to_owned(),
+                state.index.to_string(),
+            );
+        }
+        if let Some(pane) = hook_context.pane {
+            variables.insert(HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string());
+        }
+        hook_context.format_variables = variables;
+        Ok(Execution::effect(MuxEffect::RunHook {
+            name,
+            commands,
+            context: hook_context,
+        }))
+    }
+
     fn set_hook_monitor(
         &mut self,
         context: &ExecutionContext,
@@ -10740,6 +10918,7 @@ impl MuxEngine {
             scope,
             format,
             session: context.session,
+            notify_true: options.has("-T"),
             previous: BTreeMap::new(),
         });
         Ok(execution)
@@ -10861,7 +11040,9 @@ impl MuxEngine {
             .iter_mut()
             .find(|monitor| monitor.id == id)?;
         match monitor.previous.insert(target, value.to_owned()) {
-            Some(last) if last != value => Some(last),
+            Some(last) if last != value && (!monitor.notify_true || format_true(value)) => {
+                Some(last)
+            }
             Some(_) | None => None,
         }
     }
@@ -19504,6 +19685,7 @@ fn push_shown_hook_option(
 pub fn hook_format_variables(command: &CommandInvocation, hook: &str) -> BTreeMap<String, String> {
     let mut variables = BTreeMap::from([
         (HOOK_CONTEXT_FORMAT.to_owned(), hook.to_owned()),
+        ("hook_event".to_owned(), hook.to_owned()),
         (
             HOOK_ARGUMENTS_CONTEXT_FORMAT.to_owned(),
             format_command_arguments(command),
@@ -32580,7 +32762,7 @@ mod tests {
             global.lines().collect::<Vec<_>>(),
             MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalSession)
         );
-        assert_eq!(global.lines().count(), 63);
+        assert_eq!(global.lines().count(), 62);
         assert_eq!(
             global
                 .lines()
@@ -32860,7 +33042,7 @@ mod tests {
             .execute(&mut context, &command("show-hooks", &["-g"]))
             .unwrap()
             .output;
-        assert_eq!(session_hooks.lines().count(), 63);
+        assert_eq!(session_hooks.lines().count(), 62);
         assert!(
             !session_hooks
                 .lines()
@@ -32906,7 +33088,7 @@ mod tests {
             (
                 &["-g", "-H"] as &[&str],
                 TmuxOptionTarget::GlobalSession,
-                63,
+                62,
                 false,
             ),
             (
@@ -32918,7 +33100,7 @@ mod tests {
             (
                 &["-A", "-H"],
                 TmuxOptionTarget::Session(context.session.unwrap()),
-                63,
+                62,
                 true,
             ),
             (

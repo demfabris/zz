@@ -2,10 +2,10 @@ use super::{SettingsSelectItem, StackPosition};
 use crate::scroll::{GUTTER_WIDTH, Scrollbar, ScrollbarShow};
 use crate::select::{SelectItem as _, SelectState};
 use crate::{ActiveTheme as _, Colorize as _, ThemeColor, ThemeMode};
-use gpui::{
+use std::{rc::Rc, sync::Arc};
+use zpui::{
     AnyElement, App, Entity, IntoElement, ScrollHandle, SharedString, Window, div, prelude::*, px,
 };
-use std::{rc::Rc, sync::Arc};
 
 const THEME_PREVIEW_WIDTH: f32 = 84.0;
 const THEME_PREVIEW_HEIGHT: f32 = 56.0;
@@ -147,9 +147,9 @@ pub fn appearance_page<C: Copy + 'static>(
     )
 }
 
-pub struct AvailableFonts(pub Arc<dyn gpui::PlatformTextSystem>);
+pub struct AvailableFonts(pub Arc<dyn zpui::PlatformTextSystem>);
 
-impl gpui::Global for AvailableFonts {}
+impl zpui::Global for AvailableFonts {}
 
 pub fn ui_font_select(
     selected: Option<&str>,
@@ -181,7 +181,7 @@ pub fn picker_tile(
     preview: impl IntoElement,
     selected: bool,
     cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+) -> zpui::Stateful<zpui::Div> {
     tile(id, label, preview, selected, false, cx)
 }
 
@@ -192,16 +192,16 @@ fn tile(
     selected: bool,
     focused: bool,
     cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+) -> zpui::Stateful<zpui::Div> {
     let ring = |on: bool| {
         if on {
             cx.theme().accent
         } else {
-            gpui::transparent_black()
+            zpui::transparent_black()
         }
     };
     div()
-        .id(gpui::ElementId::Name(id))
+        .id(zpui::ElementId::Name(id))
         .flex()
         .flex_col()
         .flex_none()
@@ -383,7 +383,7 @@ pub fn theme_preview(
     light: &ThemeColor,
     dark: &ThemeColor,
     cx: &App,
-) -> gpui::Div {
+) -> zpui::Div {
     match mode {
         Some(ThemeMode::Light) => palette_preview(light, cx),
         Some(ThemeMode::Dark) => palette_preview(dark, cx),
@@ -424,7 +424,7 @@ pub fn theme_preview(
 }
 
 /// The window mockup the theme and palette tiles share, painted from `colors`.
-pub fn palette_preview(colors: &ThemeColor, cx: &App) -> gpui::Div {
+pub fn palette_preview(colors: &ThemeColor, cx: &App) -> zpui::Div {
     let sidebar_fraction = THEME_PREVIEW_SIDEBAR_WIDTH / THEME_PREVIEW_WIDTH;
     div()
         .w(px(THEME_PREVIEW_WIDTH))
@@ -438,7 +438,7 @@ pub fn palette_preview(colors: &ThemeColor, cx: &App) -> gpui::Div {
         .child(theme_preview_contents(colors))
 }
 
-fn theme_preview_contents(colors: &ThemeColor) -> gpui::Div {
+fn theme_preview_contents(colors: &ThemeColor) -> zpui::Div {
     let text = colors.foreground.muted();
     let text_bar = move |width: f32| div().w(px(width)).h(px(3.0)).rounded_full().bg(text);
     div()
@@ -479,25 +479,25 @@ fn theme_preview_contents(colors: &ThemeColor) -> gpui::Div {
 }
 
 fn theme_preview_split_background(
-    left: gpui::Hsla,
-    right: gpui::Hsla,
+    left: zpui::Hsla,
+    right: zpui::Hsla,
     split: f32,
-) -> gpui::Background {
-    gpui::linear_gradient(
+) -> zpui::Background {
+    zpui::linear_gradient(
         90.0,
-        gpui::linear_color_stop(left, split),
-        gpui::linear_color_stop(right, split),
+        zpui::linear_color_stop(left, split),
+        zpui::linear_color_stop(right, split),
     )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{
+    use std::cell::Cell;
+    use zpui::{
         Context, Modifiers, Render, ScrollDelta, ScrollWheelEvent, TestAppContext,
         VisualTestContext, point,
     };
-    use std::cell::Cell;
 
     type Picked = Rc<Cell<Option<(u8, usize)>>>;
 
@@ -553,7 +553,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn strips_scroll_and_navigate_independently(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let picked: Picked = Rc::default();

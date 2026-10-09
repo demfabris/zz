@@ -1,4 +1,4 @@
-use gpui::{App, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _, div, px};
+use zpui::{App, ElementId, IntoElement, ParentElement as _, SharedString, Styled as _, div, px};
 
 use super::{
     SettingEntry, SettingsSection, SettingsStack, settings_control_fill, settings_provenance_badge,
@@ -9,14 +9,13 @@ use crate::{
 };
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-pub const RENDERER: &str = env!("ZZ_UI_GPUI_REVISION");
 pub const REPOSITORY_URL: &str = "https://github.com/demfabris/zz";
 pub const RELEASES_URL: &str = "https://github.com/demfabris/zz/releases";
 pub const ISSUES_URL: &str = "https://github.com/demfabris/zz/issues/new";
 pub const ABOUT_LOGO_SIZE: f32 = 88.0;
 
 #[must_use]
-pub fn about_hero(logo: impl IntoElement, cx: &App) -> gpui::Div {
+pub fn about_hero(logo: impl IntoElement, cx: &App) -> zpui::Div {
     div()
         .flex()
         .flex_col()
@@ -51,7 +50,7 @@ pub fn about_hero(logo: impl IntoElement, cx: &App) -> gpui::Div {
 }
 
 #[must_use]
-pub fn about_value(value: impl Into<SharedString>, cx: &App) -> gpui::Div {
+pub fn about_value(value: impl Into<SharedString>, cx: &App) -> zpui::Div {
     div()
         .flex_none()
         .font_family(cx.theme().mono_font_family.clone())
@@ -87,7 +86,7 @@ pub fn about_copy_button(id: impl Into<ElementId>) -> Button {
 
 #[must_use]
 pub fn build_info(platform: &str) -> String {
-    format!("zz {VERSION} ({platform}, gpui {RENDERER})")
+    format!("zz {VERSION} ({platform})")
 }
 
 #[must_use]
@@ -109,10 +108,6 @@ pub fn about_build_stack(
                 "The operating system and processor architecture this build targets.",
             )
             .control(about_value(platform, cx)),
-        )
-        .child(
-            SettingEntry::new("Renderer", "The GPUI revision this build links.")
-                .control(about_value(RENDERER, cx)),
         )
 }
 

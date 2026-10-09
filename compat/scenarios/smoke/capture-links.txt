@@ -1,0 +1,24 @@
+# capture-pane -H prints the links on each line once, and -F prefixes each
+# line with its W, H, O and P flags; the -F rows here hold no extended cells,
+# so the pin's X flag (zz native) never appears in a compared line.
+corpus: none
+stage: fixtures/capture-links.sh ~/capture-links.sh
+new-session -d -s links -x 80 -y 12 'sh ~/capture-links.sh'
+run-shell "sleep 0.5"
+out: capture-pane -p -F -S 0 -E 3 -t links
+out: capture-pane -p -F -L -S 0 -E 3 -t links
+out: capture-pane -p -F -J -S 0 -E 3 -t links
+out: capture-pane -p -F -N -S 0 -E 3 -t links
+out: capture-pane -p -F -e -S 0 -E 3 -t links
+out: capture-pane -p -F -C -S 0 -E 3 -t links
+out: capture-pane -p -F -S 10 -E 11 -t links
+out: capture-pane -p -H -t links
+out: capture-pane -p -H -L -t links
+out: capture-pane -p -H -J -t links
+out: capture-pane -p -H -e -N -t links
+out: capture-pane -p -H -S 0 -E 3 -t links
+capture-pane -H -b links -t links
+out: show-buffer -b links
+capture-pane -H -b nolinks -S 0 -E 3 -t links
+out: list-buffers -F #{buffer_name}
+kill-session -t links

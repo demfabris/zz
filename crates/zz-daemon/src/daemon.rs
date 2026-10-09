@@ -12672,8 +12672,9 @@ impl Shared {
                 effects: Vec::new(),
             });
         }
+        let no_links = parsed.options.hyperlinks && output.is_empty();
         let mut data = output.into_bytes();
-        if !unavailable_alternate {
+        if !unavailable_alternate && !no_links {
             data.push(b'\n');
         }
         let events = {
@@ -49552,7 +49553,7 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         "capture-pane",
         args,
         &['b', 'E', 'S', 't'],
-        &['a', 'C', 'e', 'J', 'L', 'M', 'N', 'p', 'T', 'q'],
+        &['a', 'C', 'e', 'F', 'H', 'J', 'L', 'M', 'N', 'p', 'T', 'q'],
     )?;
     require_no_positionals("capture-pane", &args)?;
     let options = CaptureOptions {
@@ -49561,6 +49562,8 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         escape_nonprintable: args.has('C'),
         join_wrapped: args.has('J'),
         number_lines: args.has('L'),
+        line_flags: args.has('F'),
+        hyperlinks: args.has('H'),
         mode: args.has('M'),
         preserve_trailing: args.has('J') || args.has('N'),
         trim_positions: args.has('T'),
@@ -75037,6 +75040,98 @@ set-option -g @alias-mixed-next yes
         ));
     }
 
+    #[test]
+    fn capture_pane_parser_takes_line_flags_and_hyperlinks() {
+        let parsed = parse_capture_pane_args(&["-pFH".into()]).expect("capture args");
+        assert!(parsed.options.line_flags);
+        assert!(parsed.options.hyperlinks);
+        let parsed = parse_capture_pane_args(&["-p".into()]).expect("capture args");
+        assert!(!parsed.options.line_flags);
+        assert!(!parsed.options.hyperlinks);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_pane_prints_line_flags_and_each_new_link_like_tmux() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        let run = |context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+                .output
+        };
+        run(
+            &mut context,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "links",
+                "-x",
+                "20",
+                "-y",
+                "6",
+                "printf 'plain\\r\\n\\033]133;C\\007out\\r\\n\\033]8;;http://a\\007aa\\033]8;;\\007 \\033]8;;http://b\\007bb\\033]8;;\\007\\r\\nzz-ready'; exec /bin/cat",
+            ],
+        );
+        let target = context.pane.expect("links pane").to_string();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !run(&mut context, &["capture-pane", "-p", "-t", &target]).contains("zz-ready") {
+            assert!(Instant::now() < deadline, "the pane never printed");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            run(
+                &mut context,
+                &["capture-pane", "-pF", "-S", "0", "-E", "3", "-t", &target]
+            ),
+            "- plain\nO out\nH aa bb\n- zz-ready\n"
+        );
+        assert_eq!(
+            run(&mut context, &["capture-pane", "-pH", "-t", &target]),
+            "http://a http://b\n"
+        );
+        assert_eq!(
+            run(
+                &mut context,
+                &["capture-pane", "-pH", "-E", "1", "-t", &target]
+            ),
+            "\n"
+        );
+        run(
+            &mut context,
+            &["capture-pane", "-H", "-b", "links", "-t", &target],
+        );
+        run(
+            &mut context,
+            &[
+                "capture-pane",
+                "-H",
+                "-b",
+                "nolinks",
+                "-E",
+                "1",
+                "-t",
+                &target,
+            ],
+        );
+        assert_eq!(
+            run(&mut context, &["list-buffers", "-F", "#{buffer_name}"]),
+            "links"
+        );
+        assert_eq!(
+            run(&mut context, &["show-buffer", "-b", "links"]),
+            "http://a http://b\n"
+        );
+    }
+
     #[cfg(unix)]
     fn send_text_fixture(name: &str, command: &str) -> (Arc<Shared>, ClientId, String) {
         let shared = Arc::new(Shared::new(1));
@@ -87386,7 +87481,7 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn capture_pane_parser_rejects_unimplemented_flags() {
-        for flag in ["-F", "-H", "-P", "-R"] {
+        for flag in ["-P", "-R"] {
             let error = parse_capture_pane_args(&[flag.into()]).expect_err("unsupported flag");
             assert!(matches!(error, ServerError::CommandParse(_)), "{flag}");
         }

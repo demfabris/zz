@@ -55,6 +55,21 @@ fn capture_chunks_keep_wrap_styles_numbering_and_one_revision() {
             escape_nonprintable: true,
             ..CaptureOptions::default()
         },
+        CaptureOptions {
+            line_flags: true,
+            ..CaptureOptions::default()
+        },
+        CaptureOptions {
+            line_flags: true,
+            join_wrapped: true,
+            number_lines: true,
+            ..CaptureOptions::default()
+        },
+        CaptureOptions {
+            line_flags: true,
+            escape_sequences: true,
+            ..CaptureOptions::default()
+        },
     ] {
         let options = CaptureOptions {
             start: CaptureBoundary::HistoryStart,
@@ -65,6 +80,7 @@ fn capture_chunks_keep_wrap_styles_numbering_and_one_revision() {
         let mut work = CaptureWork::start(
             &terminal,
             None,
+            &EngineFilter::default(),
             CaptureRequest {
                 options,
                 reply: reply.into(),
@@ -103,6 +119,7 @@ fn capture_chunks_join_a_wrapped_line_longer_than_the_row_budget() {
     let mut work = CaptureWork::start(
         &terminal,
         None,
+        &EngineFilter::default(),
         CaptureRequest {
             options,
             reply: reply.into(),

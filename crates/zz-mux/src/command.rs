@@ -22,15 +22,15 @@ use std::{
 use parking_lot::Mutex;
 use zz_protocol::{
     AgentAutoApprove, AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind,
-    ClientEnvironmentBlob, ClientId, CommandInvocation, CommandPromptMode, CommandPromptType,
-    CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
-    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
-    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES,
-    PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PopupBorderLines, RawText, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
-    catalog_command_spec, command_specs, normalize_browser_profile_name,
-    parse_tmux_command_options, parse_tmux_options, resolve_command,
-    unimplemented_tmux_command_spec,
+    ChooserPreviewSize, ClientEnvironmentBlob, ClientId, CommandInvocation, CommandPromptMode,
+    CommandPromptType, CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE,
+    DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE,
+    EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey,
+    NATIVE_COMMAND_NAMES, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId,
+    PaneKindSnapshot, PopupBorderLines, RawText, ServerError, SessionId, SourceSpan,
+    TerminalUiCommand, WindowId, catalog_command_spec, command_specs,
+    normalize_browser_profile_name, parse_tmux_command_options, parse_tmux_options,
+    resolve_command, unimplemented_tmux_command_spec,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy, CopyModeSearch,
@@ -1405,6 +1405,7 @@ pub enum MuxEffect {
     },
     ChooseTree {
         pane: PaneId,
+        preview: ChooserPreviewSize,
         kind: ChooseTreeKind,
         /// `choose-client -i`: the client mode opens on `window_client_draw_info`
         /// rather than on the preview.
@@ -1429,6 +1430,7 @@ pub enum MuxEffect {
     },
     ChooseBuffer {
         pane: PaneId,
+        preview: ChooserPreviewSize,
         filter: Option<String>,
         format: Option<String>,
         kill_source: bool,
@@ -9793,7 +9795,6 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("choose-tree", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        reject_large_preview("choose-tree", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -9801,6 +9802,7 @@ impl MuxEngine {
         )?;
         Ok(Execution::effect(MuxEffect::ChooseTree {
             pane,
+            preview: chooser_preview(&options),
             kind: if options.has("-s") || options.has("-w") {
                 ChooseTreeKind::Windows
             } else {
@@ -9835,7 +9837,6 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("choose-client", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        reject_large_preview("choose-client", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -9843,6 +9844,7 @@ impl MuxEngine {
         )?;
         Ok(Execution::effect(MuxEffect::ChooseTree {
             pane,
+            preview: chooser_preview(&options),
             kind: ChooseTreeKind::Clients,
             info_preview: options.has("-i"),
             sessions_only: false,
@@ -9974,7 +9976,6 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("choose-buffer", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        reject_large_preview("choose-buffer", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -9982,6 +9983,7 @@ impl MuxEngine {
         )?;
         Ok(Execution::effect(MuxEffect::ChooseBuffer {
             pane,
+            preview: chooser_preview(&options),
             filter: options.value("-f").map(str::to_owned),
             format: options.value("-F").map(str::to_owned),
             kill_source: options.has("-k"),
@@ -17787,15 +17789,12 @@ fn required_arg<'a>(
         .ok_or_else(|| ServerError::CommandParse(format!("{option} requires an argument")))
 }
 
-/// One `-N` asks a chooser for no preview, which is the only layout zz's
-/// choosers have; a repeated `-N` is the pin's large-preview mode
-/// (`MODE_TREE_PREVIEW_BIG` in `mode_tree_start`, selected by
-/// `args_has(args, 'N') > 1`), and zz has no presentation to match it with.
-fn reject_large_preview(command: &str, options: &Options) -> Result<(), ServerError> {
-    if options.count("-N") > 1 {
-        return Err(ServerError::UnsupportedCommand(format!("{command} -NN")));
+fn chooser_preview(options: &Options) -> ChooserPreviewSize {
+    match options.count("-N") {
+        0 => ChooserPreviewSize::Normal,
+        1 => ChooserPreviewSize::Off,
+        _ => ChooserPreviewSize::Big,
     }
-    Ok(())
 }
 
 fn chooser_command_template(
@@ -42854,6 +42853,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Windows,
                 info_preview: false,
                 sessions_only: true,
@@ -42881,6 +42881,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Windows,
                 info_preview: false,
                 sessions_only: false,
@@ -42938,6 +42939,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Panes,
                 info_preview: false,
                 sessions_only: false,
@@ -42960,6 +42962,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Windows,
                 info_preview: false,
                 sessions_only: true,
@@ -43039,6 +43042,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Panes,
                 info_preview: false,
                 sessions_only: false,
@@ -43102,6 +43106,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseBuffer {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 filter: None,
                 format: None,
                 kill_source: false,

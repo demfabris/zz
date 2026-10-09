@@ -577,6 +577,11 @@ pub struct ModePresentation {
     pub match_style: String,
     #[serde(deserialize_with = "deserialize_status_text")]
     pub current_match_style: String,
+    pub line_numbers: u8,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub line_number_style: String,
+    #[serde(deserialize_with = "deserialize_status_text")]
+    pub current_line_number_style: String,
 }
 
 fn deserialize_mode_presentations<'de, D>(
@@ -5611,8 +5616,8 @@ mod tests {
                 .expect("counted copy action decodes"),
             action
         );
-        assert!(postcard::from_bytes::<CopyModeAction>(&[200, 0, 1]).is_err());
-        assert!(postcard::from_bytes::<TerminalViewAction>(&[28, 200, 0, 1]).is_err());
+        assert!(postcard::from_bytes::<CopyModeAction>(&[200, 1, 1]).is_err());
+        assert!(postcard::from_bytes::<TerminalViewAction>(&[28, 200, 1, 1]).is_err());
     }
 
     #[test]

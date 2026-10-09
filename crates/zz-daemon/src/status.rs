@@ -120,12 +120,14 @@ pub(crate) const LIST_CLIENTS_CONTEXT_FORMATS: [&str; 1] = ["line"];
 /// The `window_copy_formats` names zz answers. tmux adds them to the format
 /// tree from the pane's mode entry; zz reads them off the client view that
 /// holds the copy session, because copy mode is per client here.
-pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 17] = [
+pub(crate) const COPY_MODE_CONTEXT_FORMATS: [&str; 19] = [
     "copy_cursor_line",
     "copy_cursor_word",
     "copy_cursor_x",
     "copy_cursor_y",
+    "copy_line_numbers",
     "rectangle_toggle",
+    "refresh_active",
     "scroll_position",
     "search_count",
     "search_count_partial",
@@ -706,6 +708,9 @@ pub(crate) struct ModeRequest {
     pub(crate) position: u32,
     pub(crate) limit: u32,
     pub(crate) vi_keys: bool,
+    pub(crate) line_numbers: u8,
+    pub(crate) hide_position: bool,
+    pub(crate) rows: u32,
 }
 
 pub(crate) fn expand_style(
@@ -730,27 +735,57 @@ pub(crate) fn expand_modes(
         .iter()
         .take(zz_protocol::MAX_MODE_PRESENTATIONS)
         .map(|mode| {
-            let variables = BTreeMap::from([
-                ("copy_position".to_owned(), mode.position.to_string()),
-                ("copy_position_limit".to_owned(), mode.limit.to_string()),
-            ]);
+            let empty = BTreeMap::new();
+            let line_numbers = mode_line_numbers(
+                mode,
+                &mut DaemonFormatHooks::command_with_variables(facts, &empty)
+                    .with_option_engine(engine),
+            );
+            let variables = mode_position_variables(mode, line_numbers);
             let mut hooks = DaemonFormatHooks::command_with_variables(facts, &variables)
                 .with_option_engine(engine);
-            mode_presentation(mode, &mut hooks)
+            mode_presentation(mode, line_numbers, &mut hooks)
         })
         .collect()
 }
 
-pub(crate) const MODE_FORMATS: [&str; 5] = [
+pub(crate) const MODE_FORMATS: [&str; 8] = [
     "#{E:copy-mode-position-format}",
     "#{E:copy-mode-position-style}",
     "#{E:copy-mode-selection-style}",
     "#{E:copy-mode-match-style}",
     "#{E:copy-mode-current-match-style}",
+    "#{copy-mode-line-numbers}",
+    "#{E:copy-mode-line-number-style}",
+    "#{E:copy-mode-current-line-number-style}",
 ];
+
+fn mode_line_numbers(mode: &ModeRequest, hooks: &mut DaemonFormatHooks<'_>) -> u8 {
+    if mode.line_numbers == 0 {
+        return 0;
+    }
+    let option = expand_status(MODE_FORMATS[5], &mode.context, hooks);
+    zz_terminal::copy_line_number_mode(mode.line_numbers, &option)
+}
+
+fn mode_position_variables(mode: &ModeRequest, line_numbers: u8) -> BTreeMap<String, String> {
+    let (position, limit) = if line_numbers >= 2 {
+        (
+            mode.limit.saturating_sub(mode.position).saturating_add(1),
+            mode.limit.saturating_add(mode.rows),
+        )
+    } else {
+        (mode.position, mode.limit)
+    };
+    BTreeMap::from([
+        ("copy_position".to_owned(), position.to_string()),
+        ("copy_position_limit".to_owned(), limit.to_string()),
+    ])
+}
 
 fn mode_presentation(
     mode: &ModeRequest,
+    line_numbers: u8,
     hooks: &mut DaemonFormatHooks<'_>,
 ) -> zz_protocol::ModePresentation {
     let [
@@ -759,11 +794,29 @@ fn mode_presentation(
         selection_style,
         match_style,
         current_match_style,
+        _,
+        line_number_style,
+        current_line_number_style,
     ] = MODE_FORMATS;
+    let (line_number_style, current_line_number_style) = if line_numbers == 0 {
+        (String::new(), String::new())
+    } else {
+        (
+            expand_style(line_number_style, &mode.context, hooks),
+            expand_style(current_line_number_style, &mode.context, hooks),
+        )
+    };
     zz_protocol::ModePresentation {
         pane: mode.pane,
         view: mode.view,
-        position: clamp_status_text(expand_status(position, &mode.context, hooks)),
+        line_numbers,
+        line_number_style,
+        current_line_number_style,
+        position: if mode.hide_position {
+            String::new()
+        } else {
+            clamp_status_text(expand_status(position, &mode.context, hooks))
+        },
         position_style: expand_style(position_style, &mode.context, hooks),
         selection_style: expand_style(selection_style, &mode.context, hooks),
         vi_keys: mode.vi_keys,
@@ -1983,11 +2036,7 @@ fn render(
         .iter()
         .take(zz_protocol::MAX_MODE_PRESENTATIONS)
         .map(|mode| {
-            let variables = BTreeMap::from([
-                ("copy_position".to_owned(), mode.position.to_string()),
-                ("copy_position_limit".to_owned(), mode.limit.to_string()),
-            ]);
-            let mut hooks = DaemonFormatHooks::status(
+            let hooks = DaemonFormatHooks::status(
                 request.client,
                 request.facts.as_ref(),
                 &mode.context,
@@ -2003,9 +2052,13 @@ fn render(
                 zz_executable,
                 job_waker,
                 job_client,
-            )
-            .with_variables(&variables);
-            mode_presentation(mode, &mut hooks)
+            );
+            let empty = BTreeMap::new();
+            let mut hooks = hooks.with_variables(&empty);
+            let line_numbers = mode_line_numbers(mode, &mut hooks);
+            let variables = mode_position_variables(mode, line_numbers);
+            let mut hooks = hooks.with_variables(&variables);
+            mode_presentation(mode, line_numbers, &mut hooks)
         })
         .collect::<Vec<_>>();
     let pane_borders = request.pane_borders.as_ref().clone();
@@ -2568,14 +2621,21 @@ impl DaemonFormatHooks<'_> {
             .map(|(_, name)| *name)
     }
 
-    fn copy_mode_variable(&self, name: &str, context: &StatusContext) -> Option<String> {
+    fn copy_mode_variable(
+        &self,
+        name: &str,
+        context: &StatusContext,
+        line_option: &str,
+    ) -> Option<String> {
         let view = self.copy_mode_view(context)?;
         let [
             cursor_line,
             cursor_word,
             cursor_x,
             cursor_y,
+            line_numbers,
             rectangle_toggle,
+            refresh_active,
             scroll_position,
             search_count,
             search_count_partial,
@@ -2602,6 +2662,11 @@ impl DaemonFormatHooks<'_> {
             );
         }
         match name {
+            _ if name == line_numbers => Some(
+                u8::from(zz_terminal::copy_line_number_mode(view.line_numbers, line_option) != 0)
+                    .to_string(),
+            ),
+            _ if name == refresh_active => Some(u8::from(view.refresh_active).to_string()),
             _ if name == rectangle_toggle => Some(u8::from(view.rectangle_toggle).to_string()),
             _ if name == selection_active => Some(u8::from(view.selection_active).to_string()),
             _ if name == search_present => Some(u8::from(view.search_present).to_string()),
@@ -2837,12 +2902,23 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             })
     }
 
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.expect_facts();
+        self.copy_mode_variable("copy_line_numbers", context, option)
+    }
+
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
         self.expect_facts();
         let [list_clients_line] = LIST_CLIENTS_CONTEXT_FORMATS;
         let [message_number, message_text, message_time] = SHOW_MESSAGES_CONTEXT_FORMATS;
         if COPY_MODE_CONTEXT_FORMATS.contains(&name) {
-            return self.copy_mode_variable(name, context);
+            let line_option = if name == "copy_line_numbers" {
+                self.option_variable("copy-mode-line-numbers", context)
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            return self.copy_mode_variable(name, context, &line_option);
         }
         match name {
             "config_files" => self

@@ -10604,6 +10604,14 @@ impl Shared {
                                 && session.pane == *pane
                             {
                                 session.scroll_exit = true;
+                            } else if terminal_view_action_refreshes_now(action)
+                                && let Some(session) = inner
+                                    .client_mut(target)
+                                    .and_then(|c| c.copy_session.as_mut())
+                                && session.pane == *pane
+                                && !session.sourced
+                            {
+                                session.unseen = false;
                             } else if let Some(refresh) =
                                 terminal_view_action_refresh_request(action)
                                 && let Some(session) = inner
@@ -19514,21 +19522,35 @@ impl Shared {
                 overlay_style(&defaults.selected_style, parsed.selected_style.as_deref());
             let border_style =
                 overlay_style(&defaults.border_style, parsed.border_style.as_deref());
-            let variables = popup_position_variables(
+            let frame = menu_window_frame(&inner.engine, &target, geometry.columns, geometry.rows);
+            let mut variables = popup_position_variables(
                 &inner.engine,
                 &target,
-                context.invoking_mouse(),
-                geometry.columns,
-                geometry.rows,
+                None,
+                frame.columns,
+                frame.rows,
                 width,
                 height,
             );
+            if let Some(mouse) = context.invoking_mouse() {
+                variables.extend(
+                    menu_mouse_position_values(&inner.engine, &target, mouse, frame, width, height)
+                        .into_iter()
+                        .map(|(name, value)| (name.to_owned(), value.to_string())),
+                );
+            }
+            if variables.contains_key(POPUP_STATUS_LINE_Y_CONTEXT_FORMAT) {
+                variables.insert(
+                    POPUP_STATUS_LINE_Y_CONTEXT_FORMAT.to_owned(),
+                    if frame.top > 0 { height } else { frame.rows }.to_string(),
+                );
+            }
             target.format_variables.extend(variables);
             let (left, top) = popup_position(
                 parsed.x.as_deref(),
                 parsed.y.as_deref(),
-                geometry.columns,
-                geometry.rows,
+                frame.columns,
+                frame.rows,
                 width,
                 height,
                 |value| {
@@ -19542,6 +19564,7 @@ impl Shared {
                     )
                 },
             );
+            let top = top.saturating_add(frame.top);
             (
                 MenuState {
                     left,
@@ -39897,6 +39920,17 @@ fn terminal_view_action_refresh_request(
     }
 }
 
+fn terminal_view_action_refreshes_now(action: &zz_terminal::TerminalViewAction) -> bool {
+    matches!(
+        action,
+        zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::RefreshNow)
+            | zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: zz_terminal::CopyModeAction::RefreshNow,
+                ..
+            }
+    )
+}
+
 fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewAction) -> bool {
     matches!(
         action,
@@ -43539,7 +43573,7 @@ fn mode_request(
     session: SessionId,
     pane: PaneId,
     view: bool,
-    (position, limit): (u32, u32),
+    shown: ModeShown,
 ) -> Option<crate::status::ModeRequest> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let context = contexts.status_context(Some(session), Some(window), Some(pane));
@@ -43552,8 +43586,11 @@ fn mode_request(
         pane,
         view,
         context,
-        position,
-        limit,
+        position: shown.position,
+        limit: shown.limit,
+        line_numbers: shown.line_numbers,
+        hide_position: shown.hide_position,
+        rows: shown.rows,
         vi_keys: inner
             .engine
             .copy_mode_table_for_pane(pane)
@@ -43576,16 +43613,35 @@ const fn mode_kind(mode: TerminalMode) -> u8 {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ModeShown {
+    position: u32,
+    limit: u32,
+    line_numbers: u8,
+    hide_position: bool,
+    rows: u32,
+}
+
 fn mode_request_position(
     client: ClientId,
     terminal: &TerminalSession,
     view: bool,
-) -> Option<(u32, u32)> {
+) -> Option<ModeShown> {
     let viewport = terminal.latest_viewport_for(TerminalViewId(client.0))?;
-    let shown = match viewport.mode {
-        TerminalMode::Copy { hide_position, .. } => !view && !hide_position,
-        TerminalMode::View { .. } => view,
-        TerminalMode::Live => false,
+    let line_numbers = if view {
+        0
+    } else {
+        terminal
+            .copy_mode_facts(TerminalViewId(client.0))
+            .map_or(0, |facts| facts.line_numbers)
+    };
+    let (shown, hide_position) = match viewport.mode {
+        TerminalMode::Copy { hide_position, .. } => (
+            !view && (!hide_position || line_numbers != 0),
+            hide_position,
+        ),
+        TerminalMode::View { .. } => (view, false),
+        TerminalMode::Live => (false, false),
     };
     if !shown {
         return None;
@@ -43594,7 +43650,13 @@ fn mode_request_position(
         .scrollbar
         .total
         .saturating_sub(viewport.scrollbar.len);
-    Some((limit.saturating_sub(viewport.scrollbar.offset), limit))
+    Some(ModeShown {
+        position: limit.saturating_sub(viewport.scrollbar.offset),
+        limit,
+        line_numbers,
+        hide_position,
+        rows: viewport.scrollbar.len,
+    })
 }
 
 fn resolve_popup_client(
@@ -43883,6 +43945,85 @@ fn popup_mouse_position_values(
         values.push((
             POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
             if top { y + 1 + height } else { y },
+        ));
+    }
+    values
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MenuFrame {
+    columns: u16,
+    rows: u16,
+    top: u16,
+    status_row: Option<u16>,
+    visible_rows: u16,
+}
+
+fn menu_window_frame(
+    engine: &MuxEngine,
+    target: &ExecutionContext,
+    client_columns: u16,
+    client_rows: u16,
+) -> MenuFrame {
+    let status = engine.status_formats_for_session(target.session);
+    let lines = if status.enabled {
+        u16::from(status.lines).min(client_rows)
+    } else {
+        0
+    };
+    let status_top = status.position == zz_protocol::StatusPosition::Top;
+    let available = client_rows.saturating_sub(lines);
+    let extent = |axis| {
+        target
+            .window
+            .and_then(|window| engine.window_extent(window, axis))
+    };
+    let columns = extent(zz_protocol::Axis::Horizontal).unwrap_or(client_columns);
+    let rows = extent(zz_protocol::Axis::Vertical).unwrap_or(available);
+    let visible_rows = if client_columns >= columns && available >= rows {
+        rows
+    } else {
+        available
+    };
+    MenuFrame {
+        columns,
+        rows,
+        top: if status_top { lines } else { 0 },
+        status_row: (!status_top && lines > 0).then_some(available),
+        visible_rows,
+    }
+}
+
+fn menu_mouse_position_values(
+    engine: &MuxEngine,
+    target: &ExecutionContext,
+    mouse: &MouseEventTarget,
+    frame: MenuFrame,
+    width: u16,
+    height: u16,
+) -> Vec<(&'static str, i64)> {
+    let row = if frame.top > 0 {
+        mouse.row.saturating_sub(frame.top)
+    } else if frame.status_row.is_some_and(|status| mouse.row >= status) {
+        frame.visible_rows.saturating_sub(1)
+    } else {
+        mouse.row
+    };
+    let moved = MouseEventTarget {
+        row,
+        status_range_start: None,
+        ..mouse.clone()
+    };
+    let mut values = popup_mouse_position_values(engine, target, &moved, frame.rows, width, height);
+    if let Some(start) = mouse.status_range_start {
+        values.push((POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT, i64::from(start)));
+        values.push((
+            POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
+            if frame.top > 0 {
+                i64::from(height)
+            } else {
+                i64::from(frame.rows)
+            },
         ));
     }
     values

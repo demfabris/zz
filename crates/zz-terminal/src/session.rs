@@ -2181,6 +2181,27 @@ pub struct CopyModeFacts {
     pub search_match: String,
     pub rectangle_toggle: bool,
     pub selection_active: bool,
+    pub line_numbers: u8,
+    pub refresh_active: bool,
+}
+
+#[must_use]
+pub fn copy_line_number_mode(line_numbers: u8, option: &str) -> u8 {
+    if line_numbers == 0 {
+        return 0;
+    }
+    let mode = match option {
+        "default" => 1,
+        "absolute" => 2,
+        "relative" => 3,
+        "hybrid" => 4,
+        _ => 0,
+    };
+    if line_numbers == 2 && mode == 0 {
+        1
+    } else {
+        mode
+    }
 }
 
 /// `data->selx`, `sely`, `endselx` and `endsely`: grid rows counted from the
@@ -4611,6 +4632,7 @@ struct CopyModeState {
     /// re-run and which the incremental spellings compare against.
     search: Option<CopyModeSearch>,
     search_all: bool,
+    line_numbers: u8,
 }
 
 /// `data->searchx`, `data->searchy` and `data->searcho`.
@@ -6451,6 +6473,7 @@ fn output_view_state(terminal: &mut Terminal<'_, '_>) -> Result<TerminalViewStat
         .as_mut()
         .expect("entering output view creates a frozen revision");
     mode.kind = FrozenModeKind::View;
+    mode.line_numbers = 0;
     mode.cursor = PointCoordinate { x: 0, y: 0 };
     mode.viewport_offset = 0;
     Ok(view)
@@ -6521,37 +6544,73 @@ fn resize_copy_modes(
             mode.selection = None;
             mode.selecting = false;
             mode.recentre = None;
-            if let Some(origin) = mode.incremental_origin.as_mut() {
-                origin.row = mode.cursor.y;
-                origin.viewport_offset = mode.viewport_offset;
-            }
-            state.search_snapshot = None;
-            if mode.search_marks
-                && let Some(previous) = state.search.take()
-            {
-                let mut search = mode
-                    .revision
-                    .search
-                    .search(&previous.query, request_id, || false)
-                    .expect("resize search");
-                search.current = search
-                    .matches
-                    .iter()
-                    .position(|found| found.contains(mode.cursor, mode.revision.columns));
-                mode.search_count = Some((
-                    u32::try_from(search.matches.len()).unwrap_or(u32::MAX),
-                    false,
-                ));
-                state.search_snapshot = Some(Arc::clone(&mode.revision.search));
-                state.search = Some(Box::new(search));
-            } else {
-                mode.search_marks = false;
-                mode.search_count = None;
-                state.search = None;
-            }
+            rebuild_copy_search(
+                mode,
+                &mut state.search,
+                &mut state.search_snapshot,
+                request_id,
+            );
         }
     }
     Ok(())
+}
+
+fn rebuild_copy_search(
+    mode: &mut CopyModeState,
+    search: &mut SearchSlot,
+    search_snapshot: &mut Option<Arc<HistorySearchSnapshot>>,
+    request_id: u64,
+) {
+    if let Some(origin) = mode.incremental_origin.as_mut() {
+        origin.row = mode.cursor.y;
+        origin.viewport_offset = mode.viewport_offset;
+    }
+    *search_snapshot = None;
+    if mode.search_marks
+        && let Some(previous) = search.take()
+    {
+        let mut rebuilt = mode
+            .revision
+            .search
+            .search(&previous.query, request_id, || false)
+            .expect("copy search rebuild");
+        rebuilt.current = rebuilt
+            .matches
+            .iter()
+            .position(|found| found.contains(mode.cursor, mode.revision.columns));
+        mode.search_count = Some((
+            u32::try_from(rebuilt.matches.len()).unwrap_or(u32::MAX),
+            false,
+        ));
+        *search_snapshot = Some(Arc::clone(&mode.revision.search));
+        *search = Some(Box::new(rebuilt));
+    } else {
+        mode.search_marks = false;
+        mode.search_count = None;
+        *search = None;
+    }
+}
+
+fn settle_copy_search(
+    view_id: TerminalViewId,
+    worker: &mut SearchWorker,
+    copy_mode: &mut CopyModeSlot,
+    search: &mut SearchSlot,
+    search_origin: &mut Option<PointCoordinate>,
+    search_snapshot: &mut Option<Arc<HistorySearchSnapshot>>,
+    revision_before: Option<u64>,
+) {
+    let Some(before) = revision_before else {
+        return;
+    };
+    match copy_mode.as_deref_mut() {
+        None => drop_view_search(view_id, worker, search, search_origin, search_snapshot),
+        Some(mode) if mode.revision.id != before => {
+            let request_id = worker.cancel(view_id);
+            rebuild_copy_search(mode, search, search_snapshot, request_id);
+        }
+        Some(_) => {}
+    }
 }
 
 fn refresh_frozen_view_appearance(
@@ -7518,7 +7577,7 @@ fn apply_view_action(
             Ok(ViewActionResult::Snapshot)
         }
         TerminalViewAction::CopyModeCounted { action, count } => {
-            let was_frozen = copy_mode.is_some();
+            let revision_before = copy_mode.as_ref().map(|mode| mode.revision.id);
             let result = if let CopyModeAction::Search(spec) = &action {
                 run_copy_mode_search(
                     view_id,
@@ -7571,15 +7630,15 @@ fn apply_view_action(
                     mode_keys_vi,
                 )?
             };
-            if was_frozen && copy_mode.is_none() {
-                drop_view_search(
-                    view_id,
-                    search_worker,
-                    search,
-                    search_origin,
-                    search_snapshot,
-                );
-            }
+            settle_copy_search(
+                view_id,
+                search_worker,
+                copy_mode,
+                search,
+                search_origin,
+                search_snapshot,
+                revision_before,
+            );
             Ok(result)
         }
         TerminalViewAction::CopyMode(CopyModeAction::Search(spec)) => {
@@ -7650,7 +7709,7 @@ fn apply_view_action(
             }
         }
         TerminalViewAction::CopyMode(action) => {
-            let was_frozen = copy_mode.is_some();
+            let revision_before = copy_mode.as_ref().map(|mode| mode.revision.id);
             let result = apply_copy_mode_action(
                 terminal,
                 selection,
@@ -7660,15 +7719,15 @@ fn apply_view_action(
                 word_separators,
                 mode_keys_vi,
             )?;
-            if was_frozen && copy_mode.is_none() {
-                drop_view_search(
-                    view_id,
-                    search_worker,
-                    search,
-                    search_origin,
-                    search_snapshot,
-                );
-            }
+            settle_copy_search(
+                view_id,
+                search_worker,
+                copy_mode,
+                search,
+                search_origin,
+                search_snapshot,
+                revision_before,
+            );
             Ok(result)
         }
         TerminalViewAction::SearchBegin(query) => {
@@ -8070,6 +8129,7 @@ fn enter_copy_mode(
         incremental_origin: None,
         search: None,
         search_all: true,
+        line_numbers: 1,
     }));
     Ok(())
 }
@@ -10369,8 +10429,12 @@ fn apply_copy_mode_action(
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
-        CopyModeAction::GotoLine(line) => {
-            goto_copy_line(&mut mode, line);
+        CopyModeAction::GotoLine {
+            line,
+            option_absolute,
+        } => {
+            let absolute = option_absolute && mode.line_numbers != 0;
+            goto_copy_line(&mut mode, line, absolute);
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
             }
@@ -10419,6 +10483,36 @@ fn apply_copy_mode_action(
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
+        CopyModeAction::LineNumbersOn { option_off } => {
+            mode.line_numbers = if option_off { 2 } else { 1 };
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::LineNumbersOff => {
+            mode.line_numbers = 0;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::LineNumbersToggle { option_off } => {
+            let active = mode.line_numbers == 2 || (mode.line_numbers == 1 && !option_off);
+            mode.line_numbers = match (active, option_off) {
+                (true, _) => 0,
+                (false, true) => 2,
+                (false, false) => 1,
+            };
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::RefreshNow => {
+            if mode.kind != FrozenModeKind::Copy || mode.sourced {
+                *copy_mode = Some(mode);
+                return Ok(ViewActionResult::None);
+            }
+            refresh_copy_revision(terminal, selection, &mut mode, mode_keys_vi)?;
+            *unseen_output = 0;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
         // `window_copy_refresh_timer`: skip the tick unless the pane has
         // unseen output and no selection or cursor drag is live, then
         // `window_copy_do_refresh` re-clones the backing, keeps the view on
@@ -10434,28 +10528,7 @@ fn apply_copy_mode_action(
                 *copy_mode = Some(mode);
                 return Ok(ViewActionResult::None);
             }
-            let rows = u32::from(mode.revision.viewport_rows.saturating_sub(1));
-            let follow = mode.viewport_offset == mode.revision.maximum_offset()
-                && mode.cursor.y == mode.viewport_offset.saturating_add(rows);
-            let offset_from_top = mode.viewport_offset;
-            mode.revision = ModeRevision::capture(terminal)?;
-            if follow {
-                mode.viewport_offset = mode.revision.maximum_offset();
-                mode.cursor = mode.revision.clamp_point(PointCoordinate {
-                    x: mode.cursor.x,
-                    y: mode
-                        .viewport_offset
-                        .saturating_add(u32::from(mode.revision.viewport_rows.saturating_sub(1))),
-                });
-                mode.cursor.x = mode
-                    .cursor
-                    .x
-                    .min(revision_copy_line_end(&mode.revision, mode.cursor.y));
-            } else {
-                mode.viewport_offset = offset_from_top.min(mode.revision.maximum_offset());
-                mode.cursor = mode.revision.clamp_point(mode.cursor);
-            }
-            mode.recentre = None;
+            refresh_copy_revision(terminal, selection, &mut mode, mode_keys_vi)?;
             *unseen_output = 0;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -10859,12 +10932,16 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32, mode_keys_vi: bo
 /// The pin's `window_copy_goto_line` with line numbers off: the argument is a
 /// scrollback offset counted from the bottom, clamped to the retained history,
 /// and the cursor keeps the screen row it was on.
-fn goto_copy_line(mode: &mut CopyModeState, line: u32) {
-    if i32::try_from(line).is_err() {
+fn goto_copy_line(mode: &mut CopyModeState, line: Option<i32>, absolute: bool) {
+    let Some(line) = line else {
         return;
-    }
+    };
     let maximum = mode.revision.maximum_offset();
-    let offset = maximum.saturating_sub(line.min(maximum));
+    let offset = if absolute {
+        u32::try_from(line.max(1) - 1).unwrap_or(0).min(maximum)
+    } else {
+        maximum.saturating_sub(u32::try_from(line).unwrap_or(maximum).min(maximum))
+    };
     let delta = i64::from(offset) - i64::from(mode.viewport_offset);
     mode.viewport_offset = offset;
     let last = i64::from(mode.revision.total_rows().saturating_sub(1));
@@ -15930,6 +16007,41 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
     Ok(())
 }
 
+fn refresh_copy_revision(
+    terminal: &mut Terminal<'_, '_>,
+    selection: &mut Option<SelectionState>,
+    mode: &mut CopyModeState,
+    mode_keys_vi: bool,
+) -> Result<(), WorkerError> {
+    let rows = u32::from(mode.revision.viewport_rows.saturating_sub(1));
+    let follow = mode.viewport_offset == mode.revision.maximum_offset()
+        && mode.cursor.y == mode.viewport_offset.saturating_add(rows);
+    let offset_from_top = mode.viewport_offset;
+    mode.revision = ModeRevision::capture(terminal)?;
+    if follow {
+        mode.viewport_offset = mode.revision.maximum_offset();
+        mode.cursor = mode.revision.clamp_point(PointCoordinate {
+            x: mode.cursor.x,
+            y: mode
+                .viewport_offset
+                .saturating_add(u32::from(mode.revision.viewport_rows.saturating_sub(1))),
+        });
+        mode.cursor.x = copy_cursor_limit(&mode.revision, mode.cursor.y, mode_keys_vi, false);
+    } else {
+        mode.viewport_offset = offset_from_top.min(mode.revision.maximum_offset());
+        mode.cursor = mode.revision.clamp_point(mode.cursor);
+    }
+    mode.recentre = None;
+    *selection = None;
+    terminal.set_selection(None)?;
+    mode.selection = None;
+    mode.selection_mode = CopySelectionMode::Char;
+    mode.selecting = false;
+    let limit = copy_cursor_limit(&mode.revision, mode.cursor.y, mode_keys_vi, mode.rectangle);
+    mode.cursor.x = mode.cursor.x.min(limit);
+    Ok(())
+}
+
 /// `window_copy_formats` read off one frozen view. `data->cy` and `data->oy`
 /// are screen-relative and bottom-relative; the selection coordinates the pin
 /// stores in `selx`, `sely`, `endselx` and `endsely` are absolute grid rows,
@@ -15973,6 +16085,8 @@ fn copy_mode_facts(
         },
         rectangle_toggle: mode.rectangle,
         selection_active: mode.selection.is_some() && mode.selecting,
+        line_numbers: mode.line_numbers,
+        refresh_active: mode.refresh,
     }
 }
 
@@ -27221,13 +27335,16 @@ PS1='zz-path-fixture> '
                     terminal: &mut Terminal<'_, '_>,
                     selection: &mut Option<SelectionState>,
                     unseen_output: &mut u32,
-                    line: u32| {
+                    line: Option<i32>| {
             apply_copy_mode_action(
                 terminal,
                 selection,
                 copy_mode,
                 unseen_output,
-                CopyModeAction::GotoLine(line),
+                CopyModeAction::GotoLine {
+                    line,
+                    option_absolute: false,
+                },
                 &WordSeparators::default(),
                 false,
             )
@@ -27242,7 +27359,7 @@ PS1='zz-path-fixture> '
             &mut terminal,
             &mut selection,
             &mut unseen_output,
-            u32::MAX,
+            None,
         );
         {
             let mode = copy_mode.as_ref().expect("mode");
@@ -27257,7 +27374,7 @@ PS1='zz-path-fixture> '
                 &mut terminal,
                 &mut selection,
                 &mut unseen_output,
-                line,
+                i32::try_from(line).ok(),
             );
             let mode = copy_mode.as_ref().expect("mode");
             assert_eq!(
@@ -27271,6 +27388,222 @@ PS1='zz-path-fixture> '
                 "goto-line {line} moved the cursor screen row"
             );
         }
+    }
+
+    #[test]
+    fn goto_line_counts_from_the_top_under_absolute_line_numbers() {
+        let mut terminal = new_terminal(8, 3, 64).expect("terminal");
+        for line in 0..20_u32 {
+            terminal.vt_write(format!("L{line}\r\n").as_bytes());
+        }
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        let maximum = copy_mode.as_ref().expect("mode").revision.maximum_offset();
+        let mut unseen_output = 0;
+        let mut run = |copy_mode: &mut CopyModeSlot, action: CopyModeAction| {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                copy_mode,
+                &mut unseen_output,
+                action,
+                &WordSeparators::default(),
+                false,
+            )
+            .expect("copy action");
+            copy_mode.as_ref().expect("mode").viewport_offset
+        };
+        let goto = |line: i32| CopyModeAction::GotoLine {
+            line: Some(line),
+            option_absolute: true,
+        };
+        assert_eq!(run(&mut copy_mode, goto(1)), 0);
+        assert_eq!(run(&mut copy_mode, goto(5)), 4);
+        assert_eq!(run(&mut copy_mode, goto(-1)), 0);
+        assert_eq!(run(&mut copy_mode, goto(i32::MAX)), maximum);
+        run(&mut copy_mode, CopyModeAction::LineNumbersOff);
+        assert_eq!(run(&mut copy_mode, goto(5)), maximum - 5);
+    }
+
+    #[test]
+    fn refresh_now_clears_the_selection_and_follows_to_the_line_end() {
+        let mut terminal = new_terminal(8, 3, 16).expect("terminal");
+        terminal.vt_write(b"a\r\nb\r\n");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        let mut unseen_output = 0;
+        for action in [CopyModeAction::StartSelection, CopyModeAction::Up] {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                action,
+                &WordSeparators::default(),
+                false,
+            )
+            .expect("copy action");
+        }
+        assert!(copy_mode.as_ref().expect("mode").selection.is_some());
+        apply_copy_mode_action(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::RefreshNow,
+            &WordSeparators::default(),
+            false,
+        )
+        .expect("refresh-now");
+        let mode = copy_mode.as_ref().expect("mode");
+        assert!(mode.selection.is_none() && !mode.selecting);
+
+        let mut terminal = new_terminal(8, 3, 16).expect("terminal");
+        terminal.vt_write(b"a\r\nb\r\n");
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        terminal.vt_write(b"three");
+        for (vi, column) in [(false, 5), (true, 4)] {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                CopyModeAction::RefreshNow,
+                &WordSeparators::default(),
+                vi,
+            )
+            .expect("refresh-now");
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(
+                (mode.cursor.x, mode.cursor.y - mode.viewport_offset),
+                (column, 2)
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_now_searches_the_refreshed_text_again() {
+        let mut terminal = new_terminal(8, 3, 16).expect("terminal");
+        terminal.vt_write(b"foo\r\n");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        let view_id = TerminalViewId(4);
+        let (mut worker, _results) = SearchWorker::spawn(ActorWake::none());
+        let mut search = None;
+        let mut search_origin = None;
+        let mut search_snapshot = None;
+        let mut pane_search = None;
+        let mut unseen_output = 0;
+        let find = |text: &str| CopyModeSearch {
+            text: text.to_owned(),
+            direction: SearchDirection::Backward,
+            regex: false,
+            incremental: false,
+        };
+        let matches = |search: &SearchSlot| {
+            search.as_ref().map(|search| {
+                search
+                    .matches
+                    .iter()
+                    .map(|found| (found.row, found.start))
+                    .collect::<Vec<_>>()
+            })
+        };
+
+        run_copy_mode_search(
+            view_id,
+            &mut copy_mode,
+            &mut search,
+            &mut search_snapshot,
+            &mut worker,
+            &find("foo"),
+            1,
+            false,
+            true,
+            &mut pane_search,
+        );
+        assert_eq!(matches(&search), Some(vec![(0, 0)]));
+
+        terminal.vt_write(b"\x1b[1;1Hbar");
+        let before = copy_mode.as_ref().map(|mode| mode.revision.id);
+        apply_copy_mode_action(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::RefreshNow,
+            &WordSeparators::default(),
+            false,
+        )
+        .expect("refresh-now");
+        settle_copy_search(
+            view_id,
+            &mut worker,
+            &mut copy_mode,
+            &mut search,
+            &mut search_origin,
+            &mut search_snapshot,
+            before,
+        );
+        assert_eq!(matches(&search), Some(Vec::new()));
+        assert_eq!(
+            copy_mode.as_ref().expect("mode").search_count,
+            Some((0, false))
+        );
+
+        run_copy_mode_search(
+            view_id,
+            &mut copy_mode,
+            &mut search,
+            &mut search_snapshot,
+            &mut worker,
+            &find("bar"),
+            1,
+            false,
+            true,
+            &mut pane_search,
+        );
+        assert_eq!(matches(&search), Some(vec![(0, 0)]));
     }
 
     #[test]

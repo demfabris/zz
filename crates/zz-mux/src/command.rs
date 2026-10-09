@@ -204,6 +204,9 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "copy-mode-position-format",
     "copy-mode-position-style",
     "copy-mode-selection-style",
+    "copy-mode-line-numbers",
+    "copy-mode-line-number-style",
+    "copy-mode-current-line-number-style",
     "switch-mode-match-style",
     "theme",
     "dark-theme-black",
@@ -244,7 +247,9 @@ const COPY_MODE_CONTEXT_FORMATS: &[&str] = &[
     "copy_cursor_word",
     "copy_cursor_x",
     "copy_cursor_y",
+    "copy_line_numbers",
     "rectangle_toggle",
+    "refresh_active",
     "scroll_position",
     "search_count",
     "search_count_partial",
@@ -544,11 +549,6 @@ const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
         &["clipboard_invalid"],
     ),
     (
-        "window-copy.c",
-        "window_copy_formats",
-        &["copy_line_numbers", "refresh_active"],
-    ),
-    (
         "window-customize.c",
         "window_customize_build",
         &["is_environment"],
@@ -701,6 +701,10 @@ struct RowFormatHooks<'a, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -778,6 +782,10 @@ struct ShownOptionHooks<'a, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ShownOptionHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -1715,6 +1723,10 @@ impl StatusHooks for ConfigConditionHooks<'_> {
 }
 
 impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -1797,6 +1809,10 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -1865,6 +1881,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -9242,6 +9262,36 @@ impl MuxEngine {
                     target_client,
                     require_mode: true,
                 }));
+            };
+            let action = match action {
+                CopyModeAction::LineNumbersOn { .. }
+                | CopyModeAction::LineNumbersToggle { .. }
+                | CopyModeAction::GotoLine { .. } => {
+                    let target = ExecutionContext::for_pane(&self.state, pane)
+                        .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                    let option = self.expand_pane_format(
+                        "#{copy-mode-line-numbers}",
+                        &target,
+                        context.session,
+                        context.target_format_client(),
+                        hooks,
+                    );
+                    let option_off = option == "off";
+                    match action {
+                        CopyModeAction::LineNumbersOn { .. } => {
+                            CopyModeAction::LineNumbersOn { option_off }
+                        }
+                        CopyModeAction::GotoLine { line, .. } => CopyModeAction::GotoLine {
+                            line,
+                            option_absolute: matches!(
+                                option.as_str(),
+                                "absolute" | "relative" | "hybrid"
+                            ),
+                        },
+                        _ => CopyModeAction::LineNumbersToggle { option_off },
+                    }
+                }
+                action => action,
             };
             let action = match action.count_policy() {
                 CopyModeCountPolicy::Once => TerminalViewAction::CopyMode(action),
@@ -17012,16 +17062,17 @@ fn mouse_key_identity(base: &str) -> Option<(u32, u8, u8)> {
         ("Status", 1),
         ("Border", 5),
         ("Pane", 0),
-        ("Control0", 9),
-        ("Control1", 10),
-        ("Control2", 11),
-        ("Control3", 12),
-        ("Control4", 13),
-        ("Control5", 14),
-        ("Control6", 15),
-        ("Control7", 16),
-        ("Control8", 17),
-        ("Control9", 18),
+        ("Empty", 9),
+        ("Control0", 10),
+        ("Control1", 11),
+        ("Control2", 12),
+        ("Control3", 13),
+        ("Control4", 14),
+        ("Control5", 15),
+        ("Control6", 16),
+        ("Control7", 17),
+        ("Control8", 18),
+        ("Control9", 19),
     ];
     const EVENTS: &[(&str, u8, bool)] = &[
         ("MouseDragEnd", 7, true),
@@ -17312,6 +17363,7 @@ fn parse_mouse_key(value: &str) -> Option<String> {
         "ScrollbarSlider",
         "ScrollbarDown",
         "Border",
+        "Empty",
         "Control0",
         "Control1",
         "Control2",
@@ -18252,11 +18304,15 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::RefreshOn
             | CopyModeAction::RefreshOff
             | CopyModeAction::RefreshToggle
+            | CopyModeAction::RefreshNow
+            | CopyModeAction::LineNumbersOn { .. }
+            | CopyModeAction::LineNumbersOff
+            | CopyModeAction::LineNumbersToggle { .. }
             | CopyModeAction::RefreshRevision
             | CopyModeAction::RecentreTopBottom
             | CopyModeAction::NextMatchingBracket
             | CopyModeAction::PreviousMatchingBracket
-            | CopyModeAction::GotoLine(_)
+            | CopyModeAction::GotoLine { .. }
             | CopyModeAction::PageDownScrollExit
             | CopyModeAction::HalfPageDownScrollExit
             | CopyModeAction::ScrollDownAndCancel
@@ -18362,6 +18418,10 @@ fn copy_mode_action(
         "refresh-on" => Some(CopyModeAction::RefreshOn),
         "refresh-off" => Some(CopyModeAction::RefreshOff),
         "refresh-toggle" => Some(CopyModeAction::RefreshToggle),
+        "refresh-now" => Some(CopyModeAction::RefreshNow),
+        "line-numbers-on" => Some(CopyModeAction::LineNumbersOn { option_off: true }),
+        "line-numbers-off" => Some(CopyModeAction::LineNumbersOff),
+        "line-numbers-toggle" => Some(CopyModeAction::LineNumbersToggle { option_off: true }),
         "recentre-top-bottom" => Some(CopyModeAction::RecentreTopBottom),
         "scroll-exit-on" => Some(CopyModeAction::ScrollExitOn),
         "scroll-exit-off" => Some(CopyModeAction::ScrollExitOff),
@@ -18677,10 +18737,12 @@ fn copy_selection_mode(argument: Option<&str>) -> Option<CopySelectionMode> {
 
 fn copy_goto_line_action(arguments: &[RawText]) -> Option<CopyModeAction> {
     let [line] = arguments else { return None };
-    let target = pinned_strtonum(line, -1, i64::from(i32::MAX)).map_or(u32::MAX, |parsed| {
-        u32::try_from(parsed).unwrap_or(i32::MAX.unsigned_abs())
-    });
-    Some(CopyModeAction::GotoLine(target))
+    let line = pinned_strtonum(line, -1, i64::from(i32::MAX))
+        .and_then(|parsed| i32::try_from(parsed).ok());
+    Some(CopyModeAction::GotoLine {
+        line,
+        option_absolute: false,
+    })
 }
 
 /// The pin's `strtonum` grammar: `strtoll` base ten over the whole string,
@@ -28543,7 +28605,10 @@ mod tests {
         assert!(matches!(
             execution.effects.as_slice(),
             [MuxEffect::TerminalView {
-                action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(42)),
+                action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                    line: Some(42),
+                    ..
+                }),
                 ..
             }]
         ));
@@ -28577,19 +28642,22 @@ mod tests {
         };
 
         for (argument, line) in [
-            ("0", 0_u32),
+            ("0", 0_i32),
             ("5", 5),
             ("+6", 6),
             (" 13", 13),
             ("2147483647", 2_147_483_647),
-            ("-1", 2_147_483_647),
+            ("-1", -1),
         ] {
             let execution = goto(&mut engine, &mut context, argument);
             assert!(
                 matches!(
                     execution.effects.as_slice(),
                     [MuxEffect::TerminalView {
-                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                            line: Some(actual),
+                            ..
+                        }),
                         ..
                     }] if *actual == line
                 ),
@@ -28614,9 +28682,12 @@ mod tests {
                 matches!(
                     execution.effects.as_slice(),
                     [MuxEffect::TerminalView {
-                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                            line: None,
+                            ..
+                        }),
                         ..
-                    }] if i32::try_from(*actual).is_err()
+                    }]
                 ),
                 "goto-line {argument:?} must still reach the mode with no target"
             );
@@ -37578,7 +37649,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 151);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 154);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

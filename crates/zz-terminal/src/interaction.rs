@@ -368,7 +368,10 @@ pub enum CopyModeAction {
         direction: SearchDirection,
     },
     CopyEndOfLine(Box<CopyModeCopy>),
-    GotoLine(u32),
+    GotoLine {
+        line: Option<i32>,
+        option_absolute: bool,
+    },
     PageDownScrollExit,
     SelectionMode(CopySelectionMode),
     /// Stop the selection following the cursor without clearing it.
@@ -396,6 +399,14 @@ pub enum CopyModeAction {
     /// `refresh-off`: stop re-cloning it.
     RefreshOff,
     RefreshToggle,
+    RefreshNow,
+    LineNumbersOn {
+        option_off: bool,
+    },
+    LineNumbersOff,
+    LineNumbersToggle {
+        option_off: bool,
+    },
     /// One tick of the refresh timer, which is the daemon's here. It is not a
     /// pinned action name; `window_copy_refresh_timer` is a libevent timer.
     RefreshRevision,
@@ -517,13 +528,17 @@ impl CopyModeAction {
             | Self::ScrollDown
             | Self::CursorCentreVertical
             | Self::CursorCentreHorizontal
-            | Self::GotoLine(_)
+            | Self::GotoLine { .. }
             | Self::Jump(_)
             | Self::RepeatJump { .. } => CopyModeClear::EmacsOnly,
             Self::TogglePosition
             | Self::RefreshOn
             | Self::RefreshOff
             | Self::RefreshToggle
+            | Self::RefreshNow
+            | Self::LineNumbersOn { .. }
+            | Self::LineNumbersOff
+            | Self::LineNumbersToggle { .. }
             | Self::RefreshRevision
             | Self::MouseCursor(_)
             | Self::SearchCursorWord { .. } => CopyModeClear::Never,
@@ -648,9 +663,13 @@ impl CopyModeAction {
             | Self::RefreshOn
             | Self::RefreshOff
             | Self::RefreshToggle
+            | Self::RefreshNow
+            | Self::LineNumbersOn { .. }
+            | Self::LineNumbersOff
+            | Self::LineNumbersToggle { .. }
             | Self::RefreshRevision
             | Self::MouseCursor(_)
-            | Self::GotoLine(_) => CopyModeCountPolicy::Once,
+            | Self::GotoLine { .. } => CopyModeCountPolicy::Once,
         }
     }
 }

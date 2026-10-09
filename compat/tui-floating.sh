@@ -13,6 +13,13 @@
 # and zz's is a modal pane (tmux master 34cd5da4), so only the screen is the
 # contract there.
 #
+# THE POPUP TITLE COLUMN. tmux 3.8 draws a display-popup title with
+# screen_write_box at the box's x + 2; zz's popup is tmux master's modal pane
+# (34cd5da4), whose title is pane-border-format drawn at the pane's xoff + 2,
+# one column further right. On the popup-titled checkpoint only, the dashes
+# around the title on its top border are dropped from both captures before the
+# compare, so the box, its corners and the title text are still asserted.
+#
 # Cases (catch-up item float.clients, knowledge/designs/floating-panes.md):
 #   overlap          two overlapping floats over a vertical split
 #   raised           select-pane raises the back float over the front one
@@ -23,6 +30,8 @@
 #   no-tiled         a window with no tiled pane and two floats
 #   modal-click      a click outside a modal changes nothing
 #   modal-close      a click outside a new-pane -O -C modal kills it
+#   popup-titled     display-popup -T over a split, with the per-pane styles
+#                    display-popup sets (pane-border-style, window-style)
 #   clipped          a float pushed past the left and top window edges shows
 #                    its own columns and rows from the clipped offset on
 #   cursor-covered   a tiled pane's cursor under a float is hidden
@@ -162,7 +171,13 @@ wait_for() {
 
 CURSOR_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag}'
 
+TITLE_RULE=""
 capture_plain() {
+  if [ -n "$TITLE_RULE" ]; then
+    tmux_outer_command capture-pane -p -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
+      -t "=$OUTER_SESSION:$1" | sed -E "s/┌─*($TITLE_RULE)─*┐/┌\1┐/"
+    return
+  fi
   tmux_outer_command capture-pane -p -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
     -t "=$OUTER_SESSION:$1"
 }
@@ -348,6 +363,7 @@ attach_both() {
   set_on_both default-shell /bin/sh
   set_on_both mouse on
   run_on_both bind-key -T prefix P display-popup -w 30 -h 8 -E "$POPUP_JOB"
+  run_on_both bind-key -T prefix T display-popup -w 30 -h 8 -T POPUP-TITLE -E "$POPUP_JOB"
   tmux_outer_command -f /dev/null new-session -d -s "$OUTER_SESSION" -n zz \
     -x "$COLUMNS_UNDER_TEST" -y "$ROWS_UNDER_TEST" "$SCRATCH_DIR/attach-zz.sh" ||
     die "could not create the outer session"
@@ -455,6 +471,22 @@ modal_cases() {
   verdict modal-close
 }
 
+popup_titled_case() {
+  CASE_LABEL=popup-titled
+  attach_both
+  run_on_both split-window -h "$INNER_SHELL"
+  press_on_both T
+  both_screen_has POPUP-BODY 'the titled popup job'
+  both_screen_has POPUP-TITLE 'the popup title'
+  COMPARE_FACTS=0
+  TITLE_RULE=POPUP-TITLE
+  verdict popup-titled
+  TITLE_RULE=""
+  COMPARE_FACTS=1
+  type_on_both Enter
+  both_screen_lacks POPUP-BODY 'the closed titled popup'
+}
+
 clipped_case() {
   CASE_LABEL=clipped
   attach_both
@@ -483,6 +515,7 @@ borderless_case
 popup_zoomed_case
 no_tiled_case
 modal_cases
+popup_titled_case
 clipped_case
 cursor_covered_case
 

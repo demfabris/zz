@@ -4380,7 +4380,12 @@ impl MuxEngine {
             .and_then(|entry| entry.value.as_ref().map(ToString::to_string))
     }
 
-    pub fn set_config_environment(&mut self, name: String, value: String, hidden: bool) {
+    pub fn set_config_environment(
+        &mut self,
+        name: String,
+        value: impl Into<RawText>,
+        hidden: bool,
+    ) {
         self.global_environment.insert(
             name.into(),
             EnvironmentEntry {

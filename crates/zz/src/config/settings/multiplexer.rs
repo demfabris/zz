@@ -24,7 +24,7 @@ struct SplitControl {
 pub(super) struct SplitControls {
     rows: [SplitControl; 2],
     pending: Option<PendingSplit>,
-    timeout: Option<zpui::Task<()>>,
+    timeout: Option<zz_gpui::Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -214,7 +214,7 @@ impl SettingsView {
                                 .disabled(disabled)
                                 .bg(settings_control_fill(cx))
                                 .dropdown_menu_with_anchor(
-                                    zpui::Anchor::TopRight,
+                                    zz_gpui::Anchor::TopRight,
                                     move |menu, _, _| {
                                         PANE_KINDS.into_iter().fold(
                                             menu,

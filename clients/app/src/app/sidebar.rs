@@ -1,13 +1,13 @@
 use super::AppShell;
 use crate::connection::Connection;
 use std::{collections::BTreeSet, rc::Rc};
-use zpui::{
-    AnyElement, App, Context, Entity, FocusHandle, Hsla, ListSizingBehavior, MouseButton,
-    ScrollStrategy, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
-};
 use zz_client::{
     AgentAttentionStatus, ChromeAction,
     navigation::{RenameTarget, ordered_panes, pane_label, rename_prompt_command, session_label},
+};
+use zz_gpui::{
+    AnyElement, App, Context, Entity, FocusHandle, Hsla, ListSizingBehavior, MouseButton,
+    ScrollStrategy, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
 use zz_protocol::{CommandInvocation, MuxSnapshot, PaneId, SessionId, WindowId};
 use zz_ui::{

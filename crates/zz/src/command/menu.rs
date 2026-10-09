@@ -1,11 +1,11 @@
 use std::{cell::Cell, rc::Rc};
 
-use zpui::{
+use zz_client::{MenuBox, MenuKeyResult, MenuPointerKind, resolve_menu_key, resolve_menu_mouse};
+use zz_gpui::{
     App, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, Window,
     div, prelude::*, px,
 };
-use zz_client::{MenuBox, MenuKeyResult, MenuPointerKind, resolve_menu_key, resolve_menu_mouse};
 use zz_protocol::{InputMessage, MenuAction, MenuState, PopupBorderLines};
 use zz_terminal::KeyAction;
 
@@ -267,7 +267,7 @@ fn resolve_keystroke(
 
 #[cfg(test)]
 mod tests {
-    use zpui::Modifiers;
+    use zz_gpui::Modifiers;
     use zz_protocol::{MenuItem, PopupBorderLines};
 
     use super::*;

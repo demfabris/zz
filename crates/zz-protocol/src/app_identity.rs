@@ -1,4 +1,4 @@
-use std::{env, io, path::PathBuf};
+use std::{io, path::PathBuf};
 
 pub const DEVELOPMENT: bool = match option_env!("ZZ_DEV_BUILD") {
     Some(value) => matches!(value.as_bytes(), b"1"),
@@ -62,7 +62,7 @@ pub fn platform_data_dir() -> Option<PathBuf> {
     target_os = "windows"
 ))]
 fn absolute_env_path(key: &str) -> Option<PathBuf> {
-    env::var_os(key)
+    std::env::var_os(key)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .filter(|path| path.is_absolute())

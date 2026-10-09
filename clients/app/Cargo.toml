@@ -15,7 +15,7 @@ image.workspace = true
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-zpui = { workspace = true, features = ["default"] }
+zz-gpui = { workspace = true, features = ["default"] }
 zz-client.workspace = true
 zz-protocol.workspace = true
 zz-terminal.workspace = true
@@ -33,12 +33,12 @@ futures.workspace = true
 objc = "0.2"
 percent-encoding = "2.3.2"
 raw-window-handle.workspace = true
-zpui-ios.workspace = true
+zz-gpui-platform.workspace = true
 zz-daemon-client.workspace = true
 
 [dev-dependencies]
-zpui = { workspace = true, features = ["test-support"] }
-zpui-ios.workspace = true
+zz-gpui = { workspace = true, features = ["test-support"] }
+zz-gpui-platform.workspace = true
 
 [lints]
 workspace = true

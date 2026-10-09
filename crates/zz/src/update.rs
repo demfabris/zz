@@ -13,9 +13,9 @@ use std::{
 };
 
 use semver::Version;
-use zpui::{App, AsyncApp, Entity, Global, Window, prelude::*};
 pub(crate) use zz_config::update::{Channel, Release};
 use zz_config::update::{checks_enabled, fetch_latest};
+use zz_gpui::{App, AsyncApp, Entity, Global, Window, prelude::*};
 use zz_protocol::CommandInvocation;
 use zz_ui::{
     Sizable as _, WindowExt as _,

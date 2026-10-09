@@ -16,7 +16,7 @@ status: open
 # Read first
 
 1. [GPUI fork lab](/research/2026-09-30-gpui-fork-lab.md): what was taken, rejected and measured on Linux.
-2. [GPUI revision pin](/references/zpui.md): where the pin lives and how to move it.
+2. [GPUI revision pin](/references/zz-gpui.md): where the pin lives and how to move it.
 3. [macOS CPU, GPU, and memory investigation](/research/2026-09-23-macos-performance.md): the existing Mac
    profiling method (`just profile-cpu mac`, `profile-metal`, `profile-terminal-diagnostics`).
 

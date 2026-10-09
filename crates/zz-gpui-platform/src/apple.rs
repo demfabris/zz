@@ -1,0 +1,9 @@
+#![allow(deprecated)]
+//! Shared Apple platform support for GPUI.
+//!
+//! This crate contains the Metal renderer and GPU resource management shared
+//! by GPUI's Apple platform backends.
+
+mod metal_atlas;
+mod metal_glass;
+pub mod metal_renderer;

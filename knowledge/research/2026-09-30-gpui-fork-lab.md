@@ -159,7 +159,7 @@ click, and an ACP agent reply all rendered correctly.
 
 Eleven upstream commits since `933d8d93819c` touch GPUI; none is a frame-pacing or renderer
 change. All carried patches replayed onto upstream `decbf641b1` with five conflict steps, and
-`cargo check -p gpui -p zpui_platform` passed with the Linux backends. That trial branch predates
+`cargo check -p gpui -p zz_gpui_platform` passed with the Linux backends. That trial branch predates
 the 27 commits above.
 
 zed PR #62379 composes native views inside a GPUI window with GPUI overlays above them. For zz's
@@ -328,7 +328,7 @@ was about 10% on main-thread CPU with the machine in use, so only large effects 
 | Track the pointer position from MouseExited | makekosmos/imago (reimplemented) | stale hover after the pointer left, reproduced in a test | Carried |
 | Skip the focus handle scan when no handle was released | XeTK/zed `531f25c3` | 100 notifies with 1,000 handles: 47.9 to 4.0 us per flush; frames.py flat | Carried |
 | Bound notifications per entity within one effect flush | slgobinath/bench `b554d5e8` | notify cycle hung forever on base, ends in 0.01 s | Carried |
-| Round device pixel canvas sizes in zpui_web | zed PR #63536 (closed, never fixed upstream) | N/N+1 flip at fractional DPR, reproduced in a test | Carried |
+| Round device pixel canvas sizes in zz_gpui_platform::web | zed PR #63536 (closed, never fixed upstream) | N/N+1 flip at fractional DPR, reproduced in a test | Carried |
 | Keep fractional scale on wl_compositor v5 | zed PR #65038 | test only; GNOME and KDE advertise v6 | Carried |
 | Keep the Wayland IME off while a GPUI chord is pending | zed PR #64597 | test only; no IME on alienware | Carried |
 | Skip presenting frames whose scene matches the screen | zed PR #62455 (present-skip part) | 0 to 8 of about 3,650 frames skipped per scenario; costs a comparison on every frame | Rejected, branch `lab/present-skip` |

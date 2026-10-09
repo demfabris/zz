@@ -18,15 +18,15 @@ use std::{
     sync::Arc,
 };
 
-use zpui::{
+use zz_client::{
+    ChromeAction, ChromeKeymap, ChromeProfile, DropZone, PaneRect, UI_TABLE, coerced_drop_zone,
+    drop_preview_bounds, drop_zone_at, pane_drop_command, pane_rects, predicted_drop_layout,
+};
+use zz_gpui::{
     Animation, AnimationExt as _, AnyElement, App, Bounds, Context, Corners, DragMoveEvent, Entity,
     FocusHandle, Focusable, IntoElement, KeyDownEvent, KeyUpEvent, MouseButton, Pixels, Point,
     Render, ScrollStrategy, Subscription, UniformListScrollHandle, Window, div, prelude::*, px,
     uniform_list,
-};
-use zz_client::{
-    ChromeAction, ChromeKeymap, ChromeProfile, DropZone, PaneRect, UI_TABLE, coerced_drop_zone,
-    drop_preview_bounds, drop_zone_at, pane_drop_command, pane_rects, predicted_drop_layout,
 };
 use zz_protocol::{
     ChooseBufferAction, ChooseBufferItem, ChooseTreeAction, ChooseTreeKind, ChooseTreePaneKind,
@@ -110,7 +110,7 @@ const BUFFER_HINTS: &[ChooserHint] = &[
 ];
 
 #[cfg(target_os = "ios")]
-#[derive(Clone, PartialEq, zpui::Action)]
+#[derive(Clone, PartialEq, zz_gpui::Action)]
 #[action(namespace = zz, no_json)]
 pub struct OpenSession {
     pub name: String,
@@ -131,7 +131,7 @@ pub struct AppShell {
     connection: Entity<Connection>,
     connection_status: String,
     connected: bool,
-    idle_guard: Option<zpui::Task<()>>,
+    idle_guard: Option<zz_gpui::Task<()>>,
     #[cfg(target_os = "ios")]
     auth_prompt_id: Option<u64>,
     #[cfg(target_os = "ios")]
@@ -184,7 +184,7 @@ impl AppShell {
     pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let connection = cx.new(Connection::new);
         let window_handle = window.window_handle();
-        let key_listener = cx.listener(move |this, event: &zpui::KeystrokeEvent, window, cx| {
+        let key_listener = cx.listener(move |this, event: &zz_gpui::KeystrokeEvent, window, cx| {
             if window.window_handle() == window_handle
                 && !matches!(
                     event.keystroke.key.as_str(),
@@ -761,12 +761,12 @@ impl AppShell {
     }
 
     #[cfg(target_os = "ios")]
-    fn menus(&self) -> Vec<zpui::Menu> {
+    fn menus(&self) -> Vec<zz_gpui::Menu> {
         let bindings = self.chrome.bindings();
         let chrome = |title: &'static str, action: ChromeAction| {
-            zpui::MenuItem::action(
+            zz_gpui::MenuItem::action(
                 title,
-                zpui_ios::MenuCommand {
+                zz_gpui_platform::ios::MenuCommand {
                     id: action.name().into(),
                     shortcut: bindings
                         .iter()
@@ -776,31 +776,31 @@ impl AppShell {
             )
         };
         let tmux = |title: &'static str, command: &'static str| {
-            zpui::MenuItem::action(
+            zz_gpui::MenuItem::action(
                 title,
-                zpui_ios::MenuCommand {
+                zz_gpui_platform::ios::MenuCommand {
                     id: format!("tmux:{command}").into(),
                     shortcut: None,
                 },
             )
         };
         vec![
-            zpui::Menu::new("zz").items([chrome("Settings…", ChromeAction::OpenSettings)]),
-            zpui::Menu::new("File").items([
+            zz_gpui::Menu::new("zz").items([chrome("Settings…", ChromeAction::OpenSettings)]),
+            zz_gpui::Menu::new("File").items([
                 chrome("New Session", ChromeAction::NewSession),
                 chrome("New Window", ChromeAction::NewWindow),
                 chrome("Split Right", ChromeAction::SplitRight),
                 chrome("Split Down", ChromeAction::SplitDown),
-                zpui::MenuItem::separator(),
+                zz_gpui::MenuItem::separator(),
                 chrome("Close Pane", ChromeAction::ClosePane),
                 tmux("Kill Window", "kill-window"),
             ]),
-            zpui::Menu::new("View").items([
+            zz_gpui::Menu::new("View").items([
                 chrome("Command Palette…", ChromeAction::OpenCommandPalette),
                 tmux("Choose Window…", "choose-tree -w"),
                 chrome("Toggle Sidebar", ChromeAction::ToggleSidebar),
                 tmux("Zoom Pane", "resize-pane -Z"),
-                zpui::MenuItem::separator(),
+                zz_gpui::MenuItem::separator(),
                 chrome("Zoom In", ChromeAction::UiZoomIn),
                 chrome("Zoom Out", ChromeAction::UiZoomOut),
                 chrome("Reset Zoom", ChromeAction::UiZoomReset),
@@ -811,7 +811,7 @@ impl AppShell {
     #[cfg(target_os = "ios")]
     fn menu_command(
         &mut self,
-        command: &zpui_ios::MenuCommand,
+        command: &zz_gpui_platform::ios::MenuCommand,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1008,7 +1008,7 @@ impl AppShell {
             cx,
         )
         .when(divider_hidden, |surface| {
-            surface.border_color(zpui::transparent_black())
+            surface.border_color(zz_gpui::transparent_black())
         })
         .track_focus(&self.sidebar_focus)
         .child(
@@ -1019,7 +1019,7 @@ impl AppShell {
                 .right(px(0.0))
                 .bottom(px(0.0))
                 .w(px(8.0))
-                .cursor(zpui::CursorStyle::ResizeLeftRight)
+                .cursor(zz_gpui::CursorStyle::ResizeLeftRight)
                 .occlude()
                 .when(divider_hidden, |handle| {
                     handle.hover(|handle| {
@@ -1036,16 +1036,16 @@ impl AppShell {
                     touch_drag_handle(move |event, window, cx| {
                         let _ = view.update(cx, |this, cx| {
                             match event.phase {
-                                zpui::TouchPhase::Started => window.prevent_default(),
-                                zpui::TouchPhase::Moved => {
+                                zz_gpui::TouchPhase::Started => window.prevent_default(),
+                                zz_gpui::TouchPhase::Moved => {
                                     this.preferences.sidebar_width = f32::from(
                                         event.position.x - window.fully_visible_bounds().left(),
                                     );
                                     this.preferences.sidebar_width = this.sidebar_width(window);
                                     cx.notify();
                                 }
-                                zpui::TouchPhase::Ended => this.preferences.save(),
-                                zpui::TouchPhase::Cancelled => {}
+                                zz_gpui::TouchPhase::Ended => this.preferences.save(),
+                                zz_gpui::TouchPhase::Cancelled => {}
                             }
                             cx.stop_propagation();
                         });
@@ -1329,12 +1329,12 @@ impl AppShell {
     fn touch_pane_drag(
         &mut self,
         pane: PaneId,
-        event: &zpui::TouchDragEvent,
+        event: &zz_gpui::TouchDragEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match event.phase {
-            zpui::TouchPhase::Started => {
+            zz_gpui::TouchPhase::Started => {
                 self.on_pane_drag_start(
                     PaneDrag {
                         pane,
@@ -1347,8 +1347,8 @@ impl AppShell {
                     window.prevent_default();
                 }
             }
-            zpui::TouchPhase::Moved => self.update_drop_target(event.position, cx),
-            zpui::TouchPhase::Ended => self.drop_pane(
+            zz_gpui::TouchPhase::Moved => self.update_drop_target(event.position, cx),
+            zz_gpui::TouchPhase::Ended => self.drop_pane(
                 &PaneDrag {
                     pane,
                     requires_prefix: false,
@@ -1356,7 +1356,7 @@ impl AppShell {
                 event.position,
                 cx,
             ),
-            zpui::TouchPhase::Cancelled => self.finish_pane_drag(cx),
+            zz_gpui::TouchPhase::Cancelled => self.finish_pane_drag(cx),
         }
         cx.stop_propagation();
     }
@@ -1430,8 +1430,8 @@ impl AppShell {
                     );
                     DropPreviewFrame {
                         bounds: Bounds::new(
-                            zpui::point(px(rect.x), px(rect.y)),
-                            zpui::size(px(rect.width), px(rect.height)),
+                            zz_gpui::point(px(rect.x), px(rect.y)),
+                            zz_gpui::size(px(rect.width), px(rect.height)),
                         ),
                         opacity: 1.0,
                     }
@@ -1486,7 +1486,7 @@ impl AppShell {
             surface
                 .with_animation(
                     ("pane-drop-preview", preview.sequence),
-                    Animation::new(preview.duration).with_easing(zpui::ease_out_quint()),
+                    Animation::new(preview.duration).with_easing(zz_gpui::ease_out_quint()),
                     move |surface, delta| {
                         let frame = preview.at(delta);
                         rendered.set(frame);
@@ -1927,7 +1927,7 @@ impl AppShell {
                 let pane = indicator.pane;
                 let key = indicator
                     .selection_key()
-                    .and_then(|key| zpui::Keystroke::parse(&key.to_string()).ok())
+                    .and_then(|key| zz_gpui::Keystroke::parse(&key.to_string()).ok())
                     .map_or_else(
                         || {
                             div()
@@ -2004,7 +2004,7 @@ impl AppShell {
                     follows_pointer && active_window.active_pane != pane_id,
                     |surface| {
                         surface.on_mouse_move(cx.listener(
-                            move |this, event: &zpui::MouseMoveEvent, _, cx| {
+                            move |this, event: &zz_gpui::MouseMoveEvent, _, cx| {
                                 if event.pressed_button.is_none() {
                                     this.command(
                                         "select-pane",
@@ -2084,20 +2084,22 @@ impl AppShell {
                     } else {
                         0.0
                     }))
-                    .when(!self.inline_sidebar(window), zpui::Styled::pt_0)
+                    .when(!self.inline_sidebar(window), zz_gpui::Styled::pt_0)
                     .child(content),
             )
             .children(overlays)
             .children(preview)
             .child(
-                zpui::canvas(
+                zz_gpui::canvas(
                     |_, _, _| (),
                     move |_, (), window, _| {
-                        window.on_mouse_event(move |event: &zpui::MouseUpEvent, phase, _, cx| {
-                            if phase.capture() && event.button == MouseButton::Left {
-                                let _ = release_view.update(cx, Self::commit_split);
-                            }
-                        });
+                        window.on_mouse_event(
+                            move |event: &zz_gpui::MouseUpEvent, phase, _, cx| {
+                                if phase.capture() && event.button == MouseButton::Left {
+                                    let _ = release_view.update(cx, Self::commit_split);
+                                }
+                            },
+                        );
                     },
                 )
                 .absolute()
@@ -2172,7 +2174,7 @@ impl AppShell {
                 .child(touch_drag_handle(move |event, window, cx| {
                     let _ = view.update(cx, |this, cx| {
                         match event.phase {
-                            zpui::TouchPhase::Started => {
+                            zz_gpui::TouchPhase::Started => {
                                 this.set_split_drag(Some(SplitDragState {
                                     drag,
                                     ratio,
@@ -2181,7 +2183,7 @@ impl AppShell {
                                 }));
                                 window.prevent_default();
                             }
-                            zpui::TouchPhase::Moved => {
+                            zz_gpui::TouchPhase::Moved => {
                                 if this
                                     .split_drag
                                     .is_some_and(|state| state.drag.split == split)
@@ -2189,8 +2191,8 @@ impl AppShell {
                                     this.move_split(drag, event.position, touch_bounds.get(), cx);
                                 }
                             }
-                            zpui::TouchPhase::Ended => this.commit_split(cx),
-                            zpui::TouchPhase::Cancelled => {
+                            zz_gpui::TouchPhase::Ended => this.commit_split(cx),
+                            zz_gpui::TouchPhase::Cancelled => {
                                 this.set_split_drag(None);
                                 cx.notify();
                             }
@@ -2708,7 +2710,7 @@ impl AppShell {
                 popup.cell_width_px,
                 popup.cell_height_px,
                 bordered,
-                zpui::point(px(0.0), px(0.0)),
+                zz_gpui::point(px(0.0), px(0.0)),
                 self.floating_canvas_size(window),
                 window.scale_factor(),
             );
@@ -2947,21 +2949,21 @@ impl Render for AppShell {
 }
 
 pub(super) fn touch_drag_handle(
-    handler: impl Fn(&zpui::TouchDragEvent, &mut Window, &mut App) + 'static,
+    handler: impl Fn(&zz_gpui::TouchDragEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    zpui::canvas(
+    zz_gpui::canvas(
         |bounds, window, cx| {
             (
-                window.insert_hitbox(bounds, zpui::HitboxBehavior::Normal),
+                window.insert_hitbox(bounds, zz_gpui::HitboxBehavior::Normal),
                 window.use_state(cx, |_, _| false),
             )
         },
         move |_, (hitbox, claimed), window, _| {
-            window.on_mouse_event(move |event: &zpui::TouchDragEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &zz_gpui::TouchDragEvent, phase, window, cx| {
                 if !phase.bubble() {
                     return;
                 }
-                if event.phase == zpui::TouchPhase::Started {
+                if event.phase == zz_gpui::TouchPhase::Started {
                     if window.default_prevented()
                         || !hitbox.is_hovered_at(event.start_position, window)
                     {
@@ -2973,7 +2975,7 @@ pub(super) fn touch_drag_handle(
                     handler(event, window, cx);
                     if matches!(
                         event.phase,
-                        zpui::TouchPhase::Ended | zpui::TouchPhase::Cancelled
+                        zz_gpui::TouchPhase::Ended | zz_gpui::TouchPhase::Cancelled
                     ) {
                         claimed.update(cx, |claimed, _| *claimed = false);
                     }
@@ -3243,8 +3245,8 @@ fn unix_seconds() -> u64 {
 mod prefix_tests {
     #[test]
     fn pane_drop_targets_follow_canvas_offset_and_pixel_aspect_ratio() {
-        use zpui::{Bounds, point, px, size};
         use zz_client::DropZone;
+        use zz_gpui::{Bounds, point, px, size};
         use zz_protocol::{Axis, LayoutNode, PaneId, SplitId, WindowId};
         let state = super::PaneDragState {
             drag: zz_ui::pane::PaneDrag {

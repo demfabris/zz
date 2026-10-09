@@ -30,7 +30,7 @@ use crate::{
 };
 use parking_lot::RwLock;
 use presentation::{spinner, spinner_phase};
-use zpui::{
+use zz_gpui::{
     AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FollowMode, FontWeight,
     Global, Hsla, Image, ImageSource, IntoElement, ListOffset, ListSizingBehavior, ListState,
     ObjectFit, Pixels, RenderImage, Rgba, SharedString, Stateful, Task, Window, div, img, list,
@@ -49,7 +49,7 @@ const ACTIVITY_ROW_FONT_SIZE: f32 = 13.0;
 /// descender.
 const ACTIVITY_ROW_LINE_HEIGHT: f32 = 16.0;
 const ACTIVITY_DISCLOSURE_SIZE: f32 = 12.0;
-/// zpui centres a glyph on its ascent/descent box, but the ink a reader sees
+/// zz-gpui centres a glyph on its ascent/descent box, but the ink a reader sees
 /// sits below that centre — 0.33px for caps, 1.49px for x-height at 13px. Drop
 /// the icons by less than either so they never overshoot the letters.
 const ACTIVITY_ICON_OPTICAL_DROP: f32 = 0.5;
@@ -1035,7 +1035,7 @@ pub fn agent_jump_to_bottom_button(id: impl Into<ElementId>, cx: &App) -> Button
 /// instead of teleporting to it on every streamed token.
 ///
 /// The pin belongs to the caller, not to the list, so [`FollowMode::Tail`]
-/// stays off unless reduced motion is on — zpui's tail mode both snaps on every
+/// stays off unless reduced motion is on — zz-gpui's tail mode both snaps on every
 /// layout and re-engages itself from scroll *position*, which would make a
 /// deliberate scroll-up impossible to hold while the agent is still writing.
 pub struct TimelineStick {
@@ -1318,7 +1318,7 @@ impl AgentTimeline {
     }
 }
 
-impl zpui::RenderOnce for AgentTimeline {
+impl zz_gpui::RenderOnce for AgentTimeline {
     fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let rows = self.rows;
         let store = self.store;
@@ -2097,7 +2097,7 @@ impl StepNesting {
 
 /// One attachment as a `side`-square tile that opens a full view when clicked.
 /// The size is definite whatever was pasted, so layout never consults the
-/// image; the bytes are hash-keyed in zpui's asset cache, so decoding is shared.
+/// image; the bytes are hash-keyed in zz-gpui's asset cache, so decoding is shared.
 pub fn agent_attachment_thumbnail(
     id: impl Into<ElementId>,
     image: Arc<Image>,
@@ -2298,7 +2298,7 @@ fn activity_row_marked(
                 .overflow_hidden()
                 .text_ellipsis()
                 .whitespace_nowrap()
-                .when_some(mark.label_color, zpui::Styled::text_color)
+                .when_some(mark.label_color, zz_gpui::Styled::text_color)
                 .child(single_line(label)),
         )
         .when_some(mark.detail, |this, detail| {
@@ -2397,7 +2397,7 @@ fn trace_count_glyph(slot: usize, count: TraceCount, cx: &App) -> Stateful<Div> 
                 .text_color(number)
                 .text_size(crate::rems_from_px(8.5))
                 .line_height(px(TRACE_COUNT_BADGE - 2.0 * TRACE_COUNT_RING))
-                .font_weight(zpui::FontWeight::SEMIBOLD)
+                .font_weight(zz_gpui::FontWeight::SEMIBOLD)
                 .child(count.count.to_string()),
         )
         .tooltip(move |window, cx| crate::tooltip::Tooltip::new(tooltip.clone()).build(window, cx))
@@ -2470,7 +2470,7 @@ fn rewind_button(id: u64, rewind: &TimelineRewind, message_id: SharedString) -> 
         .flex_none()
         .invisible()
         .when(rewind.enabled, |slot| {
-            slot.group_hover(USER_ENTRY_GROUP, zpui::Styled::visible)
+            slot.group_hover(USER_ENTRY_GROUP, zz_gpui::Styled::visible)
         })
         .child(
             div()
@@ -2711,7 +2711,7 @@ struct AgentMarkdownView {
     truncated: bool,
 }
 
-impl zpui::RenderOnce for AgentMarkdownView {
+impl zz_gpui::RenderOnce for AgentMarkdownView {
     fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
         let text = TextView::new(&self.state)
             .style(self.style)
@@ -3279,7 +3279,7 @@ struct MermaidThemeColors {
 }
 
 fn mermaid_font_family(font_family: &str) -> String {
-    let mapped = zpui::font_name_with_fallbacks(font_family, "system-ui");
+    let mapped = zz_gpui::font_name_with_fallbacks(font_family, "system-ui");
     let sanitized = mapped
         .chars()
         .filter(|character| !matches!(character, ';' | '{' | '}'))
@@ -3504,7 +3504,7 @@ impl MermaidRenderState {
         let theme = MermaidTheme::from_app(cx);
         let svg_renderer = cx.svg_renderer();
         let delay = cx.background_executor().timer(MERMAID_RENDER_DEBOUNCE);
-        let task = cx.spawn(async move |this: zpui::WeakEntity<Self>, cx| {
+        let task = cx.spawn(async move |this: zz_gpui::WeakEntity<Self>, cx| {
             delay.await;
             let result = cx
                 .background_spawn(async move {
@@ -3612,7 +3612,7 @@ pub fn agent_pane_header(
                 .when(!active, |actions| {
                     actions
                         .invisible()
-                        .group_hover("agent-pane-header", zpui::Styled::visible)
+                        .group_hover("agent-pane-header", zz_gpui::Styled::visible)
                 })
                 .child(trailing),
         )
@@ -3698,7 +3698,7 @@ pub fn agent_status_pill(
                     .border_color(divider)
                     .text_color(foreground)
                     .cursor_pointer()
-                    .hover(zpui::Styled::underline)
+                    .hover(zz_gpui::Styled::underline)
                     .child("Restart")
                     .on_click(move |_, window, cx| restart(window, cx)),
             )
@@ -3784,7 +3784,9 @@ mod workspace_link_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpui::{Render, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point};
+    use zz_gpui::{
+        Render, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point,
+    };
 
     struct EmptyAgentTimelineTest {
         store: Entity<AgentTimelineStore>,
@@ -3827,7 +3829,7 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let timeline = AgentTimeline::new(
                 Arc::new(vec![TimelineRow::Single(self.entry.clone())]),
-                ListState::new(1, zpui::ListAlignment::Top, px(600.0)),
+                ListState::new(1, zz_gpui::ListAlignment::Top, px(600.0)),
                 self.store.clone(),
             )
             .active_turn(self.active_turn);
@@ -3845,7 +3847,7 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             AgentTimeline::new(
                 Arc::new(Vec::new()),
-                ListState::new(0, zpui::ListAlignment::Top, px(0.0)),
+                ListState::new(0, zz_gpui::ListAlignment::Top, px(0.0)),
                 self.store.clone(),
             )
         }
@@ -4226,13 +4228,13 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             div().w(px(520.0)).h(px(600.0)).child(AgentTimeline::new(
                 self.rows.clone(),
-                ListState::new(self.rows.len(), zpui::ListAlignment::Top, px(600.0)),
+                ListState::new(self.rows.len(), zz_gpui::ListAlignment::Top, px(600.0)),
                 self.store.clone(),
             ))
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_turn_shows_one_trace_line_until_opened(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let rows = fold_timeline_rows(&[
@@ -4275,7 +4277,7 @@ mod tests {
             "the answer stays out"
         );
 
-        cx.simulate_click(trace.center(), zpui::Modifiers::none());
+        cx.simulate_click(trace.center(), zz_gpui::Modifiers::none());
         cx.run_until_parked();
         cx.update(|window, cx| {
             _ = window.draw(cx);
@@ -4293,7 +4295,7 @@ mod tests {
         assert_eq!(disclosure_icon(true), IconName::ChevronUp);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn transcript_affordances_use_the_muted_foreground(cx: &mut TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| {
@@ -4334,7 +4336,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn assistant_and_code_block_copy_buttons_keep_raw_markdown(cx: &mut TestAppContext) {
         cx.update(crate::init);
         const RAW: &str = "Result\n\n```rust\nfn main() {\n    println!(\"hi\");\n}\n```";
@@ -4367,7 +4369,7 @@ mod tests {
             .debug_bounds("agent-code-copy")
             .expect("the code copy button should be painted");
         assert!(language.right() < code_copy.left());
-        cx.simulate_click(code_copy.center(), zpui::Modifiers::none());
+        cx.simulate_click(code_copy.center(), zz_gpui::Modifiers::none());
         assert_eq!(
             cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
             Some(CODE.to_owned())
@@ -4376,14 +4378,14 @@ mod tests {
         let message_copy = cx
             .debug_bounds("agent-assistant-copy")
             .expect("the message copy button should be painted");
-        cx.simulate_click(message_copy.center(), zpui::Modifiers::none());
+        cx.simulate_click(message_copy.center(), zz_gpui::Modifiers::none());
         assert_eq!(
             cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
             Some(RAW.to_owned())
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn assistant_copy_is_hidden_while_the_turn_is_active(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let entry = AgentEntry::Assistant {
@@ -4410,7 +4412,7 @@ mod tests {
         assert!(cx.debug_bounds("agent-assistant-copy").is_none());
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn inline_code_fills_paint_after_the_text_lays_out(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let entry = AgentEntry::Assistant {
@@ -4435,7 +4437,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn trace_disclosure_sits_right_after_the_counts(cx: &mut TestAppContext) {
         cx.update(crate::init);
         const PANE_WIDTH: Pixels = px(520.0);
@@ -4479,7 +4481,7 @@ mod tests {
         assert!(PANE_WIDTH - chevron.right() > px(200.0));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_wide_attachment_keeps_its_bubble_inside_the_pane(cx: &mut TestAppContext) {
         cx.update(crate::init);
         const PANE_WIDTH: Pixels = px(420.0);
@@ -4488,7 +4490,10 @@ mod tests {
         let entry = AgentEntry::User {
             id: 1,
             markdown: "hi can you read this image properly?".into(),
-            images: Arc::from([Arc::new(Image::from_bytes(zpui::ImageFormat::Png, bytes))]),
+            images: Arc::from([Arc::new(Image::from_bytes(
+                zz_gpui::ImageFormat::Png,
+                bytes,
+            ))]),
             rewind_id: None,
         };
         let (_, cx) = cx.add_window_view(|window, cx| {
@@ -4534,7 +4539,7 @@ mod tests {
             !cx.update(crate::WindowExt::has_active_dialog),
             "nothing should be open before the click"
         );
-        cx.simulate_click(tile.center(), zpui::Modifiers::none());
+        cx.simulate_click(tile.center(), zz_gpui::Modifiers::none());
         cx.run_until_parked();
         assert!(
             cx.update(crate::WindowExt::has_active_dialog),
@@ -4577,7 +4582,7 @@ mod tests {
         (rewinds, cx)
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_prompt_row_offers_rewind_on_hover_and_hands_over_its_id(cx: &mut TestAppContext) {
         const PANE_WIDTH: Pixels = px(420.0);
         let (rewinds, cx) = rewind_point(cx, PANE_WIDTH, false);
@@ -4590,7 +4595,7 @@ mod tests {
             .expect("the user bubble should be painted");
         assert!(bubble.origin.x >= px(0.0) && bubble.right() <= PANE_WIDTH);
 
-        cx.simulate_mouse_move(bubble.center(), None, zpui::Modifiers::none());
+        cx.simulate_mouse_move(bubble.center(), None, zz_gpui::Modifiers::none());
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
@@ -4607,24 +4612,24 @@ mod tests {
             "revealing the action does not move the bubble"
         );
 
-        cx.simulate_click(rewind.center(), zpui::Modifiers::none());
+        cx.simulate_click(rewind.center(), zz_gpui::Modifiers::none());
         assert_eq!(rewinds.borrow().as_slice(), ["prompt-7"]);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn rewind_stays_hidden_while_a_turn_runs(cx: &mut TestAppContext) {
         let (rewinds, cx) = rewind_point(cx, px(420.0), true);
         let bubble = cx
             .debug_bounds("agent-user-bubble")
             .expect("the user bubble should be painted");
-        cx.simulate_mouse_move(bubble.center(), None, zpui::Modifiers::none());
+        cx.simulate_mouse_move(bubble.center(), None, zz_gpui::Modifiers::none());
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
         assert!(cx.debug_bounds("agent-user-rewind").is_none());
         cx.simulate_click(
             point(bubble.left() - px(14.0), bubble.center().y),
-            zpui::Modifiers::none(),
+            zz_gpui::Modifiers::none(),
         );
         assert!(rewinds.borrow().is_empty());
     }
@@ -4675,7 +4680,7 @@ mod tests {
         )
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn agent_timeline_converts_without_recursing(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, cx| EmptyAgentTimelineTest {
             store: cx.new(|_| AgentTimelineStore::default()),
@@ -4685,7 +4690,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn nowrap_shaping_still_breaks_on_an_embedded_newline(cx: &mut TestAppContext) {
         let (_, cx) = cx.add_window_view(|_, cx| EmptyAgentTimelineTest {
             store: cx.new(|_| AgentTimelineStore::default()),
@@ -4840,7 +4845,7 @@ mod tests {
         assert_eq!(code_block_language(None), "text");
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn timeline_store_retains_row_state_while_the_row_is_absent(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
@@ -4881,7 +4886,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn timeline_store_sync_uses_append_and_replacement_paths(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
@@ -4997,7 +5002,7 @@ mod tests {
 
     /// A hanging marker is closed for the reader while the entry streams, and
     /// the settle hands back exactly the bytes the thread holds.
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_streaming_entry_renders_mended_and_settles_raw(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
@@ -5053,7 +5058,7 @@ mod tests {
         assert_eq!(state.read_with(cx, |state, _| state.source()), raw);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_large_hanging_inline_marker_is_repaired_off_the_ui_thread(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
@@ -5084,7 +5089,7 @@ mod tests {
 
     /// The prefix fast path survives the mend: appends are diffed against the
     /// raw text, so an entry that never hangs a marker never reparses.
-    #[zpui::test]
+    #[zz_gpui::test]
     fn streaming_appends_without_hanging_markers_stay_incremental(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
@@ -5105,7 +5110,7 @@ mod tests {
         }));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_settled_entry_is_never_mended(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let store = cx.new(|_| AgentTimelineStore::default());
@@ -5133,7 +5138,7 @@ mod tests {
         rows: usize,
     ) -> (ListState, &mut VisualTestContext) {
         cx.update(crate::init);
-        let state = ListState::new(0, zpui::ListAlignment::Top, px(200.0));
+        let state = ListState::new(0, zz_gpui::ListAlignment::Top, px(200.0));
         state.splice(0..0, rows);
         let (_, cx) = cx.add_window_view({
             let state = state.clone();
@@ -5149,7 +5154,7 @@ mod tests {
         (state, cx)
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn the_pin_measures_the_end_through_the_lists_own_padding(cx: &mut TestAppContext) {
         let (state, cx) = tail_pin_window(cx, 40);
         let mut stick = TimelineStick::new(&state, false);
@@ -5173,7 +5178,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn growing_the_transcript_cannot_break_the_pin(cx: &mut TestAppContext) {
         let (state, cx) = tail_pin_window(cx, 40);
         let mut stick = TimelineStick::new(&state, false);
@@ -5197,7 +5202,7 @@ mod tests {
         assert!(stick.wants_frame(&state));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_wheel_scroll_away_breaks_the_pin_and_returning_restores_it(cx: &mut TestAppContext) {
         let (state, cx) = tail_pin_window(cx, 40);
         let mut stick = TimelineStick::new(&state, false);
@@ -5233,7 +5238,7 @@ mod tests {
         assert!(!stick.shows_jump_button());
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn reduced_motion_keeps_the_lists_own_tail_follow(cx: &mut TestAppContext) {
         let (state, cx) = tail_pin_window(cx, 40);
         let mut stick = TimelineStick::new(&state, true);

@@ -20,7 +20,7 @@ use crate::{
     list::ListItem,
     tag::Tag,
 };
-use zpui::{
+use zz_gpui::{
     AnyElement, App, ElementId, Entity, IntoElement, Keystroke, ParentElement as _, Pixels,
     RenderOnce, SharedString, Styled as _, div, prelude::*, px,
 };
@@ -70,7 +70,7 @@ pub fn command_palette_input(
 /// A completion row. The caller attaches event handlers to the returned
 /// `ListItem`.
 pub fn command_palette_row(
-    id: impl Into<zpui::ElementId>,
+    id: impl Into<zz_gpui::ElementId>,
     label: impl Into<SharedString>,
     detail: impl Into<SharedString>,
     badge: Option<AnyElement>,
@@ -144,7 +144,7 @@ impl CommandPaletteSurface {
 }
 
 impl RenderOnce for CommandPaletteSurface {
-    fn render(self, _: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut zz_gpui::Window, cx: &mut App) -> impl IntoElement {
         let surface = div()
             .id("command-palette-surface")
             .relative()
@@ -155,7 +155,7 @@ impl RenderOnce for CommandPaletteSurface {
             .overflow_hidden()
             .popover_style(cx)
             .rounded(command_palette_radius(cx))
-            .on_mouse_down(zpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(zz_gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(self.input)
             .children(self.usage.map(|usage| {
                 div()
@@ -198,7 +198,7 @@ impl RenderOnce for CommandPaletteSurface {
                     .text_color(cx.theme().foreground.muted())
                     .children(self.hints.into_iter().map(|hint| palette_hint(hint, cx))),
             );
-        zpui_kit::foundation::surface_enter(
+        zz_gpui_kit::foundation::surface_enter(
             surface,
             ElementId::NamedInteger("command-palette-open".into(), self.revision),
             px(0.0),

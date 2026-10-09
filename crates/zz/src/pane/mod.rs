@@ -1,4 +1,4 @@
-use zpui::{App, LayoutId, Style, Window, relative};
+use zz_gpui::{App, LayoutId, Style, Window, relative};
 
 pub(crate) mod display;
 pub(crate) mod layout;

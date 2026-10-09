@@ -70,7 +70,7 @@ the parts that shipped and the parts that remain design intent.
 - **Two composition paths existed**: `zz::engine` + `AppProfile` let the former GPUI iPad app
   recompile the desktop client on another backend, while `zz-daemon` with
   `default-features = false` supplied a pure client SDK, which became its own crate,
-  `zz-daemon-client`, on 2026-10-09. The iOS client (`zz-app` on `zpui_ios`) uses that SDK and
+  `zz-daemon-client`, on 2026-10-09. The iOS client (`zz-app` on `zz_gpui_platform::ios`) uses that SDK and
   `ClientCore` directly.
 
 # The gap - what every new client re-hand-rolls today

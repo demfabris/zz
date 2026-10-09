@@ -15,7 +15,7 @@ use crate::{
     select::SelectItem,
     tag::Tag,
 };
-use zpui::{
+use zz_gpui::{
     AnyElement, App, Bounds, ElementId, FocusHandle, IntoElement, ListAlignment,
     ListSizingBehavior, ListState, ParentElement, Pixels, RenderOnce, ScrollHandle, SharedString,
     Styled as _, Window, div, list, prelude::*, px, relative,
@@ -105,7 +105,7 @@ impl SettingsSection {
             }
             Self::Hosts => "Manage the ssh machines in the fleet.",
             Self::Advanced => "Control daemon lifecycle and experimental pane features.",
-            Self::About => "tmux, ghostty and zpui walked into a mux.",
+            Self::About => "tmux, ghostty and zz_gpui walked into a mux.",
         }
     }
 
@@ -166,7 +166,7 @@ pub fn settings_navigation_back_button(id: impl Into<ElementId>) -> Button {
 }
 
 /// Holds the back button at the workspace tree's row height.
-pub fn settings_navigation_back_row(button: Button) -> zpui::Div {
+pub fn settings_navigation_back_row(button: Button) -> zz_gpui::Div {
     div()
         .flex()
         .flex_none()
@@ -176,7 +176,7 @@ pub fn settings_navigation_back_row(button: Button) -> zpui::Div {
 }
 
 /// Label above a settings navigation group.
-pub fn settings_navigation_group_label(group: SettingsNavigationGroup, cx: &App) -> zpui::Div {
+pub fn settings_navigation_group_label(group: SettingsNavigationGroup, cx: &App) -> zz_gpui::Div {
     div()
         .px(px(8.0))
         .pt(px(12.0))
@@ -288,7 +288,7 @@ mod tests {
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
-    use zpui::{Context, Render, TestAppContext, VisualTestContext};
+    use zz_gpui::{Context, Render, TestAppContext, VisualTestContext};
 
     struct VirtualSettingsTest {
         rendered: Arc<AtomicUsize>,
@@ -338,14 +338,14 @@ mod tests {
     }
 
     struct RevealTest {
-        input: zpui::Entity<crate::input::InputState>,
+        input: zz_gpui::Entity<crate::input::InputState>,
         virtual_rows: bool,
     }
 
     impl Render for RevealTest {
         fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
             let input = self.input.clone();
-            let focus = zpui::Focusable::focus_handle(self.input.read(cx), cx);
+            let focus = zz_gpui::Focusable::focus_handle(self.input.read(cx), cx);
             let row = move |index: usize| {
                 if index == 8 {
                     div()
@@ -385,7 +385,7 @@ mod tests {
         let hidden = cx.debug_bounds("reveal-field");
         assert!(hidden.is_none_or(|field| field.top() >= px(220.0)));
         cx.update(|window, cx| {
-            let focus = zpui::Focusable::focus_handle(view.read(cx).input.read(cx), cx);
+            let focus = zz_gpui::Focusable::focus_handle(view.read(cx).input.read(cx), cx);
             focus.focus(window, cx);
         });
         for _ in 0..3 {
@@ -398,13 +398,13 @@ mod tests {
             .expect("the focused field paints")
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_focused_field_scrolls_into_a_list_page(cx: &mut TestAppContext) {
         let field = reveal_field(cx, true);
         assert!(field.top() >= px(0.0) && field.bottom() <= px(220.0));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_focused_field_scrolls_into_a_scroll_page(cx: &mut TestAppContext) {
         let field = reveal_field(cx, false);
         assert!(field.top() >= px(0.0) && field.bottom() <= px(220.0));
@@ -561,7 +561,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn panes_preview_scrolls_with_controls(cx: &mut TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| cx.set_reduce_motion(true));
@@ -573,9 +573,9 @@ mod tests {
         });
         let preview = cx.debug_bounds("settings-preview-terminal").unwrap();
         let control = cx.debug_bounds("panes-control-0").unwrap();
-        cx.simulate_event(zpui::ScrollWheelEvent {
+        cx.simulate_event(zz_gpui::ScrollWheelEvent {
             position: control.center(),
-            delta: zpui::ScrollDelta::Pixels(zpui::point(px(0.0), px(-120.0))),
+            delta: zz_gpui::ScrollDelta::Pixels(zz_gpui::point(px(0.0), px(-120.0))),
             ..Default::default()
         });
         cx.run_until_parked();
@@ -594,7 +594,7 @@ mod tests {
         assert_eq!(preview_offset, control_offset);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn one_long_scroll_reaches_the_last_row(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let rendered = Arc::new(AtomicUsize::new(0));
@@ -611,9 +611,9 @@ mod tests {
         assert!(cx.debug_bounds("virtual-settings-row-0").is_some());
         assert!(cx.debug_bounds("virtual-settings-row-99").is_none());
 
-        cx.simulate_event(zpui::ScrollWheelEvent {
-            position: zpui::point(px(100.0), px(100.0)),
-            delta: zpui::ScrollDelta::Pixels(zpui::point(px(0.0), px(-100_000.0))),
+        cx.simulate_event(zz_gpui::ScrollWheelEvent {
+            position: zz_gpui::point(px(100.0), px(100.0)),
+            delta: zz_gpui::ScrollDelta::Pixels(zz_gpui::point(px(0.0), px(-100_000.0))),
             ..Default::default()
         });
         cx.update(|window, cx| {
@@ -623,7 +623,7 @@ mod tests {
         assert!(cx.debug_bounds("virtual-settings-row-0").is_none());
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_focused_row_keeps_painting_out_of_view(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, cx| FocusedRowTest {
@@ -661,7 +661,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn the_bottom_inset_keeps_the_last_row_clear(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
@@ -673,9 +673,9 @@ mod tests {
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
-        cx.simulate_event(zpui::ScrollWheelEvent {
-            position: zpui::point(px(100.0), px(100.0)),
-            delta: zpui::ScrollDelta::Pixels(zpui::point(px(0.0), px(-10_000.0))),
+        cx.simulate_event(zz_gpui::ScrollWheelEvent {
+            position: zz_gpui::point(px(100.0), px(100.0)),
+            delta: zz_gpui::ScrollDelta::Pixels(zz_gpui::point(px(0.0), px(-10_000.0))),
             ..Default::default()
         });
         cx.update(|window, cx| {
@@ -685,7 +685,7 @@ mod tests {
         assert!(last.bottom() <= px(220.0 - 40.0));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn virtual_rows_land_where_scrolled_rows_do(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| SettingsColumnGutterTest);
@@ -710,7 +710,7 @@ const SETTINGS_CONTENT_MAX_WIDTH: f32 = 960.0;
 const SETTINGS_PAGE_PADDING: f32 = 14.0;
 
 /// Centered, bounded content shared by every settings page.
-pub fn settings_page_content() -> zpui::Div {
+pub fn settings_page_content() -> zz_gpui::Div {
     div()
         .flex()
         .flex_col()
@@ -720,7 +720,7 @@ pub fn settings_page_content() -> zpui::Div {
         .mx_auto()
 }
 
-pub fn settings_page_description(section: SettingsSection, cx: &App) -> zpui::Div {
+pub fn settings_page_description(section: SettingsSection, cx: &App) -> zz_gpui::Div {
     div()
         .flex()
         .flex_col()
@@ -745,7 +745,7 @@ pub fn settings_page_description(section: SettingsSection, cx: &App) -> zpui::Di
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct SettingsBottomInset(pub Pixels);
 
-impl zpui::Global for SettingsBottomInset {}
+impl zz_gpui::Global for SettingsBottomInset {}
 
 impl SettingsBottomInset {
     #[must_use]
@@ -771,17 +771,17 @@ pub struct SettingsScrollColumn {
     children: Vec<AnyElement>,
 }
 
-impl zpui::ParentElement for SettingsScrollColumn {
+impl zz_gpui::ParentElement for SettingsScrollColumn {
     fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
         self.children.extend(elements);
     }
 }
 
 impl RenderOnce for SettingsScrollColumn {
-    fn render(self, window: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut zz_gpui::Window, cx: &mut App) -> impl IntoElement {
         let handle = window
-            .use_keyed_state(zpui::ElementId::Name(self.id.into()), cx, |_, _| {
-                zpui::ScrollHandle::default()
+            .use_keyed_state(zz_gpui::ElementId::Name(self.id.into()), cx, |_, _| {
+                zz_gpui::ScrollHandle::default()
             })
             .read(cx)
             .clone();
@@ -944,7 +944,7 @@ fn settings_group_header(
     title: SharedString,
     description: Option<SharedString>,
     cx: &App,
-) -> zpui::Div {
+) -> zz_gpui::Div {
     div()
         .flex()
         .flex_col()
@@ -968,7 +968,7 @@ pub fn settings_list_group_header(
     title: &'static str,
     description: Option<&'static str>,
     cx: &App,
-) -> zpui::Div {
+) -> zz_gpui::Div {
     div().pt(px(10.0)).child(settings_group_header(
         title.into(),
         description.map(Into::into),
@@ -1034,7 +1034,7 @@ impl Default for SettingsStack {
 }
 
 impl RenderOnce for SettingsStack {
-    fn render(self, _: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut zz_gpui::Window, cx: &mut App) -> impl IntoElement {
         let last = self.entries.len().saturating_sub(1);
         let rows = self
             .entries
@@ -1125,7 +1125,7 @@ pub struct SettingEntry {
     on_click: Option<(ElementId, EntryClick)>,
 }
 
-type EntryClick = Rc<dyn Fn(&zpui::ClickEvent, &mut zpui::Window, &mut App)>;
+type EntryClick = Rc<dyn Fn(&zz_gpui::ClickEvent, &mut zz_gpui::Window, &mut App)>;
 
 impl SettingEntry {
     pub fn new(title: impl Into<SharedString>, description: impl Into<SharedString>) -> Self {
@@ -1147,7 +1147,7 @@ impl SettingEntry {
     pub fn on_click(
         mut self,
         id: impl Into<ElementId>,
-        handler: impl Fn(&zpui::ClickEvent, &mut zpui::Window, &mut App) + 'static,
+        handler: impl Fn(&zz_gpui::ClickEvent, &mut zz_gpui::Window, &mut App) + 'static,
     ) -> Self {
         self.on_click = Some((id.into(), Rc::new(handler)));
         self
@@ -1201,7 +1201,7 @@ impl ParentElement for SettingEntry {
 }
 
 impl RenderOnce for SettingEntry {
-    fn render(self, window: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut zz_gpui::Window, cx: &mut App) -> impl IntoElement {
         let disabled = self.disabled;
         let position = self.position;
         let press = self
@@ -1238,9 +1238,9 @@ impl RenderOnce for SettingEntry {
                                     this.child(icon.with_size(crate::Size::Small))
                                 })
                                 .child(div().text_size(crate::rems_from_px(13.0)).child(self.title))
-                                .when_some(self.title_actions, zpui::ParentElement::child),
+                                .when_some(self.title_actions, zz_gpui::ParentElement::child),
                         )
-                        .when_some(self.control, zpui::ParentElement::child),
+                        .when_some(self.control, zz_gpui::ParentElement::child),
                 )
                 .children(description)
         } else {
@@ -1254,7 +1254,7 @@ impl RenderOnce for SettingEntry {
                         .when_some(self.title_icon, SettingCopy::title_icon)
                         .when_some(self.title_actions, SettingCopy::title_actions),
                 )
-                .when_some(self.control, zpui::ParentElement::child)
+                .when_some(self.control, zz_gpui::ParentElement::child)
         };
 
         let body = div()
@@ -1406,7 +1406,7 @@ impl SettingCopy {
 }
 
 impl RenderOnce for SettingCopy {
-    fn render(self, _: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut zz_gpui::Window, cx: &mut App) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -1423,7 +1423,7 @@ impl RenderOnce for SettingCopy {
                         this.child(icon.with_size(crate::Size::Small))
                     })
                     .child(div().text_size(crate::rems_from_px(13.0)).child(self.title))
-                    .when_some(self.title_actions, zpui::ParentElement::child),
+                    .when_some(self.title_actions, zz_gpui::ParentElement::child),
             )
             .when(!self.description.is_empty(), |this| {
                 this.child(
@@ -1440,7 +1440,7 @@ impl RenderOnce for SettingCopy {
 /// surfaces are already `raised(1)`, so a control at that default would
 /// dissolve into the card behind it.
 #[must_use]
-pub fn settings_control_fill(cx: &App) -> zpui::Hsla {
+pub fn settings_control_fill(cx: &App) -> zz_gpui::Hsla {
     cx.theme().background.raised(2)
 }
 
@@ -1449,7 +1449,7 @@ pub fn settings_provenance_badge(label: impl Into<SharedString>) -> Tag {
 }
 
 pub fn settings_reset_button(
-    id: impl Into<zpui::ElementId>,
+    id: impl Into<zz_gpui::ElementId>,
     tooltip: impl Into<SharedString>,
     enabled: bool,
 ) -> Button {
@@ -1512,7 +1512,7 @@ pub fn panes_page(
     focus: [SettingEntry; 2],
     frame: [SettingEntry; 3],
     cx: &App,
-) -> zpui::Div {
+) -> zz_gpui::Div {
     div()
         .flex()
         .flex_col()

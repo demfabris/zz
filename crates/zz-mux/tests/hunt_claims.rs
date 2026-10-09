@@ -69,7 +69,7 @@ fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretati
             &mut context,
             &command(
                 "attach-session",
-                &["-t", "flags", "-f", "ignore-size,!active-pane"],
+                &["-t", "flags", "-f", "ignore-size,!no-detach-on-destroy"],
             ),
         )
         .unwrap();
@@ -80,7 +80,7 @@ fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretati
             detach_others: false,
             detach_others_hangup: false,
             read_only: false,
-            flags: Some("ignore-size,!active-pane".to_owned()),
+            flags: Some("ignore-size,!no-detach-on-destroy".to_owned()),
             update_environment: true,
         }]
     );

@@ -74,13 +74,13 @@
     ],
     "pause": [
       "%begin T B 1",
-      "%pause %1",
-      "%end T B 1"
+      "%end T B 1",
+      "%pause %1"
     ],
     "continue": [
       "%begin T B 1",
-      "%continue %1",
-      "%end T B 1"
+      "%end T B 1",
+      "%continue %1"
     ],
     "extended-output": [
       "%begin T B 1",
@@ -127,10 +127,10 @@
     "hook-output": [
       "%begin T B 1",
       "%end T B 1",
+      "%window-renamed @0 hooked",
       "%begin T B 0",
       "NOTIFY_HOOK",
-      "%end T B 0",
-      "%window-renamed @0 hooked"
+      "%end T B 0"
     ],
     "hook-remove": [
       "%begin T B 1",
@@ -296,13 +296,13 @@
     ],
     "pause": [
       "%begin T B 1",
-      "%pause %1",
-      "%end T B 1"
+      "%end T B 1",
+      "%pause %1"
     ],
     "continue": [
       "%begin T B 1",
-      "%continue %1",
-      "%end T B 1"
+      "%end T B 1",
+      "%continue %1"
     ],
     "extended-output": [
       "%begin T B 1",
@@ -349,10 +349,10 @@
     "hook-output": [
       "%begin T B 1",
       "%end T B 1",
+      "%window-renamed @0 hooked",
       "%begin T B 0",
       "NOTIFY_HOOK",
-      "%end T B 0",
-      "%window-renamed @0 hooked"
+      "%end T B 0"
     ],
     "hook-remove": [
       "%begin T B 1",

@@ -3594,7 +3594,7 @@ mod tests {
             [
                 "-f",
                 "ignore-size",
-                "-factive-pane,no-detach-on-destroy",
+                "-fread-only,no-detach-on-destroy",
                 "work",
             ]
             .map(RawText::from),
@@ -3602,7 +3602,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             flags.client_flags.as_deref(),
-            Some("active-pane,no-detach-on-destroy")
+            Some("read-only,no-detach-on-destroy")
         );
 
         let cwd = parse_native_attach_arguments(["-dc/tmp/work", "-t", "work"].map(RawText::from))

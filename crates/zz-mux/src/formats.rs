@@ -6376,7 +6376,7 @@ fn dirname(value: &[u8]) -> RawText {
 fn quote_shell(value: &[u8]) -> RawText {
     let mut output = Vec::with_capacity(value.len() * 2);
     for byte in value {
-        if b"|&;<>()$`\\\"'*?[# =%".contains(byte) {
+        if b"|&;<>(){}$`\\\"'*?[# =%\n\t".contains(byte) {
             output.push(b'\\');
         }
         output.push(*byte);
@@ -8240,6 +8240,10 @@ mod tests {
         assert_eq!(expand("#{l:#{session_name}}"), "#{session_name}");
         assert_eq!(expand("#{q:pane_title}"), "/tmp/a\\ b/main");
         assert_eq!(expand("#{q/s:pane_title}"), "'/tmp/a b/main'");
+        assert_eq!(
+            quote_shell(b"a{b} c\n\t").as_bytes(),
+            b"a\\{b\\}\\ c\\\n\\\t"
+        );
         assert_eq!(expand("#{b:#{l:/x/y}}"), "/x/y");
 
         let mut context = context();

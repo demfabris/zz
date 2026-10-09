@@ -177,7 +177,7 @@ those report hooks but remain eligible for promotion after the latest client lea
 Changed-resize post-geometry format timing remains a separate protocol-owned slice so the producer
 milestone does not grow across the TUI message boundary.
 `no-detach-on-destroy` now drives the per-client fallback after session destruction.
-`active-pane` remains retained and reported without changing the shared selected pane.
+`active-pane` was retained and reported until tmux 3.8 removed it; zz now ignores the name like the pin.
 
 Slice 10r closes local cold-start parse abort. The raw CLI gate validates canonical names,
 built-in aliases, and prefixes for 83 implemented commands plus nine parked commands before

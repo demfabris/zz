@@ -1,6 +1,6 @@
 use std::{rc::Rc, sync::Arc};
 
-use gpui::{App, Entity, KeyDownEvent, SharedString};
+use zpui::{App, Entity, KeyDownEvent, SharedString};
 use zz_client::completion::PaneKindAvailability;
 use zz_protocol::{CommandInvocation, InputMessage, MuxSnapshot, PaneId};
 use zz_ui::{

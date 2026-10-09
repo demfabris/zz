@@ -448,7 +448,6 @@ pub(crate) const HOOK_NAMES: &[&str] = &[
     "after-new-window",
     "after-paste-buffer",
     "after-pipe-pane",
-    "after-queue",
     "after-refresh-client",
     "after-rename-session",
     "after-rename-window",
@@ -592,7 +591,6 @@ const SESSION_OPTIONS: &[&str] = &[
     "after-new-window",
     "after-paste-buffer",
     "after-pipe-pane",
-    "after-queue",
     "after-refresh-client",
     "after-rename-session",
     "after-rename-window",
@@ -1293,7 +1291,7 @@ mod tests {
     #[test]
     fn catalog_is_complete_and_unique() {
         let options = tmux_options().collect::<Vec<_>>();
-        assert_eq!(options.len(), 273);
+        assert_eq!(options.len(), 272);
         assert_eq!(
             options
                 .iter()
@@ -1424,7 +1422,7 @@ mod tests {
             .filter(|option| option.is_array)
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();
-        assert_eq!(arrays.len(), 98);
+        assert_eq!(arrays.len(), 97);
         for name in [
             "command-alias",
             "codepoint-widths",
@@ -1459,7 +1457,7 @@ mod tests {
             .filter(|option| tmux_option_is_hook(option.name))
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();
-        assert_eq!(hooks.len(), 90);
+        assert_eq!(hooks.len(), 89);
         assert_eq!(hooks, HOOK_NAMES.iter().copied().collect());
     }
 
@@ -1478,7 +1476,7 @@ mod tests {
                 .iter()
                 .map(|name| tmux_option_table_order(name))
                 .collect::<Vec<_>>(),
-            (183..273).collect::<Vec<_>>()
+            (183..272).collect::<Vec<_>>()
         );
     }
 

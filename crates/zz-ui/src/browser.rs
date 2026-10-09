@@ -9,7 +9,7 @@ use crate::{
     tag::Tag,
     tooltip::Tooltip,
 };
-use gpui::{
+use zpui::{
     AnyElement, App, BoxShadow, Context, Entity, Focusable as _, IntoElement, MouseButton,
     ParentElement as _, Pixels, RenderOnce, ScrollHandle, SharedString, Styled as _,
     StyledImage as _, Window, deferred, div, point, prelude::*, px,
@@ -78,7 +78,7 @@ impl RenderOnce for BrowserHeader {
                             .when(!self.active, |actions| {
                                 actions
                                     .invisible()
-                                    .group_hover("browser-pane-header", gpui::Styled::visible)
+                                    .group_hover("browser-pane-header", zpui::Styled::visible)
                             })
                             .child(self.actions),
                     ),
@@ -140,7 +140,7 @@ impl BrowserToolbar {
 }
 
 impl RenderOnce for BrowserToolbar {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
         div()
             .id("browser-navigation-row")
             .debug_selector(|| "browser-navigation-row".into())
@@ -170,7 +170,7 @@ impl RenderOnce for BrowserToolbar {
     }
 }
 
-fn browser_toolbar_cluster() -> gpui::Div {
+fn browser_toolbar_cluster() -> zpui::Div {
     div().flex().flex_none().items_center().gap_1()
 }
 
@@ -178,7 +178,7 @@ pub fn browser_address(
     address: &Entity<InputState>,
     site_controls: impl IntoElement,
     cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+) -> zpui::Stateful<zpui::Div> {
     let focus_handle = address.read(cx).focus_handle(cx);
     let focused_background = cx.theme().background.washed(1);
     let input = Input::new(address)
@@ -225,8 +225,8 @@ pub fn browser_address(
 pub fn browser_site_controls_button(cx: &App) -> Button {
     Button::compact_icon("browser-site-controls", IconName::SiteControls)
         .flat()
-        .rounded(if cx.theme().control_radius() == gpui::FULL_CORNER_RADIUS {
-            gpui::FULL_CORNER_RADIUS
+        .rounded(if cx.theme().control_radius() == zpui::FULL_CORNER_RADIUS {
+            zpui::FULL_CORNER_RADIUS
         } else {
             px(12.0)
         })
@@ -346,7 +346,7 @@ impl BrowserTabStrip {
 }
 
 impl RenderOnce for BrowserTabStrip {
-    fn render(self, window: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
         let Self {
             tabs,
             active,
@@ -458,7 +458,7 @@ fn browser_tab_shell(
     on_close: &BrowserTabAction,
     favicon: Option<Arc<[u8]>>,
     cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+) -> zpui::Stateful<zpui::Div> {
     let rest = cx.theme().background.washed(1);
     let foreground = cx.theme().foreground;
     let hover_background = cx.theme().background.washed(2);
@@ -505,7 +505,7 @@ fn browser_tab_close_button(id: u64, on_close: &BrowserTabAction, cx: &App) -> i
     div()
         .flex_none()
         .invisible()
-        .group_hover(browser_tab_group(id), gpui::Styled::visible)
+        .group_hover(browser_tab_group(id), zpui::Styled::visible)
         .child(
             Button::compact_icon(("browser-tab-close", id), IconName::Xmark)
                 .size(crate::rems_from_px(BROWSER_CONTROL_HEIGHT))
@@ -538,7 +538,7 @@ pub fn browser_toolbar_button(
         .tooltip(tooltip)
 }
 
-pub fn browser_start_surface(content: impl IntoElement) -> gpui::Div {
+pub fn browser_start_surface(content: impl IntoElement) -> zpui::Div {
     div()
         .absolute()
         .inset_0()
@@ -556,7 +556,7 @@ pub fn browser_start_surface(content: impl IntoElement) -> gpui::Div {
 pub struct BrowserEmptyHint;
 
 impl RenderOnce for BrowserEmptyHint {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
         div()
             .max_w(px(440.0))
             .flex()
@@ -604,8 +604,8 @@ pub fn browser_favicon(png: Option<Arc<[u8]>>, cx: &App) -> AnyElement {
             .into_any_element()
     };
     match png {
-        Some(png) => gpui::img(Arc::new(gpui::Image::from_bytes(
-            gpui::ImageFormat::Png,
+        Some(png) => zpui::img(Arc::new(zpui::Image::from_bytes(
+            zpui::ImageFormat::Png,
             png.to_vec(),
         )))
         .size(px(14.0))
@@ -618,11 +618,11 @@ pub fn browser_favicon(png: Option<Arc<[u8]>>, cx: &App) -> AnyElement {
 }
 
 pub fn browser_recent_row(
-    id: impl Into<gpui::ElementId>,
+    id: impl Into<zpui::ElementId>,
     url: impl Into<SharedString>,
     favicon: Option<Arc<[u8]>>,
     cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+) -> zpui::Stateful<zpui::Div> {
     let rest = cx.theme().background.washed(1);
     let highlight = crate::navigation::workspace_row_highlight(cx);
     let url = url.into();
@@ -678,7 +678,7 @@ pub fn browser_omnibox_row(
     selected: bool,
     favicon: Option<Arc<[u8]>>,
     cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+) -> zpui::Stateful<zpui::Div> {
     let title = title.into();
     let url = url.into();
     let highlight = crate::navigation::workspace_row_highlight(cx);
@@ -717,7 +717,7 @@ pub fn browser_omnibox_row(
                     this.child(
                         div()
                             .min_w_0()
-                            .max_w(gpui::relative(0.55))
+                            .max_w(zpui::relative(0.55))
                             .whitespace_nowrap()
                             .text_ellipsis()
                             .overflow_hidden()
@@ -1124,7 +1124,7 @@ impl BrowserErrorPanel {
 }
 
 impl RenderOnce for BrowserErrorPanel {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
         div()
             .max_w(px(440.0))
             .flex()
@@ -1184,7 +1184,7 @@ impl BrowserPickStatus {
 }
 
 impl RenderOnce for BrowserPickStatus {
-    fn render(self, _: &mut gpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
         div()
             .absolute()
             .left(px(16.0))
@@ -1239,7 +1239,7 @@ pub fn browser_surface_shadow(cx: &App) -> Vec<BoxShadow> {
 mod tests {
     use std::sync::{Arc, Mutex};
 
-    use gpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
+    use zpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
 
     use super::*;
     use crate::menu::DropdownMenu as _;
@@ -1338,7 +1338,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn narrow_header_keeps_controls_visible_and_address_focusable(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|window, cx| BrowserHeaderTest {
@@ -1503,7 +1503,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn active_and_inactive_tabs_reveal_working_close_buttons_on_hover(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let activated = Arc::new(Mutex::new(Vec::new()));
@@ -1567,7 +1567,7 @@ mod tests {
         assert!(activated.lock().unwrap().is_empty());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn switching_active_tab_preserves_equal_tab_widths(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(move |_, _| BrowserTabStripTest {
@@ -1657,7 +1657,7 @@ mod tests {
         assert!(first.origin.x >= strip.origin.x && second.right() <= strip.right());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn omnibox_results_render_above_the_toolbar_and_accept_pointer_input(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let accepted = Arc::new(Mutex::new(Vec::new()));

@@ -1,7 +1,7 @@
 use super::AGENT_CONTENT_MAX_WIDTH;
 use crate::input::{Input, InputState};
 use crate::{ActiveTheme as _, CHROME_GAP, Colorize as _, h_flex, v_flex};
-use gpui::{
+use zpui::{
     AnyElement, App, Entity, IntoElement, RenderOnce, SharedString, Window, div, prelude::*, px,
 };
 
@@ -53,7 +53,7 @@ impl RenderOnce for AgentComposer {
                                     .border_1()
                                     .border_color(cx.theme().border())
                                     .bg(cx.theme().background.raised(1).opaque())
-                                    .when(cx.theme().shadow, gpui::Styled::shadow_xs)
+                                    .when(cx.theme().shadow, zpui::Styled::shadow_xs)
                                     .children(self.attachments)
                                     .child(
                                         Input::new(&self.input)
@@ -129,7 +129,7 @@ impl RenderOnce for AgentComposer {
                                 h_flex()
                                     .min_w_0()
                                     .flex_shrink_1()
-                                    .max_w(gpui::relative(0.5))
+                                    .max_w(zpui::relative(0.5))
                                     .gap(px(CHROME_GAP))
                                     .children(self.footer_actions),
                             ),

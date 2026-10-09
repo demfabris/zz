@@ -1,60 +1,59 @@
 ---
 name: fork-rebase
-description: Maintain zz's own GPUI repo (demfabris/gpui, the 22 gpui crates split out of Zed, carrying RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, and more) and the native Ghostty fork pinned in third_party/rust/libghostty-vt-sys/build.rs. Use when changing gpui, moving its pin, pulling an upstream Zed fix, when the user says "bump gpui", "update zed", or "rebase forks", and before debugging weird gpui build errors after a dependency change.
+description: Maintain zpui, zz's own GPUI (zpui/, the gpui crates split out of Zed and renamed zpui*, carrying RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, liquid glass, the zpui_ios UIKit backend, and more) and the vendored native Ghostty in third_party/ghostty with its libghostty-vt crates. Use when changing zpui/gpui or Ghostty, pulling an upstream Zed or Ghostty change, when the user says "bump gpui", "update zed", "bump ghostty", "sync ghostty", or "rebase forks", and before debugging weird zpui build errors after a dependency change.
 ---
 
-# GPUI: `demfabris/gpui`
+# zpui: `zpui/`
 
-Since 2026-10-05 zz builds against [`demfabris/gpui`](https://github.com/demfabris/gpui), our
-own repo holding the 22 GPUI crates split out of Zed. It is not a patch branch: nothing gets
-rebased, and upstream Zed fixes come in by hand. Its first commit is upstream
-`zed-industries/zed` `933d8d9381` limited to those crates; the next 89 are the old
-`demfabris/zed` `zz-patches` commits (tip `5a00ac89a4`), replayed under new IDs. The old fork
-stays up as an archive; knowledge pages cite its commit IDs, and the same commits exist in
-`demfabris/gpui` with the same subjects. Crate paths match Zed's (`crates/gpui`,
-`crates/gpui_wgpu`, `tooling/perf`, ...), so upstream patches apply as-is.
+zpui is zz's GPUI: the gpui crates split out of Zed on 2026-10-05, in `zpui/`. They were the
+[`demfabris/gpui`](https://github.com/demfabris/gpui) repo until 2026-10-09, when they moved in
+with their history (`git log -- zpui gpui`) and were renamed: `gpui` is `zpui` and every
+`gpui_*` crate is `zpui_*`, in code too. Zed's utility crates (`collections`, `sum_tree`,
+`refineable`, `scheduler`, `zlog`, `ztracing`, `http_client`, `util_macros`, `perf`) keep their
+names, and `zpui_ios` is the UIKit backend. It is not a patch branch: nothing gets rebased, and
+upstream Zed fixes come in by hand. The first commit is upstream `zed-industries/zed`
+`933d8d9381` limited to those crates; the next 89 are the old `demfabris/zed` `zz-patches`
+commits (tip `5a00ac89a4`), replayed under new IDs. The old fork stays up as an archive;
+knowledge pages cite its commit IDs, and the same commits exist under `zpui/` with the same
+subjects.
 
-Local checkout: `~/dev/gpui` on the macbook. Clone it anywhere else; it is about 7 MB.
+`zpui/` is its own Cargo workspace, excluded from the root one. The root `Cargo.toml` and
+`clients/web/Cargo.toml` depend on it by path, so there is no revision to move and no lockfile
+to re-resolve.
 
-## Landing a GPUI change
+## Landing a zpui change
 
-1. Commit and push in the `demfabris/gpui` checkout. Run `cargo check --workspace
-   --all-targets` there first, plus the GPU tests for whatever the change touches.
-2. Move the `rev` in root `Cargo.toml` `[workspace.dependencies]` (`gpui`, `gpui_platform`,
-   `gpui_wgpu`) and in `clients/web/Cargo.toml` (every `demfabris/gpui` line). All must match:
-   a second `rev` is a second source identity and builds a second copy of every GPUI crate.
-3. Re-resolve both lockfiles and check each diff touches only the 22 GPUI `source =` lines:
-
-   ```bash
-   cargo metadata --format-version 1 >/dev/null
-   cargo metadata --manifest-path clients/web/Cargo.toml --format-version 1 >/dev/null
-   rg -c 'demfabris/gpui' Cargo.lock clients/web/Cargo.lock
-   ```
-
-4. Run the workspace gates and `just web build`, then an isolated app run for anything visual.
-
-The gpui revision in diagnostics needs no manual bump: `crates/zz/build.rs` stamps
-`ZZ_GPUI_SOURCE` from `Cargo.lock` at build time.
+1. Edit `zpui/` in the same commit as the zz code that needs it.
+2. From inside `zpui/`, run `cargo check --workspace --all-targets` plus the GPU tests for
+   whatever the change touches. The root clippy and test runs skip zpui; `cargo fmt --all`
+   from the root formats it. `zpui_ios` builds its UIKit modules only for iOS: check it with
+   `cargo clippy -p zpui_ios --target aarch64-apple-ios` from the root.
+3. Run the workspace gates and `just web build`, then an isolated app run for anything visual.
 
 ## Pulling a fix from upstream Zed
 
+Zed's paths and identifiers say `gpui`; ours say `zpui`. Export the patch, map
+`crates/gpui` to `crates/zpui` (and `crates/gpui_<x>` to `crates/zpui_<x>`), `gpui::` to
+`zpui::` and `gpui_<x>` to `zpui_<x>`, then apply it under `zpui/`:
+
 ```bash
-git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu > fix.patch
+git am -3 --directory=zpui fix.patch
 ```
 
 Limit the pathspec to the crates the fix touches. Never bulk-merge upstream: take what we need,
 read it, and run the GPU tests for the renderers it touches.
 
-## What zz changed in GPUI
+## What zz changed in zpui
 
-`git log` in `demfabris/gpui` is the authority. The core five:
+`git log -- zpui gpui` is the authority. The core five:
 
   1. `RenderImage::into_frames()` — retired browser frames return their pixel
      buffers to the OSR paint pool.
   2. `WgpuDeviceContext` — `Window::wgpu_device_context()` exposes the Linux
-     renderer's `wgpu::Device`/`Queue` (plus a `gpui::wgpu` re-export) so
+     renderer's `wgpu::Device`/`Queue` (plus a `zpui::wgpu` re-export) so
      embedders create GPU resources on GPUI's exact device.
-  3. External-texture element — `gpui::external_texture(wgpu::Texture)` paints
+  3. External-texture element — `zpui::external_texture(wgpu::Texture)` paints
      an app-provided texture with normal clipping/HiDPI via the repurposed
      Linux surface pipeline (was a dead YCbCr stub upstream).
   4. Window corner mask — `Window::set_window_corner_mask()` clips everything
@@ -95,7 +94,7 @@ read it, and run the GPU tests for the renderers it touches.
   only when `/dev/dxg` exists, a node native Linux cannot have), and
   `KeystrokeEvent::is_held` (the OS autorepeat flag carried through to
   keystroke observers/interceptors — zz's prefix layer swallows repeats by
-  this flag instead of held-set inference, which a lost macOS keyUp desyncs). Newest: `gpui_wgpu` subpixel offset kept in
+  this flag instead of held-set inference, which a lost macOS keyUp desyncs). Newest: `zpui_wgpu` subpixel offset kept in
   device pixels (the swash scaler already runs at `pixel_size * scale_factor`, so the
   extra `/ scale_factor` upstream still carries shrank the quarter-pixel phase on HiDPI —
   a one-line upstream-able fix).
@@ -127,31 +126,72 @@ Linux and Windows can be type-checked from macOS: `cargo check --target
 x86_64-unknown-linux-musl` with a `zig cc -target x86_64-linux-musl` wrapper named
 `x86_64-linux-musl-gcc` (drop cc-rs's `--target=` flag; a `zig c++` twin as `-g++`),
 `RUST_FONTCONFIG_DLOPEN=1`, and
-`FREETYPE2_NO_PKG_CONFIG=1`; and `cargo +1.97.0 check -p gpui_windows --target
+`FREETYPE2_NO_PKG_CONFIG=1`; and `cargo +1.97.0 check -p zpui_windows --target
 x86_64-pc-windows-msvc` with `RC_x86_64_pc_windows_msvc` set to Homebrew's `llvm-rc`.
 
-## Native Ghostty fork
+## Native Ghostty: `third_party/ghostty`
 
-`libghostty-vt-sys/build.rs` fetches `demfabris/ghostty`. The published pin is
-`e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on `zz-2026-10-04` (the render state clip
-`0ab7941c` and trimmed row copies), on `189df4a1f6403f5bdc349fe44d1d2809741a4c1d` from
-`zz-2026-10-02` (the one-call row cell copy for frame build), on
-`67351380b6dc30124938d809809ac0aa42813283` from `zz-2026-09-30`, based on copy snapshots
-`7823f65dd55fc9ff420d5eb5cae761cbd1995994` and trim fix `c39414175ca2aad564b74b3f52196355f2671774`, upstream base
-`6301810a48aaa3426887a4316668f18833a40138`. It adds owned active-screen C ABI snapshots,
-shared resident and compressed history backing, snapshot regression tests,
-active-page copies sized to their used rows, one-call row copies, clipped render
-state updates and trimmed row copies to the three existing signal-stack,
-spare-page and trim commits. The fast-forwards keep the earlier pins in their branch
-history. The safe wrapper's copy and clip APIs live in published
-`demfabris/libghostty-rs` commit `0db98a206681fd60c2b1a1719daf14049eda8c30` on new branch
-`zz-2026-10-04`, on `f5f826018e290e776c8bc4e5969c562efe530846` from `zz-2026-10-02` (row
-copies and the iteration lifetime fix on `8e40135f` from `zz-2026-09-30`), based on
-`359ef751c189540eafb9110b2de89ad95ce48fc3`.
-zz vendors only the sys snapshot, without native
-source rewriting or a safe-wrapper path patch.
+Ghostty lives in `third_party/ghostty`: a trimmed snapshot of upstream `ghostty-org/ghostty`
+with zz's commits on top. `third_party/rust/libghostty-vt-sys/build.rs` builds it with Zig;
+`GHOSTTY_SOURCE_DIR` still points the build at another checkout. Cargo reruns the native build
+when `build.zig`, `build.zig.zon`, `include`, `pkg` or `src` change under the source dir. Zig
+unpacks Ghostty's packages into `third_party/ghostty/zig-pkg` (ignored), once per checkout.
 
-Published branches retain these pins:
+The trim keeps what the libghostty-vt build reads on every target: `build.zig`,
+`build.zig.zon`, `LICENSE`, `include/`, `src/` without fonts and crash dumps, every
+`pkg/*/build.zig` and `build.zig.zon`, and the pkg dirs it compiles (apple-sdk, highway,
+simdutf, translate-c, wuffs). The list is `keep` in `scripts/vendor-ghostty.sh`.
+
+History:
+
+- `Import Ghostty <sha>` commits hold pristine trimmed upstream and end with a
+  `Ghostty-Upstream: <full sha>` trailer. Each import's parent is the previous import.
+- zz's changes are ordinary commits after it: `git log <last import>..HEAD -- third_party/ghostty`.
+  Today that is upstream `6301810a` plus eight commits: the C ABI signal-stack option,
+  spare-page reuse, the history-erase trim fix, owned copy snapshots, active-page copies at
+  their used size, one-call row cell copies, render state clips and trimmed row copies.
+
+The safe wrapper and the sys crate are vendored next to each other in `third_party/rust`
+(`libghostty-vt`, `libghostty-vt-sys`); their `UPSTREAM.md` files own the commit IDs,
+rationale, validation, and removal conditions.
+
+## Syncing Ghostty upstream
+
+1. `just vendor ghostty <full sha|branch|tag>`. It fetches into `~/.cache/zz/ghostty.git`,
+   commits the trimmed snapshot on top of the last import in a throwaway worktree, and merges
+   that commit. The merge base is the last import, so conflicts are exactly the places where
+   upstream changed lines zz changed.
+2. Resolve conflicts under `third_party/ghostty` and `git commit`.
+3. If Zig fails on a missing file the trim dropped, add a pathspec to `keep`, commit the script,
+   and rerun step 1 with the same rev: the new import adds the file and merges cleanly.
+4. If the C headers changed, regenerate `src/bindings.rs` with the sys crate's tool, then
+   `rustfmt --edition 2024` it (the tool's formatter output differs from the workspace's), and
+   update the wrapper in `third_party/rust/libghostty-vt` to the new API:
+
+   ```bash
+   GHOSTTY_SOURCE_DIR=$PWD/third_party/ghostty cargo run --manifest-path third_party/rust/libghostty-vt-sys/Cargo.toml --features bindgen-tool --bin gen-bindings
+   ```
+
+5. Recheck that C ABI code does not create Zig-owned workers or install a Zig signal stack,
+   drop zz commits upstream now covers, and update the sys README, the UPSTREAM records, and
+   the knowledge pages.
+
+Sending a change upstream: `git format-patch <last import>..HEAD --relative=third_party/ghostty
+-- third_party/ghostty` gives patches that apply to a Ghostty checkout; open the PR from a
+branch on `demfabris/ghostty`.
+
+Validate the actual archive and daemon: exported C symbols, terminal tests,
+signal-handler/alternate-stack behavior, and a normal macOS bundle build with
+no `GHOSTTY_SOURCE_DIR` or pkg-config bypass. Zig's default test runner uses its
+own `std_options`, so its pass alone does not exercise this C ABI option. Cross-check
+`cargo check -p zz-terminal --all-features --target <t>` for `aarch64-apple-ios` and
+`x86_64-unknown-linux-gnu` from a Mac; `x86_64-pc-windows-msvc` needs a Windows host or CI,
+because Zig has no MSVC C headers on a Mac.
+
+## Pre-vendoring branches
+
+Before 2026-10-09 zz fetched Ghostty and the wrapper from these fork branches, and knowledge
+pages still cite their commit IDs. Nothing builds from them now; keep them for history.
 
 | Fork | Branch | Pin |
 |---|---|---|
@@ -165,36 +205,3 @@ Published branches retain these pins:
 | `demfabris/ghostty` | `codex/cabi-signal-stack` | `fa7986a9`, previous pin |
 | `demfabris/libghostty-rs` | `zz-2026-09-30` | `8e40135fb20e9ed91c37c374fe1d14570c386d06`, owned copy API |
 | `demfabris/libghostty-rs` | `zz-2026-09-25` | `359ef751c189540eafb9110b2de89ad95ce48fc3`, parent wrapper |
-
-zz pins the native commit in `build.rs` and the wrapper commit in root `Cargo.toml`;
-Cargo regenerates `Cargo.lock` against the published wrapper source.
-`third_party/rust/libghostty-vt-sys/UPSTREAM.md` owns the full commit IDs, rationale,
-validation, and removal conditions.
-
-For a native update, inspect both upstream and fork histories, preserve the
-published pin through a retained branch or tag, and push the new pin as a
-new dated branch (`zz-YYYY-MM-DD`); never force-push an existing one. When the
-upstream base is new to the fork, create the branch at the upstream commit
-with `gh api repos/demfabris/ghostty/git/refs` (the fork network already holds
-the objects) and push only the carried commit on top. When the new commits sit
-on the current pin, push a local branch started at the pin under the new name;
-`gh api repos/demfabris/ghostty/branches` lists every branch tip, which shows
-the branch holding a pin. Recheck that C ABI code does not create Zig-owned workers or
-install a Zig signal stack. Publish the tested commit, update `GHOSTTY_REPO`
-and `GHOSTTY_COMMIT` in `build.rs`, and update the sys README, UPSTREAM record,
-and knowledge pages. No Cargo lock update is needed for a native-only change.
-A base move or carried commit that changes the C headers also needs a safe
-wrapper that speaks the new API and bindings regenerated with the snapshot's
-`gen-bindings` tool, then `rustfmt --edition 2024` on `src/bindings.rs` (the
-tool's formatter output differs from the workspace's), copied into the wrapper
-fork's sys crate; the 2026-09-25 bump records how in UPSTREAM.md. A wrapper
-change is published the same way, as a new dated branch on
-`demfabris/libghostty-rs`, and the root `Cargo.toml` rev and `Cargo.lock` move
-with it.
-
-Validate the actual archive and daemon: exported C symbols, terminal tests,
-signal-handler/alternate-stack behavior, and a normal macOS bundle build with
-no `GHOSTTY_SOURCE_DIR` or pkg-config bypass. Zig's default test runner uses its
-own `std_options`, so its pass alone does not exercise this C ABI option.
-When using local source overrides, edits at the same path do not trigger Cargo's
-native rebuild; use distinct paths or explicitly rebuild the sys package.

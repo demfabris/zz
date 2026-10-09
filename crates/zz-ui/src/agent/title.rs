@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui::{
+use zpui::{
     AnyElement, App, Context, ElementId, Entity, FocusHandle, IntoElement, Render, Subscription,
     Window, div, prelude::*, px,
 };
@@ -154,7 +154,7 @@ pub fn agent_thread_title_editor(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Modifiers, TestAppContext, VisualTestContext};
+    use zpui::{Modifiers, TestAppContext, VisualTestContext};
 
     struct TitleTest {
         title: String,
@@ -199,7 +199,7 @@ mod tests {
         draw(cx);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn inline_rename_saves_on_enter_and_discards_escape_or_blur(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|window, cx| {

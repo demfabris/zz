@@ -1,8 +1,8 @@
 #[cfg(target_os = "linux")]
-use gpui::Decorations;
+use zpui::Decorations;
 #[cfg(any(target_os = "linux", test))]
-use gpui::Tiling;
-use gpui::{Corners, Pixels, Styled, Window, px};
+use zpui::Tiling;
+use zpui::{Corners, Pixels, Styled, Window, px};
 use zz_protocol::Axis;
 
 const TOP_LEFT: u8 = 1 << 0;

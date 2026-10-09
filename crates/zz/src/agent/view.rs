@@ -23,7 +23,7 @@ use zz_ui::agent::tasks::{TaskTrayAction, TrayPanel, task_tray};
 use zz_ui::agent::title::{agent_thread_title_editor, agent_title_is_editing};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
-use gpui::{
+use zpui::{
     AnyElement, Context, Entity, EntityId, FocusHandle, Focusable, Image, IntoElement,
     KeyDownEvent, ListAlignment, ListState, MouseButton, MouseDownEvent, Render, ScrollStrategy,
     SharedString, Subscription, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
@@ -71,7 +71,7 @@ use crate::{
 const AGENT_KEY_CONTEXT: &str = "Agent";
 const STICK_FRAME_INTERVAL: std::time::Duration = std::time::Duration::from_micros(16_667);
 
-impl gpui::EventEmitter<PaneDrag> for AgentView {}
+impl zpui::EventEmitter<PaneDrag> for AgentView {}
 
 /// Whether the pane shows busy chrome. This reads the connection phase and
 /// nothing else: an adapter that never sends a final tool update leaves rows
@@ -652,7 +652,7 @@ impl AgentView {
         }
     }
 
-    pub(crate) fn focus(&self, cx: &gpui::App) -> FocusHandle {
+    pub(crate) fn focus(&self, cx: &zpui::App) -> FocusHandle {
         self.input.read(cx).focus_handle(cx)
     }
 
@@ -1038,7 +1038,7 @@ impl AgentView {
 
     /// The user is mid-sentence in the composer, so keys the wizard would claim
     /// belong to the draft instead.
-    fn composer_engaged(&self, window: &Window, cx: &gpui::App) -> bool {
+    fn composer_engaged(&self, window: &Window, cx: &zpui::App) -> bool {
         let input = self.input.read(cx);
         !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window)
     }
@@ -1475,7 +1475,7 @@ impl AgentView {
         cx.notify();
     }
 
-    fn render_attachments(&self, view: &Entity<Self>, cx: &gpui::App) -> Option<impl IntoElement> {
+    fn render_attachments(&self, view: &Entity<Self>, cx: &zpui::App) -> Option<impl IntoElement> {
         if self.attachments.is_empty() {
             return None;
         }
@@ -1518,7 +1518,7 @@ impl AgentView {
     fn render_empty_state(
         state: &AgentPaneState,
         view: EntityId,
-        cx: &mut gpui::App,
+        cx: &mut zpui::App,
     ) -> impl IntoElement {
         let agent = state
             .agent_name
@@ -1542,7 +1542,7 @@ impl AgentView {
         &self,
         state: &AgentPaneState,
         view: &Entity<Self>,
-        cx: &gpui::App,
+        cx: &zpui::App,
     ) -> Option<AnyElement> {
         let permission = self.permission_wizard.current(&state.pending_permissions)?;
         let counter = self
@@ -1646,7 +1646,7 @@ impl AgentView {
     fn render_queue_chip(
         &self,
         state: &AgentPaneState,
-        cx: &gpui::App,
+        cx: &zpui::App,
     ) -> Option<impl IntoElement> {
         let queued = state.queued_prompts;
         if queued == 0 {
@@ -1882,7 +1882,7 @@ impl AgentView {
         &self,
         state: &AgentPaneState,
         view: &Entity<Self>,
-        cx: &mut gpui::App,
+        cx: &mut zpui::App,
     ) -> Option<AnyElement> {
         let status = Self::pane_status(state)?;
         let phase = if matches!(status, AgentPaneStatus::Running | AgentPaneStatus::Stopping) {
@@ -1893,9 +1893,9 @@ impl AgentView {
         let restart = (status == AgentPaneStatus::Exited).then(|| {
             let controller = self.controller.clone();
             let pane = self.pane;
-            Rc::new(move |_: &mut Window, cx: &mut gpui::App| {
+            Rc::new(move |_: &mut Window, cx: &mut zpui::App| {
                 controller.update(cx, |controller, cx| controller.retry(pane, cx));
-            }) as Rc<dyn Fn(&mut Window, &mut gpui::App)>
+            }) as Rc<dyn Fn(&mut Window, &mut zpui::App)>
         });
         Some(
             agent_status_pill(("agent-status", self.pane.0), status, phase, restart, cx)
@@ -1922,7 +1922,7 @@ impl AgentView {
         &self,
         state: &AgentPaneState,
         view: &Entity<Self>,
-        cx: &mut gpui::App,
+        cx: &mut zpui::App,
     ) -> Option<impl IntoElement> {
         let phase = if state.tasks.is_empty() {
             0.0
@@ -1945,7 +1945,7 @@ impl AgentView {
         )
     }
 
-    fn render_error(&self, state: &AgentPaneState, cx: &gpui::App) -> Option<impl IntoElement> {
+    fn render_error(&self, state: &AgentPaneState, cx: &zpui::App) -> Option<impl IntoElement> {
         let runtime_error = state.error.clone();
         let error = runtime_error
             .clone()
@@ -2010,7 +2010,7 @@ impl AgentView {
         state: &AgentPaneState,
         view: Entity<Self>,
         window: &mut Window,
-        cx: &mut gpui::App,
+        cx: &mut zpui::App,
     ) -> AnyElement {
         let option = state
             .config_options
@@ -2072,7 +2072,7 @@ impl AgentView {
     /// The jump-to-bottom pill, floated over the timeline just above the
     /// composer: an absolute child, so showing it never resizes the scroll
     /// viewport and moves the very tail it is offering to reveal.
-    fn render_jump_to_end(&self, view: &Entity<Self>, cx: &gpui::App) -> impl IntoElement {
+    fn render_jump_to_end(&self, view: &Entity<Self>, cx: &zpui::App) -> impl IntoElement {
         let view = view.clone();
         div()
             .absolute()
@@ -2095,7 +2095,7 @@ impl AgentView {
         &self,
         state: &AgentPaneState,
         view: Entity<Self>,
-        cx: &gpui::App,
+        cx: &zpui::App,
     ) -> impl IntoElement {
         let ready =
             directory_picker_enabled(state.connection, !state.pending_permissions.is_empty());
@@ -2125,7 +2125,7 @@ impl AgentView {
         &self,
         state: &AgentPaneState,
         view: &Entity<Self>,
-        cx: &gpui::App,
+        cx: &zpui::App,
     ) -> impl IntoElement {
         let compact = self.history_compact;
         let layout_view = view.clone();
@@ -2441,7 +2441,7 @@ impl AgentView {
                             .min_h_0()
                             .min_w_0()
                             .items_stretch()
-                            .when(compact, gpui::Styled::flex_col)
+                            .when(compact, zpui::Styled::flex_col)
                             .on_prepaint(move |bounds, _, cx| {
                                 layout_view.update(cx, |view, cx| {
                                     let compact = bounds.size.width < px(560.0);
@@ -2537,7 +2537,7 @@ impl AgentView {
             )
     }
 
-    fn render_project_directories(&self, view: &Entity<Self>, cx: &gpui::App) -> impl IntoElement {
+    fn render_project_directories(&self, view: &Entity<Self>, cx: &zpui::App) -> impl IntoElement {
         let directories = self.project_rows.clone();
         let selected = self.project_directory.clone();
         let hovered = self.project_hovered.clone();
@@ -2640,10 +2640,10 @@ impl AgentView {
             .min_w_0()
             .min_h_0()
             .when(self.history_compact, |column| {
-                column.w_full().h(gpui::relative(0.35)).border_b_1()
+                column.w_full().h(zpui::relative(0.35)).border_b_1()
             })
             .when(!self.history_compact, |column| {
-                column.w(gpui::relative(0.36)).border_r_1()
+                column.w(zpui::relative(0.36)).border_r_1()
             })
             .border_color(cx.theme().border())
             .p(px(CHROME_GAP))
@@ -2672,7 +2672,7 @@ impl AgentView {
                         .when(catalog.limited, |note| {
                             note.child("Enter a full path for directories outside this scan.")
                         })
-                        .when_some(catalog.error.clone(), gpui::ParentElement::child),
+                        .when_some(catalog.error.clone(), zpui::ParentElement::child),
                 )
             })
     }
@@ -2729,7 +2729,7 @@ impl AgentView {
         icon: IconName,
         view: Entity<Self>,
         enabled: bool,
-    ) -> gpui::AnyElement {
+    ) -> zpui::AnyElement {
         let option_id = option.id.clone();
         agent_config_picker(
             format!("agent-config-picker-{}-{}", self.pane.0, option.id),
@@ -2764,7 +2764,7 @@ impl AgentView {
         state: &AgentPaneState,
         view: Entity<Self>,
         enabled: bool,
-    ) -> Option<gpui::AnyElement> {
+    ) -> Option<zpui::AnyElement> {
         if !state.config_options.is_empty() || state.modes.is_empty() {
             return None;
         }
@@ -2796,7 +2796,7 @@ impl AgentView {
         ))
     }
 
-    fn render_completions(&self, view: &Entity<Self>, cx: &gpui::App) -> Option<gpui::AnyElement> {
+    fn render_completions(&self, view: &Entity<Self>, cx: &zpui::App) -> Option<zpui::AnyElement> {
         if self.completions.is_empty() {
             return None;
         }
@@ -2861,7 +2861,7 @@ impl AgentView {
         state: &AgentPaneState,
         view: &Entity<Self>,
         window: &mut Window,
-        cx: &mut gpui::App,
+        cx: &mut zpui::App,
     ) -> impl IntoElement {
         let can_submit = state.connection.accepts_prompt() && !state.settings_busy;
         let action_kind = composer_action(
@@ -2960,7 +2960,7 @@ impl AgentView {
 }
 
 impl Focusable for AgentView {
-    fn focus_handle(&self, cx: &gpui::App) -> FocusHandle {
+    fn focus_handle(&self, cx: &zpui::App) -> FocusHandle {
         self.focus(cx)
     }
 }
@@ -3626,7 +3626,7 @@ mod completion_tests {
     use std::{cell::RefCell, rc::Rc};
 
     #[cfg(not(target_os = "macos"))]
-    use gpui::{TestAppContext, VisualTestContext};
+    use zpui::{TestAppContext, VisualTestContext};
     #[cfg(not(target_os = "macos"))]
     use zz_daemon::DaemonError;
     #[cfg(not(target_os = "macos"))]
@@ -3832,8 +3832,8 @@ mod completion_tests {
         assert_eq!(ranked_session_indices(&sessions, "needle"), vec![2]);
     }
 
-    #[gpui::test]
-    fn project_picker_renders_rows_and_adapts_to_pane_width(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn project_picker_renders_rows_and_adapts_to_pane_width(cx: &mut zpui::TestAppContext) {
         struct PickerTest {
             view: Entity<AgentView>,
             width: f32,
@@ -3959,7 +3959,7 @@ mod completion_tests {
         let directory = cx
             .debug_bounds("agent-project-row-1")
             .expect("second directory");
-        cx.simulate_mouse_move(directory.center(), None, gpui::Modifiers::default());
+        cx.simulate_mouse_move(directory.center(), None, zpui::Modifiers::default());
         cx.run_until_parked();
         assert_eq!(
             cx.update(|_, cx| view.read(cx).project_hovered.clone()),
@@ -3969,7 +3969,7 @@ mod completion_tests {
             cx.update(|_, cx| view.read(cx).project_directory.clone()),
             Some("/work/api".into())
         );
-        cx.simulate_click(directory.center(), gpui::Modifiers::default());
+        cx.simulate_click(directory.center(), zpui::Modifiers::default());
         assert_eq!(
             cx.update(|_, cx| view.read(cx).project_directory.clone()),
             Some("/work/web".into())
@@ -4083,7 +4083,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn non_append_timeline_rebuild_clears_retained_store(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
         let (view, cx) = cx.add_window_view(|window, cx| {
@@ -4188,7 +4188,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn arrow_actions_navigate_completions_before_the_multiline_input(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
         let view_slot = Rc::new(RefCell::new(None));
@@ -4402,7 +4402,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn a_question_card_answers_choices_and_typed_text_from_the_keyboard(cx: &mut TestAppContext) {
         let pane = PaneId(41);
         let (view, controller, sink, cx) = wired_view(cx, pane);
@@ -4448,7 +4448,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn one_plain_question_answers_on_its_digit_and_escape_dismisses(cx: &mut TestAppContext) {
         let pane = PaneId(42);
         let (_view, controller, sink, cx) = wired_view(cx, pane);
@@ -4492,7 +4492,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn the_task_tray_opens_and_stops_a_task(cx: &mut TestAppContext) {
         let pane = PaneId(43);
         let (view, controller, sink, cx) = wired_view(cx, pane);
@@ -4522,7 +4522,7 @@ mod completion_tests {
         let chip = cx
             .debug_bounds("agent-task-tray")
             .expect("the tray chip should be painted");
-        cx.simulate_click(chip.center(), gpui::Modifiers::none());
+        cx.simulate_click(chip.center(), zpui::Modifiers::none());
         cx.run_until_parked();
         cx.update(|window, cx| {
             _ = window.draw(cx);
@@ -4534,7 +4534,7 @@ mod completion_tests {
         let stop = cx
             .debug_bounds("agent-task-stop-0")
             .expect("an open tray lists the task");
-        cx.simulate_click(stop.center(), gpui::Modifiers::none());
+        cx.simulate_click(stop.center(), zpui::Modifiers::none());
         cx.run_until_parked();
 
         assert_eq!(
@@ -4549,7 +4549,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn subagent_steps_nest_from_the_controllers_parent_links(cx: &mut TestAppContext) {
         let pane = PaneId(44);
         let (view, controller, _sink, cx) = wired_view(cx, pane);
@@ -4678,7 +4678,7 @@ mod completion_tests {
         cx.update(|_, cx| {
             view.update(cx, |view, _| {
                 view.attachments.push(Arc::new(Image::from_bytes(
-                    gpui::ImageFormat::Png,
+                    zpui::ImageFormat::Png,
                     vec![0x89, b'P', b'N', b'G'],
                 )));
             });
@@ -4686,7 +4686,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn one_enter_answers_the_card_and_nothing_behind_it(cx: &mut TestAppContext) {
         let pane = PaneId(45);
         let (view, controller, sink, cx) = wired_view(cx, pane);
@@ -4742,7 +4742,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn the_enter_that_answers_a_card_keeps_the_attached_images(cx: &mut TestAppContext) {
         let pane = PaneId(48);
         let (view, controller, sink, cx) = wired_view(cx, pane);
@@ -4769,7 +4769,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn a_card_resolved_elsewhere_hands_the_keyboard_back(cx: &mut TestAppContext) {
         let pane = PaneId(46);
         let (view, controller, _sink, cx) = wired_view(cx, pane);
@@ -4807,7 +4807,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn a_step_that_arrives_before_its_agent_nests_once_the_agent_shows_up(cx: &mut TestAppContext) {
         let pane = PaneId(47);
         let (view, controller, _sink, cx) = wired_view(cx, pane);
@@ -4869,7 +4869,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn a_step_that_lands_in_the_same_batch_before_its_agent_still_nests(cx: &mut TestAppContext) {
         let pane = PaneId(49);
         let (view, controller, _sink, cx) = wired_view(cx, pane);
@@ -4986,11 +4986,11 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    fn hover_prompt(cx: &mut VisualTestContext) -> Option<gpui::Bounds<gpui::Pixels>> {
+    fn hover_prompt(cx: &mut VisualTestContext) -> Option<zpui::Bounds<zpui::Pixels>> {
         let bubble = cx
             .debug_bounds("agent-user-bubble")
             .expect("the prompt row is painted");
-        cx.simulate_mouse_move(bubble.center(), None, gpui::Modifiers::none());
+        cx.simulate_mouse_move(bubble.center(), None, zpui::Modifiers::none());
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
@@ -4998,14 +4998,14 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn rewind_to_here_sends_the_rows_id_the_way_the_composer_sends(cx: &mut TestAppContext) {
         let pane = PaneId(50);
         let (view, controller, sink, cx) = wired_view(cx, pane);
         ready_with_a_prompt(cx, &controller, pane, true, "fix the flaky test");
 
         let rewind = hover_prompt(cx).expect("an idle pane offers the rewind");
-        cx.simulate_click(rewind.center(), gpui::Modifiers::none());
+        cx.simulate_click(rewind.center(), zpui::Modifiers::none());
         cx.run_until_parked();
 
         assert_eq!(
@@ -5024,7 +5024,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn rewind_to_here_waits_for_the_turn_to_end(cx: &mut TestAppContext) {
         let pane = PaneId(51);
         let (_view, controller, sink, cx) = wired_view(cx, pane);
@@ -5051,7 +5051,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn a_slash_command_row_is_not_a_rewind_point(cx: &mut TestAppContext) {
         let pane = PaneId(52);
         let (_view, controller, _sink, cx) = wired_view(cx, pane);
@@ -5060,7 +5060,7 @@ mod completion_tests {
     }
 
     #[cfg(not(target_os = "macos"))]
-    #[gpui::test]
+    #[zpui::test]
     fn an_agent_without_zz_commands_offers_no_rewind(cx: &mut TestAppContext) {
         let pane = PaneId(53);
         let (_view, controller, _sink, cx) = wired_view(cx, pane);
@@ -5503,7 +5503,7 @@ mod tests {
 
     #[test]
     fn user_attachments_reach_the_timeline_without_a_second_copy() {
-        let image = Arc::new(Image::from_bytes(gpui::ImageFormat::Png, vec![0x89, 0x50]));
+        let image = Arc::new(Image::from_bytes(zpui::ImageFormat::Png, vec![0x89, 0x50]));
         let entries = ui_entries(&[AgentThreadEntry::User {
             id: 1,
             markdown: String::new(),
@@ -5517,7 +5517,7 @@ mod tests {
         assert_eq!(images.len(), 1);
         assert!(
             Arc::ptr_eq(&images[0], &image),
-            "the bytes should travel by handle, not by clone, so gpui decodes them once"
+            "the bytes should travel by handle, not by clone, so zpui decodes them once"
         );
     }
 }

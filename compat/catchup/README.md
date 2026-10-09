@@ -16,7 +16,7 @@ Work items, status, branches: `compat/catchup/ledger.json` through `ledger.py`.
 | `lane.md` | Lane brief template. The orchestrator fills `{ID}`, `{WT}`, `{BUDGET}`, `{EXTRA}`. |
 | `review.md`, `review.sh SLOT ID` | Codex quick review of a lane branch against main. |
 | `cargo.sh` | Every cargo call goes through this: memory cap, job count and two cargo slots sized from RAM. |
-| `wt.sh` | Lane worktrees `../zz-cu-<slot>` with a reflinked `target` and `compat/.cache`: `add`, `item`, `rm`, `list`, `prune`. |
+| `wt.sh` | Lane worktrees `../zz-cu-<slot>` with a reflinked `target` and `compat/.cache`: `add`, `item` (refreshes a stale tmux cache), `cache`, `rm`, `list`, `prune`. |
 
 ## Resuming (any machine)
 
@@ -98,8 +98,10 @@ Each rule cost a campaign real time. The source is in brackets
 2. **Iterate behind a filter**: `compat/catchup/cargo.sh test -p <crate> --lib <name>`. Run the full
    test package of each crate you touched once, before your final commit. Never
    `cargo test --workspace`. [A whole `zz-daemon` run per edit made every loop cost minutes.]
-3. **Clippy on touched crates before the final commit**:
-   `compat/catchup/cargo.sh clippy -p <crate> --all-targets --all-features -- -D warnings`.
+3. **Clippy and fmt before the final commit**:
+   `compat/catchup/cargo.sh clippy -p <crate> --all-targets --all-features -- -D warnings` on
+   touched crates, then `cargo fmt --all -- --check`. [Three merged lanes left unformatted files
+   on main, 2026-10-09.]
 4. **Harness: named scenarios only.** Build `zz_cli` through `cargo.sh` first, then
    `ZZ_COMPAT_ZZ=$PWD/target/debug/zz_cli ZZ_COMPAT_TMUX=$PWD/compat/.cache/tmux-src/tmux
    ZZ_COMPAT_CORPUS=$PWD/compat/.cache/plugins compat/run.sh --strict-geometry <scenario>...`.
@@ -132,7 +134,11 @@ Each rule cost a campaign real time. The source is in brackets
     clause says so or fabrico ruled on it. [Cycle 4 merged three lanes that verified nothing.]
 13. **Probes live in the repo** (tests or `compat/scenarios`), never only in `/tmp`, which is RAM
     and is lost on reboot. [A gate spent an hour rebuilding lost probes, LOG.]
-14. **Leave nothing running**: kill the daemons and fixtures you started; no binary copies in `/tmp`.
+14. **Leave nothing running, and never run `rm`.** Kill the daemons and fixtures you started. An
+    `rm` in a Bash call raises an approval prompt fabrico has to click, so lanes never delete: put
+    scratch files and binary copies under `target/catchup-scratch/` in your worktree (it goes away
+    with the worktree), and refresh a stale tmux cache with
+    `/home/demfabris/dev/zz/compat/catchup/wt.sh cache <slot>` (rsync, no `rm`). [2026-10-09.]
 15. **Stay in your worktree.** Start every Bash command with `cd <your worktree> &&` or use
     absolute paths; a `cd` inside a backgrounded subshell does not carry over. [fix.tui-colour ran a
     test batch in the shared main checkout this way, 2026-10-09.]
@@ -195,6 +201,15 @@ plus the ledger item as the prompt, from the lane's worktree. If Codex is out
 subagent instead and note it in the ledger. Killing the orchestrator leaves a running `codex` child;
 check `pgrep -af codex` on resume.
 
+## Paused 2026-10-09
+
+fabrico paused the campaign. Nothing is running. Merged: float.design, pin.move, fix.streams,
+fix.capture-links, pin.layout-v2, pin.formats-options, fix.small-semantics, pin.contract-breaks,
+fix.tui-colour, pin.tui-fixtures, pin.hooks-events. Each in-flight item's ledger notes end with a
+`PAUSED` line saying exactly what is left (review to rerun, checks to run, then merge). All lane
+branches are pushed to `origin/catchup/<id>`; worktrees `zz-cu-a`..`zz-cu-e` on alienware are
+clean. Resume with the steps above, starting from those PAUSED notes.
+
 ## Decisions
 
 - 2026-10-09 fabrico: build floating panes; move the pin to 3.8; `zz share` and desktop menu input
@@ -220,5 +235,17 @@ check `pgrep -af codex` on resume.
   (model, commands, zoom/focus, daemon and display-popup, wire, formats/registry), each step its
   own commit; a relaunch continues from the branch and the last session's report. It is reviewed
   once all six steps are in.
+- 2026-10-09 orchestrator: terminal.zoom-reflow (libghostty and tmux re-wrap history differently on
+  a width change, seen through display-panes' zoom) is an engine limit under fabrico's 2026-09-18
+  no-engine-patch ruling: recorded native, not chased.
+- 2026-10-09 orchestrator: menus stay per-client overlays (`menus.client-owned`, native) rather than
+  3.8's window-owned menus; 3.8's window-relative placement is adopted. Same reasoning as
+  fabrico's copy-mode-per-client ruling (TUI-014): zz's clients keep independent views.
+- 2026-10-09 orchestrator: the float track merges to main as one unit. float.core alone would make
+  popups invisible (clients draw floats in float.clients) and remove popup dragging (float.keys), so
+  float.clients branches from catchup/float.core, float.keys from float.clients, and main gets all
+  three together after their reviews. display-popup follows upstream master's modal-pane model per
+  fabrico's ruling, so the smoke scenarios that compare 3.8's per-client popup are registered as
+  known differences, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

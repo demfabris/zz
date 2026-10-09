@@ -187,7 +187,7 @@ the live version is the `PROTOCOL_VERSION` constant in `crates/zz-protocol/src/m
 | `crates/zz-ui/src/command/palette_view.rs` | `CommandPaletteView` and `PaletteBackend`: input, suggestion selection, pointer dismissal, prompt and chooser synchronization for every client |
 | `crates/zz-ui/src/command/palette_model.rs` | Host-agnostic navigation tree, search modes, result grouping, target selection, and fuzzy matching |
 | `crates/zz/src/command/palette.rs` | Desktop `PaletteBackend`: multi-host tree, config-driven settings, and mux activation |
-| `clients/gpui-shared/src/command_palette.rs` | Web and iOS `PaletteBackend`: single-host tree, client preferences, and connection commands |
+| `clients/app/src/command_palette.rs` | Web and iOS `PaletteBackend`: single-host tree, client preferences, and connection commands |
 | `crates/zz-ui/src/command.rs` | Shared input, completion rows, badges, shortcut hints, and floating palette surface |
 | `crates/zz-ui/src/command/palette.rs` | Shared tree disclosure, icon, row, pill, section, highlight, and status presentation |
 | `crates/zz-client/src/completion.rs` | Tokenizes and ranks catalog, option, enum, and live-target completions against the current `MuxSnapshot` |

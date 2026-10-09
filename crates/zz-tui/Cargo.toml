@@ -16,11 +16,11 @@ log.workspace = true
 miniz_oxide = "0.9.1"
 rustix = { workspace = true, features = ["fs"] }
 signal-hook-registry = "1.4.8"
-unicode-width = "0.2.2"
-zz-daemon = { path = "../zz-daemon", default-features = false }
-zz-protocol = { path = "../zz-protocol" }
-zz-client = { path = "../zz-client" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+unicode-width.workspace = true
+zz-daemon.workspace = true
+zz-protocol.workspace = true
+zz-client.workspace = true
+zz-terminal.workspace = true
 
 [lints]
 workspace = true

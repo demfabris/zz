@@ -1,4 +1,4 @@
-use gpui::{App, Keystroke, Modifiers};
+use zpui::{App, Keystroke, Modifiers};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StickyModifier {
@@ -12,7 +12,7 @@ pub struct StickyModifiers {
     pub alt: bool,
 }
 
-impl gpui::Global for StickyModifiers {}
+impl zpui::Global for StickyModifiers {}
 
 impl StickyModifiers {
     pub fn get(cx: &App) -> Self {
@@ -64,11 +64,11 @@ impl StickyModifiers {
 
 #[cfg(test)]
 mod tests {
-    use gpui::TestAppContext;
+    use zpui::TestAppContext;
 
     use super::*;
 
-    #[gpui::test]
+    #[zpui::test]
     fn toggle_latches_and_unlatches(cx: &mut TestAppContext) {
         cx.update(|cx| {
             assert!(StickyModifiers::get(cx).is_empty());
@@ -92,7 +92,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn take_reads_and_clears(cx: &mut TestAppContext) {
         cx.update(|cx| {
             assert!(StickyModifiers::take(cx).is_empty());
@@ -105,7 +105,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn apply_merges_the_latch_once(cx: &mut TestAppContext) {
         cx.update(|cx| {
             let plain = Keystroke::parse("c").unwrap();

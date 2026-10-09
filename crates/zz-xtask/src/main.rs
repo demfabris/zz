@@ -75,7 +75,7 @@ const WINDOWS_BOOTSTRAP_NAME: &str = "bootstrap.exe";
 #[cfg(target_os = "windows")]
 const WINDOWS_ICON_SOURCE: &str = "assets/windows/zz.ico";
 /// The icon group id `LoadImage(module, MAKEINTRESOURCE(1), IMAGE_ICON, ..)`
-/// resolves, which is how gpui asks the executable for its window icon.
+/// resolves, which is how zpui asks the executable for its window icon.
 #[cfg(target_os = "windows")]
 const WINDOWS_MAIN_ICON_ID: u32 = 1;
 /// The name `editpe` files a new icon group under.
@@ -83,7 +83,7 @@ const WINDOWS_MAIN_ICON_ID: u32 = 1;
 const WINDOWS_EDITPE_ICON_GROUP: &str = "MAINICON";
 #[cfg(target_os = "windows")]
 const WINDOWS_DPI_AWARENESS: &str = "PerMonitorV2";
-/// CEF's manifest plus the per-monitor DPI declaration gpui needs.
+/// CEF's manifest plus the per-monitor DPI declaration zpui needs.
 #[cfg(target_os = "windows")]
 const WINDOWS_APP_MANIFEST: &str = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
@@ -410,7 +410,7 @@ fn build_linux_binaries(release: bool, features: Option<&str>) -> Result<PathBuf
 fn build_windows_library(release: bool, features: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
     println!("Building {APP_NAME}.dll...");
     let mut command = cargo_command();
-    command.arg("build");
+    command.arg("rustc");
     if release {
         command.arg("--release");
     }
@@ -423,6 +423,8 @@ fn build_windows_library(release: bool, features: Option<&str>) -> Result<PathBu
             "--package",
             APP_NAME,
             "--lib",
+            "--crate-type",
+            "cdylib",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());

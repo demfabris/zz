@@ -16,7 +16,7 @@ timestamp: 2026-09-22T18:00:00Z
 
 `clients/web` compiles the shared GPUI components from `zz-ui` and the state reducer from
 `zz-client` to WebAssembly. The app shell, navigation, settings, palette, overlays, pane entities, connection reducer,
-and image caches in `clients/gpui-shared/src` also compile into the native iOS GPUI app. `zz-web` serves the page and forwards the existing binary protocol
+and image caches in `clients/app/src` also compile into the native iOS GPUI app. `zz-web` serves the page and forwards the existing binary protocol
 between each browser WebSocket and one daemon connection. The daemon owns sessions, PTYs,
 key bindings, copy mode, and Agent processes.
 
@@ -175,20 +175,20 @@ reject foreign origins, invalid frames, and asset paths outside the served direc
 # Source
 
 - `clients/web/src/lib.rs`: GPUI initialization, portable fonts, and browser entrypoint.
-- `clients/gpui-shared/src/connection.rs`: protocol reduction, bounded receive queue, reconnect, and replay.
-- `clients/gpui-shared/src/terminal.rs`: browser terminal input, selection, search, and shared-renderer adapter.
-- `clients/gpui-shared/src/terminal_images.rs`: bounded Kitty and pasted-image transfer assembly and image retirement.
+- `clients/app/src/connection.rs`: protocol reduction, bounded receive queue, reconnect, and replay.
+- `clients/app/src/terminal.rs`: browser terminal input, selection, search, and shared-renderer adapter.
+- `clients/app/src/terminal_images.rs`: bounded Kitty and pasted-image transfer assembly and image retirement.
 - `crates/zz-ui/src/terminal.rs`: shared terminal painting, metrics, scrollbars, cursor, and image placement.
-- `clients/gpui-shared/src/app.rs`: workspace, navigation, and daemon overlays.
-- `clients/gpui-shared/src/command_palette.rs`: the web/iOS `PaletteBackend` for zz-ui's shared `CommandPaletteView`.
-- `clients/gpui-shared/src/floating.rs`: daemon menu and confirmation interaction over shared floating surfaces.
+- `clients/app/src/app.rs`: workspace, navigation, and daemon overlays.
+- `clients/app/src/command_palette.rs`: the web/iOS `PaletteBackend` for zz-ui's shared `CommandPaletteView`.
+- `clients/app/src/app/floating.rs`: daemon menu and confirmation interaction over shared floating surfaces.
 - `crates/zz-ui/src/command/`: shared palette, menu, confirmation, and frame presentation.
 - `crates/zz-client/src/completion.rs`: shared command, option, history, and live-target completion.
-- `clients/gpui-shared/src/agent_pane.rs`: Agent timeline, composer, and conversation history.
-- `clients/gpui-shared/src/settings.rs`: supported settings pages and shared previews.
-- `clients/gpui-shared/src/preferences.rs`: local preference persistence and migration.
-- `clients/gpui-shared/src/sidebar.rs`: session tree, keyboard focus, disclosure controls, and row actions.
-- `clients/gpui-shared/src/status_bar.rs`: live status model and command callbacks for the shared strip.
+- `clients/app/src/app/agent_pane.rs`: Agent timeline, composer, and conversation history.
+- `clients/app/src/app/settings.rs`: supported settings pages and shared previews.
+- `clients/app/src/preferences.rs`: local preference persistence and migration.
+- `clients/app/src/app/sidebar.rs`: session tree, keyboard focus, disclosure controls, and row actions.
+- `clients/app/src/app/status_bar.rs`: live status model and command callbacks for the shared strip.
 - `crates/zz-ui/src/navigation/status.rs`: shared window tabs, overflow, session chip, and status items.
 - `crates/zz-ui/src/navigation/sidebar.rs`: shared tree markers, menus, action strips, and keyboard navigation.
 - `crates/zz-client/src/navigation.rs`: shared tree labels, layout order, and rename command construction.
@@ -196,12 +196,12 @@ reject foreign origins, invalid frames, and asset paths outside the served direc
 - `crates/zz-client/src/pane_separator.rs`: active pane separator spans for desktop and thin clients.
 - `crates/zz-client/src/agent_completion.rs`: shared provider command matching, query replacement, and hints.
 - `crates/zz-ui/src/agent/slash.rs`: shared Agent command suggestion rows and list.
-- `clients/gpui-shared/src/picker.rs`: pane-picker interaction over shared desktop rows.
+- `clients/app/src/app/picker.rs`: pane-picker interaction over shared desktop rows.
 - `crates/zz-ui/src/chrome_palette.rs`: shared presets and palette resolution.
 - `crates/zz-ui/src/picker.rs`: shared history and path picker layout and rows.
 - `crates/zz-ui/src/agent/controls.rs`: shared composer actions, option menus, Git counts, and context usage.
 - `crates/zz-ui/src/agent/presentation.rs`: shared permission, error, and empty-state cards.
-- `clients/gpui-shared/src/attachments.rs`: browser image selection and protocol limits.
+- `clients/app/src/attachments.rs`: browser image selection and protocol limits.
 - `crates/zz-web/src/lib.rs`: `Gateway`, asset serving, and the binary WebSocket bridge.
 - `scripts/build-web-wasm.sh`: build and static distribution assembly.
 

@@ -53,7 +53,7 @@ hides the outer shadow that cannot share that mask.
 | Shadow blur radius | 6 logical pixels |
 | Window corner smoothing | p-norm exponent 4 |
 
-The [GPUI revision reference](/references/gpui-revision.md) owns the fork pin and
+The [GPUI revision reference](/references/zpui.md) owns the fork pin and
 carried-patch history. Read the live manifests and branch before relying on the
 revision in this dated report.
 
@@ -83,7 +83,7 @@ GPUI uses richer geometry:
 1. `WindowCornerMask` in `crates/gpui/src/scene.rs` carries scaled floating-point
    bounds, four radii, and a corner-smoothing exponent.
 2. The WGPU renderer uploads those values without reducing them to surface cells.
-3. `window_mask_alpha` in `crates/gpui_wgpu/src/shaders.wgsl` evaluates a p-norm
+3. `window_mask_alpha` in `crates/zpui_wgpu/src/shaders.wgsl` evaluates a p-norm
    signed-distance curve and returns fractional coverage across one device pixel.
 4. Blurred shadows use a Gaussian path with circular source corners. They skip the
    scene-wide window mask by design.

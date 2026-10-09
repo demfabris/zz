@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{App, Entity, KeyBinding};
+use zpui::{App, Entity, KeyBinding};
 use zz_protocol::{ClientMessageKind, CommandInvocation};
 use zz_ui::ROOT_KEY_CONTEXT;
 
@@ -44,7 +44,7 @@ pub fn start_app_state_sampler(
     .detach();
 }
 
-gpui::actions!(zz, [DebugMark]);
+zpui::actions!(zz, [DebugMark]);
 
 #[cfg(any(target_os = "macos", target_os = "ios"))]
 const DEBUG_MARK_KEYSTROKE: &str = "cmd-shift-m";

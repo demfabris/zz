@@ -24,15 +24,15 @@ flow that consumes CMake/Ninja.
 | --- | --- | --- | --- |
 | just | `1.52` or newer | `scripts/just/settings.just` (`default-list`), `Justfile` (`mod`) | Lists command groups and runs their recipes |
 | Rust | `1.97.0`, minimal profile, `clippy` + `rustfmt` components | `rust-toolchain.toml`; `workspace.package.rust-version = "1.97"` in `Cargo.toml` | Toolchain auto-selected by `rustup` when present |
-| Zig | `0.16.0` | `mise.toml`, mirrored in `.zigversion`; `mlugg/setup-zig@v2.2.1` with `version: 0.16.0` in CI | Builds `libghostty-vt` with the local sys crate and a native fork removing unused C-host signal-stack storage |
+| Zig | `0.16.0` | `mise.toml`, mirrored in `.zigversion`; `mlugg/setup-zig@v2.2.1` with `version: 0.16.0` in CI | Builds `libghostty-vt` from the vendored Ghostty in `third_party/ghostty`, whose zz commits include removing unused C-host signal-stack storage |
 | CMake | `3.21` or newer | `cmake_minimum_required(VERSION 3.21)` in the CEF distribution's own `CMakeLists.txt`; `cmake` in the CI apt list | Configures the CEF C++ wrapper build invoked by `xtask`/`cef::build_util` |
 | Ninja | any recent | `ninja-build` in the CI apt list | Build backend for the CEF C++ wrapper |
-| Linux system libs | see the apt line below | CI `apt-get install` list | Font discovery plus GPUI's dual Wayland/X11 backend (`gpui_platform` features `["wayland", "x11"]`) |
+| Linux system libs | see the apt line below | CI `apt-get install` list | Font discovery plus GPUI's dual Wayland/X11 backend (`zpui_platform` features `["wayland", "x11"]`) |
 | Linux kernel | unprivileged user namespaces enabled | `cef_runtime.rs` appends only `disable-setuid-sandbox` | Chromium's user-namespace sandbox stays on; only the legacy setuid layer is disabled, and zz never passes `--no-sandbox` |
 | Ubuntu 24.04+ | an AppArmor profile granting `userns` for the launched executable, or `kernel.apparmor_restrict_unprivileged_userns=0` | `packaging/deb/zz.apparmor`, installed as `/etc/apparmor.d/zz` | The distribution denies unprivileged user namespaces to unprofiled binaries, which kills the browser panes' zygote; the `.deb` carries a profile, an AppImage or dev bundle needs one written for its own path |
 | AppImage packaging | `appimagetool` `1.9.1` + type-2 runtime `20251108`, with per-architecture SHA-256 checksums verified at download | `scripts/fetch-appimage-tools.sh` (`APPIMAGETOOL_VERSION`, `APPIMAGE_RUNTIME_VERSION`, the four `*_SHA256` values). CI only runs that script | Converts the validated Linux AppDir into a pinned-runtime type-2 AppImage; `desktop-file-utils` validates its desktop entry |
 | Arch packaging | `makepkg` + Pacman; `base-devel` is the normal package-building prerequisite | `packaging/arch/PKGBUILD`, `Justfile` | Converts the validated Linux CEF bundle into a dependency-declared native package and optionally installs it |
-| macOS | Xcode, plus the Metal Toolchain component on Xcode versions that ship it separately (`xcodebuild -downloadComponent MetalToolchain`) | `gpui_macos`'s build script shells out to `xcrun metal`/`metallib` | C/C++ toolchain for the CEF wrapper, and GPUI compiles its Metal shaders at build time |
+| macOS | Xcode, plus the Metal Toolchain component on Xcode versions that ship it separately (`xcodebuild -downloadComponent MetalToolchain`) | `zpui_macos`'s build script shells out to `xcrun metal`/`metallib` | C/C++ toolchain for the CEF wrapper, and GPUI compiles its Metal shaders at build time |
 | macOS packaging | system `ditto`, `hdiutil`, and `codesign` | Xcode/macOS command-line tools | Preserves the app bundle, creates/verifies the DMG, and re-checks the mounted app signature |
 | Windows | MSVC Rust toolchain + Visual Studio C++ build tools | CI runs the `windows-2025` image | C/C++ toolchain for the CEF wrapper; produces `zz.exe`/`zz.dll` (see [xtask](/crates/zz-xtask.md)) |
 
@@ -79,8 +79,8 @@ components = ["clippy", "rustfmt"]
 | `rust-toolchain.toml` | Pins the Rust channel and required components |
 | `mise.toml` | Selects Zig 0.16.0 for raw local Cargo commands when mise is active |
 | `.zigversion` | Mirrors the Zig pin for compatible Zig-specific tooling |
-| `Cargo.toml` | `workspace.package.rust-version = "1.97"`; `libghostty-vt` pinned to a `Uzaaft/libghostty-rs` commit (fetched from the `demfabris/libghostty-rs` fork) plus the local `libghostty-vt-sys` patch |
-| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, Ghostty `e482b036` fork pin (`zz-2026-10-04`) and upstream base, its eight commits (signal stack, spare pages, history-erase trim, copy snapshots, used-size active page copies, row cell copies, render state clip, trimmed row copies), generated bindings, and removal condition |
+| `Cargo.toml` | `workspace.package.rust-version = "1.97"`; `libghostty-vt` as a path dependency on the vendored wrapper in `third_party/rust/libghostty-vt`, which uses the adjacent `libghostty-vt-sys` snapshot |
+| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, the vendored Ghostty's upstream base and the former `e482b036` fork pin (`zz-2026-10-04`), its eight commits (signal stack, spare pages, history-erase trim, copy snapshots, used-size active page copies, row cell copies, render state clip, trimmed row copies), generated bindings, and removal condition |
 | `.github/workflows/ci.yml` | Authoritative list of Linux system packages and the Zig setup action, run across `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `packaging/arch/PKGBUILD` | Native Arch package metadata and filesystem layout for the validated Linux bundle |
 

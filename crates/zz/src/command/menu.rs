@@ -1,6 +1,6 @@
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{
+use zpui::{
     App, Bounds, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Render, ScrollWheelEvent, Window,
     div, prelude::*, px,
@@ -267,7 +267,7 @@ fn resolve_keystroke(
 
 #[cfg(test)]
 mod tests {
-    use gpui::Modifiers;
+    use zpui::Modifiers;
     use zz_protocol::{MenuItem, PopupBorderLines};
 
     use super::*;

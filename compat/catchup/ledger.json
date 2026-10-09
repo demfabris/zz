@@ -45,7 +45,7 @@
       "id": "fix.tui-regressions",
       "track": "fix",
       "title": "Regressions the 3.8 fixture rebaseline found on main",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-tui/src",
@@ -69,7 +69,10 @@
         "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello",
         "2026-10-09: TUI-009 extended-keys rows pass on catchup/fix.tui-colour (set -s extended-keys now published to the TUI); clause 2 closes when fix.tui-colour merges.",
         "2026-10-09: fix.tui-colour merged (8c952fd16); clause 2 (TUI-009 extended keys) should now pass on main: confirm with tui-caps and drop its 4 TUI-009 records when pin.tui-fixtures lands.",
-        "2026-10-09: pin.tui-fixtures merged: TUI-009's 4 tui-caps records are closed on main (clause 2 done by fix.tui-colour); TUI-014's 4 tui-client-commands records remain and must be deleted when clause 1 lands."
+        "2026-10-09: pin.tui-fixtures merged: TUI-009's 4 tui-caps records are closed on main (clause 2 done by fix.tui-colour); TUI-014's 4 tui-client-commands records remain and must be deleted when clause 1 lands.",
+        "2026-10-09 from pin.display-panes: one manual repro (outer tmux status bar on at attach) left the zz window at 78x23 for an 80x24 client after two resize-pane -Z; likely the same bug as TUI-014.",
+        "2026-10-09: lane done at 5e9ab7774: clauses 1,3,4,5,6 fixed (TUI-014 from 095151f19/d9a36e312 stale size write-back; TUI-018 from e43308848; TUI-005 fixture timing; TUI-012 fixture wrong; chain attach bug found via launch-diff); integration pass merging main + fixing zz-cli test broken by 82dca06a9",
+        "PAUSED 2026-10-09: integration done at aad92d4b7 (all fixtures, verify-claims TUI-014/TUI-003, zz-daemon/zz-cli, clippy, fmt, compat check green); needs its Codex review, then merge."
       ]
     },
     {
@@ -412,7 +415,7 @@
       "id": "pin.display-panes",
       "track": "pin",
       "title": "display-panes as a pane mode",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -429,17 +432,21 @@
         "-b removed; -k, -Z and -s source-window accepted; -t is a target pane (1a02c995).",
         "display-panes-active-colour, -colour, -format and -time are window options; display-panes-border-style exists.",
         "Raw TUI matches the pin's mode screen; desktop keeps its native overlay.",
-        "compat/attached-client.sh passes at 3.8: today it stops tmux-side in probe_display_panes_target_no_select ('can't find pane: missing', display-panes -t is a pane now), so the probes after it (probe_requested_client_flags and others) never run. This fixture restamps CI's summary at milestones."
+        "compat/attached-client.sh gets past every display-panes probe at 3.8 (probe_display_panes_target_no_select and later display-panes probes); its full PASS is owned by pin.hooks-events-2, where the fixture stops next (probe_client_event_hooks)."
       ],
       "branch": "catchup/pin.display-panes",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at 123fd791c: all 11 items closed; tui-overlays mode screen asserted; terminal.zoom-reflow ruled an engine limit (native) by the orchestrator under the no-engine-patch ruling; integration merge sent",
+        "2026-10-09: codex review 1: 4 P1 + 5 P2 (template lost when -k host chosen, desktop routing by invoking client, -k dropped on desktop, wrong window unzoomed, ...); fix pass sent; full attached-client PASS moved to pin.hooks-events-2",
+        "PAUSED 2026-10-09: fix pass 9a9628914 done (9 findings); second Codex review was stopped before it reported: rerun review.sh a pin.display-panes, then merge."
+      ]
     },
     {
       "id": "pin.hooks-events",
       "track": "pin",
       "title": "3.8 hooks, event payloads, set-hook -E/-T, wait-for -E/-v/-l/-w/-F",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -457,10 +464,12 @@
         "set-hook -E fires a user event; set-hook -T gates a -B monitor; wait-for -E -v -l -w -F behave as 3.8."
       ],
       "branch": "catchup/pin.hooks-events",
-      "sha": null,
+      "sha": "7b8277c51",
       "notes": [
         "2026-10-09 from pin.contract-breaks: scenarios failing at 3.8 that look like this item's: daemon-command-item-format (#{command} inside an after-hook is set-buffer on 3.8), source-file-current-file (@cf-hook), smoke/args-parse-set-hook and smoke/config-chain-parse-abort (tmux-side only); show-options-hooks also diverges on display-panes options (pin.display-panes) and after-queue.",
-        "2026-10-09: lane done at aa3119b71: 25/30 closed; session-group hooks filed under sessions.linked-groups (never), accepted; leftovers in pin.hooks-events-2"
+        "2026-10-09: lane done at aa3119b71: 25/30 closed; session-group hooks filed under sessions.linked-groups (never), accepted; leftovers in pin.hooks-events-2",
+        "2026-10-09: codex review 2: 5 P1 (marks lost at exit, customize Quit, hook_client, ZoomCycled layout hooks, client-created origin pane); final fix pass sent, merges without a third review",
+        "2026-10-09: 2 reviews + final fix; merged; fmt fix c90ddb99a; clippy, zz-daemon lib, just compat check green on main"
       ]
     },
     {
@@ -486,7 +495,8 @@
         "The 12 missing hook_* payload keys resolve (pane-exited exit keys, old_session/new_session and _name forms, pane_command, pane_current_path, prompt_type, group/group_size where zz has the fact; group keys register native with sessions.linked-groups).",
         "after-select-pane is skipped when the target pane is already active, as 3.8.",
         "set-hook -E @x runs nothing when @x was set with set-option rather than set-hook, as 3.8 (zz needs to remember how a user hook was set).",
-        "The pin.hooks-events gap closes."
+        "The pin.hooks-events gap closes.",
+        "compat/attached-client.sh's probe_client_event_hooks passes at 3.8: client-active fills #{hook_session} and #{hook_session_name} (3.8 prints |$0|attached,)."
       ],
       "branch": null,
       "sha": null,
@@ -565,7 +575,7 @@
       "id": "pin.keys-copy",
       "track": "pin",
       "title": "3.8 default keys, menus and copy-mode commands",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -585,7 +595,10 @@
       ],
       "branch": "catchup/pin.keys-copy",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at dca3b35a0: 10/11 closed; menus stay per-client (menus.client-owned, native) with 3.8's window-relative placement adopted; accepted by orchestrator (consistent with copy mode per client, TUI-014). Left: goto-line absolute numbering with line numbers on; GUI line numbers native.",
+        "PAUSED 2026-10-09: fix pass 8eafea12a + merge of main cb3b3f244 committed; the post-merge checks (smoke/copy-mode-line-numbers vs 3.8, tui-overlays/tui-mouse --self-check, tui-copy-mode, zz-daemon lib, clippy, fmt, just compat check) did not run: run them, then a second review, then merge."
+      ]
     },
     {
       "id": "float.design",
@@ -619,7 +632,7 @@
       "id": "float.core",
       "track": "float",
       "title": "Floating panes in the mux and daemon",
-      "status": "active",
+      "status": "review",
       "deps": [
         "float.design",
         "pin.layout-v2",
@@ -656,14 +669,16 @@
       "sha": null,
       "notes": [
         "2026-10-09: pin.move moved semantic:move-pane-tiled-extension into adopted pane.floating-model; decide whether it closes or goes back to native.",
-        "2026-10-09: session 1 at b4d83d69a: step 1 done, step 2 half (floating-panes scenario 75 steps clean vs 3.8; 21 pane.floating-model items closed). Resume: resize-pane on floats, swap-pane modal/float errors and -U/-D skipping floats, missing scenario lines, directional select-pane/compass hit order for floats, then steps 3-6"
+        "2026-10-09: session 1 at b4d83d69a: step 1 done, step 2 half (floating-panes scenario 75 steps clean vs 3.8; 21 pane.floating-model items closed). Resume: resize-pane on floats, swap-pane modal/float errors and -U/-D skipping floats, missing scenario lines, directional select-pane/compass hit order for floats, then steps 3-6",
+        "2026-10-09: session 2 done at df33a71e8: steps A-E committed; floating-panes 154 + floating-zoom 55 steps clean vs 3.8; popup machinery deleted; wire appends under 108. Left: popup kill exit code 129, remain-on-exit timing, resize-pane -y border-status adjustment; 9 display-popup smoke scenarios now differ from 3.8 by the master-model ruling (to register as known differentials).",
+        "PAUSED 2026-10-09: first Codex review was stopped before it reported: rerun review.sh c float.core. Also open: register the 9 display-popup smoke scenarios as known differences (master modal-pane model), popup kill exit code 129, remain-on-exit timing at spawn, resize-pane -y border-status adjustment."
       ]
     },
     {
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "float.core"
       ],
@@ -688,9 +703,12 @@
         "A zz-client test shows a focused modal with capture_keys sends the prefix key to the pane.",
         "rg 'PopupState|PopupAction|EventPayload::Popup' finds nothing under crates/zz, crates/zz-tui, crates/zz-client or clients/."
       ],
-      "branch": null,
+      "branch": "catchup/float.clients",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: branches from catchup/float.core (not main): float.core alone on main would make popups invisible. The float track merges to main as one unit (core + clients + keys).",
+        "PAUSED 2026-10-09: branch catchup/float.clients created from catchup/float.core in slot b; no lane launched yet."
+      ]
     },
     {
       "id": "float.keys",
@@ -725,7 +743,9 @@
       ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: float.core deleted PopupPointerState; build drag on MouseKey.press (on the wire, ignored by the daemon until this item). Branch from the float.clients branch tip."
+      ]
     },
     {
       "id": "later.share",

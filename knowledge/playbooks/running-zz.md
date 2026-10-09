@@ -119,7 +119,7 @@ The other development recipes share this identity:
 `just ios run [iPhone|iPad]` runs the GPUI iOS client in a simulator with its own app identity.
 It attaches to the throwaway daemon from `just ios rig` when that is up, then to an existing dev
 socket, or to `ZZ_GPUI_ENDPOINT` / `ZZ_DEV_SOCKET`; `just ios device` installs it on a paired
-phone. See `clients/ios-gpui/README.md`.
+phone. See `clients/ios/README.md`.
 
 `just build` and package installation keep their existing identity and destinations. Brew/AUR
 beta selection is independent of development isolation. Plain Cargo builds do not enable the

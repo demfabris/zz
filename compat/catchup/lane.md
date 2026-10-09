@@ -16,6 +16,9 @@ record it.
 
 Budget: {BUDGET} minutes of work. When it runs out, commit what works, and report what is left.
 
+Never run `rm` (it raises an approval prompt): scratch goes under `target/catchup-scratch/` in your
+worktree; a stale tmux cache is refreshed with `compat/catchup/wt.sh cache <slot>`.
+
 Finish with one commit (or a few coherent ones) on catchup/{ID}. Do not merge, push, stash, or touch
 other worktrees. Your final message is the report the orchestrator reads:
 - what changed (files, one line each)

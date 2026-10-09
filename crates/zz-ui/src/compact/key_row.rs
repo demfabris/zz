@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui::{
+use zpui::{
     AnyElement, App, Div, ElementId, Entity, IntoElement, Keystroke, Modifiers, MouseButton,
     ParentElement as _, RenderOnce, ScrollHandle, SharedString, Stateful, Styled, Window, div,
     prelude::*,
@@ -313,14 +313,14 @@ impl RenderOnce for KeyRow {
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
-    use gpui::{Context, Render, TestAppContext, VisualTestContext};
+    use zpui::{Context, Render, TestAppContext, VisualTestContext};
 
     use super::*;
 
     struct Host {
         keys: ToolKeys,
         sent: Rc<RefCell<Vec<String>>>,
-        width: Option<gpui::Pixels>,
+        width: Option<zpui::Pixels>,
     }
 
     impl Render for Host {
@@ -353,14 +353,14 @@ mod tests {
         });
     }
 
-    fn host(cx: &mut TestAppContext) -> (gpui::Entity<Host>, &mut VisualTestContext) {
+    fn host(cx: &mut TestAppContext) -> (zpui::Entity<Host>, &mut VisualTestContext) {
         host_with_width(cx, None)
     }
 
     fn host_with_width(
         cx: &mut TestAppContext,
-        width: Option<gpui::Pixels>,
-    ) -> (gpui::Entity<Host>, &mut VisualTestContext) {
+        width: Option<zpui::Pixels>,
+    ) -> (zpui::Entity<Host>, &mut VisualTestContext) {
         cx.update(crate::init);
         let (host, cx) = cx.add_window_view(move |_, cx| Host {
             keys: ToolKeys::new(vec![PopoverKeyItem::new("new-pane", "New pane")], None, cx),
@@ -377,7 +377,7 @@ mod tests {
         redraw(cx);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn keys_send_through_the_sticky_latch(cx: &mut TestAppContext) {
         let (host, cx) = host(cx);
         assert!(cx.debug_bounds("arrow-pad").is_some());
@@ -396,20 +396,20 @@ mod tests {
         assert!(cx.debug_bounds("popover-key-item-new-pane").is_some());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn keys_take_taps_off_the_cap(cx: &mut TestAppContext) {
         let (host, cx) = host(cx);
         let row = cx.debug_bounds("key-row").expect("row");
         let esc = cx.debug_bounds("key-row-key-4").expect("esc");
-        assert_eq!(row.size.height, gpui::px(KEY_ROW_HEIGHT));
-        assert_eq!(esc.size.height, gpui::px(KEY_HEIGHT));
+        assert_eq!(row.size.height, zpui::px(KEY_ROW_HEIGHT));
+        assert_eq!(esc.size.height, zpui::px(KEY_HEIGHT));
         for at in [
-            gpui::point(esc.center().x, row.top() + gpui::px(1.0)),
-            gpui::point(esc.center().x, row.bottom() - gpui::px(1.0)),
-            gpui::point(esc.right() + gpui::px(KEY_SLOP.0 - 0.5), esc.center().y),
-            gpui::point(
-                esc.left() - gpui::px(KEY_SLOP.0 - 0.5),
-                row.top() + gpui::px(1.0),
+            zpui::point(esc.center().x, row.top() + zpui::px(1.0)),
+            zpui::point(esc.center().x, row.bottom() - zpui::px(1.0)),
+            zpui::point(esc.right() + zpui::px(KEY_SLOP.0 - 0.5), esc.center().y),
+            zpui::point(
+                esc.left() - zpui::px(KEY_SLOP.0 - 0.5),
+                row.top() + zpui::px(1.0),
             ),
         ] {
             cx.simulate_click(at, Modifiers::none());
@@ -419,9 +419,9 @@ mod tests {
         assert_eq!(sent, ["escape", "escape", "escape", "escape"]);
 
         let ctrl = cx.debug_bounds("popover-key-ctrl").expect("ctrl");
-        let above = gpui::point(ctrl.center().x, row.top() + gpui::px(1.0));
-        for phase in [gpui::TouchPhase::Started, gpui::TouchPhase::Ended] {
-            cx.simulate_event(gpui::TouchDragEvent {
+        let above = zpui::point(ctrl.center().x, row.top() + zpui::px(1.0));
+        for phase in [zpui::TouchPhase::Started, zpui::TouchPhase::Ended] {
+            cx.simulate_event(zpui::TouchDragEvent {
                 phase,
                 start_position: above,
                 position: above,
@@ -431,7 +431,7 @@ mod tests {
         assert!(cx.update(|_, cx| StickyModifiers::get(cx).control));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn keys_share_one_width_in_the_set_order(cx: &mut TestAppContext) {
         let (_, cx) = host(cx);
         let keys = [
@@ -447,32 +447,32 @@ mod tests {
         ]
         .map(|selector| cx.debug_bounds(selector).expect(selector));
         for key in &keys {
-            assert_eq!(key.size.width, gpui::px(KEY_WIDTH));
+            assert_eq!(key.size.width, zpui::px(KEY_WIDTH));
         }
         for pair in keys.windows(2) {
             assert!(pair[0].right() < pair[1].left());
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_sideways_drag_on_a_card_key_scrolls_the_row(cx: &mut TestAppContext) {
-        let (host, cx) = host_with_width(cx, Some(gpui::px(200.0)));
+        let (host, cx) = host_with_width(cx, Some(zpui::px(200.0)));
         let scroll = host.read_with(cx, |host, _| host.keys.scroll.clone());
-        assert!(scroll.max_offset().x > gpui::px(0.0));
+        assert!(scroll.max_offset().x > zpui::px(0.0));
         let alt = cx.debug_bounds("popover-key-alt").expect("alt").center();
         let drag = |phase, x: f32, cx: &mut VisualTestContext| {
-            cx.simulate_event(gpui::TouchDragEvent {
+            cx.simulate_event(zpui::TouchDragEvent {
                 phase,
                 start_position: alt,
-                position: gpui::point(alt.x + gpui::px(x), alt.y),
+                position: zpui::point(alt.x + zpui::px(x), alt.y),
             });
             redraw(cx);
         };
-        drag(gpui::TouchPhase::Started, 0.0, cx);
-        drag(gpui::TouchPhase::Moved, -20.0, cx);
-        drag(gpui::TouchPhase::Moved, -60.0, cx);
-        drag(gpui::TouchPhase::Ended, -60.0, cx);
-        assert_eq!(scroll.offset().x, gpui::px(-40.0));
+        drag(zpui::TouchPhase::Started, 0.0, cx);
+        drag(zpui::TouchPhase::Moved, -20.0, cx);
+        drag(zpui::TouchPhase::Moved, -60.0, cx);
+        drag(zpui::TouchPhase::Ended, -60.0, cx);
+        assert_eq!(scroll.offset().x, zpui::px(-40.0));
         assert!(cx.debug_bounds("popover-key-item-alt-b").is_none());
         assert!(cx.update(|_, cx| StickyModifiers::get(cx).is_empty()));
     }

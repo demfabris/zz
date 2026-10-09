@@ -3,12 +3,12 @@ use std::{
     rc::Rc,
 };
 
-use gpui::{
+use web_time::Duration;
+use zpui::{
     Anchor, AnyElement, Bounds, Context, ElementId, EventEmitter, IntoElement, MouseButton,
     MouseDownEvent, ParentElement as _, Pixels, Point, Render, ScrollHandle, SharedString,
     Styled as _, Task, Window, anchored, canvas, deferred, div, point, prelude::*, px, relative,
 };
-use web_time::Duration;
 
 use super::{
     key_row::{KEY_HEIGHT, KEY_WIDTH, KeyLook, key_surface},
@@ -523,7 +523,7 @@ impl Render for PopoverKey {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{
+    use zpui::{
         Entity, Modifiers, Subscription, TestAppContext, TouchDragEvent, TouchPhase,
         VisualTestContext,
     };
@@ -601,7 +601,7 @@ mod tests {
             .read_with(cx, |key, _| key.is_open())
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_tap_latches_and_a_hold_opens_the_card(cx: &mut TestAppContext) {
         let (host, cx) = host(PopoverKeyTap::Latch(StickyModifier::Control), cx);
         let center = cx.debug_bounds("popover-key-ctrl").expect("key").center();
@@ -633,7 +633,7 @@ mod tests {
         assert!(!open(&host, cx));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn sliding_onto_an_item_picks_it_on_release(cx: &mut TestAppContext) {
         let (host, cx) = host(PopoverKeyTap::Open, cx);
         let center = cx.debug_bounds("popover-key-ctrl").expect("key").center();
@@ -657,7 +657,7 @@ mod tests {
         assert_eq!(picks(&host, cx).len(), 1);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_pinned_card_closes_on_a_tap_elsewhere_or_on_the_key(cx: &mut TestAppContext) {
         let (host, cx) = host(PopoverKeyTap::Open, cx);
         let center = cx.debug_bounds("popover-key-ctrl").expect("key").center();

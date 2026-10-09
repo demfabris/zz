@@ -55,9 +55,9 @@ regex.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 zeroize.workspace = true
-zz-mux = { path = "../zz-mux", optional = true }
-zz-protocol = { path = "../zz-protocol" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-mux = { workspace = true, optional = true }
+zz-protocol.workspace = true
+zz-terminal.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
 russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }

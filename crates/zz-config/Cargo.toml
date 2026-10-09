@@ -7,17 +7,20 @@ rust-version.workspace = true
 description = "Shared configuration parsing and persistence for zz clients"
 publish = false
 
+[features]
+update = ["dep:semver", "dep:ureq"]
+
 [dependencies]
-zz-client = { path = "../zz-client" }
-zz-daemon = { path = "../zz-daemon", default-features = false }
-zz-protocol = { path = "../zz-protocol" }
-zz-mux = { path = "../zz-mux" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-client.workspace = true
+zz-daemon.workspace = true
+zz-protocol.workspace = true
+zz-mux.workspace = true
+zz-terminal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
-semver = "1"
-ureq = "3"
+semver = { version = "1", optional = true }
+ureq = { version = "3", optional = true }
 
 [dev-dependencies]
 tempfile.workspace = true

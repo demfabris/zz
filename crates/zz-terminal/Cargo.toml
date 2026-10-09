@@ -36,7 +36,7 @@ crossbeam-channel = { workspace = true, optional = true }
 csscolorparser.workspace = true
 filedescriptor = { workspace = true, optional = true }
 foldhash = { workspace = true, optional = true }
-image = { version = "=0.25.10", optional = true, default-features = false, features = ["png"] }
+image = { workspace = true, optional = true, features = ["png"] }
 libc = { workspace = true, optional = true }
 libghostty-vt = { workspace = true, optional = true, features = ["kitty-graphics"] }
 log = { workspace = true, optional = true }

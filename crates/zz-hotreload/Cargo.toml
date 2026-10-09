@@ -16,8 +16,7 @@ required-features = ["hotreload"]
 
 [dependencies]
 mimalloc = { workspace = true, features = ["no_thp"] }
-zz = { path = "../zz" }
-zz-ui = { path = "../zz-ui" }
+zz.workspace = true
 
 [lints]
 workspace = true

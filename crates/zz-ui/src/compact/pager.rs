@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-use gpui::{SpringConfig, SpringState, TouchPhase};
 use web_time::{Duration, Instant};
+use zpui::{SpringConfig, SpringState, TouchPhase};
 
 const COMMIT_FRACTION: f32 = 0.25;
 const FLING_VELOCITY: f32 = 350.0;

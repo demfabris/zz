@@ -1,53 +1,29 @@
-//! Target-agnostic presentation components and the widget layer, shared by the
-//! zz desktop app and the browser client.
+//! zz's application UI on [`zz_kit`]: panes, terminal, agent, command palette,
+//! settings, and navigation, shared by the desktop app and the thin clients.
+//! It re-exports the kit, so zz code imports UI from one place.
 
 pub mod chrome_palette;
 pub mod tmux_style;
-mod widget;
 
-pub use widget::{
+pub use zz_kit::{
     button, color_picker, dialog, highlighter, icon, input, kbd, list, menu, notification, overlay,
-    popover, scroll, select, separator, slider, spinner, switch, tag, text, theme, title_bar,
-    tooltip,
+    popover, pulse, scroll, select, separator, slider, spinner, switch, tag, text, theme,
+    title_bar, tooltip, touch,
 };
 
 #[cfg(feature = "editor")]
-pub use widget::code_editor;
+pub use zz_kit::code_editor;
 
-pub use widget::foundation::{
-    ActiveTheme, BASE_UI_FONT_SIZE, CHROME_GAP, Colorize, Disableable, ElementExt, IndexPath,
-    InteractiveElementExt, SURFACE_RING_OUTSET, ScrollbarShow, Selectable, Side, Sizable, Size,
-    StyleSized, StyledExt, Theme, ThemeColor, ThemeMode, UiZoom, control_shadow, cubic_ease,
-    h_flex, oklab_lightness, parse_hex, rems_from_px, stacked_ring, surface_ring, to_hex, v_flex,
-    window_border, window_paddings,
+pub use zz_kit::{
+    ActiveTheme, Assets, BASE_UI_FONT_SIZE, CHROME_GAP, Colorize, Disableable, ElementExt, Icon,
+    IconName, IndexPath, InteractiveElementExt, MACOS_TRAFFIC_LIGHT_INSET,
+    MACOS_TRAFFIC_LIGHT_SPAN, ROOT_KEY_CONTEXT, Root, SURFACE_RING_OUTSET, ScrollbarShow,
+    Selectable, Side, Sizable, Size, StyleSized, StyledExt, TITLE_BAR_HEIGHT, Theme, ThemeColor,
+    ThemeMode, TitleBar, UiZoom, WindowControls, WindowExt, control_shadow, cubic_ease,
+    draws_window_controls, h_flex, init, macos_traffic_light_clearance, oklab_lightness, parse_hex,
+    rems_from_px, stacked_ring, surface_ring, to_hex, v_flex, window_border, window_controls_width,
+    window_paddings,
 };
-
-pub use widget::overlay::{ROOT_KEY_CONTEXT, Root, WindowExt};
-
-pub use widget::icon::{Icon, IconName};
-
-pub use widget::title_bar::{
-    MACOS_TRAFFIC_LIGHT_INSET, MACOS_TRAFFIC_LIGHT_SPAN, TITLE_BAR_HEIGHT, TitleBar,
-    WindowControls, draws_window_controls, macos_traffic_light_clearance, window_controls_width,
-};
-
-/// The SVG icon assets backing [`IconName`], embedded from `crates/zz-ui/assets`.
-/// Register with `with_assets`.
-pub use widget::icon::Assets;
-
-/// Initialize the widget layer. Must run once, before any window opens.
-/// The foundation goes first: it installs the globals every widget reads.
-pub fn init(cx: &mut gpui::App) {
-    widget::foundation::init(cx);
-    #[cfg(feature = "editor")]
-    widget::code_editor::init(cx);
-    widget::input::init(cx);
-    widget::menu::init(cx);
-    widget::overlay::init(cx);
-    widget::popover::init(cx);
-    widget::select::init(cx);
-    widget::text::init(cx);
-}
 
 #[cfg(feature = "agent")]
 pub mod agent;
@@ -62,10 +38,8 @@ pub mod navigation;
 pub mod pane;
 pub mod path_picker;
 pub mod picker;
-pub mod pulse;
 pub mod settings;
 pub mod shell;
 pub mod terminal;
 pub mod terminal_images;
-pub mod touch;
 pub mod which_key;

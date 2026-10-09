@@ -615,10 +615,7 @@ impl SettingsView {
         self.file_command_sequence += 1;
         let sequence = self.file_command_sequence;
         self.pending_file_command = Some((sequence, kind));
-        #[cfg(not(target_os = "ios"))]
         let server_id = self.mux.read(cx).local_server_id();
-        #[cfg(target_os = "ios")]
-        let server_id = None;
         let job = cx
             .background_executor()
             .spawn(async move { execute_file_command(command, expected, server_id) });
@@ -658,7 +655,6 @@ impl SettingsView {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn execute_file_command(
     command: CommandInvocation,
     expected: Option<(MuxOptionKey, String)>,
@@ -709,15 +705,6 @@ fn mux_confirmation_matches(key: MuxOptionKey, expected: &str, actual: &str) -> 
         }
         _ => false,
     }
-}
-
-#[cfg(target_os = "ios")]
-fn execute_file_command(
-    _: CommandInvocation,
-    _: Option<(MuxOptionKey, String)>,
-    _: Option<u64>,
-) -> Result<String, String> {
-    Err("Connect with the desktop client to import local multiplexer configuration.".to_owned())
 }
 
 fn select_value(key: FileKey, value: &str) -> String {

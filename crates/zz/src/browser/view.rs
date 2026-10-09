@@ -4436,9 +4436,9 @@ mod tests {
     #[test]
     fn page_zoom_shortcuts_use_the_platform_browser_convention() {
         let keymap = Keymap::new(browser_key_bindings());
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let (zoom_in, zoom_plus, zoom_out, reset) = ("cmd-=", "cmd-+", "cmd--", "cmd-0");
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let (zoom_in, zoom_plus, zoom_out, reset) = ("ctrl-=", "ctrl-+", "ctrl--", "ctrl-0");
 
         assert_binding::<ZoomIn>(&keymap, zoom_in);
@@ -4449,7 +4449,7 @@ mod tests {
 
     #[test]
     fn browser_keymap_matches_the_audited_supported_set() {
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let expected = [
             ("tab", "raw-tab"),
             ("shift-tab", "raw-tab"),
@@ -4490,7 +4490,7 @@ mod tests {
             ("up", "omnibox-previous"),
             ("shift-delete", "omnibox-delete"),
         ];
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let expected = [
             ("tab", "raw-tab"),
             ("shift-tab", "raw-tab"),
@@ -4556,9 +4556,9 @@ mod tests {
 
     #[test]
     fn browser_copy_outranks_window_text_copy() {
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let copy = "cmd-c";
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let copy = "ctrl-c";
         let mut bindings = vec![KeyBinding::new(
             copy,
@@ -4581,7 +4581,7 @@ mod tests {
 
     #[test]
     fn focused_address_field_outranks_browser_page_edits() {
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let edits = [
             ("cmd-z", EditCommand::Undo),
             ("cmd-shift-z", EditCommand::Redo),
@@ -4591,7 +4591,7 @@ mod tests {
             ("cmd-shift-v", EditCommand::PasteAndMatchStyle),
             ("cmd-a", EditCommand::SelectAll),
         ];
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let edits = [
             ("ctrl-z", EditCommand::Undo),
             ("ctrl-y", EditCommand::Redo),
@@ -4606,13 +4606,13 @@ mod tests {
             .iter()
             .map(|(source, _)| KeyBinding::new(source, InputEdit, Some("ZzInput")))
             .collect::<Vec<_>>();
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         bindings.push(KeyBinding::new(
             "cmd-c",
             RootCopy,
             Some(zz_ui::ROOT_KEY_CONTEXT),
         ));
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         bindings.push(KeyBinding::new(
             "ctrl-c",
             RootCopy,
@@ -4683,14 +4683,14 @@ mod tests {
             KeyContext::parse(zz_ui::ROOT_KEY_CONTEXT).expect("valid zz root context"),
             KeyContext::parse(BROWSER_KEY_CONTEXT).expect("valid browser context"),
         ];
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let shortcuts = [
             ("cmd-=", TypeId::of::<ZoomIn>()),
             ("cmd-+", TypeId::of::<ZoomIn>()),
             ("cmd--", TypeId::of::<ZoomOut>()),
             ("cmd-0", TypeId::of::<ResetZoom>()),
         ];
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let shortcuts = [
             ("ctrl-=", TypeId::of::<ZoomIn>()),
             ("ctrl-+", TypeId::of::<ZoomIn>()),
@@ -4712,7 +4712,7 @@ mod tests {
 
         assert_binding::<NextTab>(&keymap, "ctrl-tab");
         assert_binding::<PreviousTab>(&keymap, "ctrl-shift-tab");
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         {
             assert_binding::<NewTab>(&keymap, "cmd-t");
             assert!(browser_bindings_for(&keymap, "cmd-w").is_empty());
@@ -4722,7 +4722,7 @@ mod tests {
             assert_binding::<PreviousTab>(&keymap, "cmd-shift-[");
             assert_binding::<SelectLastTab>(&keymap, "cmd-9");
         }
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         {
             assert_binding::<NewTab>(&keymap, "ctrl-t");
             assert_binding::<ClosePane>(&keymap, "ctrl-w");
@@ -4736,9 +4736,9 @@ mod tests {
     fn navigation_shortcuts_use_the_platform_browser_convention() {
         let keymap = Keymap::new(browser_key_bindings());
 
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let (back, forward, reload, address) = ("cmd-[", "cmd-]", "cmd-r", "cmd-l");
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let (back, forward, reload, address) = ("alt-left", "alt-right", "ctrl-r", "ctrl-l");
 
         assert_binding::<GoBack>(&keymap, back);
@@ -4752,7 +4752,7 @@ mod tests {
         let hotkey = crate::config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY;
         let keymap = Keymap::new(browser_key_bindings());
         let bindings = browser_bindings_for(&keymap, hotkey);
-        let chord = if cfg!(any(target_os = "macos", target_os = "ios")) {
+        let chord = if cfg!(target_os = "macos") {
             "D-S-c"
         } else {
             "C-S-c"
@@ -4796,9 +4796,9 @@ mod tests {
     #[test]
     fn digit_shortcuts_jump_straight_to_tab_slots() {
         let keymap = Keymap::new(browser_key_bindings());
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let modifier = "cmd";
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let modifier = "ctrl";
 
         for index in 0..8 {

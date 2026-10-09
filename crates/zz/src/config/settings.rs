@@ -66,9 +66,9 @@ impl zpui::Global for PendingMuxImport {}
 
 /// What the Settings hint prints when the chrome keymap names no chord for
 /// `open-settings`. The binding itself is data; see `zz_client::ChromeKeymap`.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 pub(crate) const KEYBIND: &str = "cmd-,";
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 pub(crate) const KEYBIND: &str = "ctrl-,";
 const CONTROL_WIDTH: f32 = 120.0;
 const KEY_INPUT_WIDTH: f32 = 65.0;
@@ -242,7 +242,6 @@ impl SettingsView {
         let mut subscriptions = vec![
             cx.observe(&mux, |_, _, cx| cx.notify()),
             cx.observe_global::<config::FleetHosts>(|_, cx| cx.notify()),
-            #[cfg(not(target_os = "ios"))]
             cx.observe_global::<crate::update::UpdateState>(|_, cx| cx.notify()),
             browser_hotkey_subscription(&browser_element_selector_hotkey, window, cx),
             search_provider_subscription(&browser_search_provider, window, cx),
@@ -1484,10 +1483,7 @@ impl SettingsView {
             )
     }
 
-    /// `Option` mirrors the iOS variant, which has no update surface.
-    #[cfg(not(target_os = "ios"))]
-    #[allow(clippy::unnecessary_wraps)]
-    fn updates_stack(cx: &Context<Self>) -> Option<SettingsStack> {
+    fn updates_stack(cx: &Context<Self>) -> SettingsStack {
         use crate::update::{self, CheckState};
 
         let resolved = config::resolved_config(cx);
@@ -1552,23 +1548,16 @@ impl SettingsView {
                 check_button,
             ),
         };
-        Some(
-            SettingsStack::titled("Updates")
-                .child(Self::boolean_setting(
-                    ConfigKey::CheckForUpdates,
-                    "Check for updates",
-                    "Look up the newest release on GitHub once a day and offer it here. One \
-                     anonymous request; nothing about you or your sessions leaves the machine.",
-                    resolved.check_for_updates,
-                    cx,
-                ))
-                .child(SettingEntry::new("Latest release", description).control(control)),
-        )
-    }
-
-    #[cfg(target_os = "ios")]
-    fn updates_stack(_cx: &Context<Self>) -> Option<SettingsStack> {
-        None
+        SettingsStack::titled("Updates")
+            .child(Self::boolean_setting(
+                ConfigKey::CheckForUpdates,
+                "Check for updates",
+                "Look up the newest release on GitHub once a day and offer it here. One \
+                 anonymous request; nothing about you or your sessions leaves the machine.",
+                resolved.check_for_updates,
+                cx,
+            ))
+            .child(SettingEntry::new("Latest release", description).control(control))
     }
 
     fn about_section(cx: &Context<Self>) -> AnyElement {
@@ -1578,7 +1567,7 @@ impl SettingsView {
                     .size(px(zz_ui::settings::about::ABOUT_LOGO_SIZE)),
                 cx,
             ))
-            .when_some(Self::updates_stack(cx), zpui::ParentElement::child)
+            .child(Self::updates_stack(cx))
             .child(zz_ui::settings::about::about_build_stack(
                 platform(),
                 zz_ui::settings::about::about_copy_button("settings-about-copy-build-info")
@@ -2630,7 +2619,6 @@ fn import_color_scheme(cx: &App) -> TerminalColorScheme {
     })
 }
 
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn run_import(cx: &mut App) {
     match crate::config::import::import_ghostty_config(import_color_scheme(cx)) {
         Ok(report) if report.imported_anything() => {

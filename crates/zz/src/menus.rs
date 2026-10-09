@@ -1,14 +1,11 @@
-#[cfg(not(target_os = "ios"))]
 use std::{collections::BTreeSet, sync::Arc};
 
 #[cfg(target_os = "macos")]
 use zpui::SystemMenuType;
-#[cfg(not(target_os = "ios"))]
 use zpui::{App, Entity, Global, Menu, MenuItem, OsAction};
 
 #[cfg(target_os = "macos")]
 use crate::macos_app::{Hide, HideOthers, Minimize, Quit, ShowAll, Zoom};
-#[cfg(not(target_os = "ios"))]
 use crate::{
     browser::view::{GoBack, GoForward, Reload, ToggleDevTools},
     config::settings::OpenSettings,
@@ -76,17 +73,13 @@ pub(crate) struct OpenUrl {
     pub(crate) url: String,
 }
 
-#[cfg(not(target_os = "ios"))]
 pub(crate) const RELEASE_NOTES_URL: &str = "https://github.com/demfabris/zz/releases";
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Default)]
 struct MenuSessions(BTreeSet<String>);
 
-#[cfg(not(target_os = "ios"))]
 impl Global for MenuSessions {}
 
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn install(cx: &mut App) {
     #[cfg(not(target_os = "macos"))]
     cx.on_action(|_: &Quit, cx| crate::tray::quit_requested(cx));
@@ -97,7 +90,6 @@ pub(crate) fn install(cx: &mut App) {
     cx.observe_global::<MenuSessions>(rebuild).detach();
 }
 
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn observe_mux(mux: &Entity<MuxClient>, cx: &mut App) {
     let mut snapshot = mux.read(cx).snapshot();
     update_sessions(&snapshot, cx);
@@ -111,7 +103,6 @@ pub(crate) fn observe_mux(mux: &Entity<MuxClient>, cx: &mut App) {
     .detach();
 }
 
-#[cfg(not(target_os = "ios"))]
 fn update_sessions(snapshot: &zz_protocol::MuxSnapshot, cx: &mut App) {
     let names = snapshot
         .sessions
@@ -126,12 +117,10 @@ fn update_sessions(snapshot: &zz_protocol::MuxSnapshot, cx: &mut App) {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn rebuild(cx: &mut App) {
     cx.set_menus(app_menus(cx));
 }
 
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn app_menus(cx: &App) -> Vec<Menu> {
     let sessions = cx
         .try_global::<MenuSessions>()
@@ -140,7 +129,6 @@ pub(crate) fn app_menus(cx: &App) -> Vec<Menu> {
     menu_tree(&sessions)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn menu_tree(sessions: &BTreeSet<String>) -> Vec<Menu> {
     vec![
         Menu::new("zz").items([
@@ -249,7 +237,6 @@ fn menu_tree(sessions: &BTreeSet<String>) -> Vec<Menu> {
     ]
 }
 
-#[cfg(not(target_os = "ios"))]
 fn open_url(label: &str, url: &str) -> MenuItem {
     MenuItem::action(
         label.to_owned(),
@@ -259,7 +246,7 @@ fn open_url(label: &str, url: &str) -> MenuItem {
     )
 }
 
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(test)]
 mod tests {
     use zpui::AppContext as _;
 

@@ -170,7 +170,6 @@ fn prompt_stale_daemon(
             )
             .on_ok(move |_, _, cx| {
                 restart_mux.update(cx, |mux, cx| {
-                    #[cfg(not(target_os = "ios"))]
                     if explicit {
                         mux.restart_daemon_for_update(cx);
                         return;
@@ -1016,7 +1015,6 @@ impl AppView {
         )
         .detach();
         let sidebar = cx.new(|cx| WorkspaceSidebar::new(mux.clone(), &agent_controller, cx));
-        #[cfg(not(target_os = "ios"))]
         if cx.try_global::<crate::tray::DesktopTray>().is_some() {
             cx.global_mut::<crate::tray::DesktopTray>().sidebar = Some(sidebar.downgrade());
         }
@@ -1675,7 +1673,6 @@ impl AppView {
         )
     }
 
-    #[cfg_attr(target_os = "ios", allow(dead_code))]
     // Reached from the app shell's ClosePane action.
     pub(crate) fn close_active_pane(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(pane) = self.active_pane(cx) else {
@@ -1687,7 +1684,6 @@ impl AppView {
         true
     }
 
-    #[cfg(not(target_os = "ios"))]
     pub(crate) fn prompt_daemon_update(mux: &Entity<MuxClient>, window: &mut Window, cx: &mut App) {
         prompt_stale_daemon(mux, true, window, cx);
     }
@@ -5087,7 +5083,7 @@ mod tests {
             mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
         });
         cx.run_until_parked();
-        let shortcuts = if cfg!(any(target_os = "macos", target_os = "ios")) {
+        let shortcuts = if cfg!(target_os = "macos") {
             ["cmd-k", "cmd-p"]
         } else {
             ["ctrl-shift-k", "ctrl-shift-p"]
@@ -5163,7 +5159,7 @@ mod tests {
     #[zpui::test]
     fn window_shortcuts_intercept_before_pane_input_and_honor_unbinds(cx: &mut TestAppContext) {
         let fallback_count = Rc::new(Cell::new(0));
-        let (modifier, key) = if cfg!(any(target_os = "macos", target_os = "ios")) {
+        let (modifier, key) = if cfg!(target_os = "macos") {
             ("cmd", "D-1")
         } else {
             ("ctrl", "C-1")

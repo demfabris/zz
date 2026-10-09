@@ -19,7 +19,6 @@ pub struct ImportReport {
 }
 
 impl ImportReport {
-    #[cfg(not(target_os = "ios"))]
     pub fn imported_anything(&self) -> bool {
         self.config_path.is_some()
     }

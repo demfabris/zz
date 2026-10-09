@@ -766,7 +766,7 @@
       "id": "float.keys",
       "track": "float",
       "title": "Move table, prefix * @ g, pane menu Float, mouse drag, editor",
-      "status": "active",
+      "status": "review",
       "deps": [
         "float.core",
         "pin.keys-copy"
@@ -800,7 +800,8 @@
         "2026-10-09: Branched from catchup/float.clients f61c2f2f1 (float track merges as one unit).",
         "2026-10-09: Lane done at cdeebf810: all 5 clauses (float-keys 32 steps, tui-floating 23/23, tui-mouse 62/62 + self-check, editor modal via choose-buffer/customize e, gaps keys.move-table/float.keys closed); fixed a float.core panic (new-pane in a float-only window). Found: a submenu item chosen by mouse release leaves no menu (3.8 shows the next menu); russh_socks loopback test failed twice. Review 1 running on f61c2f2f1..HEAD.",
         "2026-10-09: Codex review 1 (float.keys-1.md): 4 P1 (editor write-back by name only, mouse geometry ignores top status rows, editor paste eaten by chooser checks, submenu by mouse release) + 2 P2 (paste-buffer-changed, failed-edit proofs); fix pass sent. The submenu mouse-release bug moved here from fix.followups.",
-        "2026-10-09: Fix pass bb73f52f8: review 1's 4 P1 + 2 P2 fixed (editor write-back identity, top-status mouse rows, editor paste, submenu by mouse release via display-menu from a mouse binding, paste-buffer-changed, failed-edit proofs); tui-floating 29/29, tui-mouse 66/66. Integration step running: merge float.clients fd87e8eba + main, prove the merged tip; then the whole-track review."
+        "2026-10-09: Fix pass bb73f52f8: review 1's 4 P1 + 2 P2 fixed (editor write-back identity, top-status mouse rows, editor paste, submenu by mouse release via display-menu from a mouse binding, paste-buffer-changed, failed-edit proofs); tui-floating 29/29, tui-mouse 66/66. Integration step running: merge float.clients fd87e8eba + main, prove the merged tip; then the whole-track review.",
+        "2026-10-09: Integration done at 97d98bb59: float.clients fd87e8eba + main (twice) merged; counts recomputed; display-panes code taught about floats; tui-floating 34/34, tui-mouse 67/67, tui-overlays 49, tui-client-commands 406, tui-caps 370, floating scenarios clean; 9 crates clippy. Whole-track Codex review running."
       ]
     },
     {

@@ -956,7 +956,8 @@
         "3.8 hook payload table per event: zz events still carry d77 keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events and pane-exited), visible in wait-for -E -v; PendingHookEvent::window/::pane back many events, a daemon test and control notifications read those keys.",
         "Lossy byte paths left by fix.option-bytes: plain argv, show-options -F '#{option_value}', list-keys/show-hooks arguments (tmux_command_print), a control line's $NAME (resolve_environment); #{O:} and window-neighbour option copies unmeasured.",
         "zz refuses copy-mode on an unattached pane ('pane is not attached') and command-prompt -P from a command client ('requires an interactive client'); tmux 3.8 accepts both.",
-        "capture-pane -M: tmux reads only the copy-mode screen, zz reads the frozen screen including history; -S/-E ranges into history may differ (unmeasured)."
+        "capture-pane -M: tmux reads only the copy-mode screen, zz reads the frozen screen including history; -S/-E ranges into history may differ (unmeasured).",
+        "2026-10-09: Session 1 done at 14ba4f710: 3.8 hook payload table (fit_payload), capture -M ranges fixed; byte paths registered (options.byte-path-residue); copy-mode/command-prompt -P ruled out (client model). Sent back for two side effects before review: zz events -t session filter, pane-bell/activity/shell-prompt feeding the sink without a hook."
       ]
     }
   ]

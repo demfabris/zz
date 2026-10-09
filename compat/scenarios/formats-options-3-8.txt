@@ -26,6 +26,18 @@ out: show-options -g -F #{option_name}:#{session_name} status
 set-hook -g after-new-window 'display-message hi'
 out: show-hooks -g -F #{option_name}|#{option_array_key}|#{option_value}|#{option_is_hook}|#{option_is_array} after-new-window
 set-hook -gu after-new-window
+out: show-hooks -g -F #{option_name}=#{option_value} @fmtcase
+out: show-hooks -g -F #{option_name}=#{option_value} status-keys
+out: show-options -g -F #{option_unset_name} status
+out: show-options -g -F #{option_unset_name} status-format
+set-option -g update-environment ''
+out: show-options -A -F #{option_is_parent}:#{option_has_value} update-environment
+out: show-options -A update-environment
+set-option -gu update-environment
+set-option -p -t w:0 pane-colours[0] red
+set-option -wU -t w:0 pane-colours
+out: show-options -pA -t w:0 pane-colours
+out: show-options -pA -t w:0 -F #{option_is_parent}:#{option_has_value} pane-colours
 # split-window -B validates against pane-border-lines and sets the new pane's option.
 new-window -d -n borders
 split-window -d -t w:borders -B double
@@ -54,6 +66,22 @@ out: display-message -p -t w:marks #{pane_command_running}:#{pane_command_status
 send-keys -t w:marks "printf '\\033]133\\073C\\007\\033]133\\073D\\073300\\007'" Enter
 run-shell "sleep 0.5"
 out: display-message -p -t w:marks #{pane_command_status}
+send-keys -t w:marks "printf '\\033[?1000h\\033[?1002h'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[?1003h\\033[?1006h\\033[?1000l'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[?12h\\033[0 q'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[?12h\\033[2 q'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[1 q'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[0 q\\033[?1006l'" Enter
 # The 3.8 modal formats: zz has no modal panes, so these read 0 and empty.
 out: display-message -p -t w:marks #{pane_modal_flag}:#{window_modal_pane}
 kill-window -t w:marks

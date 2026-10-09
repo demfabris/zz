@@ -582,6 +582,9 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                 self.publisher.output(&bytes);
                 let mut bar = None;
                 let mut last_command_status = None;
+                if !bytes.is_empty() {
+                    self.engine_filter.count_output();
+                }
                 self.engine_filter.write(
                     &bytes,
                     EngineKnobs::default(),

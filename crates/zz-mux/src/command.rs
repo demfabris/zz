@@ -10681,7 +10681,7 @@ impl MuxEngine {
                 .into_iter()
                 .map(|monitor| self.shown_monitor(context, options, monitor, hooks))
                 .collect::<Vec<_>>();
-            return Ok(Execution::output(lines.join("\n")));
+            return Ok(Execution::output(printed_lines(&lines)));
         };
         let parsed = parse_tmux_option(argument)
             .map_err(|()| ServerError::InvalidCommand(format!("invalid option: {argument}")))?;
@@ -11543,6 +11543,9 @@ impl MuxEngine {
             if let Some(target) = options.value("-t") {
                 forwarded.extend(["-t".into(), target.into()]);
             }
+            if let Some(format) = options.value("-F") {
+                forwarded.extend(["-F".into(), format.into()]);
+            }
             forwarded.extend(["--".into(), argument.into()]);
             return self.show_options(
                 context,
@@ -11574,6 +11577,9 @@ impl MuxEngine {
             }
             if let Some(target) = options.value("-t") {
                 forwarded.extend(["-t".into(), target.into()]);
+            }
+            if let Some(format) = options.value("-F") {
+                forwarded.extend(["-F".into(), format.into()]);
             }
             forwarded.extend(["--".into(), argument.into()]);
             return self.show_options(
@@ -12041,7 +12047,7 @@ impl MuxEngine {
                 self.expand_pane_format(template, &target, context.session, client, &mut row_hooks)
             })
             .collect::<Vec<_>>();
-        Execution::output(output.join("\n"))
+        Execution::output(printed_lines(&output))
     }
 
     fn show_options(
@@ -12237,7 +12243,7 @@ impl MuxEngine {
                         array,
                         requested.as_ref(),
                         metadata.value == TmuxArrayValue::String,
-                        inherited,
+                        inherited && (requested.is_some() || !array.is_empty()),
                         value_only,
                     );
                 }
@@ -15581,6 +15587,16 @@ fn push_shown_array(
         let name = indexed_option_name(name, Some(&index.display()));
         push_shown_option(lines, &name, value, is_string, inherited, value_only);
     }
+}
+
+/// `cmdq_print` ends every line with a newline, which the output joining
+/// drops except after a final empty line.
+fn printed_lines(lines: &[String]) -> String {
+    let mut output = lines.join("\n");
+    if lines.last().is_some_and(String::is_empty) {
+        output.push('\n');
+    }
+    output
 }
 
 fn shown_options_output(lines: &ShownOptions) -> String {
@@ -38221,7 +38237,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "pane-colours*"
+            "pane-colours"
         );
 
         engine
@@ -46161,6 +46177,60 @@ mod tests {
                 .execute(&mut context, &command("start", &[]))
                 .unwrap(),
             Execution::default()
+        );
+    }
+
+    #[test]
+    fn show_options_format_rows_match_the_pins_print_paths() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let mut run = |args: &[&str]| {
+            engine
+                .execute(&mut context, &command(args[0], &args[1..]))
+                .unwrap()
+                .output
+        };
+        run(&["set-option", "-g", "@x", "hello"]);
+        assert_eq!(
+            run(&[
+                "show-hooks",
+                "-g",
+                "-F",
+                "#{option_name}=#{option_value}",
+                "@x"
+            ]),
+            "@x=hello"
+        );
+        assert_eq!(
+            run(&[
+                "show-hooks",
+                "-g",
+                "-F",
+                "#{option_name}=#{option_value}",
+                "status-keys"
+            ]),
+            "status-keys=emacs"
+        );
+        assert_eq!(run(&["show-options", "-g", "-F", "", "status"]), "\n");
+        assert_eq!(
+            run(&["show-options", "-g", "-F", "", "status-format"]),
+            "\n\n\n"
+        );
+        run(&["set-option", "-g", "update-environment", ""]);
+        assert_eq!(
+            run(&[
+                "show-options",
+                "-A",
+                "-F",
+                "#{option_is_parent}:#{option_has_value}",
+                "update-environment"
+            ]),
+            "0:0"
+        );
+        assert_eq!(
+            run(&["show-options", "-A", "update-environment"]),
+            "update-environment"
         );
     }
 

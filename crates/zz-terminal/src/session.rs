@@ -455,6 +455,7 @@ struct EngineFilter {
     replies: Option<Rc<RefCell<PtyEffects>>>,
     output: PaneOutputFacts,
     cursor_blink_set: bool,
+    mouse_mode: Option<usize>,
 }
 
 /// `format_cb_pane_private_modes`' table, in its order: the DEC private mode
@@ -464,14 +465,48 @@ pub const PRIVATE_MODE_NUMBERS: [u16; 14] = [
 ];
 
 const CURSOR_BLINK_MODE_BIT: usize = 3;
+const MOUSE_MODE_BITS: u16 = 0b111 << 5;
 
-/// `MODE_CURSOR_BLINKING_SET`: `?12h` and `?12l` both mark the blink state as
-/// the application's, which is the only time `pane_private_modes` lists 12.
-fn csi_sets_cursor_blink(parameters: &[u8], final_byte: u8) -> bool {
-    matches!(final_byte, b'h' | b'l')
-        && parameters
-            .strip_prefix(b"?")
-            .is_some_and(|modes| modes.split(|byte| *byte == b';').any(|mode| mode == b"12"))
+impl EngineFilter {
+    /// The `input_csi_dispatch_sm_private` and `_rm_private` bookkeeping that
+    /// `pane_private_modes` reads and the engine does not keep: `?12h` and
+    /// `?12l` make the blink state the application's until `CSI 0 SP q` hands
+    /// it back, and the three mouse tracking modes replace each other, with
+    /// any of `?1000l` to `?1003l` clearing them all.
+    fn track_private_modes(&mut self, parameters: &[u8], final_byte: u8) {
+        if final_byte == b'q'
+            && let Some(style) = parameters.strip_suffix(b" ")
+        {
+            if style.is_empty() || style == b"0" {
+                self.cursor_blink_set = false;
+            }
+            return;
+        }
+        let set = match final_byte {
+            b'h' => true,
+            b'l' => false,
+            _ => return,
+        };
+        let Some(modes) = parameters.strip_prefix(b"?") else {
+            return;
+        };
+        for mode in modes.split(|byte| *byte == b';') {
+            match (mode, set) {
+                (b"12", _) => self.cursor_blink_set = true,
+                (b"1000", true) => self.mouse_mode = Some(5),
+                (b"1002", true) => self.mouse_mode = Some(6),
+                (b"1003", true) => self.mouse_mode = Some(7),
+                (b"1000" | b"1001" | b"1002" | b"1003", false) => self.mouse_mode = None,
+                _ => {}
+            }
+        }
+    }
+
+    /// `input_parse_pane` and `input_parse_buffer` count every read, before
+    /// anything decides what the bytes mean.
+    fn count_output(&mut self) {
+        self.output.output(unix_now());
+    }
 }
 
 fn unix_now() -> u64 {
@@ -569,6 +604,10 @@ impl EngineFilter {
         if !self.cursor_blink_set {
             private_modes &= !(1 << CURSOR_BLINK_MODE_BIT);
         }
+        private_modes &= !MOUSE_MODE_BITS;
+        if let Some(bit) = self.mouse_mode {
+            private_modes |= 1 << bit;
+        }
         Ok(TerminalFacts {
             output: self.output,
             private_modes,
@@ -599,9 +638,6 @@ impl EngineFilter {
         bar: &mut Option<ProgressBar>,
         last_command_status: &mut Option<CommandStatusUpdate>,
     ) {
-        if !bytes.is_empty() {
-            self.output.output(unix_now());
-        }
         while !bytes.is_empty() {
             match self.state {
                 EngineState::Ground => {
@@ -643,7 +679,9 @@ impl EngineFilter {
                     bytes = &bytes[1..];
                     if byte >= 0x40 {
                         self.metadata_hint |= csi_touches_metadata(&self.sequence, byte);
-                        self.cursor_blink_set |= csi_sets_cursor_blink(&self.sequence, byte);
+                        let sequence = std::mem::take(&mut self.sequence);
+                        self.track_private_modes(&sequence, byte);
+                        self.sequence = sequence;
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
                             write_engine_csi(
                                 &self.sequence,
@@ -759,7 +797,7 @@ impl EngineFilter {
                     let final_byte = bytes[end];
                     let parameters = &bytes[escape + 2..end];
                     self.metadata_hint |= csi_touches_metadata(parameters, final_byte);
-                    self.cursor_blink_set |= csi_sets_cursor_blink(parameters, final_byte);
+                    self.track_private_modes(parameters, final_byte);
                     if csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);
                         write_engine_csi(
@@ -920,6 +958,7 @@ impl EngineFilter {
     fn full_reset(&mut self) {
         self.metadata_hint = true;
         self.cursor_blink_set = false;
+        self.mouse_mode = None;
         self.program_status_changed |= self.program_status.reset();
     }
 
@@ -14513,6 +14552,9 @@ fn feed_pty_output(
         bar,
         last_command_status,
     } = engine;
+    if !bytes.is_empty() {
+        filter.count_output();
+    }
     passthrough.write(bytes, |unwrapped| {
         filter.write(
             unwrapped,
@@ -17058,6 +17100,9 @@ mod tests {
         let mut terminal = new_terminal(20, 4, 16).expect("terminal");
         let mut filter = EngineFilter::default();
         let mut write = |filter: &mut EngineFilter, bytes: &[u8]| {
+            if !bytes.is_empty() {
+                filter.count_output();
+            }
             filter.write(
                 bytes,
                 EngineKnobs::default(),
@@ -17085,6 +17130,28 @@ mod tests {
         assert_eq!(blinking.private_modes, 0b1000_0001_1101);
         let still = write(&mut filter, b"\x1b[?12l");
         assert_eq!(still.private_modes, 0b1000_0001_0101);
+        write(&mut filter, b"\x1b[?12h");
+        let reset = write(&mut filter, b"\x1b[0 q");
+        assert_eq!(reset.private_modes, 0b1000_0001_0101);
+        write(&mut filter, b"\x1b[?12h");
+        let bare = write(&mut filter, b"\x1b[ q");
+        assert_eq!(bare.private_modes, 0b1000_0001_0101);
+        write(&mut filter, b"\x1b[?12h");
+        let steady = write(&mut filter, b"\x1b[2 q");
+        assert_eq!(steady.private_modes & (1 << 3), 0);
+        let blinking_block = write(&mut filter, b"\x1b[1 q");
+        assert_ne!(blinking_block.private_modes & (1 << 3), 0);
+        write(&mut filter, b"\x1b[0 q");
+        let standard = write(&mut filter, b"\x1b[?1000h\x1b[?1002h");
+        assert_eq!(standard.private_modes, 0b1000_0101_0101);
+        let any = write(&mut filter, b"\x1b[?1003h\x1b[?1006h");
+        assert_eq!(any.private_modes, 0b1100_1001_0101);
+        let cleared = write(&mut filter, b"\x1b[?1000l");
+        assert_eq!(cleared.private_modes, 0b1100_0001_0101);
+        let normal = write(&mut filter, b"\x1b[?1000h\x1b[?1006l");
+        assert_eq!(normal.private_modes, 0b1000_0011_0101);
+        let reset = write(&mut filter, b"\x1bc");
+        assert_eq!(reset.private_modes & 0b1110_0000, 0);
         for (mark, status) in [
             (&b"D"[..], 0),
             (b"D;3", 3),
@@ -17107,6 +17174,29 @@ mod tests {
             );
             assert_ne!(finished.output.command_end_time, 0);
         }
+    }
+
+    #[test]
+    fn pane_output_counts_bytes_the_passthrough_filter_drops() {
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
+        let mut passthrough = PassthroughFilter::default();
+        let mut filter = EngineFilter::default();
+        let mut engine = EngineOutput {
+            filter: &mut filter,
+            knobs: EngineKnobs::default(),
+            renames: &mut Vec::new(),
+            bar: &mut None,
+            last_command_status: &mut None,
+        };
+        feed_pty_output(
+            &mut terminal,
+            &mut passthrough,
+            &mut engine,
+            b"\x1bPtmux;\x1b\x1b]52;c;eA==\x07\x1b\\",
+        );
+        let facts = filter.facts(&terminal).expect("facts");
+        assert_eq!(facts.output.output_generation, 1);
+        assert_ne!(facts.output.last_output_time, 0);
     }
 
     #[test]

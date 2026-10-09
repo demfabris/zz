@@ -5913,6 +5913,7 @@ mod tests {
             prompt_cursor: 9,
             matches: Vec::new(),
             match_style: String::new(),
+            prompt_shape: zz_protocol::PromptCursor::default(),
         };
         let open = zz_protocol::FloatingPaneSnapshot {
             xoff: 30,

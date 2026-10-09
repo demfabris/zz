@@ -257,3 +257,8 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: pin.display-panes gets a final fix pass after two reviews: the desktop overlay
   becomes a function of the pane's top mode instead of an object created at open, and copy-mode entry
   replaces panes-mode; it merges without a third review, each P1 pinned by a daemon test.
+- 2026-10-09 fabrico: read-only control clients keep refusing state changes (`client is read-only`).
+  3.8 runs new-window, rename-window, set-option, set-buffer and kill-window for a read-only `-C`
+  client (control.c never checks the flag; only send-keys does), which reads as an upstream
+  oversight. zz keeps read-only meaning read-only on every client type, which `zz share` viewers
+  will build on; queries and refresh-client on itself run as in 3.8. Registered native.

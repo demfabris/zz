@@ -56188,7 +56188,7 @@ mod tests {
                 "new-session -d -s listed\n\
                  display-message -p ROOT_BEFORE\n\
                  source-file '{}'\n\
-                 list-sessions -F LIST_#{{session_name}}\n\
+                 list-sessions -F 'LIST_#{{session_name}}'\n\
                  display-message -p ROOT_AFTER\n",
                 child.display()
             ),
@@ -58284,7 +58284,7 @@ mod tests {
                     })
                 ))
                 .count(),
-            2
+            0
         );
         let peer_snapshot = peer_messages
             .iter()

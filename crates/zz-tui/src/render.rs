@@ -2945,13 +2945,13 @@ fn mode_prompt_cursor(model: &Model) -> Option<zz_protocol::PromptCursor> {
     let chooser_prompt = |prompt: &str, search: bool| !prompt.is_empty() || search;
     if let Some(state) = &model.choose_tree {
         return chooser_prompt(&state.prompt, state.search.is_some())
-            .then(|| model.chooser_presentation.as_ref())
+            .then_some(model.chooser_presentation.as_ref())
             .flatten()
             .map(|presentation| presentation.prompt_cursor);
     }
     if let Some(state) = &model.choose_buffer {
         return chooser_prompt(&state.prompt, state.search.is_some())
-            .then(|| model.chooser_presentation.as_ref())
+            .then_some(model.chooser_presentation.as_ref())
             .flatten()
             .map(|presentation| presentation.prompt_cursor);
     }

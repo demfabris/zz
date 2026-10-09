@@ -87,10 +87,7 @@ stage: config-non-utf8-byte-matrix.txt ~/config-non-utf8-byte-matrix.txt
 # PY:     result = source("block-quote-ff", b"bind-key x { send-keys 'before\xffafter' }\n")
 # PY:     ok = ok and result.returncode == 1 and result.stdout.endswith(b":2: syntax error\n") and result.stderr == b""
 # PY: result = source("block-attached-open", b"if-shell -F 1 { display-message -p a{b}c }\n")
-# PY: if is_zz:
-# PY:     ok = check("block-attached-open", result.returncode == 1 and result.stdout.endswith(b":1: command if-shell: too many arguments (need at most 3)\n") and result.stderr == b"") and ok
-# PY: else:
-# PY:     ok = check("block-attached-open", result.returncode == 1 and result.stdout.endswith(b":1: syntax error\n") and result.stderr == b"") and ok
+# PY: ok = check("block-attached-open", result.returncode == 1 and result.stdout.endswith(b":1: syntax error\n") and result.stderr == b"") and ok
 # PY: result = source("block-literal-open", b"if-shell -F 1 { display-message -p before{after }\n")
 # PY: ok = check("block-literal-open", result.returncode == 0 and result.stdout.endswith(b"before{after\n") and result.stderr == b"") and ok
 # PY: result = source("block-adjacent", b"if-shell -F 1 { if-shell -F 1 {}{} }\n")

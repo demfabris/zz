@@ -188,6 +188,8 @@ fn prompt_state(input: &str, mode: CommandPromptMode) -> CommandPromptState {
         mode,
         no_freeze: false,
         pane: None,
+        command_mode: false,
+        prompt_cursor: zz_protocol::PromptCursor::default(),
     }
 }
 

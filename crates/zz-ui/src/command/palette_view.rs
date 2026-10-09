@@ -225,6 +225,8 @@ impl CommandPaletteView {
             prompt_type: CommandPromptType::Command,
             no_freeze: false,
             pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
         let mut palette = Self::new(backend, &state, 0, snapshot, window, cx);
         palette.local = true;

@@ -1181,25 +1181,27 @@ the DEL strict-key differential pass.
   `display-message -p` injection paths; slice 10ae extends generic option-name format lookup to the
   complete registered roster.
 
-**Store-only (75):**
+**Store-only (66):**
 
-- Typed storage that nothing reads (29): `lock-after-time`,
+- Typed storage that nothing reads (24): `lock-after-time`,
   `lock-command` (the lock commands are no-ops); `allow-rename`, `alternate-screen`,
   `scroll-on-clear`, `extended-keys`, `extended-keys-format`, `xterm-keys`, `backspace`,
   `editor`, `assume-paste-time`, `input-buffer-size`, `get-clipboard`,
   `default-client-command`, `fill-character`, `variation-selector-always-wide`;
-  `message-style`, `message-command-style`, `message-format`;
-  `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`; the four
-  `prompt-*cursor-*`. `clock-mode-colour` and `clock-mode-style` left this list on
+  `message-style`, `message-format`;
+  `pane-border-lines`, `pane-border-indicators`, the four `pane-scrollbars*`.
+  `message-command-style` and the four `prompt-*cursor-*` left this list on 2026-10-09
+  (catch-up item `fix.mode-styles`): the raw TUI paints a vi command-mode prompt in
+  `message-command-style` and sends the prompt's cursor style and colour. `clock-mode-colour` and `clock-mode-style` left this list on
   2026-09-15: `window_clock_draw_screen`'s own reads are reproduced, so the colour and the
   four faces are honoured in the raw TUI.
-- Generic scalar storage (39 of the 63 scalar-backed names) plus two of the eight
+- Generic scalar storage (35 of the 63 scalar-backed names) plus two of the eight
   arrays: everything else in the table,
   including `status-keys`,
   `copy-mode-selection-style`, `copy-mode-position-style`,
   `display-panes-colour`/`display-panes-active-colour`,
-  `pane-colours[]`, `codepoint-widths[]`, the 21 theme-palette options, and the
-  four `tree-mode-*` options. Lane assignments live in the drop-in plan's "options residue"
+  `pane-colours[]`, `codepoint-widths[]` and the 21 theme-palette options. The four
+  `tree-mode-*` options left on 2026-10-09: the raw TUI's mode tree reads them. Lane assignments live in the drop-in plan's "options residue"
   section.
 
 The index trio follows tmux's session/window inheritance, allocation, targeting, format,

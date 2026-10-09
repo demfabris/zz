@@ -211,6 +211,15 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "copy-mode-line-number-style",
     "copy-mode-current-line-number-style",
     "switch-mode-match-style",
+    "tree-mode-border-style",
+    "tree-mode-preview-format",
+    "tree-mode-preview-style",
+    "tree-mode-selection-style",
+    "message-command-style",
+    "prompt-cursor-style",
+    "prompt-cursor-colour",
+    "prompt-command-cursor-style",
+    "prompt-command-cursor-colour",
     "theme",
     "dark-theme-black",
     "dark-theme-white",
@@ -3864,6 +3873,37 @@ impl MuxEngine {
             self.word_separators_for_session(session)
         });
         (vi, separators.to_owned())
+    }
+
+    #[must_use]
+    pub fn prompt_cursor_options(&self, session: Option<SessionId>) -> [(u8, String); 2] {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        let value = |name: &str| {
+            exact_tmux_option(name)
+                .and_then(|option| self.tmux_option_readback(option, target, true).ok())
+                .flatten()
+                .map(|(value, _)| value)
+                .unwrap_or_default()
+        };
+        let read = |style: &str, colour: &str| {
+            let style = match value(style).as_str() {
+                "blinking-block" => 1,
+                "block" => 2,
+                "blinking-underline" => 3,
+                "underline" => 4,
+                "blinking-bar" => 5,
+                "bar" => 6,
+                _ => 0,
+            };
+            (style, value(colour))
+        };
+        [
+            read("prompt-cursor-style", "prompt-cursor-colour"),
+            read(
+                "prompt-command-cursor-style",
+                "prompt-command-cursor-colour",
+            ),
+        ]
     }
 
     fn window_option_override(&self, window: WindowId, option: WindowOption) -> Option<&str> {
@@ -37740,7 +37780,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 155);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 164);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

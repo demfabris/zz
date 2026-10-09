@@ -2196,6 +2196,7 @@ mod tests {
             prompt: "Confirm? ".to_owned(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
         let mut core = ClientCore::new();
 
@@ -2249,6 +2250,8 @@ mod tests {
             mode: zz_protocol::CommandPromptMode::Text,
             no_freeze: false,
             pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
         core.command_output = Some((
             3,
@@ -2324,6 +2327,7 @@ mod tests {
             prompt: "continue?".to_owned(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
 
         core.handle_message(ProtocolMessage::Attached {

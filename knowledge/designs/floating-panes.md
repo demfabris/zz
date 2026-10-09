@@ -265,6 +265,36 @@ row from `xoff + 2`; `pane_at` (`state.rs:1005`) uses the hit order. Kitty place
 are withdrawn while covered. Delete the popup branch of `input::handle` (`input.rs:199`) and
 `popup_pointer_action` (`:1851`).
 
+# Where the float.core build differs
+
+Recorded by float.core (sessions 1 and 2, 2026-10-09); 3.8 wins where this plan and the tag disagree.
+
+- No `FloatCell`: `CellNode::Float { pane, geometry }` reuses `CellGeometry` with signed offsets,
+  and the window keeps its extent in `CellLayout` once no tile is left.
+- 3.8 counts a pane as floating only while its current layout cell is (`window_pane_is_floating`):
+  a zoomed float and a float hidden by zoom read as tiled in `pane_floating_flag`, the `F` flag and
+  `pane_z`. `Window::shows_floating` is that rule; `Window::is_floating` stays the tree's flag.
+- Select-pane while zoomed keeps the zoom when the target is visible (the zoom target or an
+  over-zoom float), as `cmd_select_pane_exec` pushes and pops only for hidden panes.
+- Directional `select-pane` uses `window_pane_find_*`'s cell arithmetic over every pane once the
+  window has a float; tiled-only windows keep the older normalized walk. Compass targets treat every
+  float as bordered, because the mux model does not see `pane-border-lines none`.
+- `resize-pane -y` on a float skips 3.8's `pane-border-status` adjustment for a pane at the top or
+  bottom row.
+- `display-popup` sets `remain-on-exit`, `remain-on-exit-format` and, with `-T`, the border status and
+  format on the pane right after `new-pane` spawns it, so a command that exits within that instant
+  closes as `remain-on-exit off`. A command client waits through `new-pane -W`, so a signal exits
+  128+N and a popup killed by `kill-pane` or `-C` exits 0, not 129. Control clients still get
+  nothing, and a popup still needs a target client.
+- `PopupPointerState` went with the per-client popup, because it was keyed to the old `PopupPointer`
+  input; float.keys builds the per-client drag on `MouseKey.press` instead. The daemon ignores
+  `press` until then.
+- `pane-border-status top-floating` and `bottom-floating` reach a float's snapshot as `Top` and
+  `Bottom`; `PaneBorderStatus` has no floating variants.
+- `FloatingPaneSnapshot` lists every float in the tree, a zoomed one with `visible: false`.
+- zz back-solves the window extent from one pane's size report; while a float is active that pane is
+  the most recent tiled one.
+
 # zz-only extensions
 
 - `new-pane --kind terminal|browser|picker|agent [--profile] [--provider]`, inherited from

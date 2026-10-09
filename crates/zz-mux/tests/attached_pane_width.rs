@@ -76,7 +76,8 @@ fn an_unsplit_window_takes_the_client_measurement_exactly() {
         "199x49 0,0 198,48 1111"
     );
     assert!(
-        format_of(&mut engine, &mut context, "#{window_layout}").ends_with("199x49,0,0,0"),
+        format_of(&mut engine, &mut context, "#{window_layout}")
+            .starts_with(r#"{"V":2,"L":{"t":"p","w":199,"h":49,"x":0,"y":0,"#),
         "window_layout encodes the same cell"
     );
 
@@ -152,9 +153,11 @@ fn a_shared_axis_swallows_a_cell_while_the_spanned_axis_stays_exact() {
         pane_family(&mut engine, &mut context),
         "189x45 0,0 188,44 1101"
     );
+    let layout = format_of(&mut engine, &mut context, "#{window_layout}");
     assert!(
-        format_of(&mut engine, &mut context, "#{window_layout}")
-            .contains("200x45,0,0{189x45,0,0,0,10x45,190,0,1}"),
+        layout.contains(
+            r#"{"t":"h","w":200,"h":45,"x":0,"y":0,"c":[{"t":"p","w":189,"h":45,"x":0,"y":0,"#
+        ) && layout.contains(r#"{"t":"p","w":10,"h":45,"x":190,"y":0,"#),
         "window_layout encodes the same cells"
     );
 }

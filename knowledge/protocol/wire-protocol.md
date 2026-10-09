@@ -298,8 +298,8 @@ name plus its format variables and the control front-end alone knows the `%`-lin
 `PaneOutput { pane, bytes }` (v66) is the raw pane-output tap (the same tap `pipe-pane` uses) that
 becomes `%output`; `PaneOutputState { pane, paused }` and `PaneOutputAged { pane, age_ms, bytes }`
 (v67) carry flow-control pause/resume and age-stamped output for `%extended-output`;
-`ControlFlags { wait_exit, pause_after_ms, no_output }` (v67) echoes the client's
-`refresh-client -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
+`ControlFlags { wait_exit, pause_after_ms, no_output, new_layouts }` (v67, `new_layouts`
+appended in v108) echoes the client's `refresh-client -f` and `attach -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
 (v68) reports a `refresh-client -B` format subscription's value change. v71 appends
 `TimedClientMessageCleared { message_id }` at tag 46 — the daemon's explicit clear for one
 timed message, produced by the client-message deadline on the `zz-daemon-timers` thread when a
@@ -790,6 +790,14 @@ slots busy gets its `Begin` followed at once by an empty `done, truncated` chunk
 string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch at
 `MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
 tags.
+
+v108 also carries tmux 3.8's JSON v2 layout strings (catch-up item `pin.layout-v2`).
+`WindowSnapshot.layout_dump` and `visible_layout_dump` hold the v2 form
+(`{"V":2,"L":{...}}`, with each leaf's active flag, last-pane index, pane index and pane id), and
+`EventPayload::ControlFlags` appends `new_layouts: bool` with `#[serde(default)]`. A control client
+prints `%layout-change` from the snapshot through `zz_mux::legacy_layout`, the v1 compat copy,
+unless the daemon reported `new_layouts`; commands a control client runs expand
+`#{window_layout}` in v1 under the same rule.
 
 v108 is unreleased as of 2026-10-07. Claude Code agent panes stop going through the
 `claude-agent-acp` adapter: `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` becomes `claude`, and the daemon

@@ -1,6 +1,9 @@
 #![allow(dead_code)]
 
+mod json;
+
 use std::{
+    cell::Cell,
     collections::{BTreeMap, BTreeSet},
     fmt::Write as _,
 };
@@ -9,9 +12,69 @@ use zz_protocol::{Axis, LayoutNode, PaneBorderStatus, PaneId, SplitId};
 
 use crate::{PresetOptions, model::LayoutPreset};
 
+use json::Json;
+
 pub(crate) const PANE_MINIMUM: u16 = 1;
 pub(crate) const PANE_MAXIMUM: u16 = 10_000;
+const WINDOW_MAXIMUM: i64 = 10_000;
 const MAX_LAYOUT_DEPTH: usize = 256;
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum LayoutFormat {
+    V1,
+    #[default]
+    V2,
+}
+
+thread_local! {
+    static LAYOUT_FORMAT: Cell<LayoutFormat> = const { Cell::new(LayoutFormat::V2) };
+}
+
+#[must_use]
+pub fn layout_format() -> LayoutFormat {
+    LAYOUT_FORMAT.with(Cell::get)
+}
+
+pub fn with_layout_format<R>(format: LayoutFormat, body: impl FnOnce() -> R) -> R {
+    struct Restore(LayoutFormat);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            LAYOUT_FORMAT.with(|value| value.set(self.0));
+        }
+    }
+    let _restore = Restore(LAYOUT_FORMAT.with(|value| value.replace(format)));
+    body()
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub struct LeafState {
+    pub active: bool,
+    pub last: Option<u32>,
+    pub index: u32,
+    pub z: Option<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) struct ParsedFloat {
+    pub z: u32,
+    pub xoff: i32,
+    pub yoff: i32,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(crate) struct ParsedLeaf {
+    pub index: u32,
+    pub active: bool,
+    pub last: Option<u32>,
+    pub float: Option<ParsedFloat>,
+    pub id: Option<u64>,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub(crate) struct ParsedSelection {
+    pub active: Option<PaneId>,
+    pub last_panes: Vec<PaneId>,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct CellGeometry {
@@ -48,12 +111,14 @@ pub struct CellLayout {
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) struct ParsedLayout {
     root: ParsedNode,
+    version: u8,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 enum ParsedNode {
     Leaf {
         geometry: CellGeometry,
+        leaf: ParsedLeaf,
     },
     Node {
         axis: Axis,
@@ -62,11 +127,8 @@ enum ParsedNode {
     },
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum LayoutParseError {
-    InvalidLayout,
-    SizeMismatch,
-}
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) struct LayoutParseError(String);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum LayoutError {
@@ -124,13 +186,20 @@ impl CellNode {
 impl ParsedNode {
     fn geometry(&self) -> CellGeometry {
         match self {
-            Self::Leaf { geometry } | Self::Node { geometry, .. } => *geometry,
+            Self::Leaf { geometry, .. } | Self::Node { geometry, .. } => *geometry,
         }
     }
 
     fn geometry_mut(&mut self) -> &mut CellGeometry {
         match self {
-            Self::Leaf { geometry } | Self::Node { geometry, .. } => geometry,
+            Self::Leaf { geometry, .. } | Self::Node { geometry, .. } => geometry,
+        }
+    }
+
+    fn tiled(&self) -> bool {
+        match self {
+            Self::Leaf { leaf, .. } => leaf.float.is_none(),
+            Self::Node { children, .. } => children.iter().any(Self::tiled),
         }
     }
 
@@ -144,11 +213,12 @@ impl ParsedNode {
 }
 
 impl LayoutParseError {
-    pub(crate) const fn cause(self) -> &'static str {
-        match self {
-            Self::InvalidLayout => "invalid layout",
-            Self::SizeMismatch => "size mismatch after applying layout",
-        }
+    fn new(cause: impl Into<String>) -> Self {
+        Self(cause.into())
+    }
+
+    pub(crate) fn cause(&self) -> &str {
+        &self.0
     }
 }
 
@@ -172,37 +242,12 @@ impl CellLayout {
     }
 
     pub(crate) fn parse(input: &str) -> Result<ParsedLayout, LayoutParseError> {
-        let bytes = input.as_bytes();
-        let Some(prefix) = bytes.get(..5) else {
-            return Err(LayoutParseError::InvalidLayout);
-        };
-        if prefix[4] != b',' || !prefix[..4].iter().all(u8::is_ascii_hexdigit) {
-            return Err(LayoutParseError::InvalidLayout);
+        let input = input.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
+        if input.starts_with('{') {
+            parse_v2(input)
+        } else {
+            parse_v1(input.as_bytes())
         }
-        let expected = prefix[..4].iter().fold(0_u16, |value, byte| {
-            value * 16
-                + u16::from(match byte {
-                    b'0'..=b'9' => byte - b'0',
-                    b'a'..=b'f' => byte - b'a' + 10,
-                    b'A'..=b'F' => byte - b'A' + 10,
-                    _ => 0,
-                })
-        });
-        let body = &bytes[5..];
-        if expected != layout_checksum(body) {
-            return Err(LayoutParseError::InvalidLayout);
-        }
-        let mut parser = LayoutParser::new(body);
-        let mut root = parser
-            .parse_node(0)
-            .ok_or(LayoutParseError::InvalidLayout)?;
-        if !parser.is_done() {
-            return Err(LayoutParseError::InvalidLayout);
-        }
-        if !correct_parsed_root_size(&mut root) || !check_parsed_node(&root) {
-            return Err(LayoutParseError::SizeMismatch);
-        }
-        Ok(ParsedLayout { root })
     }
 
     pub(crate) fn extent(&self) -> (u16, u16) {
@@ -643,10 +688,20 @@ impl CellLayout {
 
     #[must_use]
     pub fn dump(&self) -> String {
-        let mut body = String::new();
-        dump_node(&self.root, &mut body);
-        let checksum = layout_checksum(body.as_bytes());
-        format!("{checksum:04x},{body}")
+        self.dump_as(LayoutFormat::V1, &|_| LeafState::default())
+    }
+
+    #[must_use]
+    pub fn dump_as(&self, format: LayoutFormat, leaf: &dyn Fn(PaneId) -> LeafState) -> String {
+        match format {
+            LayoutFormat::V1 => dump_v1(tiled_copy(&self.root, &|pane| leaf(pane).z.is_some())),
+            LayoutFormat::V2 => {
+                let mut output = String::from("{\"V\":2,\"L\":");
+                dump_v2_node(&self.root, leaf, &mut output);
+                output.push('}');
+                output
+            }
+        }
     }
 
     pub(crate) fn validate(&self) -> Result<(), String> {
@@ -665,8 +720,18 @@ impl CellLayout {
 }
 
 impl ParsedLayout {
+    pub(crate) const fn version(&self) -> u8 {
+        self.version
+    }
+
     pub(crate) fn pane_count(&self) -> usize {
         count_parsed_panes(&self.root)
+    }
+
+    pub(crate) fn has_floating(&self) -> bool {
+        let mut leaves = Vec::new();
+        parsed_leaves(&self.root, &mut leaves);
+        leaves.iter().any(|leaf| leaf.float.is_some())
     }
 
     pub(crate) fn trim_bottom_right(&mut self) {
@@ -681,11 +746,12 @@ impl ParsedLayout {
             else {
                 return;
             };
-            let gift = children[index].extent(*axis).saturating_add(1);
-            let Some(neighbour) = index.checked_sub(1) else {
-                return;
-            };
-            parsed_resize_adjust(&mut children[neighbour], *axis, i32::from(gift));
+            if children[index].tiled() {
+                let gift = children[index].extent(*axis).saturating_add(1);
+                if let Some(neighbour) = (0..index).rev().find(|other| children[*other].tiled()) {
+                    parsed_resize_adjust(&mut children[neighbour], *axis, i32::from(gift));
+                }
+            }
             children.remove(index);
             children.len() == 1
         };
@@ -694,21 +760,338 @@ impl ParsedLayout {
         }
     }
 
+    pub(crate) fn check_sizes(&mut self) -> Result<(), LayoutParseError> {
+        if correct_parsed_root_size(&mut self.root) && check_parsed_node(&self.root) {
+            Ok(())
+        } else {
+            Err(LayoutParseError::new("size mismatch after applying layout"))
+        }
+    }
+
     pub(crate) fn into_layout(
         self,
         panes: &[PaneId],
         ids: &mut dyn FnMut() -> SplitId,
-    ) -> CellLayout {
+    ) -> (CellLayout, Option<ParsedSelection>) {
         debug_assert_eq!(panes.len(), self.pane_count());
-        let mut panes = panes.iter().copied();
-        let root = assign_parsed_node(self.root, &mut panes);
-        let panes_exhausted = panes.next().is_none();
+        let mut leaves = Vec::new();
+        parsed_leaves(&self.root, &mut leaves);
+        let (order, selection) = if self.version == 1 {
+            (panes.to_vec(), None)
+        } else {
+            let mut ranked = (0..leaves.len()).collect::<Vec<_>>();
+            ranked.sort_by_key(|position| leaves[*position].index);
+            let mut order = vec![PaneId(0); leaves.len()];
+            for (pane, position) in panes.iter().zip(ranked) {
+                order[position] = *pane;
+            }
+            let active = leaves
+                .iter()
+                .zip(&order)
+                .find_map(|(leaf, pane)| leaf.active.then_some(*pane));
+            let mut last = leaves
+                .iter()
+                .zip(&order)
+                .filter(|(leaf, _)| !leaf.active)
+                .filter_map(|(leaf, pane)| leaf.last.map(|last| (last, *pane)))
+                .collect::<Vec<_>>();
+            last.sort_by_key(|(last, _)| *last);
+            let selection = ParsedSelection {
+                active,
+                last_panes: last.into_iter().map(|(_, pane)| pane).collect(),
+            };
+            (order, Some(selection))
+        };
+        let mut order = order.into_iter();
+        let root = assign_parsed_node(self.root, &mut order);
+        let panes_exhausted = order.next().is_none();
         debug_assert!(panes_exhausted);
         let mut layout = CellLayout { root };
         fix_offsets(&mut layout.root);
         layout.refresh_divider_ids(ids);
-        layout
+        (layout, selection)
     }
+}
+
+fn parse_v1(input: &[u8]) -> Result<ParsedLayout, LayoutParseError> {
+    let header = input
+        .get(..5)
+        .filter(|prefix| prefix[4] == b',' && prefix[..4].iter().all(u8::is_ascii_hexdigit));
+    let Some(prefix) = header else {
+        return Err(LayoutParseError::new("malformed layout header"));
+    };
+    let expected = prefix[..4].iter().fold(0_u16, |value, byte| {
+        value * 16
+            + u16::from(match byte {
+                b'0'..=b'9' => byte - b'0',
+                b'a'..=b'f' => byte - b'a' + 10,
+                b'A'..=b'F' => byte - b'A' + 10,
+                _ => 0,
+            })
+    });
+    let body = &input[5..];
+    if expected != layout_checksum(body) {
+        return Err(LayoutParseError::new("invalid layout checksum"));
+    }
+    let mut parser = LayoutParser::new(body);
+    let root = parser
+        .parse_node(0)
+        .ok_or_else(|| LayoutParseError::new("invalid layout"))?;
+    if !parser.is_done() {
+        return Err(LayoutParseError::new("trailing data"));
+    }
+    Ok(ParsedLayout { root, version: 1 })
+}
+
+fn parse_v2(input: &str) -> Result<ParsedLayout, LayoutParseError> {
+    let json = json::parse(input).map_err(LayoutParseError)?;
+    let version = json.number("V").map_err(LayoutParseError)?;
+    let root = json.object("L").map_err(LayoutParseError)?;
+    let mut active = 0;
+    let root = parse_v2_cell(root, &mut active).map_err(LayoutParseError)?;
+    if version != 2 {
+        return Err(LayoutParseError::new("version mismatch"));
+    }
+    if active > 1 {
+        return Err(LayoutParseError::new("more than one active pane"));
+    }
+    let mut leaves = Vec::new();
+    parsed_leaves(&root, &mut leaves);
+    if leaves.is_empty() {
+        return Err(LayoutParseError::new("no panes"));
+    }
+    let duplicated = |values: &mut Vec<u32>| {
+        values.sort_unstable();
+        values.windows(2).any(|pair| pair[0] == pair[1])
+    };
+    if duplicated(&mut leaves.iter().map(|leaf| leaf.index).collect()) {
+        return Err(LayoutParseError::new("duplicate pane index"));
+    }
+    if duplicated(
+        &mut leaves
+            .iter()
+            .filter_map(|leaf| leaf.float.map(|float| float.z))
+            .collect(),
+    ) {
+        return Err(LayoutParseError::new("duplicate pane z-index"));
+    }
+    if duplicated(&mut leaves.iter().filter_map(|leaf| leaf.last).collect()) {
+        return Err(LayoutParseError::new("duplicate last pane index"));
+    }
+    Ok(ParsedLayout { root, version: 2 })
+}
+
+fn parse_v2_cell(cell: &Json<'_>, active: &mut usize) -> Result<ParsedNode, String> {
+    let kind = cell.string("t")?;
+    let axis = match kind {
+        "p" => None,
+        "v" => Some(Axis::Vertical),
+        "h" => Some(Axis::Horizontal),
+        _ => return Err(format!("unknown cell type \"{kind}\"")),
+    };
+    let bounded = |key: &str, name: &str, range: std::ops::RangeInclusive<i64>| {
+        let value = cell.number(key)?;
+        if range.contains(&value) {
+            Ok(value)
+        } else {
+            Err(format!("invalid {name} {value}"))
+        }
+    };
+    let size = i64::from(PANE_MINIMUM)..=i64::from(PANE_MAXIMUM);
+    let offset = -WINDOW_MAXIMUM..=WINDOW_MAXIMUM;
+    let sx = bounded("w", "width", size.clone())?;
+    let sy = bounded("h", "height", size)?;
+    let xoff = bounded("x", "x-offset", offset.clone())?;
+    let yoff = bounded("y", "y-offset", offset)?;
+    let narrow = |value: i64| u16::try_from(value.max(0)).unwrap_or(u16::MAX);
+    let geometry = CellGeometry {
+        sx: narrow(sx),
+        sy: narrow(sy),
+        xoff: narrow(xoff),
+        yoff: narrow(yoff),
+    };
+    let int = i64::from(i32::MAX);
+    let Some(axis) = axis else {
+        if cell.find("c").is_some() {
+            return Err("panes cannot have children".to_owned());
+        }
+        let index = bounded("i", "index", 0..=int)?;
+        let mut leaf = ParsedLeaf {
+            index: u32::try_from(index).unwrap_or_default(),
+            ..ParsedLeaf::default()
+        };
+        if cell.find("a").is_some() {
+            leaf.active = cell.boolean("a")?;
+            if leaf.active {
+                *active += 1;
+            }
+        } else if cell.find("l").is_some() {
+            leaf.last = Some(u32::try_from(bounded("l", "last", 0..=int)?).unwrap_or_default());
+        }
+        if cell.find("z").is_some() {
+            let z = bounded("z", "floating zindex", 0..=int - 1)?;
+            leaf.float = Some(ParsedFloat {
+                z: u32::try_from(z).unwrap_or_default(),
+                xoff: i32::try_from(xoff).unwrap_or_default(),
+                yoff: i32::try_from(yoff).unwrap_or_default(),
+            });
+        }
+        leaf.id = match cell.find("I") {
+            Some(Json::String(id)) => id.strip_prefix('%').and_then(|id| id.parse().ok()),
+            _ => None,
+        };
+        return Ok(ParsedNode::Leaf { geometry, leaf });
+    };
+    let members = cell.array("c")?;
+    if members.len() < 2 {
+        return Err("nodes must have more than one child".to_owned());
+    }
+    let children = members
+        .iter()
+        .map(|member| parse_v2_cell(member, active))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(ParsedNode::Node {
+        axis,
+        geometry,
+        children,
+    })
+}
+
+fn parsed_leaves(node: &ParsedNode, leaves: &mut Vec<ParsedLeaf>) {
+    match node {
+        ParsedNode::Leaf { leaf, .. } => leaves.push(*leaf),
+        ParsedNode::Node { children, .. } => {
+            for child in children {
+                parsed_leaves(child, leaves);
+            }
+        }
+    }
+}
+
+#[must_use]
+pub fn legacy_layout(layout: &str) -> String {
+    match CellLayout::parse(layout) {
+        Ok(parsed) if parsed.version == 2 => dump_v1(tiled_copy_parsed(&parsed.root)),
+        _ => layout.to_owned(),
+    }
+}
+
+fn tiled_copy(node: &CellNode, floating: &dyn Fn(PaneId) -> bool) -> Option<CellNode> {
+    match node {
+        CellNode::Leaf { pane, .. } => (!floating(*pane)).then(|| node.clone()),
+        CellNode::Node {
+            axis,
+            geometry,
+            children,
+        } => collapse_copy(
+            *axis,
+            *geometry,
+            children
+                .iter()
+                .filter_map(|child| tiled_copy(&child.node, floating))
+                .collect(),
+        ),
+    }
+}
+
+fn tiled_copy_parsed(node: &ParsedNode) -> Option<CellNode> {
+    match node {
+        ParsedNode::Leaf { geometry, leaf } => leaf.float.is_none().then(|| CellNode::Leaf {
+            pane: PaneId(leaf.id.unwrap_or_default()),
+            geometry: *geometry,
+        }),
+        ParsedNode::Node {
+            axis,
+            geometry,
+            children,
+        } => collapse_copy(
+            *axis,
+            *geometry,
+            children.iter().filter_map(tiled_copy_parsed).collect(),
+        ),
+    }
+}
+
+fn collapse_copy(
+    axis: Axis,
+    geometry: CellGeometry,
+    mut children: Vec<CellNode>,
+) -> Option<CellNode> {
+    match children.len() {
+        0 => None,
+        1 => children.pop(),
+        _ => Some(CellNode::Node {
+            axis,
+            geometry,
+            children: children
+                .into_iter()
+                .map(|node| CellChild {
+                    divider: None,
+                    node,
+                })
+                .collect(),
+        }),
+    }
+}
+
+fn dump_v1(root: Option<CellNode>) -> String {
+    let Some(mut root) = root else {
+        return "0000,".to_owned();
+    };
+    if let CellNode::Leaf { geometry, .. } = &mut root {
+        geometry.xoff = 0;
+        geometry.yoff = 0;
+    }
+    let mut body = String::new();
+    dump_node(&root, &mut body);
+    let checksum = layout_checksum(body.as_bytes());
+    format!("{checksum:04x},{body}")
+}
+
+fn dump_v2_node(node: &CellNode, leaf: &dyn Fn(PaneId) -> LeafState, output: &mut String) {
+    let geometry = node.geometry();
+    let kind = match node {
+        CellNode::Leaf { .. } => 'p',
+        CellNode::Node {
+            axis: Axis::Vertical,
+            ..
+        } => 'v',
+        CellNode::Node {
+            axis: Axis::Horizontal,
+            ..
+        } => 'h',
+    };
+    let _ = write!(
+        output,
+        "{{\"t\":\"{kind}\",\"w\":{},\"h\":{},\"x\":{},\"y\":{}",
+        geometry.sx, geometry.sy, geometry.xoff, geometry.yoff
+    );
+    match node {
+        CellNode::Leaf { pane, .. } => {
+            let state = leaf(*pane);
+            if state.active {
+                output.push_str(",\"a\":true");
+            } else if let Some(last) = state.last {
+                let _ = write!(output, ",\"l\":{last}");
+            }
+            let _ = write!(output, ",\"i\":{}", state.index);
+            if let Some(z) = state.z {
+                let _ = write!(output, ",\"z\":{z}");
+            }
+            let _ = write!(output, ",\"I\":\"%{}\"", pane.0);
+        }
+        CellNode::Node { children, .. } => {
+            output.push_str(",\"c\":[");
+            for (index, child) in children.iter().enumerate() {
+                if index > 0 {
+                    output.push(',');
+                }
+                dump_v2_node(&child.node, leaf, output);
+            }
+            output.push(']');
+        }
+    }
+    output.push('}');
 }
 
 struct LayoutParser<'a> {
@@ -736,6 +1119,13 @@ impl<'a> LayoutParser<'a> {
         let xoff = self.number()?;
         self.expect(b',')?;
         let yoff = self.number()?;
+        if !(PANE_MINIMUM..=PANE_MAXIMUM).contains(&sx)
+            || !(PANE_MINIMUM..=PANE_MAXIMUM).contains(&sy)
+            || i64::from(xoff) > WINDOW_MAXIMUM
+            || i64::from(yoff) > WINDOW_MAXIMUM
+        {
+            return None;
+        }
         let geometry = CellGeometry { sx, sy, xoff, yoff };
         if self.peek() == Some(b',') {
             let saved = self.cursor;
@@ -750,7 +1140,10 @@ impl<'a> LayoutParser<'a> {
         match self.peek() {
             Some(b'{') => self.parse_children(depth, Axis::Horizontal, geometry, b'}'),
             Some(b'[') => self.parse_children(depth, Axis::Vertical, geometry, b']'),
-            Some(b',' | b'}' | b']') | None => Some(ParsedNode::Leaf { geometry }),
+            Some(b',' | b'}' | b']') | None => Some(ParsedNode::Leaf {
+                geometry,
+                leaf: ParsedLeaf::default(),
+            }),
             _ => None,
         }
     }
@@ -817,12 +1210,15 @@ fn correct_parsed_root_size(root: &mut ParsedNode) -> bool {
     else {
         return true;
     };
-    let Some(last) = children.last() else {
-        return false;
+    let Some(last) = children.iter().rfind(|child| child.tiled()) else {
+        return true;
     };
-    let along = children.iter().try_fold(0_u32, |total, child| {
-        total.checked_add(u32::from(child.extent(*axis)) + 1)
-    });
+    let along = children
+        .iter()
+        .filter(|child| child.tiled())
+        .try_fold(0_u32, |total, child| {
+            total.checked_add(u32::from(child.extent(*axis)) + 1)
+        });
     let Some(along) = along.and_then(|total| total.checked_sub(1)) else {
         return false;
     };
@@ -854,7 +1250,7 @@ fn check_parsed_node(node: &ParsedNode) -> bool {
         return false;
     }
     let mut extent = 0_u32;
-    for child in children {
+    for child in children.iter().filter(|child| child.tiled()) {
         let child_geometry = child.geometry();
         let cross_matches = match axis {
             Axis::Horizontal => child_geometry.sy == geometry.sy,
@@ -868,7 +1264,7 @@ fn check_parsed_node(node: &ParsedNode) -> bool {
         };
         extent = next;
     }
-    extent.checked_sub(1) == Some(u32::from(geometry.extent(*axis)))
+    extent == 0 || extent.checked_sub(1) == Some(u32::from(geometry.extent(*axis)))
 }
 
 fn count_parsed_panes(node: &ParsedNode) -> usize {
@@ -905,7 +1301,7 @@ fn parsed_node_at_path_mut<'a>(
 
 fn parsed_resize_check(node: &ParsedNode, axis: Axis) -> u16 {
     match node {
-        ParsedNode::Leaf { geometry } => geometry.extent(axis).saturating_sub(PANE_MINIMUM),
+        ParsedNode::Leaf { geometry, .. } => geometry.extent(axis).saturating_sub(PANE_MINIMUM),
         ParsedNode::Node {
             axis: node_axis,
             children,
@@ -1010,7 +1406,7 @@ fn collapse_parsed_single_child(root: &mut ParsedNode, parent_path: &[usize]) {
 
 fn assign_parsed_node(node: ParsedNode, panes: &mut impl Iterator<Item = PaneId>) -> CellNode {
     match node {
-        ParsedNode::Leaf { geometry } => CellNode::Leaf {
+        ParsedNode::Leaf { geometry, .. } => CellNode::Leaf {
             pane: panes.next().expect("parsed pane count was checked"),
             geometry,
         },
@@ -2998,13 +3394,25 @@ mod tests {
         assert_eq!(CellLayout::new(PaneId(0), 0, 0).extent(), (1, 1));
     }
 
+    fn parse_error(input: &str) -> String {
+        let mut parsed = match CellLayout::parse(input) {
+            Ok(parsed) => parsed,
+            Err(error) => return error.cause().to_owned(),
+        };
+        parsed
+            .check_sizes()
+            .map_or_else(|error| error.cause().to_owned(), |()| String::new())
+    }
+
     #[test]
     fn parsed_layout_corrects_the_root_and_assigns_dfs_panes() {
         let input = checksummed("999x999,9,9{40x24,8,8,111,39x24,9,9,222}");
-        let parsed = CellLayout::parse(&input).unwrap();
+        let mut parsed = CellLayout::parse(&input).unwrap();
+        parsed.check_sizes().unwrap();
         assert_eq!(parsed.pane_count(), 2);
         let mut ids = allocator(20);
-        let layout = parsed.into_layout(&[PaneId(7), PaneId(8)], &mut ids);
+        let (layout, selection) = parsed.into_layout(&[PaneId(7), PaneId(8)], &mut ids);
+        assert_eq!(selection, None);
         assert_eq!(
             layout.dump(),
             checksummed("80x24,0,0{40x24,0,0,7,39x24,41,0,8}")
@@ -3016,39 +3424,49 @@ mod tests {
     }
 
     #[test]
-    fn parsed_layout_rejects_checksum_grammar_and_size_errors() {
-        assert_eq!(
-            CellLayout::parse("0000,80x24,0,0,0"),
-            Err(LayoutParseError::InvalidLayout)
-        );
+    fn parsed_layout_rejects_checksum_grammar_and_size_errors_like_the_pin() {
+        assert_eq!(parse_error("0000,80x24,0,0,0"), "invalid layout checksum");
         let parsed = CellLayout::parse("B25D,80x24,0,0,0").unwrap();
         let mut ids = allocator(20);
         assert_eq!(
-            parsed.into_layout(&[PaneId(7)], &mut ids).dump(),
+            parsed.into_layout(&[PaneId(7)], &mut ids).0.dump(),
             checksummed("80x24,0,0,7")
         );
+        assert!(CellLayout::parse(" \t b25d,80x24,0,0,0").is_ok());
         for malformed in [
             "b25,80x24,0,0,0",
             "0b25d,80x24,0,0,0",
             "0xb25d,80x24,0,0,0",
-            " b25d,80x24,0,0,0",
+            "",
         ] {
             assert_eq!(
-                CellLayout::parse(malformed),
-                Err(LayoutParseError::InvalidLayout)
+                parse_error(malformed),
+                "malformed layout header",
+                "{malformed}"
             );
         }
         assert_eq!(
-            CellLayout::parse(&checksummed("80x24,0,0,0garbage")),
-            Err(LayoutParseError::InvalidLayout)
+            parse_error(&checksummed("80x24,0,0,0garbage")),
+            "invalid layout"
+        );
+        assert_eq!(parse_error(&checksummed("80x24,0,0,0,5")), "trailing data");
+        assert_eq!(parse_error(&checksummed("80x24,0,0,0]")), "trailing data");
+        assert_eq!(parse_error(&checksummed("0x24,0,0,0")), "invalid layout");
+        assert_eq!(
+            parse_error(&checksummed("80x10001,0,0,0")),
+            "invalid layout"
         );
         assert_eq!(
-            CellLayout::parse(&checksummed("80x24,0,0{80x24,0,0,0}")),
-            Err(LayoutParseError::InvalidLayout)
+            parse_error(&checksummed("80x24,10001,0,0")),
+            "invalid layout"
         );
         assert_eq!(
-            CellLayout::parse(&checksummed("80x24,0,0{40x23,0,0,0,39x24,41,0,1}")),
-            Err(LayoutParseError::SizeMismatch)
+            parse_error(&checksummed("80x24,0,0{80x24,0,0,0}")),
+            "invalid layout"
+        );
+        assert_eq!(
+            parse_error(&checksummed("80x24,0,0{40x23,0,0,0,39x24,41,0,1}")),
+            "size mismatch after applying layout"
         );
     }
 
@@ -3073,7 +3491,7 @@ mod tests {
         parsed.trim_bottom_right();
         assert_eq!(parsed.pane_count(), 2);
         let mut ids = allocator(30);
-        let layout = parsed.into_layout(&[PaneId(7), PaneId(8)], &mut ids);
+        let layout = parsed.into_layout(&[PaneId(7), PaneId(8)], &mut ids).0;
         assert_eq!(
             layout.dump(),
             checksummed("100x20,0,0{49x20,0,0,7,50x20,50,0,8}")
@@ -3089,10 +3507,7 @@ mod tests {
         let accepted = nested_layout(MAX_LAYOUT_DEPTH - 1).0;
         assert!(CellLayout::parse(&checksummed(&accepted)).is_ok());
         let rejected = nested_layout(MAX_LAYOUT_DEPTH).0;
-        assert_eq!(
-            CellLayout::parse(&checksummed(&rejected)),
-            Err(LayoutParseError::InvalidLayout)
-        );
+        assert_eq!(parse_error(&checksummed(&rejected)), "invalid layout");
     }
 
     #[test]

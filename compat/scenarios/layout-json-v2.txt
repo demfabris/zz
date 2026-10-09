@@ -1,0 +1,64 @@
+# tmux 3.8 prints #{window_layout}, #{window_visible_layout} and the list-windows
+# default line as JSON v2 (bf43fdc0, d9692f7e): {"V":2,"L":cell}, cells with t, w,
+# h, x, y, then c for a node or a, l, i, (z,) I for a pane. a marks the active
+# pane, l is the pane's place on the last-pane stack, i its pane index.
+fmt: #{window_layout}|#{window_visible_layout}
+out: list-windows -t w
+split-window -h -t w:0.0
+split-window -v -t w:0.1
+split-window -h -t w:0.2
+fmt: #{window_layout}
+select-pane -t w:0.0
+fmt: #{window_layout}
+# Zoomed, window_layout is the real tree and window_visible_layout the one-leaf
+# zoom root.
+resize-pane -Z -t w:0.1
+fmt: #{window_layout}
+fmt: #{window_visible_layout}
+out: list-windows -t w
+resize-pane -Z -t w:0.1
+resize-window -t w -x 100 -y 30
+fmt: #{window_layout}
+select-layout -t w even-horizontal
+fmt: #{window_layout}
+select-layout -t w even-vertical
+fmt: #{window_layout}
+select-layout -t w main-horizontal
+fmt: #{window_layout}
+select-layout -t w main-vertical
+fmt: #{window_layout}
+select-layout -t w tiled
+fmt: #{window_layout}
+select-layout -t w main-horizontal-mirrored
+fmt: #{window_layout}
+select-layout -t w main-vertical-mirrored
+fmt: #{window_layout}
+set-window-option -t w pane-base-index 3
+fmt: #{window_layout}
+set-window-option -t w -u pane-base-index
+# select-layout reads v2 back: cells take panes in ascending i, a selects the
+# active pane and l rebuilds the last-pane stack.
+kill-pane -t w:0.3
+resize-window -t w -x 80 -y 24
+select-layout -t w '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"a":true,"i":2,"I":"%9"},{"t":"v","w":39,"h":24,"x":41,"y":0,"c":[{"t":"p","w":39,"h":12,"x":41,"y":0,"l":0,"i":0},{"t":"p","w":39,"h":11,"x":41,"y":13,"l":1,"i":1}]}]}}'
+out: list-panes -t w -F #{pane_index}:#{pane_id}:#{pane_active}:#{pane_last}:#{pane_width}x#{pane_height}@#{pane_left},#{pane_top}
+fmt: #{window_layout}
+select-layout -t w '{"V":2,"L":{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":12,"x":0,"y":0,"i":5},{"t":"p","w":80,"h":5,"x":0,"y":13,"l":3,"i":6},{"t":"p","w":80,"h":5,"x":0,"y":19,"i":7}]}}'
+out: list-panes -t w -F #{pane_index}:#{pane_id}:#{pane_active}:#{pane_last}
+fmt: #{window_layout}
+# More cells than panes: the bottom-right cell goes, a floating one first.
+select-layout -t w '{"V":2,"L":{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":12,"x":0,"y":0,"i":0},{"t":"p","w":80,"h":5,"x":0,"y":13,"i":1},{"t":"p","w":80,"h":5,"x":0,"y":19,"i":2},{"t":"p","w":80,"h":5,"x":0,"y":19,"i":3,"z":0}]}}'
+fmt: #{window_layout}
+select-layout -t w '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":20,"h":24,"x":0,"y":0,"i":3,"l":0},{"t":"p","w":19,"h":24,"x":21,"y":0,"i":1},{"t":"p","w":19,"h":24,"x":41,"y":0,"i":2,"a":true},{"t":"p","w":19,"h":24,"x":61,"y":0,"i":0,"l":1}]}}'
+out: list-panes -t w -F #{pane_index}:#{pane_id}:#{pane_active}:#{pane_last}
+fmt: #{window_layout}
+select-layout -t w '{"V":2,"L":{"t":"h","w":60,"h":20,"x":0,"y":0,"c":[{"t":"p","w":20,"h":20,"x":0,"y":0,"i":0},{"t":"p","w":19,"h":20,"x":21,"y":0,"i":1},{"t":"p","w":19,"h":20,"x":41,"y":0,"i":2}]}}'
+fmt: #{window_width}x#{window_height} #{window_layout}
+# v1 strings still parse, and malformed v2 fails without touching the window.
+select-layout -t w 'd67e,80x24,0,0{40x24,0,0,0,39x24,41,0[39x12,41,0,1,39x11,41,13,2]}'
+fmt: #{window_layout}
+select-layout -t w '{"V":3,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"i":0}}'
+select-layout -t w '{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"i":0}}'
+select-layout -t w '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"i":0},{"t":"p","w":39,"h":24,"x":41,"y":0,"i":0}]}}'
+select-layout -t w '{"V":2,"V":2}'
+fmt: #{window_layout}

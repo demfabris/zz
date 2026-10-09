@@ -16,7 +16,9 @@ use zz_protocol::{
 use crate::{
     PresetOptions,
     journal::{ChangeJournal, Tracked},
-    layout::{CellGeometry, CellLayout, LayoutError, SplitSize, carve_border_row},
+    layout::{
+        CellGeometry, CellLayout, LayoutError, LayoutFormat, LeafState, SplitSize, carve_border_row,
+    },
 };
 
 pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
@@ -400,6 +402,37 @@ impl Window {
     pub(crate) fn last_pane(&self) -> Option<PaneId> {
         self.last_panes.first().copied()
     }
+
+    #[must_use]
+    pub fn layout_string(&self, format: LayoutFormat, pane_base_index: u32) -> String {
+        self.layout
+            .dump_as(format, &|pane| self.leaf_state(pane, pane_base_index))
+    }
+
+    #[must_use]
+    pub fn visible_layout_string(&self, format: LayoutFormat, pane_base_index: u32) -> String {
+        let Some(zoomed) = self.zoomed_pane else {
+            return self.layout_string(format, pane_base_index);
+        };
+        let (width, height) = self.layout.extent();
+        CellLayout::new(zoomed, width, height)
+            .dump_as(format, &|pane| self.leaf_state(pane, pane_base_index))
+    }
+
+    fn leaf_state(&self, pane: PaneId, pane_base_index: u32) -> LeafState {
+        let position = |panes: &[PaneId]| {
+            panes
+                .iter()
+                .position(|candidate| *candidate == pane)
+                .and_then(|position| u32::try_from(position).ok())
+        };
+        LeafState {
+            active: pane == self.active_pane,
+            last: position(&self.last_panes),
+            index: pane_base_index.saturating_add(position(&self.pane_order).unwrap_or_default()),
+            z: None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -415,12 +448,22 @@ pub struct MuxState {
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
     marked_pane: Option<(SessionId, WindowId, PaneId)>,
+    pub(crate) global_pane_base_index: u32,
+    pub(crate) window_pane_base_indices: BTreeMap<WindowId, u32>,
     pub sessions: Tracked<SessionId, Session>,
     pub windows: Tracked<WindowId, Window>,
     pub(crate) journal: ChangeJournal,
 }
 
 impl MuxState {
+    #[must_use]
+    pub fn pane_base_index(&self, window: WindowId) -> u32 {
+        self.window_pane_base_indices
+            .get(&window)
+            .copied()
+            .unwrap_or(self.global_pane_base_index)
+    }
+
     #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
@@ -1631,17 +1674,23 @@ impl MuxState {
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
             .pane_order
             .clone();
-        let mut parsed = CellLayout::parse(layout)
-            .map_err(|error| ServerError::InvalidCommand(format!("{}: {layout}", error.cause())))?;
+        let invalid = |cause: &str| ServerError::InvalidCommand(format!("{cause}: {layout}"));
+        let mut parsed = CellLayout::parse(layout).map_err(|error| invalid(error.cause()))?;
         let cells = parsed.pane_count();
         if panes.len() > cells {
-            return Err(ServerError::InvalidCommand(format!(
-                "have {} panes but need {cells}: {layout}",
+            return Err(invalid(&format!(
+                "have {} panes but need {cells}",
                 panes.len()
             )));
         }
         while parsed.pane_count() > panes.len() {
             parsed.trim_bottom_right();
+        }
+        parsed
+            .check_sizes()
+            .map_err(|error| invalid(error.cause()))?;
+        if parsed.has_floating() {
+            return Err(invalid("floating panes are not supported"));
         }
         let split_ids = (0..panes.len().saturating_sub(1))
             .map(|_| self.allocate_split_id())
@@ -1652,13 +1701,17 @@ impl MuxState {
                 .next()
                 .expect("parsed layout has one split ID per edge")
         };
-        let next = parsed.into_layout(&panes, &mut ids);
+        let (next, selection) = parsed.into_layout(&panes, &mut ids);
         let split_ids_exhausted = split_ids.next().is_none();
         debug_assert!(
             split_ids_exhausted,
             "parsed layout consumes one fresh ID per split"
         );
 
+        let active_point = selection
+            .as_ref()
+            .and_then(|selection| selection.active)
+            .map(|_| self.allocate_sort_point());
         let window = self
             .windows
             .get_mut(&mut self.journal, &window)
@@ -1667,6 +1720,23 @@ impl MuxState {
         window.z_order = window.layout.panes_in_order();
         window.previous_layout = Some(Box::new(previous));
         window.last_extent_probe = None;
+        if let Some(selection) = selection {
+            if let (Some(active), Some(active_point)) = (selection.active, active_point)
+                && activate_window_pane(window, active, false)
+            {
+                window
+                    .panes
+                    .get_mut(&active)
+                    .expect("parsed pane belongs to the window")
+                    .active_point = active_point;
+            }
+            let active = window.active_pane;
+            window.last_panes = selection
+                .last_panes
+                .into_iter()
+                .filter(|pane| *pane != active)
+                .collect();
+        }
         self.bump_generation();
         Ok(())
     }
@@ -3914,12 +3984,9 @@ impl MuxState {
             .input_options
             .synchronize_panes()
             .unwrap_or_else(|| self.global_synchronize_panes());
-        let (width, height) = window.layout.extent();
-        let layout_dump = window.layout.dump();
-        let visible_layout_dump = window.zoomed_pane.map_or_else(
-            || layout_dump.clone(),
-            |pane| CellLayout::new(pane, width, height).dump(),
-        );
+        let pane_base_index = self.pane_base_index(window.id);
+        let layout_dump = window.layout_string(LayoutFormat::V2, pane_base_index);
+        let visible_layout_dump = window.visible_layout_string(LayoutFormat::V2, pane_base_index);
         WindowSnapshot {
             id: window.id,
             index: window.index,

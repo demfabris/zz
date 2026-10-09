@@ -70,14 +70,14 @@ use zz_mux::{
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
     CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT, DetachScope,
     Execution, ExecutionContext, FormatClient, FormatMonitorScope, FormatMonitorTarget,
-    FormatNeeds, KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine,
-    PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
+    FormatNeeds, KeyDecision, KeyEngine, KeyTables, LayoutFormat, MouseEventTarget, MuxEffect,
+    MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts, ParsedConfig, ParsedConfigBytes,
     RetainedJobEnvironment, SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort,
     TmuxSortOrder, WindowSize, canonical_command, command_block_body,
     copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
     if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
-    send_keys_target_client, validate_static_command_chain,
+    send_keys_target_client, validate_static_command_chain, with_layout_format,
 };
 #[cfg(windows)]
 use zz_protocol::read_protocol_message_into;
@@ -6164,6 +6164,7 @@ impl Shared {
             }
             let mut events = Vec::new();
             for (client, session) in clients {
+                let layout_format = control_layout_format(&inner, Some(client));
                 let client_facts = client_format_facts(&inner, client, session);
                 let mut subscriptions = inner
                     .client_mut(client)
@@ -6187,8 +6188,9 @@ impl Shared {
                         context.set_format_value("config_files", inner.config_files.clone());
                         let mut hooks =
                             DaemonFormatHooks::command(&facts).with_option_engine(&inner.engine);
-                        let value =
-                            expand_format_values(&subscription.format, &context, &mut hooks);
+                        let value = with_layout_format(layout_format, || {
+                            expand_format_values(&subscription.format, &context, &mut hooks)
+                        });
                         if subscription.previous.get(&target) != Some(&value) {
                             events.push((
                                 client,
@@ -7622,16 +7624,22 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
-        self.execution_item()
-            .execute_with_mux_source_routed_for_terminal_in_queue_in_item(
-                client,
-                kind,
-                context,
-                command,
-                mux_source,
-                client_terminal,
-                queue_execution,
-            )
+        let layout_format = control_layout_format(
+            &self.inner.lock(),
+            format_provenance_client(context, client),
+        );
+        with_layout_format(layout_format, || {
+            self.execution_item()
+                .execute_with_mux_source_routed_for_terminal_in_queue_in_item(
+                    client,
+                    kind,
+                    context,
+                    command,
+                    mux_source,
+                    client_terminal,
+                    queue_execution,
+                )
+        })
     }
 
     fn execute_with_mux_source_routed_for_terminal_in_queue_in_item(
@@ -18031,9 +18039,9 @@ impl Shared {
                     .client_entry(client)
                     .control_output
                     .get_or_insert_default();
-                let before = (output.wait_exit, output.pause_after_ms, output.no_output);
+                let before = control_flag_state(output);
                 apply_control_client_flags(output, flags);
-                let after = (output.wait_exit, output.pause_after_ms, output.no_output);
+                let after = control_flag_state(output);
                 (before, after)
             };
             sync_control_feed(&inner, client, &self.control_wake);
@@ -18047,6 +18055,7 @@ impl Shared {
                         wait_exit: after.0,
                         pause_after_ms: after.1,
                         no_output: after.2,
+                        new_layouts: after.3,
                     },
                 )
             })
@@ -18077,11 +18086,11 @@ impl Shared {
                 .client_entry(client)
                 .control_output
                 .get_or_insert_default();
-            let before = (output.wait_exit, output.pause_after_ms, output.no_output);
+            let before = control_flag_state(output);
             if let Some(requested) = requested {
                 apply_control_client_flags(output, requested);
             }
-            let after = (output.wait_exit, output.pause_after_ms, output.no_output);
+            let after = control_flag_state(output);
             sync_control_feed(&inner, client, &self.control_wake);
             (before != after).then(|| {
                 (
@@ -18093,6 +18102,7 @@ impl Shared {
                         wait_exit: after.0,
                         pause_after_ms: after.1,
                         no_output: after.2,
+                        new_layouts: after.3,
                     },
                 )
             })
@@ -35480,6 +35490,7 @@ struct ControlClientOutput {
     panes: BTreeMap<PaneId, ControlPaneOutput>,
     no_output: bool,
     wait_exit: bool,
+    new_layouts: bool,
     pause_after_ms: Option<u64>,
     geometry: Option<TerminalGeometry>,
     window_geometries: BTreeMap<WindowId, TerminalGeometry>,
@@ -40137,6 +40148,9 @@ fn format_client_flags_from_source(inner: &ClientFormatSource<'_>, client: Clien
         }
         if output.wait_exit {
             flags.push("wait-exit".to_owned());
+        }
+        if output.new_layouts {
+            flags.push("new-layouts".to_owned());
         }
         if let Some(pause_after_ms) = output.pause_after_ms {
             flags.push(format!("pause-after={}", pause_after_ms / 1000));
@@ -48987,6 +49001,32 @@ fn control_subscription_targets(
     }
 }
 
+const fn control_flag_state(output: &ControlClientOutput) -> (bool, Option<u64>, bool, bool) {
+    (
+        output.wait_exit,
+        output.pause_after_ms,
+        output.no_output,
+        output.new_layouts,
+    )
+}
+
+fn control_layout_format(inner: &ServerState, client: Option<ClientId>) -> LayoutFormat {
+    let old = client
+        .and_then(|client| inner.client(client))
+        .is_some_and(|client| {
+            client.kind == Some(ClientKind::Control)
+                && !client
+                    .control_output
+                    .as_ref()
+                    .is_some_and(|output| output.new_layouts)
+        });
+    if old {
+        LayoutFormat::V1
+    } else {
+        LayoutFormat::V2
+    }
+}
+
 fn apply_control_client_flags(output: &mut ControlClientOutput, flags: &str) {
     for raw in flags.split(',') {
         let (clear, flag) = raw
@@ -48998,6 +49038,7 @@ fn apply_control_client_flags(output: &mut ControlClientOutput, flags: &str) {
                 output.panes.clear();
             }
             "wait-exit" => output.wait_exit = !clear,
+            "new-layouts" => output.new_layouts = !clear,
             "pause-after" => {
                 output.pause_after_ms = (!clear).then_some(0);
             }
@@ -56749,8 +56790,7 @@ mod tests {
                         .flat_map(|session| &session.windows)
                         .find(|candidate| candidate.id == window)
                         .is_some_and(|window| {
-                            window
-                                .layout_dump
+                            zz_mux::legacy_layout(&window.layout_dump)
                                 .ends_with(&format!("80x20,0,0,{}", pane.0))
                                 && window.panes.get(&pane).is_some_and(|pane| pane.bell)
                         })
@@ -56762,8 +56802,7 @@ mod tests {
             .find(|candidate| candidate.id == window)
             .expect("peer focus window");
         assert!(
-            peer_window
-                .layout_dump
+            zz_mux::legacy_layout(&peer_window.layout_dump)
                 .ends_with(&format!("80x20,0,0,{}", pane.0)),
             "{}",
             peer_window.layout_dump
@@ -58105,8 +58144,7 @@ mod tests {
                         .flat_map(|session| &session.windows)
                         .find(|candidate| candidate.id == window)
                         .is_some_and(|window| {
-                            window
-                                .layout_dump
+                            zz_mux::legacy_layout(&window.layout_dump)
                                 .ends_with(&format!("80x20,0,0,{}", pane.0))
                                 && window.panes.get(&pane).is_some_and(|pane| pane.bell)
                         })
@@ -58118,8 +58156,7 @@ mod tests {
             .find(|candidate| candidate.id == window)
             .expect("peer focus window");
         assert!(
-            peer_window
-                .layout_dump
+            zz_mux::legacy_layout(&peer_window.layout_dump)
                 .ends_with(&format!("80x20,0,0,{}", pane.0)),
             "{}",
             peer_window.layout_dump
@@ -64143,6 +64180,7 @@ mod tests {
                     wait_exit: true,
                     pause_after_ms: Some(2000),
                     no_output: true,
+                    new_layouts: false,
                 },
                 ..
             })
@@ -64170,6 +64208,114 @@ mod tests {
             format_client_flags(&shared.inner.lock(), control),
             "attached,focused,control-mode"
         );
+    }
+
+    #[test]
+    fn control_clients_read_v1_layouts_until_they_set_new_layouts() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("layouts")
+            .expect("layouts session");
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("interactive".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(control, session).expect("attach control");
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive");
+        take_reliable_messages(&control_mailbox);
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let layouts = |client: ClientId, kind: ClientKind, context: &mut ExecutionContext| {
+            let shown = shared
+                .execute(
+                    client,
+                    kind,
+                    context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        ["-p", "#{window_layout} #{window_visible_layout}"],
+                    ),
+                )
+                .expect("display layouts")
+                .output
+                .to_string();
+            let listed = shared
+                .execute(
+                    client,
+                    kind,
+                    context,
+                    &CommandInvocation::new("list-windows", ["-t", "layouts"]),
+                )
+                .expect("list windows")
+                .output
+                .to_string();
+            (shown, listed)
+        };
+        let v1 = "b25d,80x24,0,0,0";
+        let v2 = r#"{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"a":true,"i":0,"I":"%0"}}"#;
+        let (shown, listed) = layouts(control, ClientKind::Control, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v1} {v1}"));
+        assert!(listed.contains(&format!("[layout {v1}]")), "{listed}");
+        let (shown, listed) = layouts(interactive, ClientKind::Interactive, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v2} {v2}"));
+        assert!(listed.contains(&format!("[layout {v2}]")), "{listed}");
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-f", "new-layouts"]),
+            )
+            .expect("set new-layouts");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), control),
+            "attached,focused,control-mode,new-layouts"
+        );
+        assert!(
+            take_reliable_messages(&control_mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlFlags {
+                            new_layouts: true,
+                            ..
+                        },
+                        ..
+                    })
+                ))
+        );
+        let (shown, listed) = layouts(control, ClientKind::Control, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v2} {v2}"));
+        assert!(listed.contains(&format!("[layout {v2}]")), "{listed}");
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-f", "!new-layouts"]),
+            )
+            .expect("clear new-layouts");
+        let (shown, _) = layouts(control, ClientKind::Control, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v1} {v1}"));
+        let snapshot = shared.inner.lock().engine.state.snapshot();
+        assert_eq!(snapshot.sessions[0].windows[0].layout_dump, v2);
     }
 
     #[test]
@@ -64405,7 +64551,7 @@ mod tests {
                     message,
                     ProtocolMessage::Event(Event { payload: EventPayload::Snapshot(snapshot), .. })
                         if snapshot.sessions.iter().flat_map(|session| &session.windows)
-                            .any(|state| state.id == window && state.layout_dump.contains("100x30"))
+                            .any(|state| state.id == window && state.layout_dump.contains(r#""w":100,"h":30"#))
                 )
             })
             .expect("live 100x30 snapshot");
@@ -64471,7 +64617,7 @@ mod tests {
             message,
             ProtocolMessage::Attached { session, snapshot, .. }
                 if *session == second && snapshot.sessions.iter().flat_map(|session| &session.windows)
-                    .any(|window| window.id == second_window && window.layout_dump.contains("100x30"))
+                    .any(|window| window.id == second_window && window.layout_dump.contains(r#""w":100,"h":30"#))
         )).expect("new attachment carries resized layout");
         let session_changed = messages.iter().position(|message| matches!(
             message,
@@ -96182,8 +96328,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let peer_snapshot = latest_reliable_snapshot(&peer_messages);
         assert_eq!(peer_snapshot.generation, published_generation);
         assert!(
-            peer_snapshot.sessions[0].windows[0]
-                .layout_dump
+            zz_mux::legacy_layout(&peer_snapshot.sessions[0].windows[0].layout_dump)
                 .ends_with(&format!("100x60,0,0,{}", pane.0)),
             "{}",
             peer_snapshot.sessions[0].windows[0].layout_dump
@@ -96338,8 +96483,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let peer_snapshot = latest_reliable_snapshot(&peer_messages);
         assert_eq!(peer_snapshot.generation, mouse_published_generation);
         assert!(
-            peer_snapshot.sessions[0].windows[0]
-                .layout_dump
+            zz_mux::legacy_layout(&peer_snapshot.sessions[0].windows[0].layout_dump)
                 .ends_with(&format!("100x60,0,0,{}", pane.0)),
             "{}",
             peer_snapshot.sessions[0].windows[0].layout_dump
@@ -98239,7 +98383,9 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("display-message")
             .output;
         assert!(
-            layout.contains("119x23,0,0{108x23,0,0,") && layout.contains(",10x23,109,0,"),
+            layout.contains(
+                r#"{"t":"h","w":119,"h":23,"x":0,"y":0,"c":[{"t":"p","w":108,"h":23,"x":0,"y":0,"#
+            ) && layout.contains(r#"{"t":"p","w":10,"h":23,"x":109,"y":0,"#),
             "{layout}"
         );
     }
@@ -112404,7 +112550,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message == "invalid layout: bogus"
+                if message == "malformed layout header: bogus"
         ));
         {
             let inner = shared.inner.lock();

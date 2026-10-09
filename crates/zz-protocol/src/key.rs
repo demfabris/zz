@@ -4578,7 +4578,7 @@ mod tests {
         let expected = [
             " ", ",", ";", "C- ", "C-Down", "C-M-Down", "C-M-Up", "C-M-b", "C-M-f", "C-Up", "C-[",
             "C-a", "C-b", "C-c", "C-e", "C-f", "C-g", "C-k", "C-l", "C-n", "C-p", "C-r", "C-s",
-            "C-v", "C-w", "Down", "End", "Enter", "Escape", "F", "Home", "Left", "M-<", "M->",
+            "C-v", "C-w", "Down", "End", "Enter", "Escape", "F", "Home", "L", "Left", "M-<", "M->",
             "M-1", "M-2", "M-3", "M-4", "M-5", "M-6", "M-7", "M-8", "M-9", "M-Down", "M-R", "M-Up",
             "M-b", "M-f", "M-l", "M-m", "M-r", "M-v", "M-w", "M-x", "M-{", "M-}", "N", "NPage",
             "P", "PPage", "R", "Right", "T", "Up", "X", "f", "g", "n", "q", "r", "t",

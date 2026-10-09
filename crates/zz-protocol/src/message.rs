@@ -5616,8 +5616,8 @@ mod tests {
                 .expect("counted copy action decodes"),
             action
         );
-        assert!(postcard::from_bytes::<CopyModeAction>(&[200, 0, 1]).is_err());
-        assert!(postcard::from_bytes::<TerminalViewAction>(&[28, 200, 0, 1]).is_err());
+        assert!(postcard::from_bytes::<CopyModeAction>(&[200, 1, 1]).is_err());
+        assert!(postcard::from_bytes::<TerminalViewAction>(&[28, 200, 1, 1]).is_err());
     }
 
     #[test]

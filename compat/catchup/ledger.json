@@ -285,7 +285,7 @@
       "id": "pin.contract-breaks",
       "track": "pin",
       "title": "3.8 contract breaks: active-pane flag, %% quoting, q: escaping, relative targets",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -309,7 +309,34 @@
       "notes": [
         "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here.",
         "2026-10-09 from pin.layout-v2: smoke/control-notify fails tmux-side-only at 3.8 (%pause, %continue and hook %window-renamed now queued outside %begin/%end).",
-        "2026-10-09 from pin.layout-v2: 3.8 layout_parse no longer rebuilds tiled pane z-order from the tree; zz still sets window.z_order = panes_in_order() in select_layout_string; measure and align."
+        "2026-10-09 from pin.layout-v2: 3.8 layout_parse no longer rebuilds tiled pane z-order from the tree; zz still sets window.z_order = panes_in_order() in select_layout_string; measure and align.",
+        "2026-10-09: lane done at be130e32d: all 5 items + 2 notes closed against 3.8; compat/attached-client.sh edited (active-pane flag) but not run"
+      ]
+    },
+    {
+      "id": "pin.control-3-8",
+      "track": "pin",
+      "title": "Control-mode drift in 3.8",
+      "status": "todo",
+      "deps": [
+        "pin.contract-breaks"
+      ],
+      "zones": [
+        "crates/zz-cli/src/control_mode.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "crates/zz-daemon/src/daemon",
+        "compat/scenarios"
+      ],
+      "gaps": [],
+      "accept": [
+        "refresh-client -C sends %layout-change after every call as 3.8 does, even when the size is unchanged (smoke/control-eof-drain size-reports row agrees); zz's drop when client input already ended is checked against 3.8 and matched.",
+        "A read-only control client's commands are handled as 3.8 handles them (3.8 still runs them; zz refuses with 'client is read-only'): measure which commands 3.8 allows and match, or record with a reason if zz's refusal is the safer native choice and fabrico agrees.",
+        "Any further 3.8 control-mode change found while doing the above (bounded replies, output discard flags) is either matched or registered."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by pin.contract-breaks."
       ]
     },
     {
@@ -392,7 +419,9 @@
       ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09 from pin.contract-breaks: scenarios failing at 3.8 that look like this item's: daemon-command-item-format (#{command} inside an after-hook is set-buffer on 3.8), source-file-current-file (@cf-hook), smoke/args-parse-set-hook and smoke/config-chain-parse-abort (tmux-side only); show-options-hooks also diverges on display-panes options (pin.display-panes) and after-queue."
+      ]
     },
     {
       "id": "pin.formats-options",

@@ -295,6 +295,7 @@ const MOUSE_LOCATIONS: &[&str] = &[
     "StatusLeft",
     "StatusRight",
     "StatusDefault",
+    "Empty",
 ];
 const MOUSE_KINDS: &[&str] = &[
     "MouseDown1",

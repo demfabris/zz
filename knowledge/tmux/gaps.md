@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
-Tracked gap groups: **50**. Classified items: **423**.
+Tracked gap groups: **50**. Classified items: **411**.
 
 - Status: open: 8, accepted: 42.
 - Decision: adopt: 8, native: 33, never: 9.
 - Priority: now: 1, next: 7, none: 42.
 - Closed history entries: 216.
-- Surface: command: 3, flag: 39, extension-flag: 11, native-command: 26, option: 32, option-scope: 4, option-default: 1, format: 47, hook: 21, native-hook: 1, key: 33, binding: 42, native-key: 92, semantic: 62, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 39, extension-flag: 11, native-command: 26, option: 29, option-scope: 4, option-default: 1, format: 47, hook: 21, native-hook: 1, key: 29, binding: 37, native-key: 92, semantic: 62, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 593 command-flag shapes (332 valueless, 253 required-value, 8 optional-value), positional minimum and maximum bounds, 183 options, 214 global formats, 204 scoped literal context pairs across 37 source producers, 5 derived context families, 37 format modifiers, 89 hooks, and 308 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 39 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 11 zz-only flags on tmux command names, 26 native command names, 32 options absent from `BEHAVES`, 47 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 4 option scope mismatches, 1 option default mismatches, 21 currently documented hook-producer gaps, 1 zz-only hook names, 33 omitted default keys, 42 divergent shared default bindings, 92 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 593 command-flag shapes (332 valueless, 253 required-value, 8 optional-value), positional minimum and maximum bounds, 183 options, 214 global formats, 204 scoped literal context pairs across 37 source producers, 5 derived context families, 37 format modifiers, 89 hooks, and 308 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 39 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 11 zz-only flags on tmux command names, 26 native command names, 29 options absent from `BEHAVES`, 47 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 4 option scope mismatches, 1 option default mismatches, 21 currently documented hook-producer gaps, 1 zz-only hook names, 29 omitted default keys, 37 divergent shared default bindings, 92 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -831,7 +831,7 @@ zz renders native mode surfaces instead of tmux cell grids. Pin citation added 2
 - Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: daily, gui
-- Items: `option:copy-mode-current-line-number-style`, `option:copy-mode-line-number-style`, `option:copy-mode-line-numbers`, `option:fill-character`, `option:tree-mode-border-style`, `option:tree-mode-preview-format`, `option:tree-mode-preview-style`, `option:tree-mode-selection-style`
+- Items: `option:fill-character`, `option:tree-mode-border-style`, `option:tree-mode-preview-format`, `option:tree-mode-preview-style`, `option:tree-mode-selection-style`
 - Depends on: none
 - Evidence:
   - `resource:knowledge/tmux/divergences.md`
@@ -1002,7 +1002,7 @@ Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6
 - Priority and ease: `next` / `medium`
 - Owner: `protocol`
 - User impact: daily
-- Items: `binding:copy-mode-vi:r`, `binding:copy-mode:r`, `binding:root:M-MouseDown3Pane`, `binding:root:MouseDown1Border`, `binding:root:MouseDown3Pane`, `key:copy-mode:L`, `key:prefix:T`, `key:root:M-MouseDown3Empty`, `key:root:MouseDown3Empty`, `semantic:copy-mode-line-numbers-and-refresh-now`, `semantic:menus-belong-to-the-window`
+- Items: `semantic:copy-mode-line-numbers-and-refresh-now`, `semantic:menus-belong-to-the-window`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.json`

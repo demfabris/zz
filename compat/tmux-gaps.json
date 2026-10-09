@@ -1241,9 +1241,6 @@
       ],
       "owner": "client",
       "items": [
-        "option:copy-mode-current-line-number-style",
-        "option:copy-mode-line-number-style",
-        "option:copy-mode-line-numbers",
         "option:fill-character",
         "option:tree-mode-border-style",
         "option:tree-mode-preview-format",
@@ -1572,15 +1569,6 @@
       ],
       "owner": "protocol",
       "items": [
-        "binding:copy-mode-vi:r",
-        "binding:copy-mode:r",
-        "binding:root:M-MouseDown3Pane",
-        "binding:root:MouseDown1Border",
-        "binding:root:MouseDown3Pane",
-        "key:copy-mode:L",
-        "key:prefix:T",
-        "key:root:M-MouseDown3Empty",
-        "key:root:MouseDown3Empty",
         "semantic:copy-mode-line-numbers-and-refresh-now",
         "semantic:menus-belong-to-the-window"
       ],

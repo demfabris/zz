@@ -2144,6 +2144,23 @@ pub struct CopyModeFacts {
     pub search_match: String,
     pub rectangle_toggle: bool,
     pub selection_active: bool,
+    pub line_numbers: u8,
+    pub refresh_active: bool,
+}
+
+#[must_use]
+pub fn copy_line_number_mode(line_numbers: u8, option: &str) -> u8 {
+    if line_numbers == 0 {
+        return 0;
+    }
+    let mode = match option {
+        "default" => 1,
+        "absolute" => 2,
+        "relative" => 3,
+        "hybrid" => 4,
+        _ => 0,
+    };
+    if line_numbers == 2 && mode == 0 { 1 } else { mode }
 }
 
 /// `data->selx`, `sely`, `endselx` and `endsely`: grid rows counted from the
@@ -4557,6 +4574,7 @@ struct CopyModeState {
     /// re-run and which the incremental spellings compare against.
     search: Option<CopyModeSearch>,
     search_all: bool,
+    line_numbers: u8,
 }
 
 /// `data->searchx`, `data->searchy` and `data->searcho`.
@@ -6383,6 +6401,7 @@ fn output_view_state(terminal: &mut Terminal<'_, '_>) -> Result<TerminalViewStat
         .as_mut()
         .expect("entering output view creates a frozen revision");
     mode.kind = FrozenModeKind::View;
+    mode.line_numbers = 0;
     mode.cursor = PointCoordinate { x: 0, y: 0 };
     mode.viewport_offset = 0;
     Ok(view)
@@ -8002,6 +8021,7 @@ fn enter_copy_mode(
         incremental_origin: None,
         search: None,
         search_all: true,
+        line_numbers: 1,
     }));
     Ok(())
 }
@@ -10351,6 +10371,36 @@ fn apply_copy_mode_action(
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
+        CopyModeAction::LineNumbersOn { option_off } => {
+            mode.line_numbers = if option_off { 2 } else { 1 };
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::LineNumbersOff => {
+            mode.line_numbers = 0;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::LineNumbersToggle { option_off } => {
+            let active = mode.line_numbers == 2 || (mode.line_numbers == 1 && !option_off);
+            mode.line_numbers = match (active, option_off) {
+                (true, _) => 0,
+                (false, true) => 2,
+                (false, false) => 1,
+            };
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
+        CopyModeAction::RefreshNow => {
+            if mode.kind != FrozenModeKind::Copy || mode.sourced {
+                *copy_mode = Some(mode);
+                return Ok(ViewActionResult::None);
+            }
+            refresh_copy_revision(terminal, &mut mode)?;
+            *unseen_output = 0;
+            *copy_mode = Some(mode);
+            Ok(ViewActionResult::Snapshot)
+        }
         // `window_copy_refresh_timer`: skip the tick unless the pane has
         // unseen output and no selection or cursor drag is live, then
         // `window_copy_do_refresh` re-clones the backing, keeps the view on
@@ -10366,28 +10416,7 @@ fn apply_copy_mode_action(
                 *copy_mode = Some(mode);
                 return Ok(ViewActionResult::None);
             }
-            let rows = u32::from(mode.revision.viewport_rows.saturating_sub(1));
-            let follow = mode.viewport_offset == mode.revision.maximum_offset()
-                && mode.cursor.y == mode.viewport_offset.saturating_add(rows);
-            let offset_from_top = mode.viewport_offset;
-            mode.revision = ModeRevision::capture(terminal)?;
-            if follow {
-                mode.viewport_offset = mode.revision.maximum_offset();
-                mode.cursor = mode.revision.clamp_point(PointCoordinate {
-                    x: mode.cursor.x,
-                    y: mode
-                        .viewport_offset
-                        .saturating_add(u32::from(mode.revision.viewport_rows.saturating_sub(1))),
-                });
-                mode.cursor.x = mode
-                    .cursor
-                    .x
-                    .min(revision_copy_line_end(&mode.revision, mode.cursor.y));
-            } else {
-                mode.viewport_offset = offset_from_top.min(mode.revision.maximum_offset());
-                mode.cursor = mode.revision.clamp_point(mode.cursor);
-            }
-            mode.recentre = None;
+            refresh_copy_revision(terminal, &mut mode)?;
             *unseen_output = 0;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -15862,6 +15891,35 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
     Ok(())
 }
 
+fn refresh_copy_revision(
+    terminal: &Terminal<'_, '_>,
+    mode: &mut CopyModeState,
+) -> Result<(), WorkerError> {
+    let rows = u32::from(mode.revision.viewport_rows.saturating_sub(1));
+    let follow = mode.viewport_offset == mode.revision.maximum_offset()
+        && mode.cursor.y == mode.viewport_offset.saturating_add(rows);
+    let offset_from_top = mode.viewport_offset;
+    mode.revision = ModeRevision::capture(terminal)?;
+    if follow {
+        mode.viewport_offset = mode.revision.maximum_offset();
+        mode.cursor = mode.revision.clamp_point(PointCoordinate {
+            x: mode.cursor.x,
+            y: mode
+                .viewport_offset
+                .saturating_add(u32::from(mode.revision.viewport_rows.saturating_sub(1))),
+        });
+        mode.cursor.x = mode
+            .cursor
+            .x
+            .min(revision_copy_line_end(&mode.revision, mode.cursor.y));
+    } else {
+        mode.viewport_offset = offset_from_top.min(mode.revision.maximum_offset());
+        mode.cursor = mode.revision.clamp_point(mode.cursor);
+    }
+    mode.recentre = None;
+    Ok(())
+}
+
 /// `window_copy_formats` read off one frozen view. `data->cy` and `data->oy`
 /// are screen-relative and bottom-relative; the selection coordinates the pin
 /// stores in `selx`, `sely`, `endselx` and `endsely` are absolute grid rows,
@@ -15905,6 +15963,8 @@ fn copy_mode_facts(
         },
         rectangle_toggle: mode.rectangle,
         selection_active: mode.selection.is_some() && mode.selecting,
+        line_numbers: mode.line_numbers,
+        refresh_active: mode.refresh,
     }
 }
 

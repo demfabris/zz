@@ -868,11 +868,17 @@ impl Renderer {
                                 crate::mode_view::resolved_style(style, &model.status.theme)
                             })
                         });
+                        let gutter = mode
+                            .and_then(|mode| crate::mode_view::line_number_gutter(mode, viewport));
+                        let body = gutter.map_or(content, |gutter| gutter.body(content));
                         self.blank_is_default = cleared_to_default || known_blank;
-                        self.paint_terminal(entry.pane, viewport, content, force, damage.as_ref());
+                        self.paint_terminal(entry.pane, viewport, body, force, damage.as_ref());
                         self.blank_is_default = false;
                         if let Some(mode) = mode {
-                            self.paint_mode_position(mode, viewport, content, model);
+                            if let Some(gutter) = gutter {
+                                self.paint_line_numbers(mode, gutter, content, model);
+                            }
+                            self.paint_mode_position(mode, viewport, body, model);
                         }
                         self.selection_style = None;
                         self.selection_trim = None;
@@ -1318,6 +1324,55 @@ impl Renderer {
             visible,
         });
         self.selection_style = selection_style;
+    }
+
+    fn paint_line_numbers(
+        &mut self,
+        mode: &zz_protocol::ModePresentation,
+        gutter: crate::mode_view::LineNumberGutter,
+        rect: Rect,
+        model: &Model,
+    ) {
+        let width = gutter.width.min(rect.width);
+        for row in 0..rect.height {
+            let (text, current) = gutter.label(row);
+            let segment =
+                crate::mode_view::line_number_segment(mode, text, current, &model.status.theme);
+            let mut line = StyledLine::from_segments(vec![segment]);
+            line.resolve_theme(&model.status.theme);
+            let line = line.truncate(usize::from(width));
+            write_styled_text(
+                &mut self.output,
+                rect.x,
+                rect.y.saturating_add(row),
+                &line,
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
+        }
+        if let Some((column, row)) = gutter.cursor
+            && row < rect.height
+            && column >= gutter.content_width(rect.width)
+        {
+            let line = StyledLine::from_segments(vec![StyledSegment {
+                text: "$".to_owned(),
+                style: TmuxStyle {
+                    fg: Some(TmuxColour::Default),
+                    bg: Some(TmuxColour::Default),
+                    ..TmuxStyle::default()
+                },
+            }]);
+            write_styled_text(
+                &mut self.output,
+                rect.x.saturating_add(rect.width.saturating_sub(1)),
+                rect.y.saturating_add(row),
+                &line,
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
+        }
     }
 
     fn paint_mode_position(
@@ -2326,6 +2381,24 @@ impl Renderer {
             self.hide_cursor();
             return;
         };
+        if let Some(gutter) = crate::mode_view::presentation(model, pane, viewport)
+            .and_then(|mode| crate::mode_view::line_number_gutter(mode, viewport))
+        {
+            let rect = entry.content();
+            match gutter.cursor {
+                Some((column, row)) if row < rect.height => {
+                    write_cursor_position(
+                        &mut self.output,
+                        rect.x
+                            .saturating_add(gutter.cursor_column(column, rect.width)),
+                        rect.y.saturating_add(row),
+                    );
+                    self.output.extend_from_slice(b"\x1b[?25h");
+                }
+                _ => self.hide_cursor(),
+            }
+            return;
+        }
         self.place_viewport_cursor(pane, viewport, entry.content(), model);
     }
 

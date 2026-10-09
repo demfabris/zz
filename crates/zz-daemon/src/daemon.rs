@@ -10440,6 +10440,14 @@ impl Shared {
                                 && session.pane == *pane
                             {
                                 session.scroll_exit = true;
+                            } else if terminal_view_action_refreshes_now(action)
+                                && let Some(session) = inner
+                                    .client_mut(target)
+                                    .and_then(|c| c.copy_session.as_mut())
+                                && session.pane == *pane
+                                && !session.sourced
+                            {
+                                session.unseen = false;
                             } else if let Some(refresh) =
                                 terminal_view_action_refresh_request(action)
                                 && let Some(session) = inner
@@ -39605,6 +39613,17 @@ fn terminal_view_action_refresh_request(
     }
 }
 
+fn terminal_view_action_refreshes_now(action: &zz_terminal::TerminalViewAction) -> bool {
+    matches!(
+        action,
+        zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::RefreshNow)
+            | zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: zz_terminal::CopyModeAction::RefreshNow,
+                ..
+            }
+    )
+}
+
 fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewAction) -> bool {
     matches!(
         action,
@@ -43247,7 +43266,7 @@ fn mode_request(
     session: SessionId,
     pane: PaneId,
     view: bool,
-    (position, limit): (u32, u32),
+    shown: ModeShown,
 ) -> Option<crate::status::ModeRequest> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let context = contexts.status_context(Some(session), Some(window), Some(pane));
@@ -43260,8 +43279,11 @@ fn mode_request(
         pane,
         view,
         context,
-        position,
-        limit,
+        position: shown.position,
+        limit: shown.limit,
+        line_numbers: shown.line_numbers,
+        hide_position: shown.hide_position,
+        rows: shown.rows,
         vi_keys: inner
             .engine
             .copy_mode_table_for_pane(pane)
@@ -43284,16 +43306,34 @@ const fn mode_kind(mode: TerminalMode) -> u8 {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ModeShown {
+    position: u32,
+    limit: u32,
+    line_numbers: u8,
+    hide_position: bool,
+    rows: u32,
+}
+
 fn mode_request_position(
     client: ClientId,
     terminal: &TerminalSession,
     view: bool,
-) -> Option<(u32, u32)> {
+) -> Option<ModeShown> {
     let viewport = terminal.latest_viewport_for(TerminalViewId(client.0))?;
-    let shown = match viewport.mode {
-        TerminalMode::Copy { hide_position, .. } => !view && !hide_position,
-        TerminalMode::View { .. } => view,
-        TerminalMode::Live => false,
+    let line_numbers = if view {
+        0
+    } else {
+        terminal
+            .copy_mode_facts(TerminalViewId(client.0))
+            .map_or(0, |facts| facts.line_numbers)
+    };
+    let (shown, hide_position) = match viewport.mode {
+        TerminalMode::Copy { hide_position, .. } => {
+            (!view && (!hide_position || line_numbers != 0), hide_position)
+        }
+        TerminalMode::View { .. } => (view, false),
+        TerminalMode::Live => (false, false),
     };
     if !shown {
         return None;
@@ -43302,7 +43342,13 @@ fn mode_request_position(
         .scrollbar
         .total
         .saturating_sub(viewport.scrollbar.len);
-    Some((limit.saturating_sub(viewport.scrollbar.offset), limit))
+    Some(ModeShown {
+        position: limit.saturating_sub(viewport.scrollbar.offset),
+        limit,
+        line_numbers,
+        hide_position,
+        rows: viewport.scrollbar.len,
+    })
 }
 
 fn resolve_popup_client(

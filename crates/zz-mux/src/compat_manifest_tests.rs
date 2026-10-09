@@ -156,11 +156,11 @@ struct OracleKey {
 }
 
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
-    ("copy-mode", 67),
-    ("copy-mode-vi", 78),
+    ("copy-mode", 69),
+    ("copy-mode-vi", 79),
     ("move", 19),
-    ("prefix", 57),
-    ("root", 12),
+    ("prefix", 58),
+    ("root", 17),
 ];
 
 fn root() -> PathBuf {
@@ -601,7 +601,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(mux_literals.len(), 100);
+    assert_eq!(mux_literals.len(), 102);
     assert!(mux_literals.is_subset(&upstream_literals));
 
     let mut accepted_native_literals = BTreeSet::new();
@@ -630,7 +630,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(missing_literals.len(), 21);
+    assert_eq!(missing_literals.len(), 19);
     assert!(missing_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&missing_literals));
     assert!(accepted_native_literals.is_disjoint(&missing_literals));
@@ -822,10 +822,6 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         ),
         (
             ("window-client.c", "window_client_draw_info"),
-            "semantic:mode-format-contexts-3-8",
-        ),
-        (
-            ("window-copy.c", "window_copy_formats"),
             "semantic:mode-format-contexts-3-8",
         ),
         (
@@ -1241,10 +1237,10 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 151);
+    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 154);
     assert_eq!(
         consumers.len(),
-        151,
+        154,
         "option consumer roster contains duplicates"
     );
     assert!(
@@ -1263,13 +1259,13 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         };
         scope_counts[index] += 1;
     }
-    assert_eq!(scope_counts, [39, 47, 45, 20]);
+    assert_eq!(scope_counts, [39, 47, 48, 20]);
 
     let tracked = items
         .keys()
         .filter_map(|item| item.strip_prefix("option:"))
         .collect::<BTreeSet<_>>();
-    assert_eq!(tracked.len(), 32, "active option gap count changed");
+    assert_eq!(tracked.len(), 29, "active option gap count changed");
     assert!(
         consumers.is_disjoint(&tracked),
         "consumed and tracked option names overlap"
@@ -1532,15 +1528,15 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         308,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 367, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 371, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        275,
+        279,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        33,
+        29,
         "missing default binding count changed"
     );
     assert_eq!(
@@ -1550,12 +1546,12 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         divergent_bindings.len(),
-        42,
+        37,
         "divergent shared binding count changed"
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        233,
+        242,
         "structurally matching shared binding count changed"
     );
     assert_eq!(
@@ -1703,7 +1699,7 @@ fn shared_prefix_keys_carry_the_pinned_notes() {
         differing.is_empty(),
         "prefix notes differ from the pin: {differing:?}"
     );
-    assert_eq!(shared, 75, "shared prefix key count changed");
+    assert_eq!(shared, 76, "shared prefix key count changed");
     let unnoted = key_tables
         .list(Some("prefix"))
         .filter(|(_, _, binding)| binding.note.is_none())

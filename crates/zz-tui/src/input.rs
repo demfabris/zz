@@ -1753,7 +1753,9 @@ fn mouse_key_location(
         };
         return Some((location.to_owned(), Some(entry.pane), window));
     }
-    let entry = divider_owner(model, global_column, global_row)?;
+    let Some(entry) = divider_owner(model, global_column, global_row) else {
+        return Some(("Empty".to_owned(), None, window));
+    };
     Some(("Border".to_owned(), Some(entry), window))
 }
 

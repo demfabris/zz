@@ -3591,6 +3591,10 @@ pub trait StatusHooks {
         None
     }
 
+    fn copy_line_numbers(&mut self, context: &StatusContext, _option: &str) -> Option<String> {
+        self.variable("copy_line_numbers", context)
+    }
+
     fn tree_variable(&mut self, _name: &str, _context: &StatusContext) -> Option<Cow<'_, str>> {
         None
     }
@@ -4067,6 +4071,12 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
     }
 
     fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        if name == "copy_line_numbers" {
+            let option = self
+                .option_variable("copy-mode-line-numbers", context)
+                .unwrap_or_default();
+            return self.inner.copy_line_numbers(context, &option);
+        }
         self.inner.variable(name, context)
     }
 

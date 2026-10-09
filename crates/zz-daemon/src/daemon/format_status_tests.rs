@@ -1078,6 +1078,9 @@ fn completed_status_parts_recheck_facts_layout_targets_modes_and_sources() {
                 position: 0,
                 limit: 0,
                 vi_keys: false,
+                line_numbers: 0,
+                hide_position: false,
+                rows: 0,
             }),
             "environment" => next.environment = Arc::new(next.environment.as_ref().clone()),
             "terminal" => next.default_terminal = Arc::new(next.default_terminal.as_ref().clone()),
@@ -1166,6 +1169,9 @@ fn completed_status_shared_request_identity_keeps_clock_and_mutations_fresh() {
         position: 0,
         limit: 0,
         vi_keys: false,
+        line_numbers: 0,
+        hide_position: false,
+        rows: 0,
     });
     assert_eq!(
         renderer
@@ -1303,6 +1309,9 @@ fn completed_status_shares_internal_output_and_keeps_wire_and_mode_updates_indep
         vi_keys: false,
         match_style: String::new(),
         current_match_style: String::new(),
+        line_numbers: 0,
+        line_number_style: String::new(),
+        current_line_number_style: String::new(),
     }];
     let updated = renderer
         .republish_modes(request.client, modes.clone())
@@ -1437,6 +1446,9 @@ fn completed_status_rejects_terminal_mode_and_unknown_dependencies() {
         position: 0,
         limit: 0,
         vi_keys: false,
+        line_numbers: 0,
+        hide_position: false,
+        rows: 0,
     });
     let mut renderer = StatusRenderer::default();
     assert_eq!(

@@ -66,6 +66,7 @@ pub use session::release_held_wakes;
 #[cfg(feature = "session")]
 pub use session::{
     CaptureBoundary, CaptureOptions, CapturedCopySource, CopyModeFacts, CopyModeSelectionFacts,
+    copy_line_number_mode,
     DeferredTerminalEvent, EngineKnobs, KittyImage, KittyImageRequestError, LastCommandCapture,
     MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, OutputWake, PRIVATE_MODE_NUMBERS,
     PaneOutputFacts, PointerContext, ProgressBar, ProgressBarState, RoundTripGuard,

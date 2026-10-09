@@ -136,6 +136,13 @@
       "%begin T B 1",
       "%end T B 1"
     ],
+    "inserted-rename": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-renamed @0 inserted"
+    ],
     "percent-word": [
       "%begin T B 1",
       "parse error: syntax error",
@@ -357,6 +364,13 @@
     "hook-remove": [
       "%begin T B 1",
       "%end T B 1"
+    ],
+    "inserted-rename": [
+      "%begin T B 1",
+      "%end T B 1",
+      "%begin T B 1",
+      "%end T B 1",
+      "%window-renamed @0 inserted"
     ],
     "percent-word": [
       "%begin T B 1",

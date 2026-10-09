@@ -187,6 +187,7 @@ try:
     control.phase("hook-set", "set-hook -g after-rename-window 'display-message -p NOTIFY_HOOK'")
     control.phase("hook-output", "rename-window -t notify-main:0 hooked", until="NOTIFY_HOOK")
     control.phase("hook-remove", "set-hook -gu after-rename-window")
+    control.phase("inserted-rename", "run-shell -C 'rename-window -t notify-main:0 inserted'", until="%window-renamed ")
     control.phase("percent-word", "refresh-client -A " + pane + ":pause")
     control.phase("percent-recover", "refresh-client -A '" + pane + ":continue'")
     control.phase("message", actions=[("display-message", "-c", target, "NOTIFY_MESSAGE")], until="%message ")

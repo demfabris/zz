@@ -29130,15 +29130,17 @@ impl Shared {
         if layout_hook {
             self.publish_compact_trees();
         }
-        let message = Self::event(payload);
+        let capture_item = matches!(&payload, EventPayload::HookEvent { .. })
+            .then(|| self.command_item.as_ref().map(|item| item.lock().id))
+            .flatten();
         let subscribers = {
-            let inner = self.inner.lock();
-            inner
+            let mut inner = self.inner.lock();
+            let recipients = inner
                 .clients
                 .iter()
-                .filter_map(|(id, client)| client.subscriber.as_ref().map(|value| (id, value)))
-                .filter(|(client, _)| {
-                    inner.client(**client).and_then(|c| c.kind) == Some(ClientKind::Control)
+                .filter(|(client, state)| {
+                    state.subscriber.is_some()
+                        && inner.client(**client).and_then(|c| c.kind) == Some(ClientKind::Control)
                         && Some(**client) != exclude
                         && (!attached_only
                             || inner
@@ -29146,9 +29148,29 @@ impl Shared {
                                 .values()
                                 .any(|attached| attached.contains(client)))
                 })
-                .map(|(_, subscriber)| Arc::clone(subscriber))
-                .collect::<Vec<_>>()
+                .map(|(client, _)| *client)
+                .collect::<Vec<_>>();
+            let mut subscribers = Vec::with_capacity(recipients.len());
+            for client in recipients {
+                if let Some(item) = capture_item
+                    && let Some(capture) = inner
+                        .control_command_event_captures
+                        .get_mut(&(client, item))
+                        .and_then(|captures| captures.last_mut())
+                {
+                    capture.events.push(payload.clone());
+                    continue;
+                }
+                if let Some(subscriber) = inner.client(client).and_then(|c| c.subscriber.as_ref()) {
+                    subscribers.push(Arc::clone(subscriber));
+                }
+            }
+            subscribers
         };
+        if subscribers.is_empty() {
+            return;
+        }
+        let message = Self::event(payload);
         let Ok(encoded) = zz_protocol::encode_protocol_message(&message).map(Arc::<[u8]>::from)
         else {
             return;
@@ -29220,6 +29242,7 @@ impl Shared {
             &payload,
             EventPayload::ControlCommandGuard { .. }
                 | EventPayload::ControlCommandGuardRaw { .. }
+                | EventPayload::HookEvent { .. }
                 | EventPayload::ControlSourceFile { .. }
                 | EventPayload::ControlCommandOutput { .. }
                 | EventPayload::ControlConfigError { .. }

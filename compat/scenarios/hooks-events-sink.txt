@@ -5,7 +5,8 @@
 # client-session-changed the old and new session; polled from a fixture since
 # they land asynchronously. The last rows print 3.8's payload keys for
 # window-renamed (no session or pane), pane-exited and pane-title-changed (pane
-# and window only) and window-linked (with window_index).
+# and window only), window-linked (with window_index), session-window-changed
+# (new and old window) and window-pane-changed (new and old pane).
 shim:
 stage: fixtures/hooks-events-sink.sh ~/hooks-events-sink.sh
 out: set-environment -gu HOOKS_EVENTS_SINK

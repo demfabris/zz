@@ -105,7 +105,6 @@ scheduler.workspace = true
 resvg.workspace = true
 usvg.workspace = true
 ttf-parser = "0.25"
-util_macros.workspace = true
 schemars.workspace = true
 seahash = "4.1"
 serde.workspace = true

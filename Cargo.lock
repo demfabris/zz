@@ -11137,7 +11137,6 @@ dependencies = [
  "zpui-shared-string",
  "zpui-sum-tree",
  "zpui-util",
- "zpui-util-macros",
 ]
 
 [[package]]
@@ -11284,17 +11283,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui-log"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "log",
- "tempfile",
- "zpui-collections",
-]
-
-[[package]]
 name = "zpui-macos"
 version = "0.1.0"
 dependencies = [
@@ -11406,34 +11394,12 @@ dependencies = [
 name = "zpui-sum-tree"
 version = "0.1.0"
 dependencies = [
- "ctor",
  "heapless",
  "log",
  "proptest",
  "rand 0.9.5",
  "rayon",
- "tracing",
- "zpui-log",
- "zpui-tracing",
 ]
-
-[[package]]
-name = "zpui-tracing"
-version = "0.1.0"
-dependencies = [
- "async-channel",
- "js-sys",
- "tracing",
- "tracing-subscriber",
- "wasm-bindgen",
- "web-sys",
- "zpui-log",
- "zpui-tracing-macros",
-]
-
-[[package]]
-name = "zpui-tracing-macros"
-version = "0.1.0"
 
 [[package]]
 name = "zpui-util"
@@ -11442,14 +11408,6 @@ dependencies = [
  "anyhow",
  "log",
  "which",
-]
-
-[[package]]
-name = "zpui-util-macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]

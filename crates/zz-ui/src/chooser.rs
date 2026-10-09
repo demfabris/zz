@@ -223,7 +223,7 @@ impl RenderOnce for ChooserModal {
                 self.font_family,
                 cx,
             ));
-        crate::widget::foundation::surface_enter(surface, "chooser-open", px(0.0))
+        zz_kit::foundation::surface_enter(surface, "chooser-open", px(0.0))
     }
 }
 

@@ -8,6 +8,7 @@ members = [
     "crates/zz-config",
     "crates/zz-gpui-ios",
     "crates/zz-hotreload",
+    "crates/zz-kit",
     "crates/zz-client-ffi",
     "crates/zz-daemon",
     "crates/zz-mux",

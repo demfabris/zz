@@ -7,8 +7,8 @@ use zpui::{
     Styled as _, TouchPhase, Window, canvas, div, point, prelude::*, px,
 };
 
-use super::dismissal::{Dismissal, Overdrag, Tick, coast, coasting};
 use crate::{ActiveTheme as _, Colorize as _};
+use zz_kit::dismissal::{Dismissal, Overdrag, Tick, coast, coasting};
 
 const EDGE: f32 = 20.0;
 const FLING_WIDTHS: f32 = 1.0;

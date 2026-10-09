@@ -11950,6 +11950,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "zz-kit"
+version = "0.16.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "image",
+ "log",
+ "markdown",
+ "ropey",
+ "rust-embed",
+ "serde",
+ "smallvec",
+ "tracing",
+ "tree-sitter",
+ "tree-sitter-json",
+ "tree-sitter-language",
+ "tree-sitter-md",
+ "tree-sitter-rust",
+ "tree-sitter-tmux",
+ "tree-sitter-toml-ng",
+ "unicode-segmentation",
+ "url",
+ "web-time",
+ "zed-sum-tree",
+ "zpui",
+]
+
+[[package]]
 name = "zz-mux"
 version = "0.16.0"
 dependencies = [
@@ -12029,32 +12057,18 @@ dependencies = [
 name = "zz-ui"
 version = "0.16.0"
 dependencies = [
- "anyhow",
- "async-channel",
  "image",
  "log",
  "markdown",
  "merman",
  "parking_lot",
- "ropey",
- "rust-embed",
- "serde",
  "serde_json",
  "smallvec",
- "tracing",
- "tree-sitter",
- "tree-sitter-json",
- "tree-sitter-language",
- "tree-sitter-md",
- "tree-sitter-rust",
- "tree-sitter-tmux",
- "tree-sitter-toml-ng",
- "unicode-segmentation",
  "url",
  "web-time",
- "zed-sum-tree",
  "zpui",
  "zz-client",
+ "zz-kit",
  "zz-protocol",
  "zz-terminal",
 ]

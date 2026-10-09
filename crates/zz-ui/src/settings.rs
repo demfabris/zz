@@ -10,10 +10,10 @@ use crate::{
     ActiveTheme as _, Disableable as _, Selectable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     control_shadow,
+    icon::Icon,
     scroll::ScrollableElement as _,
     select::SelectItem,
     tag::Tag,
-    widget::icon::Icon,
 };
 use zpui::{
     AnyElement, App, Bounds, ElementId, FocusHandle, IntoElement, ListAlignment,
@@ -277,6 +277,9 @@ pub fn settings_section_index(
     }
     column
 }
+
+#[cfg(test)]
+mod scroll_tests;
 
 #[cfg(test)]
 mod tests {

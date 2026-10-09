@@ -163,7 +163,7 @@
       "id": "fix.small-semantics",
       "track": "fix",
       "title": "pane_current_command fallback, refresh-client -l, new-session -t hint, registry hygiene",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -187,7 +187,7 @@
         "mouse.bound-context's reason points at the scrollbar and floating-pane items that actually block it.",
         "The raw TUI's top-left crop of an oversized pane and attach -r self-promotion via switch-client -r are recorded in divergences.md."
       ],
-      "branch": null,
+      "branch": "catchup/fix.small-semantics",
       "sha": null,
       "notes": [
         "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'."

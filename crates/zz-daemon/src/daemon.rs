@@ -10838,6 +10838,7 @@ impl Shared {
                     }
                     MuxEffect::ChooseTree {
                         pane,
+                        preview,
                         kind: tree_kind,
                         info_preview,
                         sessions_only,
@@ -10897,6 +10898,7 @@ impl Shared {
                             (*tree_kind == ChooseTreeKind::Clients)
                                 .then(|| CLIENT_MODE_DEFAULT_COMMAND.to_owned())
                         });
+                        chooser.preview_size = *preview;
                         if attached_session != Some(chooser.source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -10933,6 +10935,7 @@ impl Shared {
                     }
                     MuxEffect::ChooseBuffer {
                         pane,
+                        preview,
                         filter,
                         format,
                         kill_source,
@@ -10967,6 +10970,7 @@ impl Shared {
                             continue;
                         };
                         chooser.template.clone_from(template);
+                        chooser.preview_size = *preview;
                         if attached_session != Some(chooser.source_session) {
                             return Err(ServerError::PaneNotAttached(*pane).into());
                         }
@@ -46378,6 +46382,7 @@ fn chooser_preview_panes(inner: &ServerState) -> BTreeSet<PaneId> {
         .clients
         .values()
         .filter_map(|c| c.choose_tree.as_ref())
+        .filter(|chooser| chooser.preview_size != ChooserPreviewSize::Off)
     {
         let Some(item) = usize::try_from(chooser.rendered.selected)
             .ok()

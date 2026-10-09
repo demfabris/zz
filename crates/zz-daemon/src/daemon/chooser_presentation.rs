@@ -699,6 +699,7 @@ pub(super) fn chooser_presentation(
             .rendered
             .items
             .get(selected)
+            .filter(|_| chooser.preview_size != ChooserPreviewSize::Off)
             .and_then(|item| tree_preview(&styles, chooser, item.target));
         return Some(ChooserPresentation {
             selected: chooser.rendered.selected,
@@ -724,6 +725,7 @@ pub(super) fn chooser_presentation(
     let preview = chooser
         .names
         .get(selected)
+        .filter(|_| chooser.preview_size != ChooserPreviewSize::Off)
         .and_then(|name| {
             inner
                 .paste_buffers

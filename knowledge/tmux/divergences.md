@@ -5,7 +5,7 @@ description: "Dated rationale and source evidence for measured tmux divergences,
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, divergences, gaps, reference]
 timestamp: 2026-08-27T00:00:00-03:00
-last_updated: 2026-10-06
+last_updated: 2026-10-09
 last_updated_by: Claude
 ---
 
@@ -727,18 +727,14 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   is why no copy-mode or chooser behavior can ride the differential corpus, which drives both
   sides through a bare CLI against a headless server: every step would diverge on exit class
   before any flag mattered. Found 2026-08-22 while trying to add a `copy-mode -H` scenario.
-- `choose-tree`/`choose-buffer` accept one `-N` as a no-op — zz's choosers are native
-  surfaces with no preview pane, so "no preview" is already their only layout — and reject a
-  repeated `-N` as `unsupported command: <cmd> -NN`, the pin's `MODE_TREE_PREVIEW_BIG`
-  (`args_has(args, 'N') > 1` in `mode_tree_start`), which has no zz presentation. `-K` expands
-  per row, and the two sides discard different expansions: the pin drops what
-  `key_string_lookup_string` cannot PARSE (`KEYC_UNKNOWN` -> `KEYC_NONE`), never testing
-  whether anything can press the result, while zz drops what falls outside its own input
-  vocabulary (`zz_protocol::is_key_name`, defined as exactly the grammar `input_key_name`
-  emits). zz's gate is strictly the narrower one, so a spelling tmux parses but zz has no
-  keystroke for — `M-C-a` and other orderings, `Space`, key names zz does not model — is
-  drawn by the pin and blank in zz. Conservative by choice: a key zz could never deliver
-  would be a dead shortcut.
+- `choose-tree`/`choose-buffer` `-K` expands per row, and the two sides discard different
+  expansions: the pin drops what `key_string_lookup_string` cannot PARSE (`KEYC_UNKNOWN` ->
+  `KEYC_NONE`), never testing whether anything can press the result, while zz drops what
+  falls outside its own input vocabulary (`zz_protocol::is_key_name`, defined as exactly the
+  grammar `input_key_name` emits). zz's gate is strictly the narrower one, so a spelling tmux
+  parses but zz has no keystroke for — `M-C-a` and other orderings, `Space`, key names zz does
+  not model — is drawn by the pin and blank in zz. Conservative by choice: a key zz could
+  never deliver would be a dead shortcut.
 - `display-menu` row shortcuts run the same two-stage gate: `zz_mux::parse_tmux_key` answers
   the pin's `key_string_lookup_string` question (so `^A`, `C-M-x`, `Space`, `BTab`, `F1`-`F12`
   and the named table all resolve, and `Ctrl-Alt-x`, `F13`, `F0` and unknown words resolve to

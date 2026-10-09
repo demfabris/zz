@@ -1,7 +1,7 @@
 # wait-for -E parks on 3.8's event sink, which every producer feeds whether or
-# not a hook is set: -v prints each payload as key=value lines, -F keeps the
-# waiter until its format is true over the payload, -l and -w list and wake
-# waiters. pane-exited and pane-died carry the exit keys and
+# not a hook is set, a set-hook -B monitor included: -v prints each payload as
+# key=value lines the moment it arrives, -F keeps the waiter until its format
+# is true over the payload, -l and -w list and wake waiters. pane-exited and pane-died carry the exit keys and
 # client-session-changed the old and new session; polled from a fixture since
 # they land asynchronously.
 shim:

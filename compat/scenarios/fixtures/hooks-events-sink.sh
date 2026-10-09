@@ -103,6 +103,47 @@ seen="$seen woken=[$(lines "$work/woken")]"
 seen="$seen nobody=[$(main_client wait-for -E -w hev-nobody session-renamed 2>&1 || true)]"
 seen="$seen invalid=[$(main_client wait-for -E hev-not-an-event 2>&1 || true)]"
 
+finish_wait() {
+    attempt=0
+    while [ "$attempt" -lt 100 ] && kill -0 "$1" 2>/dev/null; do
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    if kill -0 "$1" 2>/dev/null; then
+        seen="$seen $2=parked"
+        main_client wait-for -E -w "$(main_client wait-for -E -l "$2" | head -n 1)" "$2" || true
+    fi
+    wait "$1" || true
+}
+
+main_client wait-for -E -v -F 0 session-renamed >"$work/stream" 2>&1 &
+stream=$!
+wait_waiters session-renamed 1
+main_client rename-session -t w hevstream
+attempt=0
+while [ "$attempt" -lt 40 ] && [ ! -s "$work/stream" ]; do
+    attempt=$((attempt + 1))
+    sleep 0.05
+done
+seen="$seen streamed=[$(lines "$work/stream")]"
+main_client rename-session -t hevstream w
+main_client wait-for -E -w "$(main_client wait-for -E -l session-renamed | head -n 1)" session-renamed
+wait "$stream" || true
+seen="$seen stream-done=[$(lines "$work/stream")]"
+
+main_client set-option -t w @hevflag 0
+main_client set-hook -t w -B '@hevwatch::#{@hevflag}' "set -gF @hevwatchlog '#{hook_value}'"
+sleep 1.5
+main_client wait-for -E -v @hevwatch >"$work/watch" 2>&1 &
+watch=$!
+wait_waiters @hevwatch 1
+main_client set-option -t w @hevflag 1
+finish_wait "$watch" @hevwatch
+seen="$seen watch=[$(grep -E '^(event|last|value)=' "$work/watch" | tr '\n' ';')]"
+main_client set-hook -t w -u -B @hevwatch
+main_client set-option -t w -u @hevflag
+main_client set-option -gu @hevwatchlog
+
 main_client set-hook -g pane-exited "set -gF @hev-exited '#{hook}/#{hook_exit_status}/#{hook_exit_signal}/#{hook_exit_success}'"
 main_client split-window -d -t w:0 'exit 3'
 wait_option @hev-exited

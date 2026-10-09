@@ -2,7 +2,8 @@
 # (a user option of the same name set with set-option does not count), the
 # registration outlives the hook, after-select-pane runs only when select-pane
 # moves the active pane, and pane-created carries pane_command and
-# pane_current_path.
+# pane_current_path, with a respawned shell pane naming the shell it was
+# spawned with rather than the current default-shell.
 set -g @plain "set -gF @plainran yes"
 set -g @plainran no
 set-hook -E -t w:0 @plain
@@ -47,4 +48,14 @@ out: show -gv @pcc
 set-hook -gu pane-created
 set -gu @pcc
 kill-window -t w:7
+kill-pane -t w:0.1
+set -g default-shell /bin/sh
+split-window -d -t w:0
+set-hook -g pane-created "set -gF @pcs '#{hook_pane_command}'"
+set -g default-shell /bin/bash
+respawn-pane -k -t w:0.1
+out: show -gv @pcs
+set-hook -gu pane-created
+set -gu @pcs
+set -gu default-shell
 kill-pane -t w:0.1

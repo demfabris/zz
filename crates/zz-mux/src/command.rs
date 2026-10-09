@@ -3011,6 +3011,7 @@ impl MuxEngine {
                     .join(" ")
             })
             .filter(|command| !command.is_empty())
+            .or_else(|| self.pane_shells.get(&pane).cloned())
             .or_else(|| {
                 let window = self.state.window_for_pane(pane)?;
                 let session = self.state.windows.get(&window)?.session;

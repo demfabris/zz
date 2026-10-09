@@ -1604,6 +1604,8 @@ pub(super) fn pane_prompt_hook_events(inner: &mut ServerState) -> Vec<PendingHoo
     let previous = std::mem::replace(&mut inner.open_pane_prompts, current);
     let event = |name: &'static str, pane: PaneId, prompt_type: CommandPromptType| {
         PendingHookEvent::live_pane(name, pane, &inner.engine).map(|mut event| {
+            event.variables.remove(HOOK_SESSION_CONTEXT_FORMAT);
+            event.variables.remove(HOOK_SESSION_NAME_CONTEXT_FORMAT);
             event.variables.insert(
                 "hook_prompt_type".to_owned(),
                 prompt_type_name(prompt_type).to_owned(),
@@ -1784,7 +1786,7 @@ impl Shared {
     }
 
     pub(super) fn feed_event_waiters(&self, name: &str, variables: &BTreeMap<String, String>) {
-        let woken = {
+        let (woken, printed, lines) = {
             let mut inner = self.inner.lock();
             if !inner.event_waiters.iter().any(|waiter| waiter.name == name) {
                 return;
@@ -1817,17 +1819,29 @@ impl Shared {
                     .collect::<Vec<_>>()
             };
             let mut woken = Vec::new();
+            let mut printed = Vec::new();
             for (index, pass) in passes.into_iter().rev() {
+                let waiter = inner.event_waiters[index].client;
                 if inner.event_waiters[index].verbose {
-                    inner.event_waiters[index].output.push_str(&lines);
+                    if inner.client(waiter).and_then(|client| client.kind)
+                        == Some(ClientKind::Command)
+                    {
+                        printed.push(waiter);
+                    } else {
+                        inner.event_waiters[index].output.push_str(&lines);
+                    }
                 }
                 if pass {
                     woken.push(inner.event_waiters.remove(index));
                 }
             }
             woken.reverse();
-            woken
+            printed.reverse();
+            (woken, printed, lines)
         };
+        for client in printed {
+            self.release_command_stdout(client, &mut RawText::from(lines.as_str()));
+        }
         self.resolve_event_waiters(woken);
     }
 
@@ -1847,7 +1861,6 @@ impl Shared {
     pub(super) fn wait_for_event(
         &self,
         client: ClientId,
-        kind: ClientKind,
         context: &ExecutionContext,
         name: &str,
         filter: Option<&str>,
@@ -1887,9 +1900,7 @@ impl Shared {
             self.resolve_event_waiters(vec![woken]);
             return Ok(Execution::default());
         }
-        if !matches!(kind, ClientKind::Command | ClientKind::Control)
-            || client == ClientId(u64::MAX)
-        {
+        if client == ClientId(u64::MAX) {
             return Err(ServerError::InvalidCommand("not able to wait".to_owned()).into());
         }
         let wake_owner = self.client_writers.lock().get(&client).map(Arc::downgrade);

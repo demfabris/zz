@@ -961,3 +961,31 @@ fn a_stale_mode_transition_fires_with_the_next_command() {
     assert!(shared.inner.lock().pane_mode_transitions.is_empty());
     assert_eq!(messages(&shared), ["exited clock-mode"]);
 }
+
+#[test]
+fn an_interactive_client_parks_on_an_event_wait() {
+    let (shared, mut context) = pane_fixture("interactive-event-wait");
+    let client = ClientId(41);
+    shared.inner.lock().client_entry(client).instance_id = Some(ClientInstanceId(41));
+    let waiter = {
+        let shared = Arc::clone(&shared);
+        let mut context = context.clone();
+        std::thread::spawn(move || {
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("wait-for", ["-E", "@done"]),
+            )
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while shared.inner.lock().event_waiters.is_empty() {
+        assert!(!waiter.is_finished(), "the wait returned without parking");
+        assert!(Instant::now() < deadline, "the wait never parked");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    run(&shared, &mut context, &["set-hook", "-E", "@done"]).expect("fire @done");
+    waiter.join().expect("waiter thread").expect("wait-for -E");
+    assert!(shared.inner.lock().event_waiters.is_empty());
+}

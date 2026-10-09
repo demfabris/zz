@@ -6428,11 +6428,14 @@ impl Shared {
             fires
         };
         for (id, name, value, last, key) in fires {
+            let variables = self
+                .inner
+                .lock()
+                .engine
+                .format_monitor_hook_variables(&name, &value, &last, key);
+            self.feed_event_waiters(&name, &variables);
             let prepared = {
                 let inner = self.inner.lock();
-                let variables = inner
-                    .engine
-                    .format_monitor_hook_variables(&name, &value, &last, key);
                 inner
                     .engine
                     .format_monitor_hook_body(id)
@@ -12970,7 +12973,6 @@ impl Shared {
         if parsed.has('E') {
             return self.wait_for_event(
                 client,
-                kind,
                 context,
                 name,
                 parsed.value('F'),
@@ -80984,7 +80986,7 @@ set-option -g @alias-mixed-next yes
                     "-g",
                     hook,
                     &format!(
-                        "set -gaF @prompts '{tag}#{{hook_pane}}#{{hook_prompt_type}}#{{hook_event}}+'"
+                        "set -gaF @prompts '{tag}#{{hook_pane}}#{{hook_prompt_type}}#{{hook_event}}#{{hook_session}}+'"
                     ),
                 ],
             );

@@ -1303,7 +1303,14 @@ window a client sizes, so each call sends `%layout-change` for each such window 
 adds the unzoom and zoom steps, and the unzoom line shows the tiled layout it had when the event
 fired. Events are written when they fire, so end of file no longer loses a command's
 notifications; a blank line still drops them, because tmux marks the client exiting before the
-commands read with it run. zz matches all of this (`smoke/control-3-8`, `smoke/control-eof-drain`).
+commands read with it run. zz matches all of this (`smoke/control-3-8`, `smoke/control-eof-drain`)
+except for sizing: the same CLIENT_EXIT is in CLIENT_NOSIZEFLAGS, so `ignore_client_size` leaves
+an exiting control client out of every size the commands read with the blank line recalculate.
+Measured 2026-10-09 on an 80x24 session: `printf 'refresh-client -C 50,20\n\n'` into `-C attach`
+leaves the window 80x24 on the pin and 50x20 here, while the same lines with the blank line
+written half a second later resize both to the new size. zz's control client learns of the blank
+line only after it sent the line before it, and telling the daemon to drop its size first needs
+a message neither side has.
 
 ## Park dispositions (2026-09-01)
 

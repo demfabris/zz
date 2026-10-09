@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use gpui::{
-    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px, size,
-};
 use ropey::Rope;
 use smallvec::SmallVec;
 use sum_tree::{Bias, Dimensions, SumTree};
+use zpui::{
+    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px, size,
+};
 
 use crate::code_editor::{LastLayout, Point as TreeSitterPoint, RopeExt, WhitespaceIndicators};
 
@@ -246,7 +246,7 @@ impl TextWrapper {
         new_text: &Rope,
         wrap_line: &mut F,
     ) where
-        F: FnMut(&str, Pixels) -> Vec<gpui::Boundary>,
+        F: FnMut(&str, Pixels) -> Vec<zpui::Boundary>,
     {
         let buffer_line_count = self.lines_count();
         let start_row = self.text.offset_to_point(range.start).row;
@@ -557,11 +557,11 @@ mod tests {
     use super::*;
     use std::rc::Rc;
 
-    use gpui::{Boundary, FontFeatures, FontStyle, FontWeight, px};
+    use zpui::{Boundary, FontFeatures, FontStyle, FontWeight, px};
 
     #[test]
     fn test_update() {
-        let font = gpui::Font {
+        let font = zpui::Font {
             family: "Arial".into(),
             weight: FontWeight::default(),
             style: FontStyle::Normal,
@@ -747,8 +747,8 @@ mod tests {
         assert_eq!(wrapper.lines_count(), 2);
     }
 
-    fn test_font() -> gpui::Font {
-        gpui::Font {
+    fn test_font() -> zpui::Font {
+        zpui::Font {
             family: "Arial".into(),
             weight: FontWeight::default(),
             style: FontStyle::Normal,
@@ -920,7 +920,7 @@ mod tests {
 
     #[test]
     fn test_offset_to_display_point() {
-        let font = gpui::Font {
+        let font = zpui::Font {
             family: "Arial".into(),
             weight: FontWeight::default(),
             style: FontStyle::Normal,

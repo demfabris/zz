@@ -5,7 +5,7 @@ use crate::{
     tag::Tag,
     v_flex,
 };
-use gpui::{
+use zpui::{
     AnimationElement, App, Div, ElementId, Entity, FontWeight, MouseButton, SharedString, Stateful,
     div, prelude::*, px, relative,
 };
@@ -116,7 +116,7 @@ pub fn picker_row(id: impl Into<ElementId>, selected: bool, cx: &App) -> Statefu
         .gap_2()
         .rounded(cx.theme().menu_radius())
         .border(px(0.5))
-        .border_color(gpui::transparent_white())
+        .border_color(zpui::transparent_white())
         .px_2p5()
         .cursor_pointer()
         .when(selected, |row| row.selection_highlight(cx))

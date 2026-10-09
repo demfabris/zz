@@ -1,6 +1,6 @@
 //! Thin divider rule.
 
-use gpui::{
+use zpui::{
     App, Axis, Hsla, IntoElement, ParentElement as _, RenderOnce, StyleRefinement, Styled, Window,
     div, prelude::FluentBuilder as _, px,
 };

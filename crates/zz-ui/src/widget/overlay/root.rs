@@ -3,7 +3,7 @@
 use std::rc::Rc;
 
 use crate::window_border;
-use gpui::{
+use zpui::{
     Anchor, AnyView, App, AppContext as _, ClipboardItem, Context, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, StyleRefinement, Styled,
     WeakFocusHandle, Window, div, prelude::FluentBuilder as _,
@@ -402,7 +402,7 @@ impl Render for Root {
 #[cfg(test)]
 mod tests {
     use super::{Dialog, Root};
-    use gpui::{App, AppContext as _, Context, IntoElement, Render, TestAppContext, Window, div};
+    use zpui::{App, AppContext as _, Context, IntoElement, Render, TestAppContext, Window, div};
 
     struct TestView;
 
@@ -416,7 +416,7 @@ mod tests {
         dialog
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn dialogs_stack_and_unwind(cx: &mut TestAppContext) {
         cx.update(crate::init);
 

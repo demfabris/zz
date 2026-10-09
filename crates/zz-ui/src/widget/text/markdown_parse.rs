@@ -1,11 +1,11 @@
 //! mdast to our block tree. Runs on a background task, so nothing here may
-//! touch [`Window`](gpui::Window) or [`App`](gpui::App).
+//! touch [`Window`](zpui::Window) or [`App`](zpui::App).
 #![allow(clippy::pedantic, clippy::style, clippy::complexity)]
 
 use std::ops::Range;
 
-use gpui::SharedString;
 use markdown::mdast::{self, Node};
+use zpui::SharedString;
 
 use super::{
     document::ParsedDocument,
@@ -457,7 +457,7 @@ fn ast_to_node(source: &str, value: mdast::Node, cx: &mut NodeContext) -> BlockN
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::ParentElement;
+    use zpui::ParentElement;
 
     use crate::text::{MarkdownExtensions, MarkdownNode, MarkdownPlugin};
 
@@ -629,10 +629,10 @@ mod tests {
         fn render(
             &self,
             node: &MarkdownNode,
-            _window: &mut gpui::Window,
-            _cx: &mut gpui::App,
-        ) -> impl gpui::IntoElement {
-            gpui::div().child(node.as_text().to_string())
+            _window: &mut zpui::Window,
+            _cx: &mut zpui::App,
+        ) -> impl zpui::IntoElement {
+            zpui::div().child(node.as_text().to_string())
         }
     }
 

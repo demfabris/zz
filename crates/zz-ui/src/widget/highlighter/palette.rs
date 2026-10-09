@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use gpui::rgb;
+use zpui::rgb;
 
 use crate::ThemeMode;
 

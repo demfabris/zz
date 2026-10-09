@@ -1,12 +1,12 @@
 use async_task::Runnable;
 use dispatch2::{DispatchQueue, DispatchQueueGlobalPriority, DispatchTime, GlobalQueueIdentifier};
-use gpui::{PlatformDispatcher, Priority, RunnableMeta, RunnableVariant};
 use objc::{
     class, msg_send,
     runtime::{BOOL, YES},
     sel, sel_impl,
 };
 use std::{ffi::c_void, ptr::NonNull, time::Duration};
+use zpui::{PlatformDispatcher, Priority, RunnableMeta, RunnableVariant};
 
 pub(crate) struct IosDispatcher;
 

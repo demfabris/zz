@@ -8,13 +8,13 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gpui::{
+use markdown::mdast;
+use zpui::{
     AnyElement, App, DefiniteLength, Div, ElementId, FontStyle, FontWeight, Half, HighlightStyle,
     Hsla, InteractiveElement as _, IntoElement, Length, ObjectFit, Overflow, ParentElement,
     ScrollHandle, SharedString, SharedUri, StatefulInteractiveElement, Styled, StyledImage as _,
     Window, div, img, prelude::FluentBuilder as _, px, relative, rems,
 };
-use markdown::mdast;
 
 use crate::{
     ActiveTheme as _, Icon, IconName, StyledExt, WindowExt as _, h_flex,
@@ -875,14 +875,14 @@ impl Paragraph {
                         highlight.font_style = Some(FontStyle::Italic);
                     }
                     if style.strikethrough {
-                        highlight.strikethrough = Some(gpui::StrikethroughStyle {
-                            thickness: gpui::px(1.),
+                        highlight.strikethrough = Some(zpui::StrikethroughStyle {
+                            thickness: zpui::px(1.),
                             ..Default::default()
                         });
                     }
                     if style.underline {
-                        highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                        highlight.underline = Some(zpui::UnderlineStyle {
+                            thickness: zpui::px(1.),
                             ..Default::default()
                         });
                     }
@@ -895,8 +895,8 @@ impl Paragraph {
 
                     if let Some(mut link_mark) = style.link.clone() {
                         highlight.color = Some(cx.theme().foreground);
-                        highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                        highlight.underline = Some(zpui::UnderlineStyle {
+                            thickness: zpui::px(1.),
                             ..Default::default()
                         });
 
@@ -912,7 +912,7 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = gpui::combine_highlights(highlights, node_highlights).collect();
+                highlights = zpui::combine_highlights(highlights, node_highlights).collect();
                 offset += text_len;
             }
             ix += 1;
@@ -995,14 +995,14 @@ impl Paragraph {
                         highlight.font_style = Some(FontStyle::Italic);
                     }
                     if style.strikethrough {
-                        highlight.strikethrough = Some(gpui::StrikethroughStyle {
-                            thickness: gpui::px(1.),
+                        highlight.strikethrough = Some(zpui::StrikethroughStyle {
+                            thickness: zpui::px(1.),
                             ..Default::default()
                         });
                     }
                     if style.underline {
-                        highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                        highlight.underline = Some(zpui::UnderlineStyle {
+                            thickness: zpui::px(1.),
                             ..Default::default()
                         });
                     }
@@ -1015,8 +1015,8 @@ impl Paragraph {
 
                     if let Some(mut link_mark) = style.link.clone() {
                         highlight.color = Some(cx.theme().foreground);
-                        highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                        highlight.underline = Some(zpui::UnderlineStyle {
+                            thickness: zpui::px(1.),
                             ..Default::default()
                         });
 
@@ -1032,7 +1032,7 @@ impl Paragraph {
                     node_highlights.push((inner_range, highlight));
                 }
 
-                highlights = gpui::combine_highlights(highlights, node_highlights).collect();
+                highlights = zpui::combine_highlights(highlights, node_highlights).collect();
                 offset += text_len;
             }
         }

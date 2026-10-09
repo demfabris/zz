@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use gpui::{
+use zpui::{
     Anchor, AnyElement, App, Context, DismissEvent, Element, ElementId, Entity, Focusable,
     GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
     LongPressEvent, MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement,
@@ -146,11 +146,11 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
 
     fn request_layout(
         &mut self,
-        id: Option<&gpui::GlobalElementId>,
-        _: Option<&gpui::InspectorElementId>,
+        id: Option<&zpui::GlobalElementId>,
+        _: Option<&zpui::InspectorElementId>,
         window: &mut Window,
         cx: &mut App,
-    ) -> (gpui::LayoutId, Self::RequestLayoutState) {
+    ) -> (zpui::LayoutId, Self::RequestLayoutState) {
         let anchor = self.anchor;
 
         self.with_element_state(
@@ -226,9 +226,9 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
 
     fn prepaint(
         &mut self,
-        _: Option<&gpui::GlobalElementId>,
+        _: Option<&zpui::GlobalElementId>,
         _: Option<&InspectorElementId>,
-        bounds: gpui::Bounds<gpui::Pixels>,
+        bounds: zpui::Bounds<zpui::Pixels>,
         request_layout: &mut Self::RequestLayoutState,
         window: &mut Window,
         cx: &mut App,
@@ -241,9 +241,9 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
 
     fn paint(
         &mut self,
-        id: Option<&gpui::GlobalElementId>,
+        id: Option<&zpui::GlobalElementId>,
         _: Option<&InspectorElementId>,
-        _: gpui::Bounds<gpui::Pixels>,
+        _: zpui::Bounds<zpui::Pixels>,
         request_layout: &mut Self::RequestLayoutState,
         hitbox: &mut Self::PrepaintState,
         window: &mut Window,
@@ -348,7 +348,7 @@ impl<E: ParentElement + Styled + IntoElement + 'static> Element for ContextMenu<
 mod tests {
     use std::cell::Cell;
 
-    use gpui::{
+    use zpui::{
         Context, FocusHandle, IntoElement, Render, TestAppContext, VisualTestContext, actions,
         point,
     };
@@ -388,7 +388,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn closing_the_window_with_the_menu_open_releases_the_menu(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let before = cx.update(|cx| cx.leak_detector_snapshot());
@@ -416,7 +416,7 @@ mod tests {
         cx.update(|cx| cx.assert_no_new_leaks(&before));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn action_bubbles_from_trigger_and_focus_restores_on_dismiss(cx: &mut TestAppContext) {
         cx.update(crate::init);
 

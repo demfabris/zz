@@ -1,6 +1,6 @@
-use gpui::{AnyElement, Context, IntoElement, div, prelude::*};
+use zpui::{AnyElement, Context, IntoElement, div, prelude::*};
 #[cfg(target_os = "ios")]
-use gpui::{Entity, SharedString, Subscription, Window, px};
+use zpui::{Entity, SharedString, Subscription, Window, px};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _,
     button::Button,
@@ -395,7 +395,7 @@ impl AppShell {
                         use zz_ui::{WindowExt as _, notification::Notification};
                         let notification = match zz_daemon::ios_ssh_public_key() {
                             Ok(key) => {
-                                cx.write_to_clipboard(gpui::ClipboardItem::new_string(key));
+                                cx.write_to_clipboard(zpui::ClipboardItem::new_string(key));
                                 Notification::success("SSH key copied.")
                             }
                             Err(error) => Notification::error(error.to_string()),
@@ -408,7 +408,7 @@ impl AppShell {
     }
 }
 
-fn status_line(text: impl Into<gpui::SharedString>, color: gpui::Hsla) -> impl IntoElement {
+fn status_line(text: impl Into<zpui::SharedString>, color: zpui::Hsla) -> impl IntoElement {
     div()
         .text_size(rems_from_px(11.0))
         .text_color(color)

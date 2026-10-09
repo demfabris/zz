@@ -10,7 +10,7 @@ use std::{
     task::{Context as TaskContext, Poll},
 };
 
-use gpui::{
+use zpui::{
     App, AppContext as _, Bounds, Context, FocusHandle, IntoElement, ListState, ParentElement as _,
     Pixels, Point, Render, SharedString, Styled as _, Task, Window, canvas,
     prelude::FluentBuilder as _, px,
@@ -34,7 +34,7 @@ const MAX_COALESCED_UPDATES_PER_PARSE: usize = 64;
 
 pub struct TextViewState {
     pub(super) focus_handle: FocusHandle,
-    pub(super) entity_id: gpui::EntityId,
+    pub(super) entity_id: zpui::EntityId,
     pub(super) list_state: ListState,
 
     bounds: Bounds<Pixels>,
@@ -118,7 +118,7 @@ impl TextViewState {
             select_all: false,
             selectable: false,
             scrollable: false,
-            list_state: ListState::new(0, gpui::ListAlignment::Top, px(1000.)).measure_all(),
+            list_state: ListState::new(0, zpui::ListAlignment::Top, px(1000.)).measure_all(),
             text_view_style: TextViewStyle::default(),
             code_block_actions: None,
             markdown_extensions: Arc::default(),
@@ -595,9 +595,9 @@ fn parse_content(
 mod tests {
     use super::*;
     use crate::text::MarkdownNode;
-    use gpui::TestAppContext;
+    use zpui::TestAppContext;
 
-    #[gpui::test]
+    #[zpui::test]
     fn set_text_then_push_str_appends_to_replaced_content(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("old", cx)));
@@ -626,7 +626,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn deferred_markdown_parses_after_construction(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let state =
@@ -649,7 +649,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn streamed_appends_keep_the_created_prefix(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("`", cx)));
@@ -734,7 +734,7 @@ mod tests {
         assert_eq!(parsed_update.revision, total_updates);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn select_all_returns_rendered_text(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("**quick** value", cx)));
@@ -759,7 +759,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn set_markdown_extensions_reparses_existing_text(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("$TSLA.US", cx)));

@@ -37,7 +37,7 @@ pub use widget::icon::Assets;
 
 /// Initialize the widget layer. Must run once, before any window opens.
 /// The foundation goes first: it installs the globals every widget reads.
-pub fn init(cx: &mut gpui::App) {
+pub fn init(cx: &mut zpui::App) {
     widget::foundation::init(cx);
     #[cfg(feature = "editor")]
     widget::code_editor::init(cx);

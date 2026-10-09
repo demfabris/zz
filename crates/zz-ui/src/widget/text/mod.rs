@@ -22,7 +22,7 @@ mod utils;
 mod veil;
 mod window_selection;
 
-use gpui::{App, KeyBinding, actions};
+use zpui::{App, KeyBinding, actions};
 
 pub use markdown_ext::{
     MarkdownBlockParserFn, MarkdownBlockRenderFn, MarkdownExtensions, MarkdownNode,

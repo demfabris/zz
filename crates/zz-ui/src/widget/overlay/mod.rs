@@ -5,7 +5,7 @@
 //! lints stay off here.
 #![allow(clippy::pedantic, clippy::style, clippy::complexity)]
 
-use gpui::{App, KeyBinding};
+use zpui::{App, KeyBinding};
 
 mod actions;
 mod dialog;

@@ -1,6 +1,6 @@
 //! [`NumberInput`]: a text field flanked by `-` and `+` steppers.
 
-use gpui::{
+use zpui::{
     App, Context, Entity, InteractiveElement as _, IntoElement, KeyBinding, ParentElement as _,
     RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, actions,
     prelude::FluentBuilder as _,
@@ -18,7 +18,7 @@ use super::{
     state::{InputState, StepDirection},
 };
 use crate::Colorize as _;
-use gpui::TextAlign;
+use zpui::TextAlign;
 
 actions!(zz_number_input, [Increment, Decrement]);
 

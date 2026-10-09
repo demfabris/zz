@@ -2,13 +2,13 @@ use crate::{
     connection::{Connection, Event, Prompt},
     input::{key_input, wire_modifiers},
 };
-use gpui::{
+use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc, time::Duration};
+use zpui::{
     Bounds, ClipboardItem, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
     Focusable, IntoElement, KeyDownEvent, KeyUpEvent, MouseButton, Pixels, Point, Render,
     Subscription, Task, TextInputAction, TextInputConfiguration, UTF16Selection, Window, canvas,
     div, prelude::*, px,
 };
-use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc, time::Duration};
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, Outbound, TERMINAL_TABLE,
 };
@@ -333,7 +333,7 @@ impl TerminalApp {
         for key in std::mem::take(&mut self.forwarded) {
             if let Some(pane) = self.pane {
                 let input = key_input(
-                    &gpui::Keystroke {
+                    &zpui::Keystroke {
                         key,
                         key_char: None,
                         modifiers: Default::default(),
@@ -463,7 +463,7 @@ impl TerminalApp {
         &mut self,
         position: Point<Pixels>,
         phase: TerminalMousePhase,
-        modifiers: gpui::Modifiers,
+        modifiers: zpui::Modifiers,
         clicks: usize,
         cx: &mut Context<Self>,
     ) {
@@ -719,7 +719,7 @@ impl Render for TerminalApp {
             .child(
                 div()
                     .id("terminal")
-                    .role(gpui::accesskit::Role::Terminal)
+                    .role(zpui::accesskit::Role::Terminal)
                     .key_context("Terminal")
                     .flex_1()
                     .min_h_0()
@@ -729,7 +729,7 @@ impl Render for TerminalApp {
                     .on_key_up(cx.listener(Self::key_up))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseDownEvent, window, cx| {
+                        cx.listener(|this, event: &zpui::MouseDownEvent, window, cx| {
                             window.focus(&this.focus, cx);
                             this.drag = Some(event.position);
                             this.scroll = 0.;
@@ -751,7 +751,7 @@ impl Render for TerminalApp {
                             }
                         }),
                     )
-                    .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                    .on_mouse_move(cx.listener(|this, event: &zpui::MouseMoveEvent, _, cx| {
                         if let Some(previous) = this.drag {
                             if this.mouse_down {
                                 this.mouse(
@@ -775,7 +775,7 @@ impl Render for TerminalApp {
                     }))
                     .on_mouse_up(
                         MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
+                        cx.listener(|this, event: &zpui::MouseUpEvent, _, cx| {
                             if this.drag.take().is_some() && std::mem::take(&mut this.mouse_down) {
                                 this.mouse(
                                     event.position,
@@ -789,7 +789,7 @@ impl Render for TerminalApp {
                     )
                     .on_mouse_up_out(
                         MouseButton::Left,
-                        cx.listener(|this, event: &gpui::MouseUpEvent, _, cx| {
+                        cx.listener(|this, event: &zpui::MouseUpEvent, _, cx| {
                             if this.drag.take().is_some() && std::mem::take(&mut this.mouse_down) {
                                 this.mouse(
                                     event.position,

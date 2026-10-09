@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use gpui::{
+use zpui::{
     AnyElement, App, ClickEvent, Corners, Div, Edges, ElementId, Hsla, InteractiveElement,
     Interactivity, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role, SharedString,
     Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
@@ -504,7 +504,7 @@ impl RenderOnce for Button {
         let pressed = press.as_ref().map_or(0.0, |press| press.amount);
         let press_listener = press.map(crate::touch::PressFeedback::listener);
         let press_fill = style.active(self.outline, cx).bg;
-        let on_mouse_down = move |_: &gpui::MouseDownEvent, window: &mut Window, cx: &mut App| {
+        let on_mouse_down = move |_: &zpui::MouseDownEvent, window: &mut Window, cx: &mut App| {
             if is_disabled {
                 cx.stop_propagation();
                 return;
@@ -1119,8 +1119,8 @@ impl ButtonVariant {
 mod tests {
     use super::*;
 
-    #[gpui::test]
-    fn test_button_clickable_logic(_cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn test_button_clickable_logic(_cx: &mut zpui::TestAppContext) {
         let clickable = Button::new("test").on_click(|_, _, _| {});
         assert!(clickable.clickable());
 
@@ -1131,8 +1131,8 @@ mod tests {
         assert!(!loading.clickable());
     }
 
-    #[gpui::test]
-    fn test_button_hoverable_logic(_cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn test_button_hoverable_logic(_cx: &mut zpui::TestAppContext) {
         assert!(!Button::new("test").hoverable());
 
         assert!(Button::new("test").on_hover(|_, _, _| {}).hoverable());
@@ -1152,8 +1152,8 @@ mod tests {
         );
     }
 
-    #[gpui::test]
-    fn test_button_variant_methods(_cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn test_button_variant_methods(_cx: &mut zpui::TestAppContext) {
         assert!(ButtonVariant::Link.is_link());
         assert!(ButtonVariant::Text.is_text());
 
@@ -1165,8 +1165,8 @@ mod tests {
         assert!(!ButtonVariant::Primary.is_default());
     }
 
-    #[gpui::test]
-    fn test_outline_selected_uses_outline_active_style(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn test_outline_selected_uses_outline_active_style(cx: &mut zpui::TestAppContext) {
         cx.update(crate::init);
         let window = cx.add_empty_window();
         window.update(|_, cx| {

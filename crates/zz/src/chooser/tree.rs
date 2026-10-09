@@ -1,4 +1,4 @@
-use gpui::{AnyElement, Entity, MouseButton, prelude::*};
+use zpui::{AnyElement, Entity, MouseButton, prelude::*};
 use zz_protocol::{
     ChooseTreeAction, ChooseTreeItem, ChooseTreeKind, ChooseTreePaneKind, ChooseTreeState,
     InputMessage,

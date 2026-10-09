@@ -13,12 +13,12 @@ carry license obligations into zz's own builds.
 
 | Project | What zz carries | License | Record |
 | --- | --- | --- | --- |
-| [gpui / gpui_platform](https://github.com/zed-industries/zed) (Zed Industries) | The UI framework, split out of Zed into `gpui/` with zz's changes on top. | Apache-2.0 | [`gpui/LICENSE-APACHE`](gpui/LICENSE-APACHE), [gpui source](knowledge/references/gpui-revision.md) |
+| [gpui / zpui_platform](https://github.com/zed-industries/zed) (Zed Industries) | The UI framework, split out of Zed into `gpui/` with zz's changes on top. | Apache-2.0 | [`gpui/LICENSE-APACHE`](gpui/LICENSE-APACHE), [gpui source](knowledge/references/gpui-revision.md) |
 | [gpui-component / gpui-kit](https://github.com/longbridge/gpui-kit) (Longbridge) | `crates/zz-ui`, a full fork of the widget layer taken at `b004e595`. Upstream is no longer a dependency. `crates/zz/src/window/frame.rs` is adapted from its Linux client-side window border. | Apache-2.0, © 2024–2025 Longbridge | [`crates/zz-ui/LICENSE-APACHE`](crates/zz-ui/LICENSE-APACHE), per-module port notes in [`crates/zz-ui/UPSTREAM.md`](crates/zz-ui/UPSTREAM.md) |
 | [libghostty-rs](https://github.com/uzaaft/libghostty-rs) (Uzaaft) | Source snapshots of `libghostty-vt` and `libghostty-vt-sys` 0.2.1 from the `demfabris/libghostty-rs` fork, adapted to build the Zig 0.16 VT library. | MIT OR Apache-2.0 | [`third_party/rust/libghostty-vt/`](third_party/rust/libghostty-vt/UPSTREAM.md), [`third_party/rust/libghostty-vt-sys/`](third_party/rust/libghostty-vt-sys/UPSTREAM.md) |
 | [Ghostty](https://github.com/ghostty-org/ghostty) (Mitchell Hashimoto and Ghostty contributors) | The VT state machine itself, compiled from the trimmed Ghostty source in `third_party/ghostty` through the snapshots above. Separately, `crates/zz-terminal/src/x11-rgb.txt` is copied from Ghostty's `src/terminal/res/rgb.txt` at `cf60af28`, which sources it from the X.Org `rgb` project. | MIT | [`third_party/ghostty/LICENSE`](third_party/ghostty/LICENSE), [`third_party/ghostty-reference/`](third_party/ghostty-reference/UPSTREAM.md) |
 
-zz builds against the Apache-2.0 `gpui` and `gpui_platform` crates only. No GPL-licensed Zed
+zz builds against the Apache-2.0 `gpui` and `zpui_platform` crates only. No GPL-licensed Zed
 code is linked into any zz binary.
 
 ## Bundled binaries

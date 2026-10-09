@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use gpui::{
+use zpui::{
     Animation, AnimationExt as _, App, Hsla, IntoElement, ParentElement as _, RenderOnce,
     Transformation, Window, div, ease_in_out, percentage, prelude::FluentBuilder as _,
 };
@@ -53,7 +53,7 @@ impl RenderOnce for Spinner {
         div().child(
             Icon::new(IconName::Loader)
                 .with_size(self.size)
-                .when_some(self.color, gpui::Styled::text_color)
+                .when_some(self.color, zpui::Styled::text_color)
                 .with_animation(
                     "spinner-rotation",
                     Animation::new(ROTATION_PERIOD)

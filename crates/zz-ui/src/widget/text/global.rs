@@ -1,7 +1,7 @@
 //! Paint-scoped globals for text selection: the `TextView` stack and the
 //! press-suppression flag.
 
-use gpui::{App, Entity, Global};
+use zpui::{App, Entity, Global};
 
 use super::{state::TextViewState, window_selection::SelectionScope};
 

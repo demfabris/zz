@@ -11,8 +11,8 @@ mod terminal_app;
 #[cfg(target_os = "ios")]
 mod app {
     use super::terminal_app::TerminalApp;
-    use gpui::{App, AppContext, Application, WindowOptions};
     use std::{borrow::Cow, rc::Rc};
+    use zpui::{App, AppContext, Application, WindowOptions};
     use zz_ui::{Root, Theme, UiZoom};
 
     pub fn run() {

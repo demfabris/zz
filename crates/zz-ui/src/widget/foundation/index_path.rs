@@ -2,7 +2,7 @@
 
 use std::fmt::Display;
 
-use gpui::ElementId;
+use zpui::ElementId;
 
 /// A section / row / column address. All three default to `0`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]

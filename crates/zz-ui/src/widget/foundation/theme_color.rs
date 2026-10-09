@@ -1,6 +1,6 @@
 //! The palette: every color the widget layer is allowed to name.
 
-use gpui::Hsla;
+use zpui::Hsla;
 
 use super::{Colorize as _, color::edge_weight};
 

@@ -11,8 +11,8 @@ use std::{
     },
 };
 
-use gpui::{AnyElement, App, IntoElement, SharedString, Window};
 use markdown::{ParseOptions, mdast};
+use zpui::{AnyElement, App, IntoElement, SharedString, Window};
 
 use super::node::Span;
 

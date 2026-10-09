@@ -1,7 +1,7 @@
 use std::{collections::VecDeque, rc::Rc};
 
 use futures::StreamExt as _;
-use gpui::{
+use zpui::{
     App, ClipboardEntry, ClipboardItem, ClipboardString, Context, Corners, Entity, FocusHandle,
     Focusable, Image, ImageFormat, Pixels, Render, Subscription, Window, div, prelude::*, px,
 };
@@ -33,7 +33,7 @@ struct Tab {
     error: Option<String>,
     picking: bool,
     pick_status: Option<String>,
-    _events: gpui::Task<()>,
+    _events: zpui::Task<()>,
 }
 
 pub(super) struct BrowserPane {

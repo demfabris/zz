@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use gpui::{Context, EventEmitter};
+use zpui::{Context, EventEmitter};
 use zz_client::agent_completion::AgentCommand;
 use zz_client::{
     ClientCore, CoreEvent, Outbound,
@@ -202,7 +202,7 @@ pub struct Connection {
     #[cfg(target_os = "ios")]
     client: Option<Arc<zz_daemon::InteractiveClient>>,
     #[cfg(target_os = "ios")]
-    reader: Option<gpui::Task<()>>,
+    reader: Option<zpui::Task<()>>,
     #[cfg(target_os = "ios")]
     auth_prompt: Option<(
         AuthenticationPrompt,
@@ -213,7 +213,7 @@ pub struct Connection {
     #[cfg(target_os = "ios")]
     pending_session: Option<String>,
     #[cfg(target_os = "ios")]
-    retry: Option<gpui::Task<()>>,
+    retry: Option<zpui::Task<()>>,
     pub core: ClientCore,
     history: HistoryPacer,
     #[cfg(test)]
@@ -237,9 +237,9 @@ pub struct Connection {
     #[cfg(target_family = "wasm")]
     socket: Option<browser::Socket>,
     #[cfg(target_family = "wasm")]
-    reader: Option<gpui::Task<()>>,
+    reader: Option<zpui::Task<()>>,
     #[cfg(target_family = "wasm")]
-    retry: Option<gpui::Task<()>>,
+    retry: Option<zpui::Task<()>>,
 }
 
 impl EventEmitter<CoreEvent> for Connection {}
@@ -326,11 +326,11 @@ impl Connection {
         self.terminal_images.pane(pane)
     }
 
-    pub fn take_retired_terminal_images(&mut self) -> Vec<Arc<gpui::RenderImage>> {
+    pub fn take_retired_terminal_images(&mut self) -> Vec<Arc<zpui::RenderImage>> {
         self.terminal_images.take_retired()
     }
 
-    pub fn pasted_image(&self, pane: PaneId, number: u32) -> Option<Arc<gpui::Image>> {
+    pub fn pasted_image(&self, pane: PaneId, number: u32) -> Option<Arc<zpui::Image>> {
         self.pasted_images.image(pane, number)
     }
 
@@ -353,7 +353,7 @@ impl Connection {
         cx.notify();
     }
 
-    pub fn upload_image(&mut self, pane: PaneId, image: &gpui::Image, cx: &mut Context<Self>) {
+    pub fn upload_image(&mut self, pane: PaneId, image: &zpui::Image, cx: &mut Context<Self>) {
         let extension = image.format.extension();
         if zz_protocol::PastedImageFormat::from_extension(extension).is_none()
             || image.bytes.is_empty()
@@ -844,7 +844,7 @@ impl Connection {
                 }
                 CoreEvent::ClientMessage { text, .. } => self.status.clone_from(text),
                 CoreEvent::Clipboard { text, .. } => {
-                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+                    cx.write_to_clipboard(zpui::ClipboardItem::new_string(text.clone()));
                 }
                 CoreEvent::OpenUri { uri, .. }
                     if uri.starts_with("https://")
@@ -1858,9 +1858,9 @@ mod tests {
     }
 
     #[cfg(not(target_family = "wasm"))]
-    #[gpui::test]
-    fn viewport_frames_leave_the_connection_unnotified(cx: &mut gpui::TestAppContext) {
-        use gpui::AppContext as _;
+    #[zpui::test]
+    fn viewport_frames_leave_the_connection_unnotified(cx: &mut zpui::TestAppContext) {
+        use zpui::AppContext as _;
         use zz_protocol::{ClientView, Event, EventPayload, PaneId, SessionId};
 
         let connection = cx.new(super::Connection::new);

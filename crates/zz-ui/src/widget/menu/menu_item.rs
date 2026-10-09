@@ -1,11 +1,11 @@
 use crate::Colorize as _;
 use crate::{ActiveTheme, Disableable, StyledExt, h_flex};
-use gpui::{
+use smallvec::SmallVec;
+use zpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement, IntoElement, MouseButton,
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement as _,
     StyleRefinement, Styled, Window, prelude::FluentBuilder as _, px,
 };
-use smallvec::SmallVec;
 
 #[derive(IntoElement)]
 pub(crate) struct MenuItemElement {
@@ -83,13 +83,13 @@ impl Disableable for MenuItemElement {
 }
 
 impl Styled for MenuItemElement {
-    fn style(&mut self) -> &mut gpui::StyleRefinement {
+    fn style(&mut self) -> &mut zpui::StyleRefinement {
         &mut self.style
     }
 }
 
 impl ParentElement for MenuItemElement {
-    fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
+    fn extend(&mut self, elements: impl IntoIterator<Item = zpui::AnyElement>) {
         self.children.extend(elements);
     }
 }
@@ -99,7 +99,7 @@ impl RenderOnce for MenuItemElement {
         let highlight = if self.submenu_open {
             StyleRefinement::default()
                 .bg(cx.theme().background.washed(2))
-                .border_color(gpui::transparent_white())
+                .border_color(zpui::transparent_white())
                 .text_color(cx.theme().foreground)
                 .shadow_none()
         } else {
@@ -119,7 +119,7 @@ impl RenderOnce for MenuItemElement {
             .text_color(cx.theme().foreground)
             .relative()
             .border(px(0.5))
-            .border_color(gpui::transparent_white())
+            .border_color(zpui::transparent_white())
             .items_center()
             .justify_between()
             .refine_style(&self.style)

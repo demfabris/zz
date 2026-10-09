@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use gpui::{
+use zpui::{
     AnyElement, App, ElementId, Hsla, IntoElement, MouseButton, SharedString, Stateful, Window,
     div, prelude::*, px,
 };
@@ -20,9 +20,9 @@ use crate::{
 use super::{workspace_tree_action_button, workspace_tree_marker};
 
 pub fn tree_host_marker(bell: bool, badge_color: Option<Hsla>, cx: &App) -> AnyElement {
-    static LOGO: LazyLock<Arc<gpui::Image>> = LazyLock::new(|| {
-        Arc::new(gpui::Image::from_bytes(
-            gpui::ImageFormat::Png,
+    static LOGO: LazyLock<Arc<zpui::Image>> = LazyLock::new(|| {
+        Arc::new(zpui::Image::from_bytes(
+            zpui::ImageFormat::Png,
             include_bytes!(concat!(
                 env!("CARGO_MANIFEST_DIR"),
                 "/../../assets/linux/hicolor/64x64/apps/zz.png"
@@ -31,7 +31,7 @@ pub fn tree_host_marker(bell: bool, badge_color: Option<Hsla>, cx: &App) -> AnyE
         ))
     });
     tree_node_marker(
-        gpui::img(Arc::clone(&LOGO))
+        zpui::img(Arc::clone(&LOGO))
             .size(crate::rems_from_px(super::WORKSPACE_TREE_NODE_ICON_SIZE)),
         bell,
         badge_color,
@@ -127,7 +127,7 @@ impl TreeRowMenuItem {
     }
 }
 
-pub fn tree_row_menu(row: Stateful<gpui::Div>, items: Vec<TreeRowMenuItem>) -> AnyElement {
+pub fn tree_row_menu(row: Stateful<zpui::Div>, items: Vec<TreeRowMenuItem>) -> AnyElement {
     if items.is_empty() {
         return row.into_any_element();
     }
@@ -175,7 +175,7 @@ pub fn tree_window_layout_button(
 ) -> AnyElement {
     let on_split = Rc::new(on_split);
     workspace_tree_action_button(id, IconName::LayoutColumns, "Window layout", disabled, cx)
-        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+        .dropdown_menu_with_anchor(zpui::Anchor::TopRight, move |menu, _, _| {
             [
                 ("Split right", IconName::PanelRight, true),
                 ("Split bottom", IconName::PanelBottom, false),
@@ -257,8 +257,8 @@ mod tests {
 
     struct Row;
 
-    impl gpui::Render for Row {
-        fn render(&mut self, _: &mut Window, cx: &mut gpui::Context<Self>) -> impl IntoElement {
+    impl zpui::Render for Row {
+        fn render(&mut self, _: &mut Window, cx: &mut zpui::Context<Self>) -> impl IntoElement {
             let actions = tree_action_strip(
                 "actions",
                 vec![
@@ -292,8 +292,8 @@ mod tests {
         }
     }
 
-    #[gpui::test]
-    fn coarse_rows_grow_to_a_touch_target_and_keep_actions_inside(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn coarse_rows_grow_to_a_touch_target_and_keep_actions_inside(cx: &mut zpui::TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| Row);
         for coarse in [false, true] {

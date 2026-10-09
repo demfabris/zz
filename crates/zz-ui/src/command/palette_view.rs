@@ -1,6 +1,6 @@
 use std::{ops::Range, rc::Rc, sync::Arc, time::Duration};
 
-use gpui::{
+use zpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, Global, IntoElement, KeyDownEvent,
     MouseButton, Render, ScrollStrategy, SharedString, UniformListScrollHandle, Window, div,
     prelude::*, px, uniform_list,
@@ -828,7 +828,7 @@ impl CommandPaletteView {
         );
     }
 
-    fn render_unified(&mut self, window: &mut Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn render_unified(&mut self, window: &mut Window, cx: &mut Context<Self>) -> zpui::AnyElement {
         let Some(unified) = &self.unified else {
             return div().into_any_element();
         };
@@ -1409,7 +1409,7 @@ impl CommandPaletteView {
         palette: Entity<Self>,
         font: SharedString,
         cx: &App,
-    ) -> gpui::Div {
+    ) -> zpui::Div {
         let hover_palette = palette.clone();
         let click_palette = palette;
         let kind = suggestion.kind;

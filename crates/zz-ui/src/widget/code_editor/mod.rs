@@ -40,6 +40,6 @@ impl Position {
     }
 }
 
-pub(crate) fn init(cx: &mut gpui::App) {
+pub(crate) fn init(cx: &mut zpui::App) {
     state::init(cx);
 }

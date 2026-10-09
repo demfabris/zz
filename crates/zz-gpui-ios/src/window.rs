@@ -1,17 +1,6 @@
 use crate::keyboard_inset::{KeyboardMotion, Spring};
 use crate::{CGPoint, CGRect, IosDisplay, id, nil, ns_array};
 use futures::channel::oneshot;
-use gpui::accesskit;
-use gpui::{
-    AnyWindowHandle, Bounds, Capslock, CursorStyle, DevicePixels, DispatchEventResult,
-    KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels,
-    PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
-    PromptButton, PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size,
-    TextInputAction, TextInputConfiguration, TextInputMode, TextInputStateChange, TouchEvent,
-    TouchId, TouchPhase, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowParams,
-    point, px, size,
-};
 use objc::{
     class,
     declare::ClassDecl,
@@ -29,6 +18,17 @@ use std::{
     sync::{Arc, Once},
     time::Instant,
 };
+use zpui::accesskit;
+use zpui::{
+    AnyWindowHandle, Bounds, Capslock, CursorStyle, DevicePixels, DispatchEventResult,
+    KeyDownEvent, KeyUpEvent, Keystroke, Modifiers, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, PinchEvent, Pixels,
+    PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler, PlatformWindow, Point,
+    PromptButton, PromptLevel, RequestFrameOptions, ScrollDelta, ScrollWheelEvent, Size,
+    TextInputAction, TextInputConfiguration, TextInputMode, TextInputStateChange, TouchEvent,
+    TouchId, TouchPhase, WindowAppearance, WindowBackgroundAppearance, WindowBounds, WindowParams,
+    point, px, size,
+};
 
 const STATE_IVAR: &str = "zzWindowState";
 static REGISTER_VIEW: Once = Once::new();
@@ -40,14 +40,14 @@ pub(crate) struct IosWindowState {
     native_window: id,
     native_view: id,
     display_link: Rc<crate::DisplayLink>,
-    renderer: gpui_wgpu::WgpuRenderer,
+    renderer: zpui_wgpu::WgpuRenderer,
     needs_presentation: bool,
     accesskit_adapter: Option<accesskit_ios::SubclassingAdapter>,
     request_frame_callback: Option<Box<dyn FnMut(RequestFrameOptions)>>,
     event_callback: Option<Box<dyn FnMut(PlatformInput) -> DispatchEventResult>>,
     resize_callback: Option<Box<dyn FnMut(Size<Pixels>, f32)>>,
     appearance_callback: Option<Box<dyn FnMut()>>,
-    insets_callback: Option<Box<dyn FnMut(gpui::WindowInsets)>>,
+    insets_callback: Option<Box<dyn FnMut(zpui::WindowInsets)>>,
     close_callback: Option<Box<dyn FnOnce()>>,
     input_handler: Option<PlatformInputHandler>,
     keyboard: crate::keyboard::Keyboard,
@@ -139,15 +139,15 @@ impl IosWindow {
             let _: () = msg_send![native_window, setRootViewController: controller];
             let _: () = msg_send![controller, release];
 
-            let instance = gpui_wgpu::wgpu::Instance::new(gpui_wgpu::wgpu::InstanceDescriptor {
-                backends: gpui_wgpu::wgpu::Backends::METAL,
+            let instance = zpui_wgpu::wgpu::Instance::new(zpui_wgpu::wgpu::InstanceDescriptor {
+                backends: zpui_wgpu::wgpu::Backends::METAL,
                 display: Some(Box::new(IosDisplayHandle)),
                 flags: Default::default(),
                 backend_options: Default::default(),
                 memory_budget_thresholds: Default::default(),
             });
             let surface = instance.create_surface_unsafe(
-                gpui_wgpu::wgpu::SurfaceTargetUnsafe::RawHandle {
+                zpui_wgpu::wgpu::SurfaceTargetUnsafe::RawHandle {
                     raw_display_handle: Some(rwh::RawDisplayHandle::UiKit(
                         rwh::UiKitDisplayHandle::new(),
                     )),
@@ -156,13 +156,13 @@ impl IosWindow {
                     )),
                 },
             )?;
-            let context = gpui_wgpu::WgpuContext::new(instance, &surface, None)?;
+            let context = zpui_wgpu::WgpuContext::new(instance, &surface, None)?;
             drop(surface);
             let gpu_context = Rc::new(std::cell::RefCell::new(Some(context)));
-            let renderer = gpui_wgpu::WgpuRenderer::new(
+            let renderer = zpui_wgpu::WgpuRenderer::new(
                 gpu_context,
                 &IosRawWindow(native_view as usize),
-                gpui_wgpu::WgpuSurfaceConfig {
+                zpui_wgpu::WgpuSurfaceConfig {
                     size: size(
                         DevicePixels((screen_bounds.size.width * scale) as i32),
                         DevicePixels((screen_bounds.size.height * scale) as i32),
@@ -337,12 +337,12 @@ impl Drop for IosWindow {
 }
 
 impl PlatformWindow for IosWindow {
-    fn insets(&self) -> gpui::WindowInsets {
+    fn insets(&self) -> zpui::WindowInsets {
         let state = self.0.borrow();
         view_insets(state.native_view, state.keyboard_overlap)
     }
 
-    fn on_insets_changed(&self, callback: Box<dyn FnMut(gpui::WindowInsets)>) {
+    fn on_insets_changed(&self, callback: Box<dyn FnMut(zpui::WindowInsets)>) {
         self.0.borrow_mut().insets_callback = Some(callback);
     }
 
@@ -396,11 +396,11 @@ impl PlatformWindow for IosWindow {
         self.bounds_impl()
     }
 
-    fn visibility(&self) -> gpui::WindowVisibility {
-        gpui::WindowVisibility::Visible
+    fn visibility(&self) -> zpui::WindowVisibility {
+        zpui::WindowVisibility::Visible
     }
 
-    fn on_visibility_change(&self, _callback: Box<dyn FnMut(gpui::WindowVisibility)>) {}
+    fn on_visibility_change(&self, _callback: Box<dyn FnMut(zpui::WindowVisibility)>) {}
 
     fn is_maximized(&self) -> bool {
         false
@@ -532,7 +532,7 @@ impl PlatformWindow for IosWindow {
 
     fn on_hit_test_window_control(
         &self,
-        _callback: Box<dyn FnMut() -> Option<gpui::WindowControlArea>>,
+        _callback: Box<dyn FnMut() -> Option<zpui::WindowControlArea>>,
     ) {
     }
 
@@ -544,7 +544,7 @@ impl PlatformWindow for IosWindow {
         self.0.borrow_mut().appearance_callback = Some(callback);
     }
 
-    fn draw(&self, scene: &gpui::Scene) {
+    fn draw(&self, scene: &zpui::Scene) {
         let mut state = self.0.borrow_mut();
         state.perf.drew(scene);
         state.needs_presentation = !state.renderer.draw(scene);
@@ -560,10 +560,10 @@ impl PlatformWindow for IosWindow {
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>) {}
 
-    fn gpu_specs(&self) -> Option<gpui::GpuSpecs> {
+    fn gpu_specs(&self) -> Option<zpui::GpuSpecs> {
         self.0.borrow().renderer.gpu_specs()
     }
-    fn a11y_init(&self, callbacks: gpui::A11yCallbacks) {
+    fn a11y_init(&self, callbacks: zpui::A11yCallbacks) {
         let view = self.0.borrow_mut().native_view;
         let adapter = unsafe {
             accesskit_ios::SubclassingAdapter::new(
@@ -1031,16 +1031,16 @@ fn viewport_changed(this: &Object) {
     }
 }
 
-fn view_insets(view: id, keyboard_overlap: f64) -> gpui::WindowInsets {
+fn view_insets(view: id, keyboard_overlap: f64) -> zpui::WindowInsets {
     let insets: crate::UIEdgeInsets = unsafe { msg_send![view, safeAreaInsets] };
-    gpui::WindowInsets {
-        safe_area: gpui::Edges {
+    zpui::WindowInsets {
+        safe_area: zpui::Edges {
             top: px(insets.top as f32),
             right: px(insets.right as f32),
             bottom: px(insets.bottom as f32),
             left: px(insets.left as f32),
         },
-        ime: gpui::Edges {
+        ime: zpui::Edges {
             bottom: px(keyboard_overlap as f32),
             ..Default::default()
         },
@@ -1427,10 +1427,10 @@ extern "C" fn autocorrection_type(this: &Object, _: Sel) -> isize {
 
 extern "C" fn autocapitalization_type(this: &Object, _: Sel) -> isize {
     match text_input(this).autocapitalize {
-        gpui::Autocapitalize::None => 0,
-        gpui::Autocapitalize::Words => 1,
-        gpui::Autocapitalize::Sentences => 2,
-        gpui::Autocapitalize::Characters => 3,
+        zpui::Autocapitalize::None => 0,
+        zpui::Autocapitalize::Words => 1,
+        zpui::Autocapitalize::Sentences => 2,
+        zpui::Autocapitalize::Characters => 3,
     }
 }
 

@@ -1,6 +1,6 @@
 //! Small inline status pill.
 
-use gpui::{
+use zpui::{
     AnyElement, App, Hsla, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
     StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative, transparent_white,
 };

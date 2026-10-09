@@ -86,7 +86,7 @@ on iPhone and iPad simulators; physical-device validation remains outstanding.
 
 - CEF pinned to Rust packages `154.0.0+154.0.23`, Chromium `154.0.8037.17` . see
   [CEF artifacts](/references/cef-artifacts.md).
-- GPUI + `gpui_platform` come from a fixed Zed revision . see [GPUI revision](/references/gpui-revision.md).
+- GPUI + `zpui_platform` come from a fixed Zed revision . see [GPUI revision](/references/gpui-revision.md).
 - tmux behavior checked against a pinned commit . see [tmux upstream](/references/tmux-upstream.md).
 - X11 named colors sourced from Ghostty . see [Ghostty color reference](/references/ghostty-color-reference.md).
 

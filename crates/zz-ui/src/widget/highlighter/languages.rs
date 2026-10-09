@@ -1,6 +1,6 @@
 //! Built-in tree-sitter grammars. `Plain` has none, so nothing parses it.
 
-use gpui::SharedString;
+use zpui::SharedString;
 
 use super::LanguageConfig;
 

@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 #[cfg(target_os = "macos")]
 use core_video::pixel_buffer::CVPixelBuffer;
-use gpui::{
+use zpui::{
     App, Bounds, ContentMask, Corners, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId, InspectorElementId, IntoElement, LayoutId, Pixels, RenderImage, Window,
 };

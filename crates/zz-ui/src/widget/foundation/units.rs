@@ -1,4 +1,4 @@
-use gpui::{App, Global, Pixels, Rems, rems};
+use zpui::{App, Global, Pixels, Rems, rems};
 
 /// The design-system baseline: at the default UI size, one rem is 16 pixels.
 pub const BASE_UI_FONT_SIZE: f32 = 16.0;
@@ -34,14 +34,14 @@ impl UiZoom {
 
 /// Express a design measurement in rems, preserving its default pixel size. Use
 /// it for named UI metrics; one-pixel borders and other physical details stay on
-/// [`gpui::px`].
+/// [`zpui::px`].
 pub const fn rems_from_px(value: f32) -> Rems {
     rems(value / BASE_UI_FONT_SIZE)
 }
 
 #[cfg(test)]
 mod tests {
-    use gpui::px;
+    use zpui::px;
 
     use super::*;
 

@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gpui::{
+use zpui::{
     AbsoluteLength, AnyElement, App, AvailableSpace, Bounds, DefiniteLength, Element, ElementId,
     GlobalElementId, HighlightStyle, InspectorElementId, InteractiveElement as _, IntoElement,
     LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine, SharedString,
@@ -60,7 +60,7 @@ struct InlineFlowLayout {
 enum PositionedFragment {
     Text {
         item_ix: usize,
-        origin: gpui::Point<Pixels>,
+        origin: zpui::Point<Pixels>,
         size: Size<Pixels>,
         source_range: Range<usize>,
         text: SharedString,
@@ -69,7 +69,7 @@ enum PositionedFragment {
     },
     Image {
         item_ix: usize,
-        origin: gpui::Point<Pixels>,
+        origin: zpui::Point<Pixels>,
         size: Size<Pixels>,
     },
 }
@@ -721,8 +721,8 @@ fn slice_ranges<T, U>(
 mod tests {
     use super::*;
 
-    #[gpui::test]
-    fn hard_lines_keep_empty_lines_and_exclude_newline_bytes(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn hard_lines_keep_empty_lines_and_exclude_newline_bytes(cx: &mut zpui::TestAppContext) {
         let cx = cx.add_empty_window();
         cx.update(|window, _| {
             let items = vec![

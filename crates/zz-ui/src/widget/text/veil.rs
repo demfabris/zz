@@ -4,8 +4,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gpui::{App, EntityId, TextRun};
 use web_time::Instant;
+use zpui::{App, EntityId, TextRun};
 
 use crate::pulse::pulse_lease;
 
@@ -261,8 +261,8 @@ fn apply_veil(runs: Vec<TextRun>, spans: &[(Range<usize>, f32)]) -> Vec<TextRun>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{TextRun, font};
     use web_time::Duration;
+    use zpui::{TextRun, font};
 
     fn at(base: Instant, millis: u64) -> Instant {
         base + Duration::from_millis(millis)
@@ -272,7 +272,7 @@ mod tests {
         TextRun {
             len,
             font: font("Test"),
-            color: gpui::white(),
+            color: zpui::white(),
             background_color: None,
             underline: None,
             strikethrough: None,

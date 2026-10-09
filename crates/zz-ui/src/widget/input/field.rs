@@ -1,6 +1,6 @@
 //! [`Input`]: the chrome around a text field, rebuilt every frame.
 
-use gpui::{
+use zpui::{
     AnyElement, App, DefiniteLength, Entity, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement as _, RenderOnce, Role, StatefulInteractiveElement as _,
     StyleRefinement, Styled, TextAlign, Window, div, prelude::FluentBuilder as _, px,
@@ -262,7 +262,7 @@ impl RenderOnce for Input {
             .w_full()
             .line_height(LINE_HEIGHT)
             .text_color(foreground)
-            .when(editable, gpui::Styled::cursor_text);
+            .when(editable, zpui::Styled::cursor_text);
 
         element = Self::sized(element, self.size);
         if !multi_line {

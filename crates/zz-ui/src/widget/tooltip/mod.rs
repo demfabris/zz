@@ -1,6 +1,6 @@
 //! Hover tooltip: a label, optionally trailed by a keybinding.
 
-use gpui::{
+use zpui::{
     Action, AnyView, App, AppContext as _, Context, IntoElement, ParentElement as _, Render,
     SharedString, StyleRefinement, Styled, Window, div, prelude::FluentBuilder,
 };
@@ -9,7 +9,7 @@ use crate::Colorize as _;
 use crate::{ActiveTheme as _, StyledExt as _, h_flex, kbd::Kbd};
 
 /// The box that appears on hover: a label, optionally trailed by the keybinding
-/// of the action it triggers. Attach one through gpui's `.tooltip()`.
+/// of the action it triggers. Attach one through zpui's `.tooltip()`.
 pub struct Tooltip {
     style: StyleRefinement,
     text: SharedString,
@@ -34,7 +34,7 @@ impl Tooltip {
         self
     }
 
-    /// Build the tooltip into the `AnyView` gpui's hover machinery expects.
+    /// Build the tooltip into the `AnyView` zpui's hover machinery expects.
     #[must_use]
     pub fn build(self, _window: &mut Window, cx: &mut App) -> AnyView {
         cx.new(|_| self).into()

@@ -1,9 +1,9 @@
 //! Color math shared by the theme and every widget that tints something.
 
-use gpui::{Hsla, Rgba, hsla};
 use std::cell::Cell;
+use zpui::{Hsla, Rgba, hsla};
 
-/// Create a [`gpui::Hsla`] color from CSS-style components: `h` in 0.0..360.0,
+/// Create a [`zpui::Hsla`] color from CSS-style components: `h` in 0.0..360.0,
 /// `s` and `l` in 0.0..100.0.
 #[inline]
 pub fn hsl(h: f32, s: f32, l: f32) -> Hsla {
@@ -131,7 +131,7 @@ pub trait Colorize: Sized {
 
     /// Scale the alpha channel by `factor` (clamped to `0.0..=1.0`). Relative,
     /// so a half-transparent color ends at `0.5 * factor`;
-    /// [`gpui::Hsla::alpha`] sets alpha outright.
+    /// [`zpui::Hsla::alpha`] sets alpha outright.
     fn opacity(&self, opacity: f32) -> Self;
 
     /// Replace the alpha channel with `divisor`.
@@ -172,7 +172,7 @@ pub trait Colorize: Sized {
 
 /// sRGB <-> Oklab, after Björn Ottosson's reference implementation.
 mod oklab {
-    use gpui::Rgba;
+    use zpui::Rgba;
 
     #[inline]
     fn to_linear(c: f32) -> f32 {
@@ -580,14 +580,14 @@ mod tests {
     #[test]
     fn mix_oklab_with_transparent_keeps_hue_and_scales_alpha() {
         let red = hsl(0., 100., 50.);
-        let mixed = red.mix_oklab(gpui::transparent_black(), 0.2);
+        let mixed = red.mix_oklab(zpui::transparent_black(), 0.2);
         assert_close(mixed.a, 0.2);
         assert_close(mixed.h, red.h);
     }
 
     #[test]
     fn mix_oklab_of_two_transparents_is_transparent() {
-        let mixed = gpui::transparent_black().mix_oklab(gpui::transparent_black(), 0.5);
+        let mixed = zpui::transparent_black().mix_oklab(zpui::transparent_black(), 0.5);
         assert_close(mixed.a, 0.0);
     }
 

@@ -1,9 +1,9 @@
 //! The shared styling vocabulary: one [`Size`] scale, one set of state traits,
-//! one set of [`gpui::Styled`] extensions.
+//! one set of [`zpui::Styled`] extensions.
 
 use super::ActiveTheme;
 use super::Colorize as _;
-use gpui::{
+use zpui::{
     App, BoxShadow, Corners, DefiniteLength, Div, Edges, Pixels, Refineable, StyleRefinement,
     Styled, div, point, px,
 };
@@ -26,12 +26,12 @@ macro_rules! font_weight {
         /// [docs](https://tailwindcss.com/docs/font-weight)
         #[inline]
         fn $fn(self) -> Self {
-            self.font_weight(gpui::FontWeight::$const)
+            self.font_weight(zpui::FontWeight::$const)
         }
     };
 }
 
-/// Extends [`gpui::Styled`] with the shorthands this crate leans on.
+/// Extends [`zpui::Styled`] with the shorthands this crate leans on.
 pub trait StyledExt: Styled + Sized {
     fn refine_style(mut self, style: &StyleRefinement) -> Self {
         self.style().refine(style);
@@ -92,7 +92,7 @@ pub trait StyledExt: Styled + Sized {
 
     fn menu_item_corners(self, row_height: Pixels, cx: &App) -> Self {
         self.rounded(cx.theme().menu_radius().min(row_height * 0.40))
-            .corner_radius_mode(gpui::CornerRadiusMode::Fixed)
+            .corner_radius_mode(zpui::CornerRadiusMode::Fixed)
             .corner_smoothing(2.5)
     }
 
@@ -434,12 +434,12 @@ impl<T: Styled> StyleSized<T> for T {
 
 #[cfg(test)]
 mod tests {
-    use gpui::px;
+    use zpui::px;
 
     use super::Size;
 
-    #[gpui::test]
-    fn control_shadow_strength_scales_ink_without_changing_shape(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn control_shadow_strength_scales_ink_without_changing_shape(cx: &mut zpui::TestAppContext) {
         cx.update(crate::init);
         cx.update(|cx| {
             let original = super::control_shadow(cx);

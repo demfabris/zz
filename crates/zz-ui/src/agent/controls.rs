@@ -1,6 +1,6 @@
 use std::{f32::consts::PI, rc::Rc};
 
-use gpui::{
+use zpui::{
     Anchor, AnyElement, App, ElementId, IntoElement, PathBuilder, Role, SharedString, Window,
     canvas, div, point, prelude::*, px,
 };
@@ -138,7 +138,7 @@ pub fn agent_config_picker(
                             .child(
                                 div()
                                     .text_size(crate::rems_from_px(12.0))
-                                    .font_weight(gpui::FontWeight::MEDIUM)
+                                    .font_weight(zpui::FontWeight::MEDIUM)
                                     .child(name.clone()),
                             )
                             .when_some(description.clone(), |this, description| {
@@ -186,18 +186,18 @@ fn agent_picker_row(
     content: impl IntoElement,
     window: &mut Window,
     cx: &mut App,
-) -> gpui::Stateful<gpui::Div> {
+) -> zpui::Stateful<zpui::Div> {
     let id = id.into();
     let focus = window
         .use_keyed_state(format!("{id}:focus"), cx, |_, cx| cx.focus_handle())
         .read(cx)
         .clone();
     let highlight = if parent && selected {
-        gpui::StyleRefinement::default()
+        zpui::StyleRefinement::default()
             .bg(cx.theme().background.washed(2))
             .text_color(cx.theme().foreground)
     } else {
-        gpui::StyleRefinement::default().selection_highlight(cx)
+        zpui::StyleRefinement::default().selection_highlight(cx)
     };
     h_flex()
         .id(id)
@@ -208,7 +208,7 @@ fn agent_picker_row(
         .px_2()
         .py_1()
         .border(px(0.5))
-        .border_color(gpui::transparent_white())
+        .border_color(zpui::transparent_white())
         .menu_item_corners(px(32.0), cx)
         .text_size(crate::rems_from_px(12.0))
         .line_height(px(16.0))
@@ -221,7 +221,7 @@ fn agent_picker_row(
         .when(!enabled, |this| {
             this.text_color(cx.theme().foreground.muted())
         })
-        .on_mouse_down(gpui::MouseButton::Left, move |_, window, cx| {
+        .on_mouse_down(zpui::MouseButton::Left, move |_, window, cx| {
             if !enabled {
                 cx.stop_propagation();
                 return;
@@ -525,7 +525,7 @@ pub fn agent_model_picker(
                                     Icon::new(IconName::Check)
                                         .xsmall()
                                         .flex_none()
-                                        .when(!checked, gpui::Styled::invisible),
+                                        .when(!checked, zpui::Styled::invisible),
                                 ),
                             window,
                             cx,
@@ -571,7 +571,7 @@ pub fn agent_model_picker(
                 .debug_selector(|| "agent-model-menu".into())
                 .w(width)
                 .h(panel_height)
-                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .on_mouse_down(zpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .child(
                     h_flex()
                         .w_full()
@@ -782,7 +782,7 @@ pub fn context_usage_meter(
     id: impl Into<ElementId>,
     used: u64,
     size: u64,
-    cx: &gpui::App,
+    cx: &zpui::App,
 ) -> AnyElement {
     let progress = context_usage_fraction(used, size) as f32;
     let tooltip = context_usage_tooltip(used, size);
@@ -879,7 +879,7 @@ pub fn context_usage_meter(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
+    use zpui::{Context, Modifiers, Render, TestAppContext, VisualTestContext};
     use zz_protocol::AgentProvider;
 
     #[test]
@@ -978,7 +978,7 @@ mod tests {
         draw(cx);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn model_highlights_share_menu_corners_and_keep_the_provider_neutral(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
@@ -1013,7 +1013,7 @@ mod tests {
                 let quad = quads
                     .iter()
                     .find(|quad| {
-                        quad.background == gpui::solid_background(color)
+                        quad.background == zpui::solid_background(color)
                             && (quad.bounds.origin.x.0 / scale - f32::from(bounds.origin.x)).abs()
                                 < 1.0
                             && (quad.bounds.origin.y.0 / scale - f32::from(bounds.origin.y)).abs()
@@ -1026,7 +1026,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn picker_stages_model_and_effort_pills_until_dismissed_once(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, _| ModelPickerTest {
@@ -1060,7 +1060,7 @@ mod tests {
         assert_eq!(view.read_with(cx, |view, _| view.applied.len()), 1);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn catalog_arrives_in_the_open_picker_without_switching_provider(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, _| ModelPickerTest {
@@ -1105,7 +1105,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn vendor_tabs_use_cached_choices_without_applying_and_clear_on_scope_change(
         cx: &mut TestAppContext,
     ) {

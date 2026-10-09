@@ -1,6 +1,6 @@
 //! [`ColorPicker`]: a swatch that opens a hex field and a grid of presets.
 
-use gpui::{
+use zpui::{
     Anchor, App, AppContext as _, ClickEvent, Context, Entity, EventEmitter, FocusHandle,
     Focusable, Hsla, InteractiveElement as _, IntoElement, ParentElement as _, Pixels, RenderOnce,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled as _, Subscription,
@@ -194,7 +194,7 @@ impl ColorPicker {
             .on_click(move |_, _, cx| state.update(cx, |picker, cx| picker.set_sheet(true, cx)))
     }
 
-    fn touch_sheet(&self, shown: Hsla, window: &Window, cx: &App) -> gpui::AnyElement {
+    fn touch_sheet(&self, shown: Hsla, window: &Window, cx: &App) -> zpui::AnyElement {
         let theme = cx.theme();
         let state = self.state.clone();
         let hex = self.state.read(cx).hex.clone();
@@ -335,7 +335,7 @@ impl Disableable for ColorPicker {
     }
 }
 
-impl gpui::Styled for ColorPicker {
+impl zpui::Styled for ColorPicker {
     fn style(&mut self) -> &mut StyleRefinement {
         &mut self.style
     }

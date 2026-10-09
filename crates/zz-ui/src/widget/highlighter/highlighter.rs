@@ -3,7 +3,7 @@
 use super::{HighlightTheme, LanguageRegistry};
 
 use anyhow::{Context, Result, anyhow};
-use gpui::{HighlightStyle, SharedString};
+use zpui::{HighlightStyle, SharedString};
 
 use ropey::{ChunkCursor, Rope};
 use std::sync::Arc;

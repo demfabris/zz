@@ -1,6 +1,6 @@
 //! The `RenderOnce` half of the select: the per-frame builder a call site writes.
 
-use gpui::{
+use zpui::{
     App, ElementId, Entity, Focusable as _, InteractiveElement as _, IntoElement, Length,
     ParentElement as _, RenderOnce, SharedString, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder as _,

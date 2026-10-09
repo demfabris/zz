@@ -1,6 +1,6 @@
 //! A selectable row for list-shaped surfaces.
 
-use gpui::{
+use zpui::{
     AnyElement, App, ClickEvent, Div, ElementId, InteractiveElement as _, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, ParentElement, RenderOnce, Stateful,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
@@ -145,7 +145,7 @@ impl RenderOnce for ListItem {
             .text_color(foreground)
             .rounded(cx.theme().menu_radius())
             .border(px(0.5))
-            .border_color(gpui::transparent_white())
+            .border_color(zpui::transparent_white())
             .when(highlighted, |this| this.selection_highlight(cx))
             .refine_style(&style)
             .when(interactive, |this| {

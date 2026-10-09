@@ -1,6 +1,5 @@
 use crate::{CGRect, id, nil};
 use anyhow::Result;
-use gpui::{Bounds, DisplayId, Pixels, PlatformDisplay, point, px, size};
 use objc::{
     class, msg_send,
     runtime::{NO, Object, YES},
@@ -8,6 +7,7 @@ use objc::{
 };
 use std::cell::Cell;
 use uuid::Uuid;
+use zpui::{Bounds, DisplayId, Pixels, PlatformDisplay, point, px, size};
 
 const IDLE_FRAMES_BEFORE_PAUSE: u8 = 3;
 

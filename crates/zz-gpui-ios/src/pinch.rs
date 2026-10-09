@@ -1,4 +1,4 @@
-use gpui::{Pixels, Point, TouchPhase, point};
+use zpui::{Pixels, Point, TouchPhase, point};
 
 const SLOP: f32 = 0.06;
 const SLOP_POINTS: f32 = 8.0;

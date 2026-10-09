@@ -1,4 +1,4 @@
-use gpui::SharedString;
+use zpui::SharedString;
 
 use super::TabSize;
 

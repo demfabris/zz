@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui::{
+use zpui::{
     Anchor, Context, DismissEvent, ElementId, Entity, Focusable, InteractiveElement, IntoElement,
     RenderOnce, SharedString, StyleRefinement, Styled, Window,
 };
@@ -79,7 +79,7 @@ impl<T> RenderOnce for DropdownMenuPopover<T>
 where
     T: Selectable + IntoElement + 'static,
 {
-    fn render(self, window: &mut Window, cx: &mut gpui::App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut zpui::App) -> impl IntoElement {
         let builder = self.builder.clone();
         let menu_state =
             window.use_keyed_state(self.id.clone(), cx, |_, _| DropdownMenuState::default());
@@ -129,7 +129,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use gpui::{
+    use zpui::{
         Modifiers, ParentElement as _, Render, TestAppContext, VisualTestContext, div, point, px,
     };
 
@@ -148,7 +148,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn closing_the_window_with_the_menu_open_releases_the_menu(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let before = cx.update(|cx| cx.leak_detector_snapshot());

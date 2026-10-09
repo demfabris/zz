@@ -6,7 +6,7 @@ use std::{
     sync::{LazyLock, Mutex, MutexGuard, PoisonError},
 };
 
-use gpui::{HighlightStyle, SharedString};
+use zpui::{HighlightStyle, SharedString};
 
 use super::theme::HighlightTheme;
 

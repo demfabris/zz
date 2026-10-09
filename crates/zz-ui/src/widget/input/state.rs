@@ -6,7 +6,8 @@
 
 use std::{borrow::Cow, ops::Range, rc::Rc, sync::Arc};
 
-use gpui::{
+use unicode_segmentation::UnicodeSegmentation as _;
+use zpui::{
     App, AppContext as _, Bounds, ClipboardEntry, ClipboardItem, Context, DismissEvent, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, Image, IntoElement, KeyDownEvent,
     MouseButton, MouseDownEvent, ParentElement as _, Pixels, Point, Render, ScrollWheelEvent,
@@ -14,7 +15,6 @@ use gpui::{
     TextInputMode, UTF16Selection, Window, anchored, deferred, div, point,
     prelude::FluentBuilder as _, px,
 };
-use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::{
     Size,
@@ -128,7 +128,7 @@ pub struct InputState {
     pub(super) measured_rows: usize,
     pub(super) follow_cursor: bool,
     pub(super) reset_scroll: bool,
-    pub(super) revealed_viewport: Option<gpui::Size<Pixels>>,
+    pub(super) revealed_viewport: Option<zpui::Size<Pixels>>,
 
     blink: Entity<BlinkCursor>,
     context_menu: Option<Entity<PopupMenu>>,
@@ -1462,7 +1462,7 @@ impl InputState {
             cx.notify();
         });
 
-        // Beats gpui's own focus-on-mouse-down listener to the event.
+        // Beats zpui's own focus-on-mouse-down listener to the event.
         window.prevent_default();
 
         self.menu_focus_round_trip = self.focus_handle.is_focused(window);
@@ -1490,7 +1490,7 @@ impl Render for InputState {
         div()
             .flex_1()
             .min_w_0()
-            .when(self.mode.is_multi_line(), gpui::Styled::h_full)
+            .when(self.mode.is_multi_line(), zpui::Styled::h_full)
             .child(TextElement::new(cx.entity()))
             .children(menu)
     }
@@ -1792,8 +1792,8 @@ mod tests {
         assert_eq!(utf8_offset(text, 4), 6);
     }
 
-    #[gpui::test]
-    fn an_idle_caret_settles_visible_and_input_restarts_it(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn an_idle_caret_settles_visible_and_input_restarts_it(cx: &mut zpui::TestAppContext) {
         let blink = cx.new(|_| BlinkCursor::new());
         blink.update(cx, BlinkCursor::start);
         let steps = crate::widget::BLINK_IDLE_TIMEOUT.as_millis() / 250 + 8;
@@ -1833,12 +1833,12 @@ mod tests {
     ];
 
     fn paste_into_a_field(
-        item: gpui::ClipboardItem,
-        cx: &mut gpui::TestAppContext,
+        item: zpui::ClipboardItem,
+        cx: &mut zpui::TestAppContext,
     ) -> (String, Vec<InputEvent>) {
         cx.update(crate::init);
         let (state, cx) = cx.add_window_view(InputState::new);
-        let cx: &mut gpui::VisualTestContext = cx;
+        let cx: &mut zpui::VisualTestContext = cx;
         let heard = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         cx.update(|_, cx| {
             cx.write_to_clipboard(item);
@@ -1856,13 +1856,13 @@ mod tests {
         (value, heard)
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn native_paste_preserves_text_and_image_from_one_clipboard_item(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         cx.update(crate::init);
         let (state, cx) = cx.add_window_view(InputState::new);
-        let cx: &mut gpui::VisualTestContext = cx;
+        let cx: &mut zpui::VisualTestContext = cx;
         let heard = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
         cx.update(|window, cx| {
             let events = heard.clone();
@@ -1875,11 +1875,11 @@ mod tests {
                     state,
                     ClipboardItem {
                         entries: vec![
-                            gpui::ClipboardEntry::String(gpui::ClipboardString::new(
+                            zpui::ClipboardEntry::String(zpui::ClipboardString::new(
                                 "[<button>Save</button>]".to_owned(),
                             )),
-                            gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
-                                gpui::ImageFormat::Png,
+                            zpui::ClipboardEntry::Image(zpui::Image::from_bytes(
+                                zpui::ImageFormat::Png,
                                 PNG_PIXEL.to_vec(),
                             )),
                         ],
@@ -1907,12 +1907,12 @@ mod tests {
         assert_eq!(images[0][0].bytes, PNG_PIXEL);
     }
 
-    #[gpui::test]
-    fn a_masked_field_keeps_its_value_out_of_the_clipboard(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn a_masked_field_keeps_its_value_out_of_the_clipboard(cx: &mut zpui::TestAppContext) {
         cx.update(crate::init);
         let (state, cx) = cx.add_window_view(InputState::new);
-        let cx: &mut gpui::VisualTestContext = cx;
-        let clipboard = |cx: &mut gpui::VisualTestContext| {
+        let cx: &mut zpui::VisualTestContext = cx;
+        let clipboard = |cx: &mut zpui::VisualTestContext| {
             cx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
         };
         cx.update(|window, cx| {
@@ -1940,11 +1940,11 @@ mod tests {
         assert_eq!(clipboard(cx).as_deref(), Some("hunter2"));
     }
 
-    #[gpui::test]
-    fn a_masked_field_hides_its_word_boundaries(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn a_masked_field_hides_its_word_boundaries(cx: &mut zpui::TestAppContext) {
         cx.update(crate::init);
         let (state, cx) = cx.add_window_view(InputState::new);
-        let cx: &mut gpui::VisualTestContext = cx;
+        let cx: &mut zpui::VisualTestContext = cx;
         cx.update(|window, cx| {
             state.update(cx, |state, cx| {
                 state.set_value("aaa bbb ccc", window, cx);
@@ -1961,10 +1961,10 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn an_image_only_clipboard_is_forwarded_instead_of_dropped(cx: &mut gpui::TestAppContext) {
-        let image = gpui::Image::from_bytes(gpui::ImageFormat::Png, PNG_PIXEL.to_vec());
-        let (value, heard) = paste_into_a_field(gpui::ClipboardItem::new_image(&image), cx);
+    #[zpui::test]
+    fn an_image_only_clipboard_is_forwarded_instead_of_dropped(cx: &mut zpui::TestAppContext) {
+        let image = zpui::Image::from_bytes(zpui::ImageFormat::Png, PNG_PIXEL.to_vec());
+        let (value, heard) = paste_into_a_field(zpui::ClipboardItem::new_image(&image), cx);
 
         assert!(value.is_empty(), "an image inserts no text");
         let [InputEvent::PasteImages(images)] = heard.as_slice() else {
@@ -1974,10 +1974,10 @@ mod tests {
         assert_eq!(images[0].bytes, PNG_PIXEL);
     }
 
-    #[gpui::test]
-    fn a_text_clipboard_still_pastes_as_text(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn a_text_clipboard_still_pastes_as_text(cx: &mut zpui::TestAppContext) {
         let (value, heard) =
-            paste_into_a_field(gpui::ClipboardItem::new_string("hello".to_owned()), cx);
+            paste_into_a_field(zpui::ClipboardItem::new_string("hello".to_owned()), cx);
 
         assert_eq!(value, "hello");
         assert!(

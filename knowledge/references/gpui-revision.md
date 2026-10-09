@@ -20,7 +20,7 @@ commit IDs. Upstream fixes come in by hand, when we want them.
 Commit IDs cited below come from the old `demfabris/zed` fork, which stays up as an archive. The
 same commits exist under `gpui/` with the same subjects.
 
-On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
+On Linux, `zpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
 `gpui/` is its own Cargo workspace (its root `Cargo.toml` holds the shared dependency versions
@@ -28,7 +28,7 @@ and Zed's lints), excluded from the zz workspace. Both zz workspaces depend on i
 
 | Place | Role |
 | --- | --- |
-| `Cargo.toml`, `[workspace.dependencies]` | `gpui`, `gpui_platform`, and `gpui_wgpu` (the iOS crate's direct renderer dependency) as `path = "gpui/crates/…"`. |
+| `Cargo.toml`, `[workspace.dependencies]` | `gpui`, `zpui_platform`, and `zpui_wgpu` (the iOS crate's direct renderer dependency) as `path = "gpui/crates/…"`. |
 | `clients/web/Cargo.toml` | The browser client's own workspace, `path = "../../gpui/crates/…"`. |
 
 Because the crates are not workspace members, `cargo clippy --workspace` and
@@ -77,7 +77,7 @@ Five fixes from building the iPhone client (`67e9cbc` to `01d7c9a`):
   the tree, so debug builds panicked with "Duplicate a11y node id". zz's settings column no longer
   takes the autoscroll request from its rows to dodge it.
 - `ListState::bounds_for_item` counts the list's top padding, as `scroll_to_reveal_item` does.
-- `gpui_wgpu` uploads instance data through a `wgpu::util::StagingBelt` with one write for all six
+- `zpui_wgpu` uploads instance data through a `wgpu::util::StagingBelt` with one write for all six
   primitive kinds, and binds the whole instance buffer once, indexing kinds by `first_instance`.
   Before, every primitive kind made its own `queue.write_buffer`, and wgpu made a new staging buffer for each
   one. The ignored `bench_swipe_frames` (a 1179x2556 page swipe, about 650 KB of instances, Metal
@@ -99,7 +99,7 @@ viewport comes to rest once a keyboard transition ends (default: the current vis
 # zz changes to GPUI
 
 Fork commit `7bdd43258b` gives the native macOS Window menu first chance to handle
-`performKeyEquivalent:` in `gpui_macos/src/window.rs` `handle_key_equivalent`.
+`performKeyEquivalent:` in `zpui_macos/src/window.rs` `handle_key_equivalent`.
 Users can tile the app with their macOS keyboard shortcuts while a terminal has focus.
 Unmatched keys continue through GPUI's existing input path. The menu call precedes
 the window-state lock and GPUI event callback because menu validation can call back
@@ -186,7 +186,7 @@ Each is upstream-able as a small Zed PR; if Zed merges an equivalent, drop it. I
     once per requested font. Before, every text shape re-walked it, and each missing family
     formatted a new error; on Linux `.SystemUIFont` maps to IBM Plex Sans, so every UI text run
     paid several failed lookups when that font was not installed.
-33. Desktop interface font on Linux (`19aae7aa64`, `25655fcd99`). `gpui_linux` reads GNOME's
+33. Desktop interface font on Linux (`19aae7aa64`, `25655fcd99`). `zpui_linux` reads GNOME's
     `org.gnome.desktop.interface` `font-name` or KDE's `org.kde.kdeglobals.General` `font` through
     the settings portal and maps `.SystemUIFont` to the first installed family it names, following
     later changes. The first read happens while the platform is built (capped at 200 ms) so no
@@ -224,7 +224,7 @@ complete; `2d9f5676f5` sorts sprites by `(order, texture)` in `Scene::finish` in
 uses to show macOS browser frames on a native layer under the window (see
 [OSR rendering](/browser/osr-rendering.md)); and `9b46226e6f` pauses a macOS window's
 display link after three vsyncs without frame demand, restarting it through `schedule_frame`
-and a new `frame_waker`, the same contract `gpui_web` uses for `requestAnimationFrame`.
+and a new `frame_waker`, the same contract `zpui_web` uses for `requestAnimationFrame`.
 
 `git log -- gpui` is the authority (it carries
 more commits than this list numbers, because a few patches landed as follow-up fixes to an entry
@@ -235,8 +235,8 @@ above).
 ```toml
 # Cargo.toml [workspace.dependencies]
 gpui = { path = "gpui/crates/gpui" }
-gpui_platform = { path = "gpui/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_wgpu = { path = "gpui/crates/gpui_wgpu" }
+zpui_platform = { path = "gpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+zpui_wgpu = { path = "gpui/crates/zpui_wgpu" }
 ```
 
 Landing a GPUI change: edit `gpui/` in the same commit as the zz code that needs it. Run
@@ -247,7 +247,7 @@ Pulling a fix from upstream Zed: crate paths under `gpui/` match Zed's, so a pat
 touched crates applies with a directory prefix.
 
 ```bash
-git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3 --directory=gpui
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/zpui_wgpu | git am -3 --directory=gpui
 ```
 
 The two rebase sections below are history from the patch-branch era. Their layout sizes and
@@ -299,8 +299,8 @@ ignore.
 WGPU layout tests now expect 44 words for `Quad`. The fork passed 410 GPUI tests plus 17
 profiler and bench tests (these share global state and pass with `--test-threads=1`),
 14 Apple tests including the Metal atlas retirement and pixel tests, 12 macOS tests, and
-47 WGPU tests including WGSL validation. `gpui_linux` and `gpui_wgpu` were type-checked
-for Linux (musl target, zig as the C compiler) and `gpui_windows` for
+47 WGPU tests including WGSL validation. `zpui_linux` and `zpui_wgpu` were type-checked
+for Linux (musl target, zig as the C compiler) and `zpui_windows` for
 `x86_64-pc-windows-msvc`. Nothing ran on a Linux or Windows host.
 
 # Related

@@ -2,16 +2,16 @@
 
 use std::{cell::Cell, ops::Range, time::Duration};
 
-use gpui::{
+use ropey::Rope;
+use sum_tree::Bias;
+use unicode_segmentation::UnicodeSegmentation as _;
+use zpui::{
     Action, App, AppContext as _, Bounds, ClipboardItem, Context, Corners, Edges, Entity,
     EntityInputHandler, EventEmitter, FocusHandle, Focusable, IntoElement, KeyBinding,
     KeyDownEvent, MouseButton, MouseDownEvent, ParentElement as _, Pixels, Point, Render,
     ScrollWheelEvent, SharedString, Styled as _, Subscription, TextRun, TextStyle, UTF16Selection,
     Window, actions, div, point,
 };
-use ropey::Rope;
-use sum_tree::Bias;
-use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::{ActiveTheme as _, highlighter::SyntaxHighlighter, text::suppress_text_selection};
 
@@ -498,7 +498,7 @@ impl CodeEditorState {
     pub(super) fn sync_display_map_layout(
         &mut self,
         wrap_width: Option<Pixels>,
-        font: gpui::Font,
+        font: zpui::Font,
         font_size: Pixels,
         cx: &mut Context<Self>,
     ) {
@@ -1366,13 +1366,13 @@ mod tests {
     use super::*;
 
     fn with_editor(
-        cx: &mut gpui::TestAppContext,
-    ) -> (Entity<CodeEditorState>, &mut gpui::VisualTestContext) {
+        cx: &mut zpui::TestAppContext,
+    ) -> (Entity<CodeEditorState>, &mut zpui::VisualTestContext) {
         cx.update(crate::init);
         cx.add_window_view(CodeEditorState::new)
     }
 
-    fn type_text(editor: &Entity<CodeEditorState>, text: &str, cx: &mut gpui::VisualTestContext) {
+    fn type_text(editor: &Entity<CodeEditorState>, text: &str, cx: &mut zpui::VisualTestContext) {
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| {
                 editor.replace_text_in_range(None, text, window, cx);
@@ -1380,8 +1380,8 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn typing_and_backspace_are_grapheme_safe(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn typing_and_backspace_are_grapheme_safe(cx: &mut zpui::TestAppContext) {
         let (editor, cx) = with_editor(cx);
         type_text(&editor, "a", cx);
         type_text(&editor, "e\u{301}", cx);
@@ -1396,8 +1396,8 @@ mod tests {
         assert_eq!(editor.read_with(cx, |editor, _| editor.cursor()), 1);
     }
 
-    #[gpui::test]
-    fn adjacent_typing_is_one_undo_redo_group(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn adjacent_typing_is_one_undo_redo_group(cx: &mut zpui::TestAppContext) {
         let (editor, cx) = with_editor(cx);
         for character in ["a", "b", "c"] {
             type_text(&editor, character, cx);
@@ -1414,8 +1414,8 @@ mod tests {
         assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "abc");
     }
 
-    #[gpui::test]
-    fn a_new_edit_after_undo_drops_the_redo_stack(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn a_new_edit_after_undo_drops_the_redo_stack(cx: &mut zpui::TestAppContext) {
         let (editor, cx) = with_editor(cx);
         type_text(&editor, "hello", cx);
 
@@ -1436,10 +1436,10 @@ mod tests {
         assert_eq!(editor.read_with(cx, |editor, _| editor.value()), "");
     }
 
-    #[gpui::test]
-    fn display_map_rows_follow_every_edit(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn display_map_rows_follow_every_edit(cx: &mut zpui::TestAppContext) {
         let (editor, cx) = with_editor(cx);
-        let assert_in_sync = |cx: &mut gpui::VisualTestContext| {
+        let assert_in_sync = |cx: &mut zpui::VisualTestContext| {
             editor.read_with(cx, |editor, _| {
                 let map = &editor.display_map;
                 assert_eq!(map.text().to_string(), editor.text.to_string());
@@ -1494,12 +1494,12 @@ mod tests {
         assert_in_sync(cx);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn shaping_generation_tracks_content_and_language_but_not_selection(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         let (editor, cx) = with_editor(cx);
-        let generation = |cx: &mut gpui::VisualTestContext| {
+        let generation = |cx: &mut zpui::VisualTestContext| {
             editor.read_with(cx, |editor, _| editor.layout_generation)
         };
 
@@ -1524,8 +1524,8 @@ mod tests {
         assert_eq!(after_language, generation(cx));
     }
 
-    #[gpui::test]
-    fn selection_and_basic_movement_follow_rope_lines(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn selection_and_basic_movement_follow_rope_lines(cx: &mut zpui::TestAppContext) {
         let (editor, cx) = with_editor(cx);
         cx.update(|window, cx| {
             editor.update(cx, |editor, cx| {

@@ -32,6 +32,6 @@ pub use window_border::{window_border, window_paddings};
 
 /// Install the [`Theme`] global. Must run once, before any window opens;
 /// `zz_ui::init` calls it first, ahead of every widget's own `init`.
-pub fn init(cx: &mut gpui::App) {
+pub fn init(cx: &mut zpui::App) {
     theme::init(cx);
 }

@@ -4,7 +4,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gpui::{AsyncApp, Bounds, Context, Pixels, Task, WeakEntity, px};
+use zpui::{AsyncApp, Bounds, Context, Pixels, Task, WeakEntity, px};
 
 pub(super) struct AutoScroll {
     shared: Arc<Mutex<Option<Pixels>>>,

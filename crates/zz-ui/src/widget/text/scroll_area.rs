@@ -1,7 +1,7 @@
 //! A horizontal scroll viewport that lets vertical wheel events keep bubbling.
 #![allow(clippy::pedantic, clippy::style, clippy::complexity)]
 
-use gpui::{
+use zpui::{
     App, Bounds, ContentMask, Element, ElementId, GlobalElementId, Hitbox, InspectorElementId,
     InteractiveElement as _, IntoElement, IsZero as _, LayoutId, ParentElement as _, Pixels, Point,
     Position, ScrollHandle, ScrollWheelEvent, StatefulInteractiveElement as _, Style,
@@ -87,7 +87,7 @@ impl Element for HorizontalScrollMask {
             size: bounds.size,
         };
 
-        window.insert_hitbox(cover_bounds, gpui::HitboxBehavior::Normal)
+        window.insert_hitbox(cover_bounds, zpui::HitboxBehavior::Normal)
     }
 
     fn paint(

@@ -1,6 +1,6 @@
 use std::{ops::Range, rc::Rc};
 
-use gpui::{
+use zpui::{
     AnyElement, Bounds, Context, Font, Hsla, ParentElement as _, Pixels, StyledText, TextRun,
     Window, canvas, div, font, point, prelude::*, px, size,
 };
@@ -231,7 +231,7 @@ impl AppShell {
         bottom_inset: Pixels,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> gpui::Div {
+    ) -> zpui::Div {
         let progress = self.compact.lift.progress();
         let (pages, current) = pages(model, &self.unseen_agents);
         let target = self

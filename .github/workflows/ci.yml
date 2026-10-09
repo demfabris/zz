@@ -125,7 +125,7 @@ jobs:
         shell: bash
         run: |
           tree=$(cargo tree -p zz-cli -e normal --prefix none)
-          if grep -Eq '^(gpui|gpui_platform|wgpu|cef|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
+          if grep -Eq '^(gpui|zpui_platform|wgpu|cef|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
             echo "zz-cli links GUI crates"
             exit 1
           fi

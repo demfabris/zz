@@ -1,8 +1,8 @@
 #[path = "../src/pinch.rs"]
 mod pinch;
 
-use gpui::{TouchPhase, point, px};
 use pinch::Pinch;
+use zpui::{TouchPhase, point, px};
 
 #[test]
 fn pinch_starts_past_the_slop_and_scales_from_the_span_where_it_started() {

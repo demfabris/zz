@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui::{App, IntoElement, div, prelude::*, px};
+use zpui::{App, IntoElement, div, prelude::*, px};
 pub use zz_client::StatusBarSettings;
 
 use crate::{
@@ -25,7 +25,7 @@ pub fn status_bar_page(
     gaps: bool,
     controls: impl IntoElement,
     cx: &App,
-) -> gpui::Div {
+) -> zpui::Div {
     div()
         .flex()
         .flex_col()
@@ -52,7 +52,7 @@ pub fn status_bar_page(
         )
 }
 
-fn status_bar_preview(settings: StatusBarSettings, gaps: bool, cx: &App) -> gpui::Div {
+fn status_bar_preview(settings: StatusBarSettings, gaps: bool, cx: &App) -> zpui::Div {
     let session = settings.show_session.then(|| {
         status_session(
             "settings-preview-session",
@@ -164,7 +164,7 @@ fn status_bar_preview(settings: StatusBarSettings, gaps: bool, cx: &App) -> gpui
                 .px(px(6.0))
                 .rounded(cx.theme().control_radius())
                 .when(cx.theme().shadow, |item| {
-                    item.border(px(0.5)).border_color(gpui::transparent_white())
+                    item.border(px(0.5)).border_color(zpui::transparent_white())
                 })
                 .child(
                     div()

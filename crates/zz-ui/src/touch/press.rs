@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use gpui::{
+use web_time::{Duration, Instant};
+use zpui::{
     AnyElement, App, DispatchPhase, ElementId, Entity, EntityId, Global, Hitbox, HitboxBehavior,
     Hsla, IntoElement, LongPressEvent, MouseButton, MouseDownEvent, MouseExitEvent, MouseUpEvent,
     Pixels, Point, ScrollWheelEvent, Styled, TouchDragEvent, TouchPhase, Window, canvas, fill,
 };
-use web_time::{Duration, Instant};
 
 const DELAY: Duration = Duration::from_millis(100);
 const RISE: Duration = Duration::from_millis(120);
@@ -301,7 +301,7 @@ fn listen(state: &Entity<Press>, hitbox: Hitbox, delay: Duration, window: &mut W
 mod tests {
     use std::{cell::Cell, rc::Rc};
 
-    use gpui::{
+    use zpui::{
         Context, Modifiers, ParentElement as _, Render, ScrollDelta, TestAppContext,
         VisualTestContext, div, point, prelude::*, px,
     };
@@ -363,7 +363,7 @@ mod tests {
         cx.simulate_mouse_up(at, MouseButton::Left, Modifiers::none());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_held_touch_lights_the_innermost_control_after_the_delay(cx: &mut TestAppContext) {
         let (outer, inner, cx) = host(cx);
         let at = point(px(30.0), px(30.0));
@@ -380,7 +380,7 @@ mod tests {
         assert_eq!(inner.get(), 0.0);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_touch_that_ends_without_a_tap_lets_go(cx: &mut TestAppContext) {
         let (_, inner, cx) = host(cx);
         let at = point(px(30.0), px(30.0));
@@ -396,7 +396,7 @@ mod tests {
         assert_eq!(inner.get(), 0.0);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_quick_tap_still_flashes(cx: &mut TestAppContext) {
         let (_, inner, cx) = host(cx);
         let at = point(px(30.0), px(30.0));
@@ -409,7 +409,7 @@ mod tests {
         assert_eq!(inner.get(), 0.0);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_scroll_before_the_delay_never_lights(cx: &mut TestAppContext) {
         let (outer, inner, cx) = host(cx);
         let at = point(px(30.0), px(30.0));
@@ -428,7 +428,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_mouse_press_lights_at_once(cx: &mut TestAppContext) {
         let (outer, inner, cx) = host(cx);
         let at = point(px(200.0), px(200.0));

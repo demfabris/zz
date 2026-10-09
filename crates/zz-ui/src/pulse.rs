@@ -1,7 +1,7 @@
 //! Shared leased pulse clock for repeating indicator animations.
 //!
-//! A repeating [`gpui::Animation`] asks for a redraw on every display frame for
-//! as long as its element stays mounted, and in gpui a notify repaints the
+//! A repeating [`zpui::Animation`] asks for a redraw on every display frame for
+//! as long as its element stays mounted, and in zpui a notify repaints the
 //! whole window — one mounted spinner pins the window to the display refresh
 //! rate. This clock replaces that with a single ~30fps tick shared by every
 //! indicator: reading a phase takes a short lease on the reading entity, the
@@ -13,8 +13,8 @@
 
 use std::collections::HashMap;
 
-use gpui::{App, EntityId, Global};
 use web_time::{Duration, Instant};
+use zpui::{App, EntityId, Global};
 
 /// Tick interval of the shared clock, ~30fps.
 const TICK: Duration = Duration::from_millis(33);

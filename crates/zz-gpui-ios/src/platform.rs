@@ -1,12 +1,6 @@
 use crate::{IosDisplay, IosWindow, nil, ns_string};
 use anyhow::{Result, anyhow};
 use futures::channel::oneshot;
-use gpui::{
-    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DummyKeyboardMapper,
-    ForegroundExecutor, Keymap, Menu, MenuItem, PathPromptOptions, Platform, PlatformDisplay,
-    PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Task,
-    ThermalState, WindowAppearance, WindowParams,
-};
 use objc::{
     class,
     declare::ClassDecl,
@@ -24,6 +18,12 @@ use std::{
         Arc, Once,
         atomic::{AtomicPtr, AtomicUsize, Ordering},
     },
+};
+use zpui::{
+    Action, AnyWindowHandle, BackgroundExecutor, ClipboardItem, CursorStyle, DummyKeyboardMapper,
+    ForegroundExecutor, Keymap, Menu, MenuItem, PathPromptOptions, Platform, PlatformDisplay,
+    PlatformKeyboardLayout, PlatformKeyboardMapper, PlatformTextSystem, PlatformWindow, Task,
+    ThermalState, WindowAppearance, WindowParams,
 };
 
 use crate::id;
@@ -91,7 +91,7 @@ impl IosPlatform {
         let dispatcher = Arc::new(crate::IosDispatcher::new());
 
         let text_system: Arc<dyn PlatformTextSystem> = Arc::new(
-            gpui_wgpu::CosmicTextSystem::new_without_system_fonts("Lilex"),
+            zpui_wgpu::CosmicTextSystem::new_without_system_fonts("Lilex"),
         );
         text_system.add_fonts(system_fonts()).ok();
 
@@ -117,10 +117,10 @@ impl IosPlatform {
 
 struct IosGestures;
 
-impl gpui::PlatformGestures for IosGestures {
-    fn tuning(&self) -> gpui::GestureTuning {
-        gpui::GestureTuning {
-            overscroll: gpui::Overscroll::Bounce,
+impl zpui::PlatformGestures for IosGestures {
+    fn tuning(&self) -> zpui::GestureTuning {
+        zpui::GestureTuning {
+            overscroll: zpui::Overscroll::Bounce,
             ..Default::default()
         }
     }
@@ -264,10 +264,10 @@ impl Platform for IosPlatform {
 
     fn on_system_sleep(&self, _callback: Box<dyn FnMut()>) {}
 
-    fn prevent_idle_sleep(&self, _reason: &str) -> Task<Result<gpui::ActivityGuard>> {
+    fn prevent_idle_sleep(&self, _reason: &str) -> Task<Result<zpui::ActivityGuard>> {
         IDLE_GUARDS.fetch_add(1, Ordering::AcqRel);
         schedule_idle_timer_sync();
-        Task::ready(Ok(gpui::ActivityGuard::new(|| {
+        Task::ready(Ok(zpui::ActivityGuard::new(|| {
             IDLE_GUARDS.fetch_sub(1, Ordering::AcqRel);
             schedule_idle_timer_sync();
         })))
@@ -325,7 +325,7 @@ impl Platform for IosPlatform {
         false
     }
 
-    fn gestures(&self) -> Option<Rc<dyn gpui::PlatformGestures>> {
+    fn gestures(&self) -> Option<Rc<dyn zpui::PlatformGestures>> {
         Some(Rc::new(IosGestures))
     }
 
@@ -348,10 +348,10 @@ impl Platform for IosPlatform {
                 let _: () = msg_send![values, setObject: ns_string(&text) forKey: ns_string("public.utf8-plain-text")];
             }
             for entry in item.entries() {
-                if let gpui::ClipboardEntry::Image(image) = entry {
+                if let zpui::ClipboardEntry::Image(image) = entry {
                     let kind = match image.format() {
-                        gpui::ImageFormat::Png => "public.png",
-                        gpui::ImageFormat::Jpeg => "public.jpeg",
+                        zpui::ImageFormat::Png => "public.png",
+                        zpui::ImageFormat::Jpeg => "public.jpeg",
                         _ => continue,
                     };
                     let data: id = msg_send![class!(NSData), dataWithBytes: image.bytes().as_ptr() length: image.bytes().len()];
@@ -704,8 +704,8 @@ pub(crate) fn read_clipboard() -> Option<ClipboardItem> {
         }
         let mut entries = Vec::new();
         for (kind, format) in [
-            ("public.png", gpui::ImageFormat::Png),
-            ("public.jpeg", gpui::ImageFormat::Jpeg),
+            ("public.png", zpui::ImageFormat::Png),
+            ("public.jpeg", zpui::ImageFormat::Jpeg),
         ] {
             let data: id = msg_send![pasteboard, dataForPasteboardType: ns_string(kind)];
             if data.is_null() {
@@ -715,7 +715,7 @@ pub(crate) fn read_clipboard() -> Option<ClipboardItem> {
             let length: usize = msg_send![data, length];
             if !bytes.is_null() && length > 0 {
                 let bytes = std::slice::from_raw_parts(bytes, length).to_vec();
-                entries.push(gpui::ClipboardEntry::Image(gpui::Image::from_bytes(
+                entries.push(zpui::ClipboardEntry::Image(zpui::Image::from_bytes(
                     format, bytes,
                 )));
                 break;
@@ -723,7 +723,7 @@ pub(crate) fn read_clipboard() -> Option<ClipboardItem> {
         }
         let string: id = msg_send![pasteboard, string];
         if let Some(text) = crate::nsstring_to_string(string) {
-            entries.push(gpui::ClipboardEntry::String(gpui::ClipboardString::new(
+            entries.push(zpui::ClipboardEntry::String(zpui::ClipboardString::new(
                 text,
             )));
         }

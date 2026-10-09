@@ -1,7 +1,7 @@
 use std::{rc::Rc, time::Duration};
 
 use crate::cubic_ease;
-use gpui::{
+use zpui::{
     Anchor, Animation, AnimationExt as _, AnyElement, App, AppContext as _, ClickEvent, Context,
     DismissEvent, ElementId, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled,
@@ -423,7 +423,7 @@ impl Render for NotificationList {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Bounds, Pixels, TestAppContext, VisualTestContext};
+    use zpui::{Bounds, Pixels, TestAppContext, VisualTestContext};
 
     use super::Notification;
 
@@ -448,7 +448,7 @@ mod tests {
         )
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn the_icon_centers_on_the_message(cx: &mut TestAppContext) {
         let (icon, message) = icon_and_first_line(
             Notification::warning("session ended"),
@@ -458,7 +458,7 @@ mod tests {
         assert_eq!(icon.center().y, message.center().y);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_title_takes_the_icon_off_the_message(cx: &mut TestAppContext) {
         let (icon, title) = icon_and_first_line(
             Notification::error("The host refused the connection").title("Disconnected"),

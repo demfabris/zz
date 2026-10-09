@@ -2,7 +2,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use gpui::{
+use zpui::{
     Animation, AnimationExt as _, App, Background, ElementId, Entity, InteractiveElement as _,
     IntoElement, MouseButton, ParentElement as _, Pixels, RenderOnce, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled, Window, div,
@@ -228,7 +228,7 @@ impl RenderOnce for Switch {
                     |this, on_click| {
                         let toggle_state = toggle_state.clone();
                         let toggle =
-                            move |_: &gpui::MouseDownEvent, window: &mut Window, cx: &mut App| {
+                            move |_: &zpui::MouseDownEvent, window: &mut Window, cx: &mut App| {
                                 cx.stop_propagation();
                                 let () = toggle_state.update(cx, |this, _| *this = checked);
                                 on_click(&!checked, window, cx);

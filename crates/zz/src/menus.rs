@@ -2,9 +2,9 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 #[cfg(target_os = "macos")]
-use gpui::SystemMenuType;
+use zpui::SystemMenuType;
 #[cfg(not(target_os = "ios"))]
-use gpui::{App, Entity, Global, Menu, MenuItem, OsAction};
+use zpui::{App, Entity, Global, Menu, MenuItem, OsAction};
 
 #[cfg(target_os = "macos")]
 use crate::macos_app::{Hide, HideOthers, Minimize, Quit, ShowAll, Zoom};
@@ -18,7 +18,7 @@ use crate::{
     workspace::ClosePane,
 };
 
-gpui::actions!(
+zpui::actions!(
     zz,
     [
         NewSession,
@@ -53,24 +53,24 @@ gpui::actions!(
 );
 
 #[cfg(not(target_os = "macos"))]
-gpui::actions!(zz, [Quit]);
+zpui::actions!(zz, [Quit]);
 
 #[allow(clippy::unsafe_derive_deserialize)]
-#[derive(Clone, Debug, gpui::Action, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, zpui::Action, PartialEq, Eq, serde::Deserialize)]
 #[action(namespace = zz, no_json)]
 pub(crate) struct SwitchSession {
     pub(crate) name: String,
 }
 
 #[allow(clippy::unsafe_derive_deserialize)]
-#[derive(Clone, Debug, gpui::Action, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, zpui::Action, PartialEq, Eq, serde::Deserialize)]
 #[action(namespace = zz, no_json)]
 pub(crate) struct SelectPane {
     pub(crate) direction: String,
 }
 
 #[allow(clippy::unsafe_derive_deserialize)]
-#[derive(Clone, Debug, gpui::Action, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, zpui::Action, PartialEq, Eq, serde::Deserialize)]
 #[action(namespace = zz, no_json)]
 pub(crate) struct OpenUrl {
     pub(crate) url: String,
@@ -261,12 +261,12 @@ fn open_url(label: &str, url: &str) -> MenuItem {
 
 #[cfg(all(test, not(target_os = "ios")))]
 mod tests {
-    use gpui::AppContext as _;
+    use zpui::AppContext as _;
 
     use super::*;
 
-    #[gpui::test]
-    fn session_menu_follows_replaced_snapshots_and_empty_workspaces(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn session_menu_follows_replaced_snapshots_and_empty_workspaces(cx: &mut zpui::TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(zz_daemon::DaemonError::Thread("test client".to_owned())),

@@ -1,9 +1,9 @@
 #[path = "../src/momentum.rs"]
 mod momentum;
 
-use gpui::{Point, point, px};
 use momentum::Momentum;
 use std::time::{Duration, Instant};
+use zpui::{Point, point, px};
 
 #[test]
 fn fling_coasts_the_uiscrollview_distance_and_stops() {

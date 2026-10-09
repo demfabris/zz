@@ -30,7 +30,7 @@ pub const VERBOSE_FILTER: &str = concat!(
     "zz_terminal=trace,",
     "zz_mux=trace,",
     "cef=debug,",
-    "gpui=debug,",
+    "zpui=debug,",
     "wgpu=info"
 );
 pub const NORMAL_FILTER: &str =

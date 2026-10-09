@@ -1,10 +1,10 @@
 use std::collections::VecDeque;
 
-use gpui::{
+use web_time::{Duration, Instant};
+use zpui::{
     App, DispatchPhase, Global, IntoElement, Pixels, Point, ScrollWheelEvent, SpringConfig,
     SpringState, Styled as _, TouchPhase, canvas,
 };
-use web_time::{Duration, Instant};
 
 const RUBBER_BAND: f32 = 0.55;
 const VELOCITY_WINDOW: Duration = Duration::from_millis(100);

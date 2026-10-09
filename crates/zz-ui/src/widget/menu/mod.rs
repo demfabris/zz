@@ -9,7 +9,7 @@ mod dropdown_menu;
 mod menu_item;
 mod popup_menu;
 
-use gpui::App;
+use zpui::App;
 
 pub use context_menu::{ContextMenu, ContextMenuExt, ContextMenuState};
 pub use dropdown_menu::DropdownMenu;

@@ -1,6 +1,6 @@
-//! Extensions on gpui's element traits.
+//! Extensions on zpui's element traits.
 
-use gpui::{
+use zpui::{
     App, Bounds, ClickEvent, InteractiveElement, ParentElement, Pixels, Stateful, Styled as _,
     Window, canvas,
 };
@@ -24,7 +24,7 @@ pub trait ElementExt: ParentElement + Sized {
 
 impl<T: ParentElement> ElementExt for T {}
 
-/// Extends [`gpui::InteractiveElement`] with events gpui does not surface.
+/// Extends [`zpui::InteractiveElement`] with events zpui does not surface.
 pub trait InteractiveElementExt: InteractiveElement {
     fn on_double_click(
         mut self,

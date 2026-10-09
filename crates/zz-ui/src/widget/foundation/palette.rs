@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, LazyLock};
 
-use gpui::Hsla;
+use zpui::Hsla;
 
 use super::{ThemeColor, ThemeMode, color::hsl};
 
@@ -29,7 +29,7 @@ impl ThemeColor {
 
 #[inline]
 fn scrim(alpha: f32) -> Hsla {
-    gpui::hsla(0., 0., 0., alpha)
+    zpui::hsla(0., 0., 0., alpha)
 }
 
 fn palette(mode: ThemeMode) -> ThemeColor {

@@ -2,7 +2,7 @@
 
 use std::{ops::Deref, sync::Arc};
 
-use gpui::{HighlightStyle, Hsla};
+use zpui::{HighlightStyle, Hsla};
 
 use crate::ThemeMode;
 
@@ -16,12 +16,12 @@ pub enum FontStyle {
     Underline,
 }
 
-impl From<FontStyle> for gpui::FontStyle {
+impl From<FontStyle> for zpui::FontStyle {
     fn from(style: FontStyle) -> Self {
         match style {
-            FontStyle::Normal => gpui::FontStyle::Normal,
-            FontStyle::Underline => gpui::FontStyle::Normal,
-            FontStyle::Italic => gpui::FontStyle::Italic,
+            FontStyle::Normal => zpui::FontStyle::Normal,
+            FontStyle::Underline => zpui::FontStyle::Normal,
+            FontStyle::Italic => zpui::FontStyle::Italic,
         }
     }
 }
@@ -41,18 +41,18 @@ pub enum FontWeightContent {
     Black = 900,
 }
 
-impl From<FontWeightContent> for gpui::FontWeight {
+impl From<FontWeightContent> for zpui::FontWeight {
     fn from(value: FontWeightContent) -> Self {
         match value {
-            FontWeightContent::Thin => gpui::FontWeight::THIN,
-            FontWeightContent::ExtraLight => gpui::FontWeight::EXTRA_LIGHT,
-            FontWeightContent::Light => gpui::FontWeight::LIGHT,
-            FontWeightContent::Normal => gpui::FontWeight::NORMAL,
-            FontWeightContent::Medium => gpui::FontWeight::MEDIUM,
-            FontWeightContent::Semibold => gpui::FontWeight::SEMIBOLD,
-            FontWeightContent::Bold => gpui::FontWeight::BOLD,
-            FontWeightContent::ExtraBold => gpui::FontWeight::EXTRA_BOLD,
-            FontWeightContent::Black => gpui::FontWeight::BLACK,
+            FontWeightContent::Thin => zpui::FontWeight::THIN,
+            FontWeightContent::ExtraLight => zpui::FontWeight::EXTRA_LIGHT,
+            FontWeightContent::Light => zpui::FontWeight::LIGHT,
+            FontWeightContent::Normal => zpui::FontWeight::NORMAL,
+            FontWeightContent::Medium => zpui::FontWeight::MEDIUM,
+            FontWeightContent::Semibold => zpui::FontWeight::SEMIBOLD,
+            FontWeightContent::Bold => zpui::FontWeight::BOLD,
+            FontWeightContent::ExtraBold => zpui::FontWeight::EXTRA_BOLD,
+            FontWeightContent::Black => zpui::FontWeight::BLACK,
         }
     }
 }

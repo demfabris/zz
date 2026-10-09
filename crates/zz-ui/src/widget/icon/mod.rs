@@ -21,7 +21,7 @@ mod assets;
 
 pub use assets::Assets;
 
-use gpui::{
+use zpui::{
     AnyElement, App, Hsla, IntoElement, RenderOnce, SharedString, StyleRefinement, Styled, Svg,
     Transformation, Window, prelude::FluentBuilder as _, svg,
 };
@@ -55,7 +55,7 @@ impl Icon {
     }
 
     /// Point the icon at an arbitrary asset path, such as `icons/globe.svg`.
-    /// Resolved through the [`gpui::AssetSource`] the app was built with.
+    /// Resolved through the [`zpui::AssetSource`] the app was built with.
     #[must_use]
     pub fn path(mut self, path: impl Into<SharedString>) -> Self {
         self.path = path.into();
@@ -276,7 +276,7 @@ impl IconName {
     ];
 
     /// The icon's asset path, such as `icons/arrow-down.svg`. Resolved through
-    /// the [`gpui::AssetSource`] the app was built with, [`Assets`] by default.
+    /// the [`zpui::AssetSource`] the app was built with, [`Assets`] by default.
     #[must_use]
     pub const fn path(&self) -> &'static str {
         match self {
@@ -379,7 +379,7 @@ impl RenderOnce for IconName {
 mod tests {
     use std::{collections::HashSet, path::PathBuf};
 
-    use gpui::AssetSource as _;
+    use zpui::AssetSource as _;
 
     use super::{Assets, IconName};
 

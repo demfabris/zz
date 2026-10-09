@@ -13,11 +13,11 @@ struct PastedEntry {
 enum PastedState {
     Requested,
     Loading {
-        format: gpui::ImageFormat,
+        format: zpui::ImageFormat,
         total: usize,
         bytes: Vec<u8>,
     },
-    Ready(Arc<gpui::Image>),
+    Ready(Arc<zpui::Image>),
     Unavailable,
 }
 
@@ -34,7 +34,7 @@ impl PastedState {
 #[derive(Default)]
 pub struct PastedImages {
     entries: HashMap<(PaneId, u32), PastedEntry>,
-    retired: Vec<Arc<gpui::Image>>,
+    retired: Vec<Arc<zpui::Image>>,
     sequence: u64,
 }
 
@@ -59,9 +59,9 @@ impl PastedImages {
         });
     }
 
-    pub fn release_retired(&mut self, cx: &mut gpui::App) {
+    pub fn release_retired(&mut self, cx: &mut zpui::App) {
         for image in self.retired.drain(..) {
-            gpui::ImageSource::Image(image).remove_asset(cx);
+            zpui::ImageSource::Image(image).remove_asset(cx);
         }
     }
 
@@ -75,7 +75,7 @@ impl PastedImages {
         }
     }
 
-    pub fn image(&self, pane: PaneId, number: u32) -> Option<Arc<gpui::Image>> {
+    pub fn image(&self, pane: PaneId, number: u32) -> Option<Arc<zpui::Image>> {
         match &self.entries.get(&(pane, number))?.state {
             PastedState::Ready(image) => Some(image.clone()),
             _ => None,
@@ -157,10 +157,10 @@ impl PastedImages {
             return;
         }
         let format = match format {
-            zz_protocol::PastedImageFormat::Png => gpui::ImageFormat::Png,
-            zz_protocol::PastedImageFormat::Jpeg => gpui::ImageFormat::Jpeg,
-            zz_protocol::PastedImageFormat::Gif => gpui::ImageFormat::Gif,
-            zz_protocol::PastedImageFormat::Webp => gpui::ImageFormat::Webp,
+            zz_protocol::PastedImageFormat::Png => zpui::ImageFormat::Png,
+            zz_protocol::PastedImageFormat::Jpeg => zpui::ImageFormat::Jpeg,
+            zz_protocol::PastedImageFormat::Gif => zpui::ImageFormat::Gif,
+            zz_protocol::PastedImageFormat::Webp => zpui::ImageFormat::Webp,
         };
         entry.state = PastedState::Loading {
             format,
@@ -190,7 +190,7 @@ impl PastedImages {
         }
         bytes.extend_from_slice(chunk);
         if bytes.len() == *total {
-            entry.state = PastedState::Ready(Arc::new(gpui::Image::from_bytes(
+            entry.state = PastedState::Ready(Arc::new(zpui::Image::from_bytes(
                 *format,
                 std::mem::take(bytes),
             )));
@@ -224,7 +224,7 @@ mod tests {
         cache.chunk(pane, 8, &[9, 9]);
         cache.chunk(pane, 7, &[3, 4]);
         let image = cache.image(pane, 7).unwrap();
-        assert_eq!(image.format, gpui::ImageFormat::Png);
+        assert_eq!(image.format, zpui::ImageFormat::Png);
         assert_eq!(image.bytes, [1, 2, 3, 4]);
         cache.chunk(pane, 7, &[5]);
         assert!(Arc::ptr_eq(&image, &cache.image(pane, 7).unwrap()));

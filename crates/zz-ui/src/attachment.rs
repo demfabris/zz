@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use gpui::{App, Image, ImageSource, ObjectFit, RenderImage, Window, div, img, prelude::*, px};
+use zpui::{App, Image, ImageSource, ObjectFit, RenderImage, Window, div, img, prelude::*, px};
 
 use crate::WindowExt as _;
 

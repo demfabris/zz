@@ -25,17 +25,17 @@ fn terminal_input_preserves_layout_modifiers_and_release() {
 
 #[test]
 fn terminal_tab_does_not_enter_toolbar_focus_navigation() {
-    gpui::actions!(test_navigation, [Next, Previous]);
+    zpui::actions!(test_navigation, [Next, Previous]);
     let mut bindings = vec![
-        gpui::KeyBinding::new("tab", Next, Some("Root")),
-        gpui::KeyBinding::new("shift-tab", Previous, Some("Root")),
+        zpui::KeyBinding::new("tab", Next, Some("Root")),
+        zpui::KeyBinding::new("shift-tab", Previous, Some("Root")),
     ];
     bindings.extend(input::raw_key_bindings());
-    let keymap = gpui::Keymap::new(bindings);
-    let root = gpui::KeyContext::parse("Root").unwrap();
-    let terminal = gpui::KeyContext::parse("Terminal").unwrap();
+    let keymap = zpui::Keymap::new(bindings);
+    let root = zpui::KeyContext::parse("Root").unwrap();
+    let terminal = zpui::KeyContext::parse("Terminal").unwrap();
     for key in ["tab", "shift-tab"] {
-        let key = gpui::Keystroke::parse(key).unwrap();
+        let key = zpui::Keystroke::parse(key).unwrap();
         let (bindings, pending) = keymap.bindings_for_input(
             std::slice::from_ref(&key),
             &[root.clone(), terminal.clone()],

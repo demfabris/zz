@@ -36,8 +36,8 @@ The browser client in `clients/web` (`just web run`) uses the shared GPUI compon
    element is appropriate only when a component cannot preserve required input routing,
    rendering, or interaction behavior. When a fork-local widget must diverge from upstream, record
    why in `crates/zz-ui/UPSTREAM.md`.
-3. `clippy.toml` enforces the chrome-color rule by disallowing calls to `gpui::rgb`, `gpui::rgba`,
-   and `gpui::hsla`. Keep any exemption narrowly scoped and document why the color is not
+3. `clippy.toml` enforces the chrome-color rule by disallowing calls to `zpui::rgb`, `zpui::rgba`,
+   and `zpui::hsla`. Keep any exemption narrowly scoped and document why the color is not
    application chrome.
 4. Do not scatter branding or palette literals through views, fixtures that model application
    chrome, or component state branches.

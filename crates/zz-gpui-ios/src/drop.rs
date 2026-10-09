@@ -1,5 +1,4 @@
 use crate::{id, ns_array, ns_string};
-use gpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat};
 use objc::{
     class,
     declare::ClassDecl,
@@ -8,6 +7,7 @@ use objc::{
     sel, sel_impl,
 };
 use std::ffi::c_void;
+use zpui::{ClipboardEntry, ClipboardItem, Image, ImageFormat};
 
 const IMAGE: &str = "public.image";
 const TEXT: &str = "public.plain-text";

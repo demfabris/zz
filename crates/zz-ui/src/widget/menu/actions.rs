@@ -1,7 +1,7 @@
 //! Keyboard actions for the popup menu.
 
-use gpui::{Action, actions};
 use serde::Deserialize;
+use zpui::{Action, actions};
 
 /// Accept the highlighted item. `secondary` marks the alternate accept,
 /// cmd/ctrl-enter.

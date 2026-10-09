@@ -1,6 +1,6 @@
 use std::{ops::Range, rc::Rc};
 
-use gpui::{
+use zpui::{
     App, Bounds, ContentMask, Corners, CursorStyle, DispatchPhase, Element, ElementId,
     ElementInputHandler, Entity, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
     IntoElement, LayoutId, MouseButton, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString,
@@ -43,8 +43,8 @@ impl LastLayout {
 
 #[derive(Clone, Default)]
 pub(crate) struct WhitespaceIndicators {
-    pub(super) space: gpui::ShapedLine,
-    pub(super) tab: gpui::ShapedLine,
+    pub(super) space: zpui::ShapedLine,
+    pub(super) tab: zpui::ShapedLine,
 }
 
 #[derive(Clone)]
@@ -196,9 +196,9 @@ pub(super) struct ShapedText {
 pub(super) struct ShapedCache {
     generation: u64,
     wrap_width: Option<Pixels>,
-    font: gpui::Font,
+    font: zpui::Font,
     font_size: Pixels,
-    color: gpui::Hsla,
+    color: zpui::Hsla,
     shaped: ShapedText,
 }
 
@@ -208,8 +208,8 @@ impl ShapedCache {
         generation: u64,
         wrap_width: Option<Pixels>,
         font_size: Pixels,
-        color: gpui::Hsla,
-        font: &gpui::Font,
+        color: zpui::Hsla,
+        font: &zpui::Font,
     ) -> bool {
         self.generation == generation
             && self.wrap_width == wrap_width
@@ -240,10 +240,10 @@ impl IntoElement for TextElement {
 pub(super) struct PrepaintState {
     layout: EditorLayout,
     text_hitbox: Hitbox,
-    line_numbers: Vec<(usize, gpui::ShapedLine)>,
+    line_numbers: Vec<(usize, zpui::ShapedLine)>,
     selection_quads: Vec<Bounds<Pixels>>,
     caret: Option<Bounds<Pixels>>,
-    cursor_glyph: Option<gpui::ShapedLine>,
+    cursor_glyph: Option<zpui::ShapedLine>,
     current_line: usize,
 }
 
@@ -685,7 +685,7 @@ impl Element for TextElement {
 
 fn paint_viewport_quad(
     bounds: Bounds<Pixels>,
-    color: gpui::Hsla,
+    color: zpui::Hsla,
     viewport: Bounds<Pixels>,
     radii: Corners<Pixels>,
     window: &mut Window,

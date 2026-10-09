@@ -20,7 +20,7 @@ members = [
 ]
 exclude = [
     "clients/web",
-    "gpui",
+    "zpui",
     "third_party/rust/libghostty-vt",
     "third_party/rust/libghostty-vt-sys",
 ]
@@ -53,9 +53,9 @@ filedescriptor = "0.8.3"
 env_logger = "0.11.11"
 foldhash = "0.2.0"
 futures-lite = "2.6.1"
-gpui = { path = "gpui/crates/gpui" }
-gpui_platform = { path = "gpui/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_wgpu = { path = "gpui/crates/gpui_wgpu" }
+zpui = { path = "zpui/crates/zpui" }
+zpui_platform = { path = "zpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+zpui_wgpu = { path = "zpui/crates/zpui_wgpu" }
 getrandom = "0.4.3"
 ignore = "0.4.33"
 image = { version = "=0.25.10", default-features = false }
@@ -130,7 +130,7 @@ cast_sign_loss = "allow"
 float_cmp = "allow"
 struct_excessive_bools = "allow"
 type_complexity = "allow"
-# gpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
+# zpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
 # and view methods take &self for organization before they need it.
 used_underscore_binding = "allow"
 unused_self = "allow"
@@ -144,7 +144,7 @@ opt-level = 2
 [profile.dev.package.taffy]
 opt-level = 3
 
-[profile.dev.package.gpui]
+[profile.dev.package.zpui]
 opt-level = 3
 
 [profile.release]

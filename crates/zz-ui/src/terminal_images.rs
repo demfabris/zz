@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
-use gpui::RenderImage;
 use image::{Frame, ImageBuffer, Rgba};
+use zpui::RenderImage;
 use zz_client::CoreEvent;
 use zz_protocol::{MAX_KITTY_IMAGE_BYTES, MAX_KITTY_IMAGE_CHUNK_BYTES, PaneId};
 

@@ -4,8 +4,8 @@
 
 use std::sync::Arc;
 
-use gpui::prelude::FluentBuilder as _;
-use gpui::{
+use zpui::prelude::FluentBuilder as _;
+use zpui::{
     AnyElement, App, Bounds, Element, ElementId, Entity, GlobalElementId, Hitbox, HitboxBehavior,
     InspectorElementId, InteractiveElement, IntoElement, LayoutId, ParentElement, Pixels,
     SharedString, StyleRefinement, Styled, Window, div,
@@ -84,7 +84,7 @@ impl TextView {
         self
     }
 
-    /// Virtualize large content through [`gpui::list`] with a scrollbar, which
+    /// Virtualize large content through [`zpui::list`] with a scrollbar, which
     /// needs a fixed-height parent. Default false: the view expands to fit all
     /// its content.
     pub fn scrollable(mut self, scrollable: bool) -> Self {
@@ -193,7 +193,7 @@ impl Element for TextView {
                     cx.propagate();
                     return;
                 }
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.to_string()));
+                cx.write_to_clipboard(zpui::ClipboardItem::new_string(text.to_string()));
             })
             .on_action(window.listener_for(&state, TextViewState::on_action_select_all))
             .child(state.clone())
@@ -241,7 +241,7 @@ impl Element for TextView {
 mod tests {
     use super::{TextView, clipboard_selection_text};
     use crate::text::TextViewState;
-    use gpui::{
+    use zpui::{
         AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, Modifiers,
         MouseButton, MouseDownEvent, MouseUpEvent, ParentElement as _, Render, Styled as _,
         TestAppContext, VisualTestContext, Window, div, point, px,
@@ -315,7 +315,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn inline_image_keeps_surrounding_text_on_same_line(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|window, cx| {
@@ -359,7 +359,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn inline_image_after_hard_break_starts_the_next_line(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|window, cx| {
@@ -390,7 +390,7 @@ mod tests {
         assert!(inline_bounds[1].left() > inline_bounds[0].left());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn list_item_renders_a_nested_code_block_at_full_width(cx: &mut TestAppContext) {
         struct ListItemBlockRoot;
 
@@ -434,7 +434,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn clipped_markdown_link_does_not_open(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, cx| {
@@ -447,7 +447,7 @@ mod tests {
         assert_eq!(cx.opened_url(), None);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn clipped_markdown_cannot_start_selection(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx
@@ -477,7 +477,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn double_click_selects_word(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) =
@@ -510,7 +510,7 @@ mod tests {
         assert_eq!(selected_text.trim(), "quick");
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn triple_click_selects_paragraph(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) =
@@ -544,9 +544,9 @@ mod tests {
         assert_eq!(selected_text.trim(), "quick select value");
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn outer_list_content_total_stable_while_scrolling(cx: &mut TestAppContext) {
-        use gpui::{ListAlignment, ListState, list};
+        use zpui::{ListAlignment, ListState, list};
 
         const ITEMS: &[&str] = &[
             "# Heading\n\nA paragraph long enough to wrap across several lines and produce a non-trivial height.",

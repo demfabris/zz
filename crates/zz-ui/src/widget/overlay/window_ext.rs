@@ -1,4 +1,4 @@
-use gpui::{App, Entity, Window};
+use zpui::{App, Entity, Window};
 
 use super::{
     dialog::{AlertDialog, Dialog},

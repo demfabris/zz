@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use gpui::{
+use zpui::{
     AnyElement, IntoElement, ParentElement as _, Pixels, SharedString, Size, Styled as _, div, px,
     size,
 };

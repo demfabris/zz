@@ -49,10 +49,10 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::Styled as _;
-use gpui::{AnyView, App, Context, Entity, Window, WindowAppearance};
+use zpui::Styled as _;
+use zpui::{AnyView, App, Context, Entity, Window, WindowAppearance};
 #[cfg(not(target_os = "ios"))]
-use gpui::{AppContext, WindowOptions, px, size};
+use zpui::{AppContext, WindowOptions, px, size};
 #[cfg(not(target_os = "ios"))]
 use zz_browser::{BrowserBootstrap, BrowserError, BrowserRuntime};
 #[cfg(not(target_os = "ios"))]
@@ -249,9 +249,9 @@ fn run_app(
     socket_path: PathBuf,
     profile: AppProfile,
 ) {
-    let platform = gpui_platform::current_platform(false);
+    let platform = zpui_platform::current_platform(false);
     let fonts = zz_ui::settings::appearance::AvailableFonts(platform.text_system());
-    let application = gpui::Application::with_platform(platform);
+    let application = zpui::Application::with_platform(platform);
     #[cfg(target_os = "macos")]
     application.on_reopen(|cx| {
         if let Some(window) = cx
@@ -470,7 +470,7 @@ fn run_app(
 }
 
 #[cfg(not(target_os = "ios"))]
-fn toggle_from_tray(main_window: gpui::AnyWindowHandle, cx: &mut App) {
+fn toggle_from_tray(main_window: zpui::AnyWindowHandle, cx: &mut App) {
     let (visible, active) = main_window
         .update(cx, |_, window, _| {
             (window.is_window_visible(), window.is_window_active())
@@ -484,7 +484,7 @@ fn toggle_from_tray(main_window: gpui::AnyWindowHandle, cx: &mut App) {
 
 pub fn build_root(view: impl Into<AnyView>, window: &mut Window, cx: &mut Context<Root>) -> Root {
     config::observe_window_background(window, cx);
-    let root = Root::new(view, window, cx).bg(gpui::transparent_black());
+    let root = Root::new(view, window, cx).bg(zpui::transparent_black());
     #[cfg(target_os = "linux")]
     {
         root.bordered(false)
@@ -629,7 +629,7 @@ fn tui_browser_provider() -> Option<Box<dyn zz_tui::browser::BrowserFrameProvide
 
 #[cfg(test)]
 mod tests {
-    use gpui::WindowAppearance;
+    use zpui::WindowAppearance;
     use zz_terminal::TerminalColorScheme;
 
     use super::terminal_color_scheme;

@@ -1,5 +1,5 @@
-use gpui::{Pixels, PlatformInput, Point, Size, TouchEvent, TouchId, TouchPhase, point, px};
 use std::time::{Duration, Instant};
+use zpui::{Pixels, PlatformInput, Point, Size, TouchEvent, TouchId, TouchPhase, point, px};
 
 const BURST_GAP: f64 = 0.1;
 const LINK_REPORT: f64 = 5.0;
@@ -59,7 +59,7 @@ impl Perf {
         }
     }
 
-    pub(crate) fn drew(&mut self, scene: &gpui::Scene) {
+    pub(crate) fn drew(&mut self, scene: &zpui::Scene) {
         if self.log.is_none() {
             return;
         }

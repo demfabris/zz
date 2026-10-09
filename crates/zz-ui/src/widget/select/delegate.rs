@@ -1,6 +1,6 @@
 //! Row data and the collection behind a [`crate::select::Select`].
 
-use gpui::SharedString;
+use zpui::SharedString;
 
 /// One row of a [`crate::select::Select`]: a label to show and a value to
 /// report. Implemented for the string types.

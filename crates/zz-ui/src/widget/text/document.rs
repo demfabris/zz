@@ -1,8 +1,8 @@
 //! The parsed block list and how it renders: fit-to-content, or virtualized
-//! through `gpui::list`.
+//! through `zpui::list`.
 #![allow(clippy::pedantic, clippy::style, clippy::complexity)]
 
-use gpui::{
+use zpui::{
     App, InteractiveElement as _, IntoElement, ListState, ParentElement as _, SharedString,
     Styled as _, Window, div,
 };
@@ -103,7 +103,7 @@ impl ParsedDocument {
         }
 
         div().id("document").size_full().child(
-            gpui::list(list_state, {
+            zpui::list(list_state, {
                 let node_cx = node_cx.clone();
                 let blocks = blocks.clone();
                 move |ix, window, cx| {

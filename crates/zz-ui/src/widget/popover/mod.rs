@@ -2,7 +2,7 @@
 
 mod actions;
 
-use gpui::{
+use zpui::{
     Anchor, AnyElement, App, Bounds, Context, DismissEvent, ElementId, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement as _,
     Pixels, Point, Render, RenderOnce, Size, StyleRefinement, Styled, Subscription, Window,
@@ -400,7 +400,7 @@ impl EventEmitter<DismissEvent> for PopoverState {}
 
 #[cfg(test)]
 mod tests {
-    use gpui::{Modifiers, Render, TestAppContext, VisualTestContext, size};
+    use zpui::{Modifiers, Render, TestAppContext, VisualTestContext, size};
 
     use super::*;
     use crate::button::Button;
@@ -417,7 +417,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn closing_the_window_with_the_popover_open_releases_its_state(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let before = cx.update(|cx| cx.leak_detector_snapshot());

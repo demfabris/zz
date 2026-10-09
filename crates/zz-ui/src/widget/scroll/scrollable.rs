@@ -3,7 +3,7 @@
 
 use std::{panic::Location, rc::Rc};
 
-use gpui::{
+use zpui::{
     App, Div, Element, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce,
     ScrollHandle, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div,
     prelude::FluentBuilder,
@@ -113,7 +113,7 @@ impl<E> ParentElement for Scrollable<E>
 where
     E: InteractiveElement + Styled + ParentElement + Element,
 {
-    fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
+    fn extend(&mut self, elements: impl IntoIterator<Item = zpui::AnyElement>) {
         self.element.extend(elements);
     }
 }
@@ -122,7 +122,7 @@ impl<E> InteractiveElement for Scrollable<E>
 where
     E: InteractiveElement + Styled + ParentElement + Element,
 {
-    fn interactivity(&mut self) -> &mut gpui::Interactivity {
+    fn interactivity(&mut self) -> &mut zpui::Interactivity {
         self.element.interactivity()
     }
 }
@@ -252,7 +252,7 @@ fn render_scrollbar<H: ScrollbarHandle + Clone>(
 mod tests {
     use super::*;
     use crate::Sizable as _;
-    use gpui::{
+    use zpui::{
         AppContext as _, Context, Render, ScrollDelta, ScrollWheelEvent, TestAppContext,
         VisualTestContext, point, px,
     };
@@ -362,7 +362,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn auto_height_parent_gets_content_height(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| AutoHeightParentTest);
@@ -373,7 +373,7 @@ mod tests {
         assert_eq!(footer.top(), px(100.));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn max_height_parent_clamps_and_scrolls(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| MaxHeightParentTest);
@@ -527,7 +527,7 @@ mod tests {
                         .child(
                             div()
                                 .text_size(crate::rems_from_px(10.))
-                                .child(gpui::SharedString::from("word ".repeat(60))),
+                                .child(zpui::SharedString::from("word ".repeat(60))),
                         )
                         .child(row("wrapped-text-tail", 20.)),
                 ),
@@ -536,8 +536,8 @@ mod tests {
     }
 
     struct SettingsPageReplicaTest {
-        pickers: Vec<gpui::Entity<crate::color_picker::ColorPickerState>>,
-        numbers: Vec<gpui::Entity<crate::input::InputState>>,
+        pickers: Vec<zpui::Entity<crate::color_picker::ColorPickerState>>,
+        numbers: Vec<zpui::Entity<crate::input::InputState>>,
     }
 
     impl Render for SettingsPageReplicaTest {
@@ -581,7 +581,7 @@ mod tests {
                                     .control(
                                         crate::color_picker::ColorPicker::new(
                                             picker,
-                                            gpui::black(),
+                                            zpui::black(),
                                         ),
                                     )
                                 })),
@@ -632,7 +632,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn settings_page_scroll_range_matches_content(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|window, cx| SettingsPageReplicaTest {
@@ -656,7 +656,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn scroll_range_measures_wrapped_text_at_layout_width(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| WrappedTextTest);
@@ -672,7 +672,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn vertical_scrollbar_scrolls_past_a_size_full_child(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| SizeFullChildTest);
@@ -685,7 +685,7 @@ mod tests {
         assert!(cx.debug_bounds("last-row").unwrap().origin.y < initial_y);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn vertical_scrollbar_preserves_source_gap(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| GapLayoutTest);
@@ -697,7 +697,7 @@ mod tests {
         assert_eq!(second.top() - first.bottom(), px(10.));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn overflow_y_scrollbar_preserves_gap_and_padding_while_scrolling(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| GapRegressionTest);
@@ -725,7 +725,7 @@ mod tests {
         assert!(last_after_scroll_y < last_initial_y);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn horizontal_scrollbar_preserves_source_gap_and_scrolls(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| HorizontalGapLayoutTest);
@@ -751,7 +751,7 @@ mod tests {
         assert!(last_after_scroll_x < last_initial_x);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn overflow_scrollbar_preserves_vertical_source_gap(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| OverflowScrollbarVerticalTest);
@@ -764,7 +764,7 @@ mod tests {
         assert_eq!(second.top() - first.bottom(), px(10.));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn overflow_scrollbar_preserves_gap_and_scrolls_horizontally(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| OverflowScrollbarHorizontalTest);
@@ -798,7 +798,7 @@ mod tests {
         assert!(last_after_scroll_x < last_initial_x);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn multiple_scrollables_keep_independent_scroll_state(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| IndependentScrollablesTest);
@@ -817,7 +817,7 @@ mod tests {
         assert_eq!(right_after_scroll.top(), right_initial.top());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn vertical_scrollbar_does_not_scroll_when_content_does_not_overflow(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| NoOverflowTest);
@@ -842,7 +842,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn horizontal_scrollbar_does_not_scroll_when_content_does_not_overflow(
         cx: &mut TestAppContext,
     ) {

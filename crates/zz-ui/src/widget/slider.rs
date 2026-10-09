@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use gpui::{
+use zpui::{
     App, ElementId, IntoElement, RenderOnce, Role, SharedString, Window, div, prelude::*, px,
 };
 

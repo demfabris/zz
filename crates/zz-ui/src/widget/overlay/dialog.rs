@@ -4,7 +4,7 @@ use std::{rc::Rc, time::Duration};
 
 use crate::widget::foundation::{SURFACE_ENTER_DURATION, surface_enter};
 use crate::window_paddings;
-use gpui::{
+use zpui::{
     Animation, AnimationExt as _, AnyElement, App, BoxShadow, ClickEvent, Div, FocusHandle,
     InteractiveElement as _, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, Window,
@@ -665,7 +665,7 @@ impl AlertDialog {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{
+    use zpui::{
         App, AppContext as _, Bounds, Context, InteractiveElement as _, IntoElement,
         ParentElement as _, Pixels, Render, Styled as _, TestAppContext, VisualTestContext, Window,
         div, px, size,
@@ -684,7 +684,7 @@ mod tests {
         }
     }
 
-    fn window(cx: &mut TestAppContext, viewport: gpui::Size<Pixels>) -> &mut VisualTestContext {
+    fn window(cx: &mut TestAppContext, viewport: zpui::Size<Pixels>) -> &mut VisualTestContext {
         cx.update(|cx| {
             crate::init(cx);
             cx.set_reduce_motion(true);
@@ -713,7 +713,7 @@ mod tests {
             .unwrap_or_else(|| panic!("dialog layer {layer_ix} was not painted"))
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_dialog_that_fits_keeps_its_width_and_top_offset(cx: &mut TestAppContext) {
         let cx = window(cx, size(px(1000.), px(800.)));
         open(cx, |dialog, _, _| dialog.title("Fits").child("body"));
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(bounds.origin.y, px(80.));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_dialog_larger_than_the_window_stays_inside_it(cx: &mut TestAppContext) {
         let viewport = size(px(360.), px(300.));
         let cx = window(cx, viewport);
@@ -747,7 +747,7 @@ mod tests {
         assert!(footer.bottom() <= bounds.bottom(), "{footer:?} {bounds:?}");
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn an_oversized_dialog_moves_up_to_the_edge_margin(cx: &mut TestAppContext) {
         let viewport = size(px(360.), px(600.));
         let cx = window(cx, viewport);
@@ -760,7 +760,7 @@ mod tests {
         assert_eq!(bounds.bottom(), viewport.height - EDGE_MARGIN);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_dialog_that_almost_fits_rises_only_as_far_as_it_must(cx: &mut TestAppContext) {
         let viewport = size(px(1000.), px(800.));
         let cx = window(cx, viewport);
@@ -777,7 +777,7 @@ mod tests {
         assert_eq!(bounds.bottom(), viewport.height - EDGE_MARGIN);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn stacked_dialogs_each_fit_the_window(cx: &mut TestAppContext) {
         let viewport = size(px(360.), px(300.));
         let cx = window(cx, viewport);
@@ -798,7 +798,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn custom_dialog_actions_enable_the_visible_default_footer(cx: &mut TestAppContext) {
         cx.update(|cx| {
             assert!(!Dialog::new(cx).show_button_row);

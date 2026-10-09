@@ -12,7 +12,7 @@ upstream Zed fixes come in by hand. The first commit is upstream `zed-industries
 `933d8d9381` limited to those crates; the next 89 are the old `demfabris/zed` `zz-patches`
 commits (tip `5a00ac89a4`), replayed under new IDs. The old fork stays up as an archive;
 knowledge pages cite its commit IDs, and the same commits exist under `gpui/` with the same
-subjects. Crate paths under `gpui/` match Zed's (`crates/gpui`, `crates/gpui_wgpu`,
+subjects. Crate paths under `gpui/` match Zed's (`crates/gpui`, `crates/zpui_wgpu`,
 `tooling/perf`, ...).
 
 `gpui/` is its own Cargo workspace, excluded from the root one. The root `Cargo.toml` and
@@ -30,7 +30,7 @@ to re-resolve.
 ## Pulling a fix from upstream Zed
 
 ```bash
-git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3 --directory=gpui
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/zpui_wgpu | git am -3 --directory=gpui
 ```
 
 Limit the pathspec to the crates the fix touches. Never bulk-merge upstream: take what we need,
@@ -43,9 +43,9 @@ read it, and run the GPU tests for the renderers it touches.
   1. `RenderImage::into_frames()` — retired browser frames return their pixel
      buffers to the OSR paint pool.
   2. `WgpuDeviceContext` — `Window::wgpu_device_context()` exposes the Linux
-     renderer's `wgpu::Device`/`Queue` (plus a `gpui::wgpu` re-export) so
+     renderer's `wgpu::Device`/`Queue` (plus a `zpui::wgpu` re-export) so
      embedders create GPU resources on GPUI's exact device.
-  3. External-texture element — `gpui::external_texture(wgpu::Texture)` paints
+  3. External-texture element — `zpui::external_texture(wgpu::Texture)` paints
      an app-provided texture with normal clipping/HiDPI via the repurposed
      Linux surface pipeline (was a dead YCbCr stub upstream).
   4. Window corner mask — `Window::set_window_corner_mask()` clips everything
@@ -86,7 +86,7 @@ read it, and run the GPU tests for the renderers it touches.
   only when `/dev/dxg` exists, a node native Linux cannot have), and
   `KeystrokeEvent::is_held` (the OS autorepeat flag carried through to
   keystroke observers/interceptors — zz's prefix layer swallows repeats by
-  this flag instead of held-set inference, which a lost macOS keyUp desyncs). Newest: `gpui_wgpu` subpixel offset kept in
+  this flag instead of held-set inference, which a lost macOS keyUp desyncs). Newest: `zpui_wgpu` subpixel offset kept in
   device pixels (the swash scaler already runs at `pixel_size * scale_factor`, so the
   extra `/ scale_factor` upstream still carries shrank the quarter-pixel phase on HiDPI —
   a one-line upstream-able fix).
@@ -118,7 +118,7 @@ Linux and Windows can be type-checked from macOS: `cargo check --target
 x86_64-unknown-linux-musl` with a `zig cc -target x86_64-linux-musl` wrapper named
 `x86_64-linux-musl-gcc` (drop cc-rs's `--target=` flag; a `zig c++` twin as `-g++`),
 `RUST_FONTCONFIG_DLOPEN=1`, and
-`FREETYPE2_NO_PKG_CONFIG=1`; and `cargo +1.97.0 check -p gpui_windows --target
+`FREETYPE2_NO_PKG_CONFIG=1`; and `cargo +1.97.0 check -p zpui_windows --target
 x86_64-pc-windows-msvc` with `RC_x86_64_pc_windows_msvc` set to Homebrew's `llvm-rc`.
 
 ## Native Ghostty: `third_party/ghostty`

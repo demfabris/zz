@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 
-use gpui::{SpringConfig, SpringState, TouchPhase};
 use web_time::{Duration, Instant};
+use zpui::{SpringConfig, SpringState, TouchPhase};
 
 const DISTANCE: f32 = 300.0;
 const COMMIT: f32 = 1.0 / 3.0;

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use gpui::{
+use zpui::{
     Animation, AnimationElement, AnimationExt as _, ElementId, IntoElement, Pixels, Styled,
     ease_out_quint, px,
 };

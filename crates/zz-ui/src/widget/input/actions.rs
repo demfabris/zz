@@ -1,14 +1,14 @@
 //! Keyboard actions for the text field, and the bindings that produce them.
 
-use gpui::{Action, App, KeyBinding, actions};
 use serde::Deserialize;
+use zpui::{Action, App, KeyBinding, actions};
 
 pub(super) const CONTEXT: &str = "ZzInput";
 
 /// `enter`, carrying whether Shift was held. A multi-line field with
 /// `submit_on_enter` treats plain Enter as submit and `shift-enter` as "insert a
 /// newline".
-// The `Action` derive expands to gpui's `unsafe`, not ours.
+// The `Action` derive expands to zpui's `unsafe`, not ours.
 #[allow(clippy::unsafe_derive_deserialize)]
 #[derive(Clone, Action, PartialEq, Eq, Deserialize)]
 #[action(namespace = zz_input, no_json)]
@@ -185,7 +185,7 @@ fn edit_key_bindings() -> Vec<KeyBinding> {
 mod tests {
     use std::{any::TypeId, collections::HashSet};
 
-    use gpui::{AsKeystroke, Keystroke};
+    use zpui::{AsKeystroke, Keystroke};
 
     use super::*;
 

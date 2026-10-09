@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use gpui::{Pixels, Rems, StyleRefinement, px, rems};
+use zpui::{Pixels, Rems, StyleRefinement, px, rems};
 
 use crate::highlighter::HighlightTheme;
 

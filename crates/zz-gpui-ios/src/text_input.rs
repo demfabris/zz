@@ -1,5 +1,4 @@
 use crate::{CGPoint, CGRect, CGSize, NSRange, id, nil};
-use gpui::{Bounds, Pixels, PlatformInputHandler, point, px};
 use objc::{
     class,
     declare::ClassDecl,
@@ -8,6 +7,7 @@ use objc::{
     sel, sel_impl,
 };
 use std::{ops::Range, ptr, sync::Once};
+use zpui::{Bounds, Pixels, PlatformInputHandler, point, px};
 
 static REGISTER_CLASSES: Once = Once::new();
 static mut POSITION_CLASS: *const Class = ptr::null();

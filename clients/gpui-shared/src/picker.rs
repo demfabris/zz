@@ -1,5 +1,5 @@
 use crate::connection::Connection;
-use gpui::{
+use zpui::{
     App, Context, Corners, Entity, FocusHandle, Focusable, KeyDownEvent, MouseButton, Pixels,
     Render, Window, div, prelude::*, px,
 };

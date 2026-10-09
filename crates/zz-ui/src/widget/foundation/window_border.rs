@@ -1,6 +1,6 @@
 // From:
 // https://github.com/zed-industries/zed/blob/56daba28d40301ee4c05546fadb691d070b7b2b6/crates/gpui/examples/window_shadow.rs
-use gpui::{
+use zpui::{
     AnyElement, App, CursorStyle, Decorations, Edges, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement, Pixels, Point, RenderOnce, ResizeEdge, Size, Styled as _, Tiling,
     Window, div, point, prelude::FluentBuilder as _, px,
@@ -109,14 +109,14 @@ impl RenderOnce for WindowBorder {
 
         div()
             .id("window-backdrop")
-            .bg(gpui::transparent_black())
+            .bg(zpui::transparent_black())
             .map(|div| match decorations {
                 Decorations::Server => div,
                 Decorations::Client { tiling, .. } => div
                     .flex()
                     .flex_col()
                     .overflow_hidden()
-                    .bg(gpui::transparent_black())
+                    .bg(zpui::transparent_black())
                     .when(!(tiling.top || tiling.right), |div| {
                         div.rounded_tr(BORDER_RADIUS)
                     })
@@ -167,7 +167,7 @@ impl RenderOnce for WindowBorder {
                             .when(!tiling.left, |div| div.border_l(BORDER_SIZE))
                             .when(!tiling.right, |div| div.border_r(BORDER_SIZE))
                             .when(!tiling.is_tiled(), |div| {
-                                div.shadow(vec![gpui::BoxShadow {
+                                div.shadow(vec![zpui::BoxShadow {
                                     color: Hsla {
                                         h: 0.,
                                         s: 0.,
@@ -184,7 +184,7 @@ impl RenderOnce for WindowBorder {
                     .on_mouse_move(|_e, _, cx| {
                         cx.stop_propagation();
                     })
-                    .bg(gpui::transparent_black())
+                    .bg(zpui::transparent_black())
                     .children(self.children),
             )
             .when(matches!(decorations, Decorations::Client { .. }), |this| {

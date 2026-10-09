@@ -1,6 +1,6 @@
 //! The text field: a single-line or auto-growing multi-line editor.
 
-// Each allow below is for a lint that fires only on gpui's element and action
+// Each allow below is for a lint that fires only on zpui's element and action
 // shapes; correctness, perf and suspicious lints stay on.
 #![allow(
     clippy::cast_precision_loss,
@@ -26,11 +26,11 @@ pub use actions::{
     ShowCharacterPalette, Undo,
 };
 pub use field::{Input, InputContentType};
-pub use gpui::TextAlign;
 pub use number::NumberInput;
 pub use state::{InputEvent, InputState};
+pub use zpui::TextAlign;
 
-pub(crate) fn init(cx: &mut gpui::App) {
+pub(crate) fn init(cx: &mut zpui::App) {
     actions::init(cx);
     number::init(cx);
 }

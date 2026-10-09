@@ -1,4 +1,4 @@
-use gpui::{
+use zpui::{
     App, Entity, InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, RenderOnce,
     StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _,
 };

@@ -2,7 +2,7 @@
 
 use std::ops::Range;
 
-use gpui::SharedString;
+use zpui::SharedString;
 
 const MAX_ENTRIES: usize = 256;
 

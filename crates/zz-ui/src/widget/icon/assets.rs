@@ -2,7 +2,7 @@
 
 use std::borrow::Cow;
 
-use gpui::{AssetSource, Result, SharedString};
+use zpui::{AssetSource, Result, SharedString};
 
 /// zz's embedded SVG icon set, read from `crates/zz-ui/assets/icons/`. Native
 /// debug builds read from disk, so an edited SVG needs no rebuild; wasm builds

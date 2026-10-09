@@ -4,13 +4,13 @@ use crate::button::{Button, ButtonVariants as _};
 use crate::scroll::ScrollableElement;
 use crate::{ActiveTheme, Icon, IconName, Sizable as _, Size, StyledExt, h_flex, kbd::Kbd, v_flex};
 use crate::{ElementExt, Side};
-use gpui::{
+use zpui::{
     Action, Anchor, AnyElement, App, AppContext, Bounds, Context, DismissEvent, Edges, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,
     ParentElement, Pixels, Render, Role, ScrollHandle, SharedString, StatefulInteractiveElement,
     Styled, WeakEntity, Window, anchored, div, prelude::FluentBuilder, px, rems,
 };
-use gpui::{ClickEvent, MouseDownEvent, Point, Subscription};
+use zpui::{ClickEvent, MouseDownEvent, Point, Subscription};
 
 use crate::Colorize as _;
 use std::rc::Rc;
@@ -807,7 +807,7 @@ impl PopupMenu {
             this.p_0()
                 .flex_nowrap()
                 .border_0()
-                .bg(gpui::transparent_white())
+                .bg(zpui::transparent_white())
                 .text_color(cx.theme().foreground)
                 .opacity(opacity)
         })
@@ -856,7 +856,7 @@ impl PopupMenu {
 
         let is_bottom_pos = bounds.origin.y + bounds.size.height > window.bounds().size.height;
         self.submenu_anchor = if is_bottom_pos {
-            (anchor.other_side_along(gpui::Axis::Vertical), left)
+            (anchor.other_side_along(zpui::Axis::Vertical), left)
         } else {
             (anchor, left)
         };
@@ -896,7 +896,7 @@ impl PopupMenu {
             .relative()
             .when(coarse && item.is_clickable(), |this| {
                 this.child(crate::touch::press_highlight(
-                    gpui::ElementId::NamedInteger(group_name.clone().into(), 0),
+                    zpui::ElementId::NamedInteger(group_name.clone().into(), 0),
                     cx.theme().foreground.opacity(0.1),
                     cx.theme().menu_radius(),
                 ))
@@ -1231,8 +1231,8 @@ impl Render for PopupMenu {
 mod tests {
     use super::*;
 
-    #[gpui::test]
-    fn custom_content_tracks_keyboard_and_pointer_highlights(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn custom_content_tracks_keyboard_and_pointer_highlights(cx: &mut zpui::TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
             cx.set_reduce_motion(true);
@@ -1256,7 +1256,7 @@ mod tests {
             menu.focus_handle.focus(window, cx);
             menu
         });
-        let draw = |cx: &mut gpui::VisualTestContext| {
+        let draw = |cx: &mut zpui::VisualTestContext| {
             cx.run_until_parked();
             cx.update(|window, cx| _ = window.draw(cx));
         };
@@ -1266,13 +1266,13 @@ mod tests {
         draw(cx);
         assert_eq!(*highlights.borrow(), [true, false]);
         let second = cx.debug_bounds("custom-content-1").unwrap();
-        cx.simulate_mouse_move(second.center(), None, gpui::Modifiers::default());
+        cx.simulate_mouse_move(second.center(), None, zpui::Modifiers::default());
         draw(cx);
         assert_eq!(*highlights.borrow(), [false, true]);
     }
 
-    #[gpui::test]
-    fn popup_highlights_use_exact_tuned_corners_inside_the_surface(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn popup_highlights_use_exact_tuned_corners_inside_the_surface(cx: &mut zpui::TestAppContext) {
         struct Preview(Entity<PopupMenu>);
         impl Render for Preview {
             fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -1302,13 +1302,13 @@ mod tests {
                     .iter()
                     .find(|quad| {
                         quad.background
-                            == gpui::solid_background(cx.theme().background.raised(2).opaque())
+                            == zpui::solid_background(cx.theme().background.raised(2).opaque())
                     })
                     .expect("menu surface");
                 let highlight = quads
                     .iter()
                     .find(|quad| {
-                        quad.background == gpui::solid_background(cx.theme().selection_background())
+                        quad.background == zpui::solid_background(cx.theme().selection_background())
                     })
                     .expect("selected menu entry");
                 assert_eq!(highlight.corner_smoothing, 2.5);
@@ -1324,8 +1324,8 @@ mod tests {
         }
     }
 
-    #[gpui::test]
-    fn open_submenu_parent_stays_neutral_while_leaf_stays_accented(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn open_submenu_parent_stays_neutral_while_leaf_stays_accented(cx: &mut zpui::TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
             cx.set_reduce_motion(true);
@@ -1346,7 +1346,7 @@ mod tests {
             menu.focus_handle.focus(window, cx);
             menu
         });
-        let draw = |cx: &mut gpui::VisualTestContext| {
+        let draw = |cx: &mut zpui::VisualTestContext| {
             cx.run_until_parked();
             cx.update(|window, cx| {
                 _ = window.draw(cx);
@@ -1354,18 +1354,18 @@ mod tests {
                 let parent = quads
                     .iter()
                     .find(|quad| {
-                        quad.background == gpui::solid_background(cx.theme().background.washed(2))
+                        quad.background == zpui::solid_background(cx.theme().background.washed(2))
                     })
                     .expect("open submenu parent has a neutral background");
                 let child = quads
                     .iter()
                     .find(|quad| {
-                        quad.background == gpui::solid_background(cx.theme().selection_background())
+                        quad.background == zpui::solid_background(cx.theme().selection_background())
                     })
                     .expect("selected submenu leaf has an accent background");
-                let position = |quad: &gpui::Quad| {
+                let position = |quad: &zpui::Quad| {
                     let center = quad.bounds.center();
-                    gpui::point(
+                    zpui::point(
                         px(center.x.0 / window.scale_factor()),
                         px(center.y.0 / window.scale_factor()),
                     )
@@ -1374,19 +1374,19 @@ mod tests {
             })
         };
         let (parent, _) = draw(cx);
-        cx.simulate_mouse_move(parent, None, gpui::Modifiers::default());
+        cx.simulate_mouse_move(parent, None, zpui::Modifiers::default());
         let (_, child) = draw(cx);
-        cx.simulate_mouse_move(child, None, gpui::Modifiers::default());
+        cx.simulate_mouse_move(child, None, zpui::Modifiers::default());
         draw(cx);
     }
 
     fn menu_with_open_submenu(
         clicks: Rc<std::cell::Cell<usize>>,
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) -> (
         Entity<PopupMenu>,
         Rc<std::cell::Cell<usize>>,
-        &mut gpui::VisualTestContext,
+        &mut zpui::VisualTestContext,
     ) {
         cx.update(|cx| {
             crate::init(cx);
@@ -1433,8 +1433,8 @@ mod tests {
         (menu, dismissed, cx)
     }
 
-    #[gpui::test]
-    fn escape_closes_the_chain_while_a_hovered_submenu_is_open(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn escape_closes_the_chain_while_a_hovered_submenu_is_open(cx: &mut zpui::TestAppContext) {
         let clicks = Rc::new(std::cell::Cell::new(0));
         let (menu, dismissed, cx) = menu_with_open_submenu(Rc::clone(&clicks), cx);
         assert!(menu.read_with(cx, |menu, _| menu.active_submenu().is_some()));
@@ -1446,8 +1446,8 @@ mod tests {
         assert_eq!(clicks.get(), 0);
     }
 
-    #[gpui::test]
-    fn clicking_a_submenu_item_runs_it_before_the_chain_closes(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn clicking_a_submenu_item_runs_it_before_the_chain_closes(cx: &mut zpui::TestAppContext) {
         let clicks = Rc::new(std::cell::Cell::new(0));
         let (menu, dismissed, cx) = menu_with_open_submenu(Rc::clone(&clicks), cx);
         cx.run_until_parked();
@@ -1457,11 +1457,11 @@ mod tests {
                 .painted_quads()
                 .into_iter()
                 .find(|quad| {
-                    quad.background == gpui::solid_background(cx.theme().selection_background())
+                    quad.background == zpui::solid_background(cx.theme().selection_background())
                 })
                 .expect("selected submenu leaf");
             let center = quad.bounds.center();
-            gpui::point(
+            zpui::point(
                 px(center.x.0 / window.scale_factor()),
                 px(center.y.0 / window.scale_factor()),
             )
@@ -1469,14 +1469,14 @@ mod tests {
 
         assert!(!menu.read_with(cx, |menu, _| menu.bounds.contains(&leaf)));
 
-        cx.simulate_click(leaf, gpui::Modifiers::default());
+        cx.simulate_click(leaf, zpui::Modifiers::default());
 
         assert_eq!(clicks.get(), 1);
         assert_eq!(dismissed.get(), 1);
     }
 
-    #[gpui::test]
-    fn dismissal_preserves_focus_moved_by_menu_handler(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn dismissal_preserves_focus_moved_by_menu_handler(cx: &mut zpui::TestAppContext) {
         cx.update(crate::init);
 
         for moves_focus in [false, true] {
@@ -1513,9 +1513,9 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn stepper_updates_live_with_keyboard_and_clicks_without_dismissing(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         use std::cell::Cell;
         cx.update(crate::init);
@@ -1555,7 +1555,7 @@ mod tests {
             _ = window.draw(cx);
         });
         let bounds = cx.debug_bounds("menu-step-up-0").expect("increment button");
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         assert_eq!(value.get(), 110);
         assert!(!dismissed.get());
         menu.read_with(cx, |menu, cx| {
@@ -1568,8 +1568,8 @@ mod tests {
         assert!(dismissed.get());
     }
 
-    #[gpui::test]
-    fn popup_menu_item_a11y_label_uses_visible_label(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn popup_menu_item_a11y_label_uses_visible_label(cx: &mut zpui::TestAppContext) {
         let submenu = cx.update(|cx| cx.new(|cx| PopupMenu::new(cx)));
 
         assert_eq!(PopupMenuItem::new("Open").a11y_label(), Some("Open".into()));

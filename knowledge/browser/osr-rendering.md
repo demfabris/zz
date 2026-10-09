@@ -136,7 +136,7 @@ busy time at 120 fps. Misses log at debug level on
 ## Windows D3D11
 
 `d3d11_osr.rs` mirrors the macOS split . native import, no wgpu, because
-`gpui_windows` renders through DirectX . with one structural simplification:
+`zpui_windows` renders through DirectX . with one structural simplification:
 producer and consumer share GPUI's single immediate context, so the copy is
 synchronous and needs no completion handler, no in-flight cap, and no per-slot
 marker. For each accelerated paint it:
@@ -159,7 +159,7 @@ marker. For each accelerated paint it:
 zz never closes the shared handle: CEF owns it and recycles the slot. The pool
 is keyed by size and format, and `pool_generation` increments only when it is
 rebuilt, exactly as on macOS. Every D3D11 type crossing the GPUI boundary comes
-from `gpui::windows`, GPUI's own re-export of the `windows` crate . zz's
+from `zpui::windows`, GPUI's own re-export of the `windows` crate . zz's
 workspace pin is a different, type-incompatible version.
 
 External BeginFrames are **not** wired on Windows; the tier runs on CEF's

@@ -1,6 +1,6 @@
 //! The sidebar's `+ add host` dialog.
 
-use gpui::{App, AppContext as _, Entity, Focusable as _, SharedString, Window};
+use zpui::{App, AppContext as _, Entity, Focusable as _, SharedString, Window};
 use zz_daemon::Endpoint;
 use zz_ui::{WindowExt as _, feedback::add_host_prompt_dialog, input::InputState};
 

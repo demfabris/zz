@@ -27,7 +27,7 @@ tree-sitter = [
 
 [dependencies]
 anyhow = "1"
-gpui.workspace = true
+zpui.workspace = true
 image = { version = "=0.25.10", default-features = false }
 # The only crate in the workspace allowed to name these: `zz-ui` re-exports a
 # narrow slice of the widget layer so the rest of the app depends on us, not on
@@ -74,7 +74,7 @@ rust-embed = { version = "8.12", features = ["include-exclude", "debug-embed"] }
 url.workspace = true
 
 [dev-dependencies]
-gpui = { workspace = true, features = ["test-support"] }
+zpui = { workspace = true, features = ["test-support"] }
 
 [lints]
 workspace = true

@@ -5,7 +5,7 @@ use std::{
     sync::Arc,
 };
 
-use gpui::{Anchor, App, Edges, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
+use zpui::{Anchor, App, Edges, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
 
 use crate::{BASE_UI_FONT_SIZE, TITLE_BAR_HEIGHT, highlighter::HighlightTheme};
 
@@ -122,7 +122,7 @@ impl Global for Theme {}
 impl Theme {
     pub fn control_radius(&self) -> Pixels {
         if self.radius > px(24.0) {
-            gpui::FULL_CORNER_RADIUS
+            zpui::FULL_CORNER_RADIUS
         } else {
             self.radius
         }
@@ -282,13 +282,13 @@ mod tests {
                 ..Theme::default()
             };
             for (width, height) in [(24.0, 24.0), (120.0, 30.0), (360.0, 40.0)] {
-                let size = gpui::size(px(width), px(height));
-                let control = gpui::Corners::all(theme.control_radius())
+                let size = zpui::size(px(width), px(height));
+                let control = zpui::Corners::all(theme.control_radius())
                     .resolve_radii_for_quad_size(size, 0.45);
                 let surface =
-                    gpui::Corners::all(theme.radius).resolve_radii_for_quad_size(size, 0.45);
+                    zpui::Corners::all(theme.radius).resolve_radii_for_quad_size(size, 0.45);
                 if radius > 24.0 {
-                    assert_eq!(control, gpui::Corners::all(px(height / 2.0)));
+                    assert_eq!(control, zpui::Corners::all(px(height / 2.0)));
                     assert!(surface.top_left < control.top_left);
                 } else {
                     assert_eq!(control, surface);

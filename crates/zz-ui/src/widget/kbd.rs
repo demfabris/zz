@@ -1,7 +1,7 @@
 //! Keyboard-shortcut pill: one [`Keystroke`] as a platform-appropriate glyph
 //! string, ⌘⇧A on Apple platforms and Ctrl+Shift+A elsewhere.
 
-use gpui::{
+use zpui::{
     Action, AsKeystroke as _, FocusHandle, IntoElement, KeyContext, Keystroke, ParentElement as _,
     RenderOnce, StyleRefinement, Styled, Window, div, relative,
 };
@@ -150,7 +150,7 @@ impl Styled for Kbd {
 }
 
 impl RenderOnce for Kbd {
-    fn render(self, _window: &mut Window, cx: &mut gpui::App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut zpui::App) -> impl IntoElement {
         div()
             .text_color(cx.theme().foreground.muted())
             .bg(cx.theme().background.raised(2))
@@ -171,7 +171,7 @@ impl RenderOnce for Kbd {
 #[cfg(test)]
 mod tests {
     use super::Kbd;
-    use gpui::Keystroke;
+    use zpui::Keystroke;
 
     #[test]
     fn lowercase_touches_only_the_key_glyph() {

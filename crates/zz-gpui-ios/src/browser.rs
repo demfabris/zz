@@ -6,7 +6,6 @@ use std::{
 };
 
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
-use gpui::{Bounds, Pixels, Window};
 use objc::{
     class,
     declare::ClassDecl,
@@ -15,6 +14,7 @@ use objc::{
     sel, sel_impl,
 };
 use raw_window_handle::RawWindowHandle;
+use zpui::{Bounds, Pixels, Window};
 use zz_daemon::InteractiveClient;
 
 pub use crate::element_picker::ElementPickerAppearance;

@@ -27,8 +27,8 @@ mod transport;
 
 #[cfg(target_os = "ios")]
 fn main() {
-    use gpui::{App, Application, px};
     use std::{borrow::Cow, rc::Rc};
+    use zpui::{App, Application, px};
     use zz_ui::{Theme, UiZoom};
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
@@ -86,8 +86,8 @@ fn main() {
 }
 
 #[cfg(target_os = "ios")]
-fn open_workspace(cx: &mut gpui::App) {
-    use gpui::{AppContext, WindowOptions};
+fn open_workspace(cx: &mut zpui::App) {
+    use zpui::{AppContext, WindowOptions};
     use zz_ui::Root;
 
     cx.open_window(WindowOptions::default(), |window, cx| {

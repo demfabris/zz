@@ -12,8 +12,8 @@ use std::{
     time::Duration,
 };
 
-use gpui::{App, AsyncApp, Entity, Global, Window, prelude::*};
 use semver::Version;
+use zpui::{App, AsyncApp, Entity, Global, Window, prelude::*};
 pub(crate) use zz_config::update::{Channel, Release};
 use zz_config::update::{checks_enabled, fetch_latest};
 use zz_protocol::CommandInvocation;

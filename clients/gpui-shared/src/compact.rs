@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use gpui::{
+use zpui::{
     AnyElement, App, Bounds, Context, Corners, Entity, Focusable as _, IntoElement, Keystroke,
     ParentElement as _, PinchEvent, Pixels, ScrollDelta, ScrollHandle, ScrollWheelEvent,
     SharedString, Stateful, Styled as _, Subscription, TouchPhase, Window, div, linear_color_stop,
@@ -866,7 +866,7 @@ impl AppShell {
         overlays: Vec<AnyElement>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Stateful<gpui::Div> {
+    ) -> Stateful<zpui::Div> {
         self.prune_pane_entities(cx);
         let model = self.status_model(cx);
         let (pages, current) = pages(&model, &self.unseen_agents);
@@ -1072,8 +1072,8 @@ impl AppShell {
             .into_any_element()
         } else if lifting {
             let pane = Bounds::new(
-                gpui::point(px(0.0), px(0.0)),
-                gpui::size(px(width), window.viewport_size().height - bar - safe_bottom),
+                zpui::point(px(0.0), px(0.0)),
+                zpui::size(px(width), window.viewport_size().height - bar - safe_bottom),
             );
             self.overview_lift(&model, pane, top_inset, safe_bottom, window, cx)
                 .child(div().absolute().inset_0().child(screen))

@@ -2,13 +2,13 @@
 
 use std::{ops::Range, rc::Rc};
 
-use gpui::{
+use unicode_segmentation::UnicodeSegmentation as _;
+use zpui::{
     App, Bounds, ContentMask, DispatchPhase, Element, ElementId, ElementInputHandler, Entity,
     GlobalElementId, InspectorElementId, IntoElement, LayoutId, MouseButton, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, SharedString, Size, Style, TextAlign, TextRun, Window,
     WrappedLine, fill, point, px, relative, size,
 };
-use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::ActiveTheme as _;
 
@@ -548,7 +548,7 @@ impl TextElement {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{
+    use zpui::{
         AppContext as _, Context, Entity, Modifiers, ParentElement as _, Render, Styled as _,
         TestAppContext, VisualTestContext, div,
     };
@@ -738,7 +738,7 @@ mod tests {
         layout.lines[0].width() / layout.lines[0].text.chars().count() as f32
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn typing_into_a_password_field_shapes_bullets_and_keeps_the_value(cx: &mut TestAppContext) {
         let (state, cx) = field("", SECRET, cx);
         cx.simulate_input("hunter2");
@@ -752,7 +752,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn only_the_password_content_type_masks(cx: &mut TestAppContext) {
         for content_type in [PLAIN, Some(InputContentType::Url)] {
             let (state, cx) = field("hunter2", content_type, cx);
@@ -761,13 +761,13 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn one_bullet_per_grapheme_however_many_scalars_it_took(cx: &mut TestAppContext) {
         let (state, cx) = field("e\u{301}👨‍👩‍👧‍👦!", SECRET, cx);
         assert_eq!(shaped(&state, cx), "•••");
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn the_caret_lands_on_bullet_boundaries_for_multi_byte_graphemes(cx: &mut TestAppContext) {
         let (state, cx) = field("a😀b", SECRET, cx);
         let layout = layout(&state, cx);
@@ -782,7 +782,7 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn clicking_a_masked_field_selects_the_grapheme_boundary_under_the_pointer(
         cx: &mut TestAppContext,
     ) {
@@ -803,7 +803,7 @@ mod tests {
 
     const LOPSIDED: &str = "👨‍👩‍👧‍👦a";
 
-    #[gpui::test]
+    #[zpui::test]
     fn the_caret_at_the_end_of_a_long_grapheme_sits_past_its_bullet(cx: &mut TestAppContext) {
         let (state, cx) = field(LOPSIDED, SECRET, cx);
         let layout = layout(&state, cx);
@@ -812,7 +812,7 @@ mod tests {
         assert_eq!(layout.position_for_offset(LOPSIDED.len()).x, bullet * 2.);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_selection_past_a_long_grapheme_still_draws(cx: &mut TestAppContext) {
         let (state, cx) = field(LOPSIDED, SECRET, cx);
         let layout = layout(&state, cx);
@@ -826,7 +826,7 @@ mod tests {
         assert_eq!(quad.size.width, bullet);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_masked_selection_covers_the_bullets_it_spans(cx: &mut TestAppContext) {
         let (state, cx) = field("a😀b", SECRET, cx);
         let layout = layout(&state, cx);
@@ -839,7 +839,7 @@ mod tests {
         assert_eq!(quad.size.width, bullet * 2.);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn editing_a_masked_field_edits_the_real_value(cx: &mut TestAppContext) {
         let (state, cx) = field("hunter2", SECRET, cx);
         cx.update(|window, cx| {
@@ -858,7 +858,7 @@ mod tests {
         assert_eq!(shaped(&state, cx), "•");
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn backspacing_a_masked_emoji_removes_one_bullet(cx: &mut TestAppContext) {
         let (state, cx) = field("a👨‍👩‍👧‍👦", SECRET, cx);
         assert_eq!(shaped(&state, cx), "••");
@@ -873,14 +873,14 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_password_placeholder_is_shown_as_itself(cx: &mut TestAppContext) {
         let (state, cx) = field("", SECRET, cx);
         assert_eq!(shaped(&state, cx), "Passphrase");
         assert!(layout(&state, cx).mask.is_none());
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_multi_line_field_ignores_masking(cx: &mut TestAppContext) {
         let (state, cx) = field_with("one\ntwo", SECRET, true, cx);
         assert_eq!(shaped(&state, cx), "one\ntwo");

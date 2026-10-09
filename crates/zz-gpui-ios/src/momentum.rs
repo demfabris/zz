@@ -1,5 +1,5 @@
-use gpui::{Pixels, Point, point, px};
 use std::time::Instant;
+use zpui::{Pixels, Point, point, px};
 
 const DECELERATION_PER_MS: f64 = 0.998;
 const STOP_SPEED: f64 = 10.0;

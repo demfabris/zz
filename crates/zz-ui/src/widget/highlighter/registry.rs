@@ -4,7 +4,7 @@ use std::{
     sync::{LazyLock, Mutex, MutexGuard, PoisonError},
 };
 
-use gpui::SharedString;
+use zpui::SharedString;
 
 use super::{Language, languages};
 

@@ -1,8 +1,8 @@
 use crate::{id, nil, ns_array, ns_string};
-use gpui::{Action, Menu, MenuItem, SharedString};
 use objc::{class, msg_send, sel, sel_impl};
+use zpui::{Action, Menu, MenuItem, SharedString};
 
-#[derive(Clone, Debug, PartialEq, gpui::Action)]
+#[derive(Clone, Debug, PartialEq, zpui::Action)]
 #[action(namespace = zz_ios, no_json)]
 pub struct MenuCommand {
     pub id: SharedString,

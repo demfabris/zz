@@ -1,4 +1,4 @@
-use gpui::{AppContext as _, Context, Focusable as _, Window};
+use zpui::{AppContext as _, Context, Focusable as _, Window};
 use zz_ui::{Root, WindowExt as _, input::InputState};
 
 use super::AppShell;

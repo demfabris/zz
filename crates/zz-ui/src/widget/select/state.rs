@@ -1,6 +1,6 @@
 //! The select's entity: what is picked, and whether the menu is open.
 
-use gpui::{
+use zpui::{
     Anchor, AnyElement, App, AppContext as _, Bounds, Context, DismissEvent, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement as _, IntoElement, Length, MouseButton,
     ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement as _,
@@ -297,7 +297,7 @@ impl<D: SelectDelegate> SelectState<D> {
         let open = self.menu.is_some() || self.sheet;
         let slop = crate::touch::control_slop(self.options.size);
         let toggle = move |this: &mut Self,
-                           _: &gpui::MouseDownEvent,
+                           _: &zpui::MouseDownEvent,
                            window: &mut Window,
                            cx: &mut Context<Self>| {
             cx.stop_propagation();
@@ -365,7 +365,7 @@ impl<D: SelectDelegate> SelectState<D> {
                         cx,
                     )
                     .debug_selector(move || format!("select-option-{ix}"))
-                    .when_some(item.font_family(), gpui::Styled::font_family)
+                    .when_some(item.font_family(), zpui::Styled::font_family)
                     .on_click(cx.listener(move |this, _, window, cx| this.commit(ix, window, cx))),
                 )
             })
@@ -453,24 +453,24 @@ impl<D: SelectDelegate> EventEmitter<SelectEvent<D>> for SelectState<D> {}
 
 #[cfg(test)]
 mod tests {
-    use gpui::{AppContext as _, TestAppContext};
+    use zpui::{AppContext as _, TestAppContext};
 
     use super::{IndexPath, SelectState};
 
     struct Preview {
-        state: gpui::Entity<SelectState<Vec<String>>>,
+        state: zpui::Entity<SelectState<Vec<String>>>,
         disabled: bool,
     }
 
-    impl gpui::Render for Preview {
+    impl zpui::Render for Preview {
         fn render(
             &mut self,
-            _: &mut gpui::Window,
-            _: &mut gpui::Context<Self>,
-        ) -> impl gpui::IntoElement {
+            _: &mut zpui::Window,
+            _: &mut zpui::Context<Self>,
+        ) -> impl zpui::IntoElement {
             use crate::Sizable as _;
-            use gpui::{ParentElement as _, Styled as _};
-            gpui::div().flex().w(gpui::px(200.0)).child(
+            use zpui::{ParentElement as _, Styled as _};
+            zpui::div().flex().w(zpui::px(200.0)).child(
                 super::super::Select::new(&self.state)
                     .small()
                     .disabled(self.disabled),
@@ -478,10 +478,10 @@ mod tests {
         }
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn popup_picker_preserves_pointer_keyboard_and_disabled_behavior(cx: &mut TestAppContext) {
-        use gpui::Focusable as _;
         use std::{cell::RefCell, rc::Rc};
+        use zpui::Focusable as _;
         cx.update(|cx| {
             crate::init(cx);
             cx.set_reduce_motion(true);
@@ -515,13 +515,13 @@ mod tests {
             _ = window.draw(cx);
         });
         let bounds = state.read_with(cx, |state, _| state.trigger_bounds);
-        assert!(bounds.size.width < gpui::px(200.0));
-        cx.simulate_mouse_move(bounds.center(), None, gpui::Modifiers::default());
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        assert!(bounds.size.width < zpui::px(200.0));
+        cx.simulate_mouse_move(bounds.center(), None, zpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         assert!(state.read_with(cx, |state, _| state.menu.is_some()));
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         assert!(state.read_with(cx, |state, _| state.menu.is_none()));
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         cx.simulate_keystrokes("up enter");
         assert_eq!(
             state.read_with(cx, |state, _| state.selected_value().cloned()),
@@ -535,7 +535,7 @@ mod tests {
         assert!(
             state.read_with(cx, |state, _| state.trigger_bounds.size.width) < bounds.size.width
         );
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         cx.simulate_keystrokes("down escape");
         assert_eq!(events.borrow().len(), 1);
         assert!(state.read_with(cx, |state, _| state.menu.is_none()));
@@ -546,7 +546,7 @@ mod tests {
             Some("emacs".into())
         );
         assert_eq!(events.borrow().len(), 2);
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         cx.update(|window, cx| {
             state.update(cx, |state, cx| {
                 state.set_selected_index(Some(IndexPath::new(0)), window, cx);
@@ -554,17 +554,17 @@ mod tests {
         });
         assert!(state.read_with(cx, |state, _| state.menu.is_none()));
         assert_eq!(events.borrow().len(), 2);
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         preview.update(cx, |preview, cx| {
             preview.disabled = true;
             cx.notify();
         });
         cx.run_until_parked();
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         assert!(state.read_with(cx, |state, _| state.menu.is_none()));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn long_popup_picker_reopens_at_the_committed_value(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
@@ -595,7 +595,7 @@ mod tests {
             _ = window.draw(cx);
         });
         let bounds = state.read_with(cx, |state, _| state.trigger_bounds);
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
@@ -607,7 +607,7 @@ mod tests {
             let selected = quads
                 .iter()
                 .find(|quad| {
-                    quad.background == gpui::solid_background(cx.theme().selection_background())
+                    quad.background == zpui::solid_background(cx.theme().selection_background())
                 })
                 .expect("selected font row");
             assert!(
@@ -626,7 +626,7 @@ mod tests {
             state.read_with(cx, |state, _| state.selected_value().cloned()),
             Some("Font 999".into())
         );
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         cx.simulate_keystrokes("down enter");
         assert_eq!(
             state.read_with(cx, |state, _| state.selected_value().cloned()),
@@ -634,7 +634,7 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn a_touch_screen_picks_from_a_sheet(cx: &mut TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
@@ -653,7 +653,7 @@ mod tests {
             disabled: false,
         });
         let state = preview.read_with(cx, |preview, _| preview.state.clone());
-        let draw = |cx: &mut gpui::VisualTestContext| {
+        let draw = |cx: &mut zpui::VisualTestContext| {
             cx.run_until_parked();
             cx.update(|window, cx| {
                 _ = window.draw(cx);
@@ -661,13 +661,13 @@ mod tests {
         };
         draw(cx);
         let bounds = state.read_with(cx, |state, _| state.trigger_bounds);
-        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.simulate_click(bounds.center(), zpui::Modifiers::default());
         draw(cx);
         assert!(state.read_with(cx, |state, _| state.sheet && state.menu.is_none()));
         let row = cx
             .debug_bounds("select-option-0")
             .expect("the sheet lists the options");
-        cx.simulate_click(row.center(), gpui::Modifiers::default());
+        cx.simulate_click(row.center(), zpui::Modifiers::default());
         draw(cx);
         assert_eq!(
             state.read_with(cx, |state, _| state.selected_value().cloned()),
@@ -676,7 +676,7 @@ mod tests {
         assert!(state.read_with(cx, |state, _| !state.sheet));
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn initial_index_seeds_the_committed_value(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();
@@ -695,7 +695,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn out_of_range_initial_index_starts_empty(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();
@@ -708,7 +708,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn set_selected_value_resolves_through_the_delegate(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();

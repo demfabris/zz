@@ -2,14 +2,14 @@
 
 use std::{cell::Cell, panic::Location, rc::Rc};
 
-use gpui::{
+use web_time::{Duration, Instant};
+use zpui::{
     Anchor, App, Axis, Bounds, ContentMask, CursorStyle, Element, ElementId, GlobalElementId,
     Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId, ListState,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Position, ScrollHandle,
     ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window, fill, point, px, relative,
     size, transparent_black,
 };
-use web_time::{Duration, Instant};
 
 use crate::ActiveTheme as _;
 use crate::Colorize as _;
@@ -257,7 +257,7 @@ impl ScrollbarStateInner {
 fn schedule_fade_wake(
     state: &ScrollbarState,
     delay: Duration,
-    view_id: gpui::EntityId,
+    view_id: zpui::EntityId,
     window: &Window,
     cx: &mut App,
 ) {
@@ -886,10 +886,10 @@ impl Element for Scrollbar {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Context, Modifiers, MouseButton, ParentElement as _, Render, Styled as _, div};
+    use zpui::{Context, Modifiers, MouseButton, ParentElement as _, Render, Styled as _, div};
 
-    #[gpui::test]
-    fn track_click_notifies_after_changing_custom_handle_offset(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn track_click_notifies_after_changing_custom_handle_offset(cx: &mut zpui::TestAppContext) {
         #[derive(Clone, Default)]
         struct TestHandle(Rc<Cell<Point<Pixels>>>);
 

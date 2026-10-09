@@ -8,7 +8,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use gpui::{
+use zpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
@@ -66,7 +66,7 @@ fn selectable_line_bounds(
             if row + 1 == rows {
                 width += newline_width;
             }
-            let bounds = Bounds::new(point(origin.x, top), gpui::size(width, line_height))
+            let bounds = Bounds::new(point(origin.x, top), zpui::size(width, line_height))
                 .intersect(&mask_bounds);
             if bounds.size.width > px(0.) && bounds.size.height > px(0.) {
                 line_bounds.push(bounds);
@@ -207,7 +207,7 @@ impl Inline {
         self
     }
 
-    /// Painted before the glyphs so the fill lands under them. gpui's own run
+    /// Painted before the glyphs so the fill lands under them. zpui's own run
     /// background is a bare rect; this one is rounded and hugs the font's ink
     /// box instead of the taller line box.
     fn paint_code_fills(&self, layout: &TextLayout, window: &mut Window, cx: &mut App) {
@@ -229,7 +229,7 @@ impl Inline {
                 line_height,
                 window.text_style().text_align,
             ) {
-                window.paint_quad(gpui::fill(fill, fill_color).corner_radii(radius));
+                window.paint_quad(zpui::fill(fill, fill_color).corner_radii(radius));
             }
         }
     }
@@ -363,7 +363,7 @@ impl Inline {
                 px(0.),
                 cx.theme().foreground.wash(),
                 Edges::default(),
-                gpui::transparent_black(),
+                zpui::transparent_black(),
                 BorderStyle::default(),
             ));
         } else {
@@ -375,7 +375,7 @@ impl Inline {
                 px(0.),
                 cx.theme().foreground.wash(),
                 Edges::default(),
-                gpui::transparent_black(),
+                zpui::transparent_black(),
                 BorderStyle::default(),
             ));
 
@@ -388,7 +388,7 @@ impl Inline {
                     px(0.),
                     cx.theme().foreground.wash(),
                     Edges::default(),
-                    gpui::transparent_black(),
+                    zpui::transparent_black(),
                     BorderStyle::default(),
                 ));
             }
@@ -401,7 +401,7 @@ impl Inline {
                 px(0.),
                 cx.theme().foreground.wash(),
                 Edges::default(),
-                gpui::transparent_black(),
+                zpui::transparent_black(),
                 BorderStyle::default(),
             ));
         }
@@ -722,11 +722,11 @@ mod tests {
         Bounds, CODE_FILL_PAD_X, CODE_FILL_PAD_Y, InlineState, TextAlign, code_fill_bounds,
         is_openable, point_in_text_selection, selectable_line_bounds,
     };
-    use gpui::{
+    use std::sync::Arc;
+    use zpui::{
         FontId, GlyphId, LineLayout, ShapedGlyph, ShapedRun, WrapBoundary, WrappedLineLayout,
         point, px,
     };
-    use std::sync::Arc;
 
     fn code_line(text: &str, wraps: &[usize]) -> Arc<WrappedLineLayout> {
         let glyphs = text
@@ -872,12 +872,12 @@ mod tests {
         }
     }
 
-    #[gpui::test]
-    fn shaped_code_wrap_leaves_the_unused_line_width_unpainted(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn shaped_code_wrap_leaves_the_unused_line_width_unpainted(cx: &mut zpui::TestAppContext) {
         let cx = cx.add_empty_window();
         cx.update(|window, _| {
-            let text = gpui::SharedString::from("cargo run -p zz-xtask");
-            let run = gpui::TextStyle::default().to_run(text.len());
+            let text = zpui::SharedString::from("cargo run -p zz-xtask");
+            let run = zpui::TextStyle::default().to_run(text.len());
             let wrapped = window
                 .text_system()
                 .shape_text(text.clone(), px(13.0), &[run], Some(px(113.0)), None)

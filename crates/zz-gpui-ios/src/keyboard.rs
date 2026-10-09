@@ -1,8 +1,8 @@
-use gpui::{Capslock, KeyDownEvent, Keystroke, Modifiers};
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
+use zpui::{Capslock, KeyDownEvent, Keystroke, Modifiers};
 
 #[derive(Default)]
 pub struct Keyboard {

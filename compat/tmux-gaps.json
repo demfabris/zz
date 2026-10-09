@@ -461,7 +461,6 @@
         "semantic:popup-client-box",
         "semantic:popup-context-menu",
         "semantic:popup-job-environment",
-        "semantic:popup-kitty-images",
         "semantic:popup-resize-lifecycle",
         "semantic:popup-style-refresh"
       ],
@@ -470,8 +469,6 @@
         "resource:knowledge/designs/floating-panes.md",
         "resource:knowledge/research/2026-10-09-tmux-compat-revisit.md",
         "scenario:compat/scenarios/known/known-display-popup-drag.txt",
-        "scenario:compat/scenarios/known/known-display-popup-kitty.txt",
-        "scenario:compat/scenarios/known/known-display-popup-kitty-noresize.txt",
         "scenario:compat/scenarios/known/known-display-popup-menu.txt",
         "scenario:compat/scenarios/known/known-display-popup-menu-policy.txt",
         "scenario:compat/scenarios/known/known-display-popup-resize-lifecycle.txt",
@@ -484,7 +481,7 @@
         "display-popup stays new-pane -O over the target window with master's flag mapping, as knowledge/designs/floating-panes.md describes; a client-drawn popup box, its border drag and its context menu do not come back."
       ],
       "depends_on": [],
-      "reason": "Ruled 2026-10-09 by fabrico (knowledge/research/2026-10-09-tmux-compat-revisit.md): display-popup follows upstream master's modal-pane model, where commit 34cd5da4 deleted popup.c and made display-popup spawn a floating modal pane above zoom. catch-up item float.core built that model, so the per-client popup tmux 3.8 still draws from popup.c is gone in zz and the nine smoke scenarios that measured it now differ from the 3.8 pin. They moved from smoke/ to known/ (with shim: for their staged fixtures) and are registered here with their measured tuples, each taken twice on 2026-10-09 (the corpus pass and the alone retry agreed). What each one measures and why it differs: display-popup-drag, display-popup-kitty, display-popup-kitty-noresize, display-popup-resize-lifecycle and display-popup-style-refresh drive a client attached on a real pty and look for the popup box popup_draw_cb paints; zz's modal is a pane, not a client overlay, so zz's side reports no popup box and never sets its marker (one OUT query failure, its stdout and the unknown-variable stderr as two WARN rows), while drawing floats and modals in the raw TUI belongs to float.clients and dragging them to float.keys. display-popup-menu, display-popup-menu-policy and display-popup-to-pane drive popup_key_cb's button-3 menu; tmux 3.8's popup.c no longer builds popup_menu_items, so the pin's own side fails its fixture too, and both sides leave the marker unset, which counts one OUT and one WARN row. jobs-display-popup-environment checks the popup job's environment (TMUX, TERM and the -e overrides through job_run); the modal pane takes the pane environment instead, as the 2026-10-09 divergences.md note on the job environment row says. Any change to a tuple fails compat/run.sh, so whoever makes a row match again moves it back to smoke/ and drops its item."
+      "reason": "Ruled 2026-10-09 by fabrico (knowledge/research/2026-10-09-tmux-compat-revisit.md): display-popup follows upstream master's modal-pane model, where commit 34cd5da4 deleted popup.c and made display-popup spawn a floating modal pane above zoom. catch-up item float.core built that model, so the per-client popup tmux 3.8 still draws from popup.c is gone in zz and the nine smoke scenarios that measured it now differ from the 3.8 pin. They moved from smoke/ to known/ (with shim: for their staged fixtures) and are registered here with their measured tuples, each taken twice on 2026-10-09 (the corpus pass and the alone retry agreed). What each one measures and why it differs: display-popup-drag, display-popup-kitty, display-popup-kitty-noresize, display-popup-resize-lifecycle and display-popup-style-refresh drive a client attached on a real pty and look for the popup box popup_draw_cb paints; zz's modal is a pane, not a client overlay, so zz's side reports no popup box and never sets its marker (one OUT query failure, its stdout and the unknown-variable stderr as two WARN rows), while drawing floats and modals in the raw TUI belongs to float.clients and dragging them to float.keys. display-popup-menu, display-popup-menu-policy and display-popup-to-pane drive popup_key_cb's button-3 menu; tmux 3.8's popup.c no longer builds popup_menu_items, so the pin's own side fails its fixture too, and both sides leave the marker unset, which counts one OUT and one WARN row. jobs-display-popup-environment checks the popup job's environment (TMUX, TERM and the -e overrides through job_run); the modal pane takes the pane environment instead, as the 2026-10-09 divergences.md note on the job environment row says. Any change to a tuple fails compat/run.sh, so whoever makes a row match again moves it back to smoke/ and drops its item. Closed 2026-10-09 in the float track integration: semantic:popup-kitty-images. With float.clients' placement of a modal pane's Kitty images, compat/scenarios/smoke/display-popup-kitty.txt and display-popup-kitty-noresize.txt run clean against 3.8 (each side asserts the image contract its own binary owes), so both scenarios return to smoke/ and their known tuples go."
     },
     {
       "id": "formats.expansion-budgets",
@@ -3044,9 +3041,9 @@
         "resource:knowledge/tmux/divergences.md",
         "scenario:compat/scenarios/known/known-display-popup-style-refresh.txt",
         "resource:crates/zz-tui/src/kitty.rs",
-        "scenario:compat/scenarios/known/known-display-popup-kitty.txt",
+        "scenario:compat/scenarios/smoke/display-popup-kitty.txt",
         "file:compat/scenarios/smoke/fixtures/graphics-drive.py",
-        "scenario:compat/scenarios/known/known-display-popup-kitty-noresize.txt",
+        "scenario:compat/scenarios/smoke/display-popup-kitty-noresize.txt",
         "resource:crates/zz-terminal/src/session.rs",
         "scenario:compat/scenarios/known/known-display-popup-drag.txt",
         "scenario:compat/scenarios/known/known-display-popup-menu.txt",
@@ -5107,24 +5104,6 @@
   "known_differentials": [
     {
       "scenario": "known/known-display-popup-drag.txt",
-      "gap": "display-popup.modal-pane",
-      "topo": 0,
-      "geo": 0,
-      "fmt": 0,
-      "out": 1,
-      "warn": 2
-    },
-    {
-      "scenario": "known/known-display-popup-kitty-noresize.txt",
-      "gap": "display-popup.modal-pane",
-      "topo": 0,
-      "geo": 0,
-      "fmt": 0,
-      "out": 1,
-      "warn": 2
-    },
-    {
-      "scenario": "known/known-display-popup-kitty.txt",
       "gap": "display-popup.modal-pane",
       "topo": 0,
       "geo": 0,

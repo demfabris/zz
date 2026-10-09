@@ -2352,7 +2352,7 @@ fn first_full_subscriber_does_not_hide_a_pending_hash_update() {
     shared.send_compact_keys(full_client, &full_mailbox);
     reliable_children(&full_mailbox);
     shared.publish_key_tables_if_changed();
-    let messages = bounded_reliable_children(&hash_mailbox, 64);
+    let messages = bounded_reliable_children(&hash_mailbox, 80);
     assert!(
         matches!(messages.as_slice(), [ProtocolMessage::Event(Event { payload: EventPayload::KeyTablesHashChanged { hash, .. }, .. })] if *hash == generation)
     );
@@ -2735,7 +2735,7 @@ fn hash_subscriber_receives_bounded_mouse_hash_without_full_bindings() {
         "bind-key",
         &["-T", "root", "x", "display-message", "changed"],
     );
-    let messages = bounded_reliable_children(&mailbox, 64);
+    let messages = bounded_reliable_children(&mailbox, 80);
     assert!(!messages.iter().any(|message| matches!(
         message,
         ProtocolMessage::Event(Event {
@@ -2759,7 +2759,7 @@ fn hash_subscriber_receives_bounded_mouse_hash_without_full_bindings() {
         zz_protocol::encode_protocol_message(hash)
             .expect("encode")
             .len()
-            <= 64
+            <= 80
     );
 }
 

@@ -1,7 +1,4 @@
-# gap: display-popup.modal-pane
-# display-popup is a modal floating pane as in tmux master 34cd5da4 (fabrico's
-# ruling), so this tmux 3.8 popup contract differs by the registered tuple.
-shim:
+corpus: none
 # A popup's Kitty images are zz's own presentation contract, not a fidelity
 # gap: the pinned tree at d77c9dc6 has no image protocol anywhere - the string
 # kitty appears in none of its sources, popup.c has no image or sixel branch,
@@ -13,8 +10,8 @@ shim:
 # popup's image at the content origin inside the border, retires the placement
 # it replaces and deletes what it placed when the popup closes, while the pin
 # draws the popup's text and never emits a graphics escape.
-stage: ../smoke/fixtures/display-popup-kitty.sh ~/display-popup-kitty.sh
-stage: ../smoke/fixtures/graphics-drive.py ~/graphics-drive.py
+stage: fixtures/display-popup-kitty.sh ~/display-popup-kitty.sh
+stage: fixtures/graphics-drive.py ~/graphics-drive.py
 out: set-environment -gu DISPLAY_POPUP_KITTY
 run-shell 'sh ~/display-popup-kitty.sh'
 out: show-environment -g DISPLAY_POPUP_KITTY

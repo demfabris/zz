@@ -74,7 +74,9 @@ function launch(width, height, scale) {
     });
     const stop = () => {
         child.kill("SIGKILL");
-        rmSync(profile, { recursive: true, force: true });
+        try {
+            rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+        } catch {}
     };
     return { endpoint, stop };
 }

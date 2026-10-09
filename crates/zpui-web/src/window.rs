@@ -220,7 +220,7 @@ impl WebWindow {
             .then(|| params.mount.as_ref().map(ToString::to_string))
             .flatten();
         let mut viewport = WebViewport::new(&document)?;
-        viewport.update(&browser_window, &canvas)?;
+        viewport.update(&browser_window, &canvas, mount.is_some())?;
 
         let display: Rc<dyn PlatformDisplay> = Rc::new(WebDisplay::new(browser_window.clone()));
 
@@ -446,7 +446,7 @@ impl WebWindowInner {
         match self
             .viewport
             .borrow_mut()
-            .update(&self.browser_window, &self.canvas)
+            .update(&self.browser_window, &self.canvas, self.mount.is_some())
         {
             Ok(changed) => changed,
             Err(error) => {

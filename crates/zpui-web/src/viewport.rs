@@ -44,8 +44,23 @@ impl WebViewport {
         &mut self,
         window: &web_sys::Window,
         canvas: &web_sys::HtmlCanvasElement,
+        mounted: bool,
     ) -> anyhow::Result<bool> {
         let canvas_bounds = canvas.get_bounding_client_rect();
+        if mounted {
+            let visible_bounds = Bounds::new(
+                point(px(0.), px(0.)),
+                size(
+                    px(canvas_bounds.width() as f32),
+                    px(canvas_bounds.height() as f32),
+                ),
+            );
+            let insets = WindowInsets::default();
+            let changed = self.visible_bounds != visible_bounds || self.insets != insets;
+            self.visible_bounds = visible_bounds;
+            self.insets = insets;
+            return Ok(changed);
+        }
         let document = window
             .document()
             .ok_or_else(|| anyhow::anyhow!("Missing document"))?;

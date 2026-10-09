@@ -126,7 +126,9 @@ Each rule cost a campaign real time. The source is in brackets
    your turn waiting on a background task. [A reviewer that did was dropped, LOG.]
 9. **Fixtures that start tmux or zz**: scrub HOME and the XDG dirs only (not `env -i`), start tmux
    with `-L zzprobe-$$ -f /dev/null`, put sockets directly under `/tmp` with short names.
-   [A shared HOME made a fixture compare the pin with itself, LOG.]
+   [A shared HOME made a fixture compare the pin with itself, LOG.] Run every `compat/tui-*.sh` and
+   `compat/run.sh` with `LANG=en_US.UTF-8`: agent shells have `LANG` empty, and tmux then draws ACS
+   borders where zz draws Unicode, so whole fixtures go red (pin.keys-copy, 2026-10-09).
 10. **Proofs at tip**: every result in your report comes from your final commit.
 11. **Zones are a hint, not a fence.** If a clause needs a file outside your item's zones, edit it
     and say so. [Three cycles left items open because the last fix sat in "someone else's" crate.]
@@ -201,15 +203,6 @@ plus the ledger item as the prompt, from the lane's worktree. If Codex is out
 subagent instead and note it in the ledger. Killing the orchestrator leaves a running `codex` child;
 check `pgrep -af codex` on resume.
 
-## Paused 2026-10-09
-
-fabrico paused the campaign. Nothing is running. Merged: float.design, pin.move, fix.streams,
-fix.capture-links, pin.layout-v2, pin.formats-options, fix.small-semantics, pin.contract-breaks,
-fix.tui-colour, pin.tui-fixtures, pin.hooks-events. Each in-flight item's ledger notes end with a
-`PAUSED` line saying exactly what is left (review to rerun, checks to run, then merge). All lane
-branches are pushed to `origin/catchup/<id>`; worktrees `zz-cu-a`..`zz-cu-e` on alienware are
-clean. Resume with the steps above, starting from those PAUSED notes.
-
 ## Decisions
 
 - 2026-10-09 fabrico: build floating panes; move the pin to 3.8; `zz share` and desktop menu input
@@ -249,3 +242,14 @@ clean. Resume with the steps above, starting from those PAUSED notes.
   known differences, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.
+- 2026-10-09 fabrico resumed the campaign after the restructure (gpui renamed zpui and moved in-repo,
+  zz-kit split out of zz-ui, clients/gpui-shared became clients/app, clients/ios). Orchestrator: lane
+  branches take main by merge, not rebase: their history is on origin and several carry merges already, so a rebase would force-push
+  and replay those. Registry, generated gaps.md and wire doc conflicts are resolved by the
+  orchestrator; a code conflict is resolved too when it is local, and the relaunched lane compiles it.
+- 2026-10-09 orchestrator: fix.tui-regressions gets a final fix pass after two reviews (per-client
+  report places, stale reports sized from the client's window size) and merges without a third review,
+  each repro pinned by a daemon test.
+- 2026-10-09 orchestrator: pin.display-panes gets a final fix pass after two reviews: the desktop overlay
+  becomes a function of the pane's top mode instead of an object created at open, and copy-mode entry
+  replaces panes-mode; it merges without a third review, each P1 pinned by a daemon test.

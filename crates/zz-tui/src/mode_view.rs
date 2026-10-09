@@ -16,18 +16,119 @@ pub(crate) fn presentation<'a>(
     viewport: &TerminalViewport,
 ) -> Option<&'a ModePresentation> {
     let view = match viewport.mode {
-        TerminalMode::Copy {
-            hide_position: false,
-            ..
-        } => false,
+        TerminalMode::Copy { .. } => false,
         TerminalMode::View { .. } => true,
-        _ => return None,
+        TerminalMode::Live => return None,
     };
     model
         .status
         .modes
         .iter()
         .find(|mode| mode.pane == pane && mode.view == view)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct LineNumberGutter {
+    pub width: u16,
+    mode: u8,
+    history: u32,
+    offset: u32,
+    pub cursor: Option<(u16, u16)>,
+}
+
+impl LineNumberGutter {
+    pub(crate) fn content_width(self, columns: u16) -> u16 {
+        if self.width >= columns {
+            1
+        } else {
+            columns - self.width
+        }
+    }
+
+    pub(crate) fn body(self, rect: crate::layout::Rect) -> crate::layout::Rect {
+        let content = self.content_width(rect.width).min(rect.width);
+        crate::layout::Rect {
+            x: rect.x.saturating_add(rect.width - content),
+            width: content,
+            ..rect
+        }
+    }
+
+    pub(crate) fn cursor_column(self, column: u16, columns: u16) -> u16 {
+        if column >= self.content_width(columns) {
+            columns.saturating_sub(1)
+        } else {
+            self.width.saturating_add(column)
+        }
+    }
+
+    pub(crate) fn label(self, row: u16) -> (String, bool) {
+        let row = u32::from(row);
+        let current = self.cursor.map(|(_, cursor)| u32::from(cursor));
+        let absolute = self
+            .history
+            .saturating_sub(self.offset)
+            .saturating_add(row)
+            .saturating_add(1);
+        let number = match self.mode {
+            1 => row.abs_diff(self.offset),
+            2 => absolute,
+            4 if current == Some(row) => absolute,
+            _ => row.abs_diff(current.unwrap_or(0)),
+        };
+        let pad = usize::from(self.width.saturating_sub(1));
+        let text = format!("{number:>pad$} ")
+            .chars()
+            .take(usize::from(self.width))
+            .collect();
+        (text, current == Some(row))
+    }
+}
+
+pub(crate) fn line_number_gutter(
+    mode: &ModePresentation,
+    viewport: &TerminalViewport,
+) -> Option<LineNumberGutter> {
+    if mode.line_numbers == 0 || mode.view {
+        return None;
+    }
+    let rows = viewport.scrollbar.len;
+    let history = viewport.scrollbar.total.saturating_sub(rows);
+    let mut lines = history.saturating_add(rows).saturating_add(1);
+    let mut digits = 1_u16;
+    while lines >= 10 {
+        lines /= 10;
+        digits += 1;
+    }
+    let cursor = viewport
+        .overlays
+        .iter()
+        .find(|overlay| overlay.kind() == OverlayKind::CopyCursor)
+        .map(|overlay| (overlay.start, overlay.row));
+    Some(LineNumberGutter {
+        width: digits.max(3) + 1,
+        mode: mode.line_numbers,
+        history,
+        offset: history.saturating_sub(viewport.scrollbar.offset),
+        cursor,
+    })
+}
+
+pub(crate) fn line_number_segment(
+    mode: &ModePresentation,
+    text: String,
+    current: bool,
+    theme: &ThemeColours,
+) -> StyledSegment {
+    let style = if current {
+        &mode.current_line_number_style
+    } else {
+        &mode.line_number_style
+    };
+    StyledSegment {
+        text,
+        style: grounded(resolved_style(style, theme).unwrap_or_default()),
+    }
 }
 
 pub(crate) fn resolved_style(value: &str, theme: &ThemeColours) -> Option<TmuxStyle> {
@@ -240,6 +341,9 @@ mod tests {
             vi_keys: false,
             match_style: String::new(),
             current_match_style: String::new(),
+            line_numbers: 0,
+            line_number_style: String::new(),
+            current_line_number_style: String::new(),
         }
     }
 

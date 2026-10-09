@@ -836,6 +836,18 @@ The TUI raises its colour depth and arms extended keys from `features` and decod
 in `user_keys` before the built-in keys. `zz_terminal::KeyCode` appends `User(u16)`, which
 `input_key_name` spells `UserN`; a pane writes nothing for it.
 
+v108 also carries tmux 3.8's copy-mode line numbers and refresh-now (catch-up item
+`pin.keys-copy`). `zz_terminal::CopyModeAction` appends `RefreshNow`, `LineNumbersOn { option_off }`,
+`LineNumbersOff` and `LineNumbersToggle { option_off }` after `RefreshToggle`; `option_off` is the
+window's `copy-mode-line-numbers` read when the command ran. `GotoLine(u32)` becomes
+`GotoLine { line: Option<i32>, option_absolute: bool }`; `option_absolute` says the option was
+`absolute`, `relative` or `hybrid`, and then a goto with line numbers shown counts from the top of
+history. `ModePresentation` appends
+`line_numbers: u8` (0 off, 1 default, 2 absolute, 3 relative, 4 hybrid), `line_number_style` and
+`current_line_number_style`, and a copy view with `-H` is now published when it shows line numbers,
+with an empty `position`. `MouseBindings` grows the `Empty` mouse location after `StatusDefault`,
+which moves every `ControlN` bit up by one kind row.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

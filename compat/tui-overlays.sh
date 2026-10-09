@@ -374,9 +374,6 @@ PIN_DISPLAY_PANES_MODE=0
 ZOOM_REFLOW_MODE=same
 ZOOM_REFLOW_OWNER=gap:terminal.zoom-reflow
 ZOOM_REFLOW_REASON='gap:terminal.zoom-reflow (accepted engine limit, fabrico 2026-09-18): 3.8 display-panes zooms its pane, and libghostty and the pin reflow a pane whose history holds a wrapped line differently on a width change (resize-pane -Z twice shows the same split), so the pane content after the mode, and the live copy the mode redraws at a new size, differ while the mode screen itself is asserted'
-CENTRE_MENU_MODE=same
-CENTRE_MENU_OWNER=gap:pin.keys-copy
-CENTRE_MENU_REASON='PIN 3.8, gap:pin.keys-copy: 3.8 menus belong to the window (ad6832e6), so display-menu -x C -y C centres on the window and the pin draws the menu a row above the client-centred row zz still uses at an odd height'
 display_panes_on_both() {
   if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
     side_command zz display-panes -d 0 || die 'zz refused display-panes'
@@ -908,9 +905,10 @@ display_panes_case() {
   DIVIDER_RULE=0
 }
 
-# ODD SIZE AND USER STYLES. cmd_display_menu_get_pos centres on tty->sy, the
-# client's full height, and clamps against it, so at 79x23 a centred menu and a
-# centred popup sit where (sy - 1) / 2 + h / 2 - h puts them. menu.c and
+# ODD SIZE AND USER STYLES. cmd_display_menu_get_menu_pos centres a menu on
+# window->sy and cmd_display_menu_get_popup_pos a popup on tty->sy, the
+# client's full height, so at 79x23 each sits where (sy - 1) / 2 + h / 2 - h
+# puts it in its own frame, the menu a row higher. menu.c and
 # popup.c leave a user style's missing background as the terminal's default
 # ground. The split display-panes left behind is closed first and the pane
 # re-marked after the resize, so no residue of resizing a -h split reaches a
@@ -936,10 +934,10 @@ centred_surfaces() {
   press_on_both C
   both_screen_has CENTRE-MENU 'the centred menu'
   settle_both "MARK-$label" 'the centred menu'
-  verdict "centre-menu-$label" "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
+  verdict "centre-menu-$label" same
   type_on_both Down
   settle_both "MARK-$label" 'the centred menu after Down'
-  verdict "centre-menu-$label-down" "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
+  verdict "centre-menu-$label-down" same
   type_on_both Escape
   both_screen_lacks CENTRE-MENU 'the cancelled centred menu'
   settle_both "MARK-$label" 'the cancelled centred menu'
@@ -975,7 +973,7 @@ odd_size_case() {
   press_on_both D
   both_screen_has CENTRE-MENU 'the centred -M menu'
   settle_both MARK-click 'the centred -M menu'
-  verdict centre-menu-mouse-opened "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
+  verdict centre-menu-mouse-opened same
   click_item_on_both 'Third item'
   both_option_is @overlay_menu third 'the clicked third item of the centred menu'
   both_screen_lacks CENTRE-MENU 'the centred menu closed by the click'
@@ -1015,7 +1013,6 @@ if ! tmux_inner_command -f /dev/null start-server \; list-commands display-panes
   grep -q -- '-b'; then
   PIN_DISPLAY_PANES_MODE=1
   ZOOM_REFLOW_MODE=record
-  CENTRE_MENU_MODE=record
 fi
 
 run_cases() {

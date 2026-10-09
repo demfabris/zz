@@ -280,7 +280,13 @@ fn mode_requests_render_the_same_presentation_on_a_detached_universe() {
             fixture.alpha,
             fixture.alpha_pane,
             false,
-            (3, 9),
+            ModeShown {
+                position: 3,
+                limit: 9,
+                line_numbers: 0,
+                hide_position: false,
+                rows: 0,
+            },
         )
         .expect("mode request");
         drop(contexts);

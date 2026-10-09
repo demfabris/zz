@@ -1,0 +1,13 @@
+corpus: none
+stage: fixtures/copy-mode-line-numbers.sh ~/copy-mode-line-numbers.sh
+stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+out: list-keys -T copy-mode -1 L
+out: list-keys -T copy-mode -1 r
+out: list-keys -T copy-mode-vi -1 r
+out: list-keys -T prefix -1 T
+out: list-keys -T root -1 MouseDown1Border
+out: list-keys -T root -1 MouseDown3Empty
+out: list-keys -T root -1 M-MouseDown3Empty
+out: set-environment -gu COPY_MODE_LINE_NUMBERS
+run-shell 'sh ~/copy-mode-line-numbers.sh'
+out: show-environment -g COPY_MODE_LINE_NUMBERS

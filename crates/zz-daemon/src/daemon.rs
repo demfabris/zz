@@ -6026,6 +6026,7 @@ impl Shared {
             inner.pane_read_observations.clear();
             inner.terminal_spawns.clear();
             inner.terminal_geometries.clear();
+            inner.reported_pane_places.clear();
             inner.attached.clear();
             for client in inner.clients.values_mut() {
                 client.visible_terminals = None;
@@ -10196,6 +10197,7 @@ impl Shared {
                             inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
+                            inner.reported_pane_places.remove(pane);
                             inner.pane_modes.remove(pane);
                             inner.pane_mode_zooms.remove(pane);
                             inner.panes_mode_frames.remove(pane);
@@ -10534,6 +10536,14 @@ impl Shared {
                                 && session.pane == *pane
                             {
                                 session.scroll_exit = true;
+                            } else if terminal_view_action_refreshes_now(action)
+                                && let Some(session) = inner
+                                    .client_mut(target)
+                                    .and_then(|c| c.copy_session.as_mut())
+                                && session.pane == *pane
+                                && !session.sourced
+                            {
+                                session.unseen = false;
                             } else if let Some(refresh) =
                                 terminal_view_action_refresh_request(action)
                                 && let Some(session) = inner
@@ -19432,21 +19442,35 @@ impl Shared {
                 overlay_style(&defaults.selected_style, parsed.selected_style.as_deref());
             let border_style =
                 overlay_style(&defaults.border_style, parsed.border_style.as_deref());
-            let variables = popup_position_variables(
+            let frame = menu_window_frame(&inner.engine, &target, geometry.columns, geometry.rows);
+            let mut variables = popup_position_variables(
                 &inner.engine,
                 &target,
-                context.invoking_mouse(),
-                geometry.columns,
-                geometry.rows,
+                None,
+                frame.columns,
+                frame.rows,
                 width,
                 height,
             );
+            if let Some(mouse) = context.invoking_mouse() {
+                variables.extend(
+                    menu_mouse_position_values(&inner.engine, &target, mouse, frame, width, height)
+                        .into_iter()
+                        .map(|(name, value)| (name.to_owned(), value.to_string())),
+                );
+            }
+            if variables.contains_key(POPUP_STATUS_LINE_Y_CONTEXT_FORMAT) {
+                variables.insert(
+                    POPUP_STATUS_LINE_Y_CONTEXT_FORMAT.to_owned(),
+                    if frame.top > 0 { height } else { frame.rows }.to_string(),
+                );
+            }
             target.format_variables.extend(variables);
             let (left, top) = popup_position(
                 parsed.x.as_deref(),
                 parsed.y.as_deref(),
-                geometry.columns,
-                geometry.rows,
+                frame.columns,
+                frame.rows,
                 width,
                 height,
                 |value| {
@@ -19460,6 +19484,7 @@ impl Shared {
                     )
                 },
             );
+            let top = top.saturating_add(frame.top);
             (
                 MenuState {
                     left,
@@ -21545,6 +21570,11 @@ impl Shared {
             {
                 *cell = (geometry.cell_width_px, geometry.cell_height_px);
             }
+            let extent =
+                inner
+                    .engine
+                    .window_extent_for_pane_geometry(pane, geometry.columns, geometry.rows);
+            record_report_place(&mut inner, client, pane, extent);
             if let Some(reported) = pane_geometry_from(&inner, pane, GeometrySource::ClientReport) {
                 inner
                     .engine
@@ -35733,6 +35763,7 @@ struct ServerState {
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     destroying_unattached: BTreeSet<SessionId>,
     terminal_geometries: BTreeMap<PaneId, BTreeMap<ClientId, TerminalGeometry>>,
+    reported_pane_places: BTreeMap<PaneId, BTreeMap<ClientId, ReportedPlace>>,
     terminal_input_sequence: u64,
     chooser_kill_panes: Vec<PaneId>,
     /// The pane a `copy-mode -k` in the current effect batch armed, consumed
@@ -39987,6 +40018,17 @@ fn terminal_view_action_refresh_request(
     }
 }
 
+fn terminal_view_action_refreshes_now(action: &zz_terminal::TerminalViewAction) -> bool {
+    matches!(
+        action,
+        zz_terminal::TerminalViewAction::CopyMode(zz_terminal::CopyModeAction::RefreshNow)
+            | zz_terminal::TerminalViewAction::CopyModeCounted {
+                action: zz_terminal::CopyModeAction::RefreshNow,
+                ..
+            }
+    )
+}
+
 fn terminal_view_action_arms_scroll_exit(action: &zz_terminal::TerminalViewAction) -> bool {
     matches!(
         action,
@@ -43629,7 +43671,7 @@ fn mode_request(
     session: SessionId,
     pane: PaneId,
     view: bool,
-    (position, limit): (u32, u32),
+    shown: ModeShown,
 ) -> Option<crate::status::ModeRequest> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let context = contexts.status_context(Some(session), Some(window), Some(pane));
@@ -43642,8 +43684,11 @@ fn mode_request(
         pane,
         view,
         context,
-        position,
-        limit,
+        position: shown.position,
+        limit: shown.limit,
+        line_numbers: shown.line_numbers,
+        hide_position: shown.hide_position,
+        rows: shown.rows,
         vi_keys: inner
             .engine
             .copy_mode_table_for_pane(pane)
@@ -43666,16 +43711,35 @@ const fn mode_kind(mode: TerminalMode) -> u8 {
     }
 }
 
+#[derive(Clone, Copy)]
+struct ModeShown {
+    position: u32,
+    limit: u32,
+    line_numbers: u8,
+    hide_position: bool,
+    rows: u32,
+}
+
 fn mode_request_position(
     client: ClientId,
     terminal: &TerminalSession,
     view: bool,
-) -> Option<(u32, u32)> {
+) -> Option<ModeShown> {
     let viewport = terminal.latest_viewport_for(TerminalViewId(client.0))?;
-    let shown = match viewport.mode {
-        TerminalMode::Copy { hide_position, .. } => !view && !hide_position,
-        TerminalMode::View { .. } => view,
-        TerminalMode::Live => false,
+    let line_numbers = if view {
+        0
+    } else {
+        terminal
+            .copy_mode_facts(TerminalViewId(client.0))
+            .map_or(0, |facts| facts.line_numbers)
+    };
+    let (shown, hide_position) = match viewport.mode {
+        TerminalMode::Copy { hide_position, .. } => (
+            !view && (!hide_position || line_numbers != 0),
+            hide_position,
+        ),
+        TerminalMode::View { .. } => (view, false),
+        TerminalMode::Live => (false, false),
     };
     if !shown {
         return None;
@@ -43684,7 +43748,13 @@ fn mode_request_position(
         .scrollbar
         .total
         .saturating_sub(viewport.scrollbar.len);
-    Some((limit.saturating_sub(viewport.scrollbar.offset), limit))
+    Some(ModeShown {
+        position: limit.saturating_sub(viewport.scrollbar.offset),
+        limit,
+        line_numbers,
+        hide_position,
+        rows: viewport.scrollbar.len,
+    })
 }
 
 fn resolve_popup_client(
@@ -43973,6 +44043,85 @@ fn popup_mouse_position_values(
         values.push((
             POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
             if top { y + 1 + height } else { y },
+        ));
+    }
+    values
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MenuFrame {
+    columns: u16,
+    rows: u16,
+    top: u16,
+    status_row: Option<u16>,
+    visible_rows: u16,
+}
+
+fn menu_window_frame(
+    engine: &MuxEngine,
+    target: &ExecutionContext,
+    client_columns: u16,
+    client_rows: u16,
+) -> MenuFrame {
+    let status = engine.status_formats_for_session(target.session);
+    let lines = if status.enabled {
+        u16::from(status.lines).min(client_rows)
+    } else {
+        0
+    };
+    let status_top = status.position == zz_protocol::StatusPosition::Top;
+    let available = client_rows.saturating_sub(lines);
+    let extent = |axis| {
+        target
+            .window
+            .and_then(|window| engine.window_extent(window, axis))
+    };
+    let columns = extent(zz_protocol::Axis::Horizontal).unwrap_or(client_columns);
+    let rows = extent(zz_protocol::Axis::Vertical).unwrap_or(available);
+    let visible_rows = if client_columns >= columns && available >= rows {
+        rows
+    } else {
+        available
+    };
+    MenuFrame {
+        columns,
+        rows,
+        top: if status_top { lines } else { 0 },
+        status_row: (!status_top && lines > 0).then_some(available),
+        visible_rows,
+    }
+}
+
+fn menu_mouse_position_values(
+    engine: &MuxEngine,
+    target: &ExecutionContext,
+    mouse: &MouseEventTarget,
+    frame: MenuFrame,
+    width: u16,
+    height: u16,
+) -> Vec<(&'static str, i64)> {
+    let row = if frame.top > 0 {
+        mouse.row.saturating_sub(frame.top)
+    } else if frame.status_row.is_some_and(|status| mouse.row >= status) {
+        frame.visible_rows.saturating_sub(1)
+    } else {
+        mouse.row
+    };
+    let moved = MouseEventTarget {
+        row,
+        status_range_start: None,
+        ..mouse.clone()
+    };
+    let mut values = popup_mouse_position_values(engine, target, &moved, frame.rows, width, height);
+    if let Some(start) = mouse.status_range_start {
+        values.push((POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT, i64::from(start)));
+        values.push((
+            POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
+            if frame.top > 0 {
+                i64::from(height)
+            } else {
+                i64::from(frame.rows)
+            },
         ));
     }
     values
@@ -46561,6 +46710,10 @@ fn remove_client_terminal_geometries(
         }
         !geometries.is_empty()
     });
+    inner.reported_pane_places.retain(|_, places| {
+        places.remove(&client);
+        !places.is_empty()
+    });
     for pane in &affected {
         sync_view_area(inner, *pane, client);
     }
@@ -46707,6 +46860,9 @@ fn terminal_geometry_for_mode_from(
     }
     let session = window_state.session;
     let suppress_ignored = unignored_attached_sizing_client_exists(inner);
+    let place = (source == GeometrySource::ClientReport)
+        .then(|| pane_place(inner, pane))
+        .flatten();
     let candidates = inner
         .attached
         .get(&session)?
@@ -46724,7 +46880,24 @@ fn terminal_geometry_for_mode_from(
             }
         })
         .filter_map(|client| {
-            client_terminal_geometry(inner, *client, pane).map(|geometry| (*client, geometry))
+            let geometry = client_terminal_geometry(inner, *client, pane)?;
+            let Some((columns, rows)) = place.as_ref().and_then(|place| {
+                let reported = inner.reported_pane_places.get(&pane)?.get(client)?;
+                (reported.place != *place).then_some(reported.extent)
+            }) else {
+                return Some((*client, geometry));
+            };
+            let (columns, rows) = inner
+                .engine
+                .pane_geometry_at_window_extent(pane, columns, rows)?;
+            Some((
+                *client,
+                TerminalGeometry {
+                    columns,
+                    rows,
+                    ..geometry
+                },
+            ))
         })
         .collect::<Vec<_>>();
     let owner = candidates.iter().min_by_key(|(client, _)| {
@@ -46805,6 +46978,62 @@ fn pane_geometry_from(
     let aggressive = inner.engine.state.window_aggressive_resize(window).ok()?;
     let mode = inner.engine.window_size(window);
     terminal_geometry_for_mode_from(inner, pane, aggressive, mode, source)
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct PanePlace {
+    path: Vec<(SplitId, bool)>,
+    zoomed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct ReportedPlace {
+    place: PanePlace,
+    extent: (u16, u16),
+}
+
+fn record_report_place(
+    inner: &mut ServerState,
+    client: ClientId,
+    pane: PaneId,
+    extent: Option<(u16, u16)>,
+) {
+    let reported = pane_place(inner, pane)
+        .zip(extent)
+        .map(|(place, extent)| ReportedPlace { place, extent });
+    let places = inner.reported_pane_places.entry(pane).or_default();
+    match reported {
+        Some(reported) => {
+            places.insert(client, reported);
+        }
+        None => {
+            places.remove(&client);
+        }
+    }
+}
+
+fn pane_place(inner: &ServerState, pane: PaneId) -> Option<PanePlace> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let window = inner.engine.state.windows.get(&window)?;
+    let mut node = window.layout.project();
+    let mut path = Vec::new();
+    loop {
+        match node {
+            zz_protocol::LayoutNode::Pane(found) => {
+                return (found == pane).then(|| PanePlace {
+                    path,
+                    zoomed: window.zoomed_pane == Some(pane),
+                });
+            }
+            zz_protocol::LayoutNode::Split {
+                id, first, second, ..
+            } => {
+                let in_first = first.contains(pane);
+                path.push((id, in_first));
+                node = if in_first { *first } else { *second };
+            }
+        }
+    }
 }
 
 /// The layout learns what the owner client reported, so the cell the pty is
@@ -100057,6 +100286,406 @@ bind - split-window -v -c "#{pane_current_path}"
                 r#"{"t":"h","w":119,"h":23,"x":0,"y":0,"c":[{"t":"p","w":108,"h":23,"x":0,"y":0,"#
             ) && layout.contains(r#"{"t":"p","w":10,"h":23,"x":109,"y":0,"#),
             "{layout}"
+        );
+    }
+
+    #[test]
+    fn a_detached_split_keeps_the_window_its_client_reported() {
+        for (axis, first, second) in [("-h", "40x23", "39x23"), ("-v", "80x11", "80x11")] {
+            let shared = Arc::new(Shared::new(1));
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                OutboundMailbox::new(),
+            );
+            let mut context = ExecutionContext::default();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "new-session",
+                        [
+                            "-d",
+                            "-s",
+                            "detached-split",
+                            "-x",
+                            "80",
+                            "-y",
+                            "23",
+                            QUIET_PANE_COMMAND,
+                        ],
+                    ),
+                )
+                .expect("create session");
+            let session = context.session.expect("session id");
+            let pane = context.pane.expect("pane id");
+            shared.attach(client, session).expect("attach");
+            assert_eq!(
+                shared.inner.lock().engine.pane_geometry(pane),
+                Some((80, 23))
+            );
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns: 80,
+                        rows: 23,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("client measurement");
+            assert_eq!(
+                shared.inner.lock().engine.pane_geometry(pane),
+                Some((80, 23))
+            );
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("split-window", ["-d", axis, QUIET_PANE_COMMAND]),
+                )
+                .expect("split the window");
+            let panes = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "list-panes",
+                        [
+                            "-F",
+                            "#{pane_width}x#{pane_height} #{window_width}x#{window_height}",
+                        ],
+                    ),
+                )
+                .expect("list-panes")
+                .output;
+            assert_eq!(
+                panes,
+                format!("{first} 80x23\n{second} 80x23"),
+                "split-window -d {axis} keeps the window at the reported 80x23"
+            );
+
+            let run = |context: &mut ExecutionContext, args: &[&str]| {
+                shared
+                    .execute(
+                        client,
+                        ClientKind::Interactive,
+                        context,
+                        &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                    )
+                    .expect("command")
+                    .output
+            };
+            run(&mut context, &["new-window", QUIET_PANE_COMMAND]);
+            let hidden = context.pane.expect("new window pane");
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ResizeTerminal {
+                        pane: hidden,
+                        columns: 80,
+                        rows: 23,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("client measurement");
+            run(&mut context, &["select-window", "-t", ":0"]);
+            run(
+                &mut context,
+                &["split-window", "-d", axis, "-t", ":1", QUIET_PANE_COMMAND],
+            );
+            run(&mut context, &["select-window", "-t", ":1"]);
+            assert_eq!(
+                run(
+                    &mut context,
+                    &[
+                        "list-panes",
+                        "-t",
+                        ":1",
+                        "-F",
+                        "#{pane_width}x#{pane_height} #{window_width}x#{window_height}",
+                    ],
+                ),
+                format!("{first} 80x23\n{second} 80x23"),
+                "split-window -d {axis} in an unseen window keeps it at 80x23 once selected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stale_report_leaves_the_latest_control_size_to_write_back() {
+        let shared = Arc::new(Shared::new(1));
+        let run =
+            |client: ClientId, kind: ClientKind, context: &mut ExecutionContext, args: &[&str]| {
+                shared
+                    .execute(
+                        client,
+                        kind,
+                        context,
+                        &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                    )
+                    .expect("command")
+                    .output
+            };
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "stale-control",
+                "-x",
+                "80",
+                "-y",
+                "23",
+                QUIET_PANE_COMMAND,
+            ],
+        );
+        let session = context.session.expect("session id");
+        shared.attach(client, session).expect("attach");
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["new-window", QUIET_PANE_COMMAND],
+        );
+        let hidden = context.pane.expect("new window pane");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: hidden,
+                    columns: 80,
+                    rows: 23,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            )
+            .expect("client measurement");
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["select-window", "-t", ":0"],
+        );
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["split-window", "-d", "-h", "-t", ":1", QUIET_PANE_COMMAND],
+        );
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        shared.attach(control, session).expect("attach control");
+        let mut control_context = ExecutionContext::default();
+        run(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            &["refresh-client", "-C", "100x24"],
+        );
+        assert_eq!(
+            run(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &[
+                    "list-panes",
+                    "-t",
+                    ":1",
+                    "-F",
+                    "#{pane_width}x#{pane_height} #{window_width}x#{window_height}",
+                ],
+            ),
+            "50x24 100x24\n49x24 100x24",
+            "the latest control client sizes the window past a stale interactive report"
+        );
+    }
+
+    #[test]
+    fn one_client_fresh_report_leaves_another_client_report_stale() {
+        let shared = Arc::new(Shared::new(1));
+        let run = |client: ClientId, context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+                .output
+        };
+        let report = |client: ClientId, context: &mut ExecutionContext, pane, columns| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns,
+                        rows: 23,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("client measurement");
+        };
+        let register = || {
+            shared
+                .register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new())
+                .0
+        };
+        let (first, second) = (register(), register());
+        let mut context = ExecutionContext::default();
+        run(
+            first,
+            &mut context,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "two-reports",
+                "-x",
+                "80",
+                "-y",
+                "23",
+                QUIET_PANE_COMMAND,
+            ],
+        );
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+        shared.attach(second, session).expect("attach second");
+        shared.attach(first, session).expect("attach first");
+        report(first, &mut context, pane, 80);
+        report(second, &mut context, pane, 80);
+        run(
+            first,
+            &mut context,
+            &["split-window", "-d", "-h", QUIET_PANE_COMMAND],
+        );
+        report(second, &mut context, pane, 40);
+        assert_eq!(
+            run(
+                first,
+                &mut context,
+                &[
+                    "list-panes",
+                    "-F",
+                    "#{pane_width}x#{pane_height} #{window_width}x#{window_height}",
+                ],
+            ),
+            "40x23 80x23\n39x23 80x23",
+            "the second client's fresh report does not revive the latest client's stale one"
+        );
+    }
+
+    #[test]
+    fn a_stale_report_still_bounds_a_smallest_window_by_its_client_size() {
+        let shared = Arc::new(Shared::new(1));
+        let run =
+            |client: ClientId, kind: ClientKind, context: &mut ExecutionContext, args: &[&str]| {
+                shared
+                    .execute(
+                        client,
+                        kind,
+                        context,
+                        &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                    )
+                    .expect("command")
+                    .output
+            };
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "stale-smallest",
+                "-x",
+                "80",
+                "-y",
+                "23",
+                QUIET_PANE_COMMAND,
+            ],
+        );
+        let session = context.session.expect("session id");
+        let pane = context.pane.expect("pane id");
+        shared.attach(client, session).expect("attach");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane,
+                    columns: 80,
+                    rows: 23,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            )
+            .expect("client measurement");
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["set-window-option", "-g", "window-size", "smallest"],
+        );
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        shared.attach(control, session).expect("attach control");
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["split-window", "-d", "-h", QUIET_PANE_COMMAND],
+        );
+        let mut control_context = ExecutionContext::default();
+        let mut window_size = |size: &str| {
+            run(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &["refresh-client", "-C", size],
+            );
+            run(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &["display-message", "-p", "#{window_width}x#{window_height}"],
+            )
+        };
+        assert_eq!(window_size("60x24"), "60x23");
+        assert_eq!(
+            window_size("100x24"),
+            "80x23",
+            "the stale 80-column client bounds a smallest window again once control grows"
         );
     }
 

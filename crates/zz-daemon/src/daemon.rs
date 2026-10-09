@@ -578,8 +578,21 @@ fn client_lifecycle_event(
     if !matches!(kind, ClientKind::Interactive | ClientKind::Control) {
         return None;
     }
+    let registered = inner.client(client);
+    let origin = registered
+        .and_then(|c| c.origin)
+        .or_else(|| {
+            let environment = registered.and_then(|c| c.environment.as_ref())?;
+            ["TMUX_PANE", "ZZ_PANE"]
+                .into_iter()
+                .find_map(|name| environment.map().get(name)?.as_str().parse().ok())
+        })
+        .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane));
     let context = client_attached_session(inner, client).map_or_else(
         || {
+            if let Some(origin) = origin {
+                return origin;
+            }
             inner.engine.state.most_recent_context().map_or_else(
                 ExecutionContext::default,
                 |(session, window, pane)| {
@@ -11703,7 +11716,6 @@ impl Shared {
             let mut variables = context.format_variables.clone();
             if name.starts_with('@')
                 && variables.get("hook_event") == Some(&name)
-                && !variables.contains_key("hook_client")
                 && client != ClientId(u64::MAX)
             {
                 let client_name = client_format_name(&self.inner.lock(), client);
@@ -23556,6 +23568,8 @@ impl Shared {
             self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
             self.publish_snapshot();
         }
+        let events = take_pane_mode_hook_events(&mut self.inner.lock());
+        self.run_event_hooks(events);
         self.publish_mux_snapshots();
     }
 
@@ -28081,6 +28095,7 @@ impl Shared {
             zz_terminal::SessionStatus::Failed(_) => (true, None, None),
             zz_terminal::SessionStatus::Starting | zz_terminal::SessionStatus::Running => return,
         };
+        self.raise_shell_marks(pane, terminal);
         let pipe = {
             let mut inner = self.inner.lock();
             inner
@@ -53934,6 +53949,86 @@ mod tests {
                         && keys == &[zz_protocol::KeyToken::Literal("x".to_owned())]
                 ))
         );
+    }
+
+    #[test]
+    fn customize_quit_fires_the_mode_exit_hooks_without_further_input() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-quit", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+            )
+            .expect("enter customize mode");
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        shared.apply_customize_result(
+            client,
+            &mut context,
+            pane,
+            mode,
+            &CustomizeResult {
+                close: true,
+                commands: Vec::new(),
+                menu: None,
+            },
+        );
+        let inner = shared.inner.lock();
+        assert!(!inner.pane_modes.contains_key(&pane));
+        assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn user_event_hook_client_is_the_invoking_client() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (attached, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "event-client", &[attached]);
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for args in [
+            vec!["-g", "@ping", "set -gF @pong '#{hook_client}'"],
+            vec!["-E", "@ping"],
+        ] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", args),
+                )
+                .expect("set-hook");
+        }
+        let expected = client_format_name(&shared.inner.lock(), command);
+        assert_ne!(expected, client_format_name(&shared.inner.lock(), attached));
+        let shown = shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gv", "@pong"]),
+            )
+            .expect("show the hook's write");
+        assert_eq!(shown.output.to_string().trim_end(), expected);
     }
 
     fn register_wait_clients(shared: &Shared, clients: impl IntoIterator<Item = u64>) {

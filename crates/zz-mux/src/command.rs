@@ -10822,23 +10822,6 @@ impl MuxEngine {
         };
         let mut hook_context = target_context;
         let mut variables = BTreeMap::from([("hook_event".to_owned(), name.clone())]);
-        let client = expand_format_with_hooks(
-            "#{client_name}",
-            self,
-            FormatContext {
-                session: hook_context.session,
-                window: hook_context.window,
-                pane: hook_context.pane,
-                active_session: context.session,
-                format_client: context.target_format_client(),
-                format_type: FormatType::Pane,
-            },
-            hooks,
-        )
-        .to_string();
-        if !client.is_empty() {
-            variables.insert("hook_client".to_owned(), client);
-        }
         if let Some(session) = hook_context.session {
             variables.insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
             if let Some(state) = self.state.sessions.get(&session) {

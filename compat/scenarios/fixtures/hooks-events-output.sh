@@ -13,6 +13,9 @@ if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
             "$ZZ_SMOKE_ZZ_BIN" --socket "$ZZ_SMOKE_ZZ_SOCKET" \
             -C attach-session -t w
     }
+    inside_control_client() {
+        "$ZZ_SMOKE_ZZ_BIN" --socket "$ZZ_SMOKE_ZZ_SOCKET" -C "$@"
+    }
 else
     side=tmux
     main_client() {
@@ -22,6 +25,9 @@ else
         env -u TMUX -u TMUX_PANE \
             "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" \
             -C attach-session -t w
+    }
+    inside_control_client() {
+        "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" -C "$@"
     }
 fi
 
@@ -73,6 +79,15 @@ main_client set-hook -g client-closed "set -gF @hev-closed '#{hook}/#{hook_event
 control_client </dev/null >/dev/null 2>&1 || true
 wait_option @hev-created
 wait_option @hev-closed
+main_client new-session -d -s hev-recent
+main_client set-option -g @hev-origin ''
+main_client set-hook -g client-created "set -gF @hev-origin '#{hook_session_name}'"
+origin_pane="$(main_client display-message -p -t w:0.0 '#{pane_id}')"
+TMUX_PANE="$origin_pane" ZZ_PANE="$origin_pane" inside_control_client \
+    new-session -d -s hev-made </dev/null >/dev/null 2>&1 || true
+wait_option @hev-origin
+main_client kill-session -t hev-made 2>/dev/null || true
+main_client kill-session -t hev-recent
 main_client set-hook -gu client-created
 main_client set-hook -gu client-closed
 
@@ -98,6 +113,18 @@ while [ "$attempt" -lt 200 ]; do
 done
 seen="$seen burst=$(main_client show-options -gqv @hev-burst)"
 main_client kill-pane -t "$burst"
+
+cat >"$work/final.sh" <<'FINAL'
+#!/bin/sh
+while [ ! -e "$1" ]; do sleep 0.05; done
+printf '\033]133;C\007\033]133;D;7\007'
+FINAL
+main_client set-option -g @hev-final ''
+main_client set-hook -g pane-command-finished "set -gF @hev-final '#{hook}/#{hook_command_status}'"
+main_client split-window -d -t w:0 "sh '$work/final.sh' '$work/final-go'"
+: >"$work/final-go"
+wait_option @hev-final
+main_client set-hook -gu pane-command-finished
 
 main_client set-option -t w @hev-flag 0
 main_client set-option -g @hev-monlog ''

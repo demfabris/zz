@@ -924,10 +924,9 @@ pub(super) fn mux_hook_events_in(
             (after.session(*session), after.window(*window))
         {
             if before.window(*window).is_none() && created_windows.insert(*window) {
-                for (pane, _) in after_panes
-                    .iter()
-                    .filter(|(pane, (owner, _, _))| *owner == *window && !before_panes.contains_key(pane))
-                {
+                for (pane, _) in after_panes.iter().filter(|(pane, (owner, _, _))| {
+                    *owner == *window && !before_panes.contains_key(pane)
+                }) {
                     events.push(pane_created_event(*pane, *window, after));
                 }
                 events.push(window_payload_event("window-created", *window, after));
@@ -1145,6 +1144,44 @@ pub(super) fn mux_hook_events_in(
     events
 }
 
+fn zoom_cycle_events(
+    engine: &MuxEngine,
+    window: WindowId,
+    view: &MuxHookSnapshot,
+) -> Vec<PendingHookEvent> {
+    let Some(state) = view.window(window) else {
+        return Vec::new();
+    };
+    let layout_changed = || {
+        window_event(
+            "window-layout-changed",
+            window,
+            state.session,
+            state.name,
+            state.active_pane,
+            view,
+        )
+    };
+    let border = engine.pane_border_status(window);
+    let resized = state.zoomed_pane.and_then(|pane| {
+        let zoomed = state.layout.displayed_pane_size(pane, Some(pane), border)?;
+        let tiled = state.layout.displayed_pane_size(pane, None, border)?;
+        (zoomed != tiled).then_some((pane, zoomed, tiled))
+    });
+    let mut events = Vec::new();
+    if let Some((pane, zoomed, tiled)) = resized {
+        events.push(pane_resized_event(pane, window, tiled, zoomed, view));
+    }
+    events.push(window_payload_event("window-unzoomed", window, view));
+    events.push(layout_changed());
+    if let Some((pane, zoomed, tiled)) = resized {
+        events.push(pane_resized_event(pane, window, zoomed, tiled, view));
+    }
+    events.push(window_payload_event("window-zoomed", window, view));
+    events.push(layout_changed());
+    events
+}
+
 pub(super) fn apply_operation_events(
     engine: &MuxEngine,
     effects: &[MuxEffect],
@@ -1179,8 +1216,7 @@ pub(super) fn apply_operation_events(
                         || event.variables.get(HOOK_WINDOW_CONTEXT_FORMAT) != Some(&id)
                 });
                 let view = MuxHookSnapshot::capture(engine);
-                events.push(window_payload_event("window-unzoomed", *window, &view));
-                events.push(window_payload_event("window-zoomed", *window, &view));
+                events.extend(zoom_cycle_events(engine, *window, &view));
             }
             MuxEffect::PaneRespawned { pane, empty, .. } => {
                 let Some(window) = engine.state.window_for_pane(*pane) else {
@@ -1188,9 +1224,10 @@ pub(super) fn apply_operation_events(
                 };
                 let view = MuxHookSnapshot::capture(engine);
                 let mut event = pane_created_event(*pane, window, &view);
-                event
-                    .variables
-                    .insert("hook_created_empty".to_owned(), u8::from(*empty).to_string());
+                event.variables.insert(
+                    "hook_created_empty".to_owned(),
+                    u8::from(*empty).to_string(),
+                );
                 event
                     .variables
                     .insert("hook_created_respawn".to_owned(), "1".to_owned());
@@ -1269,7 +1306,10 @@ pub(super) fn server_mode_hook_events(
     events
 }
 
-pub(super) fn copy_mode_exit_hook_events(pane: PaneId, engine: &MuxEngine) -> Vec<PendingHookEvent> {
+pub(super) fn copy_mode_exit_hook_events(
+    pane: PaneId,
+    engine: &MuxEngine,
+) -> Vec<PendingHookEvent> {
     ["pane-mode-exited", "pane-mode-changed"]
         .into_iter()
         .filter_map(|name| PendingHookEvent::live_pane(name, pane, engine))
@@ -1289,8 +1329,10 @@ impl PendingHookEvent {
         };
         self.variables
             .insert(key.to_owned(), "copy-mode".to_owned());
-        self.variables
-            .insert("hook_mode_entered".to_owned(), u8::from(entered).to_string());
+        self.variables.insert(
+            "hook_mode_entered".to_owned(),
+            u8::from(entered).to_string(),
+        );
     }
 
     pub(super) fn live_pane(name: &'static str, pane: PaneId, engine: &MuxEngine) -> Option<Self> {

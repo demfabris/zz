@@ -69,8 +69,12 @@ set -g @zc ''
 set-hook -g window-zoomed "set -gaF @zc '#{hook}/#{hook_window}+'"
 set-hook -g window-unzoomed "set -gaF @zc '#{hook}/#{hook_window}+'"
 resize-pane -Z -t w:0.0
+set-hook -g window-layout-changed "set -gaF @zc '#{hook}/#{hook_window}+'"
+set-hook -g pane-resized "set -gaF @zc '#{hook}/#{hook_pane}/#{hook_width}x#{hook_height}/#{hook_old_width}x#{hook_old_height}+'"
 swap-pane -Z -s w:0.0 -t w:0.0
 out: show -gv @zc
+set-hook -gu window-layout-changed
+set-hook -gu pane-resized
 resize-pane -Z -t w:0.0
 set-hook -gu window-zoomed
 set-hook -gu window-unzoomed

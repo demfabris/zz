@@ -2092,6 +2092,7 @@ impl PaneActor {
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
         }
+        publisher.push_shell_marks(engine_filter.take_shell_marks());
         engine_filter.program_status_changed |= engine_filter.program_status.program_left();
         if let Some(status) = engine_filter.take_program_status() {
             publisher.set_program_status(status);

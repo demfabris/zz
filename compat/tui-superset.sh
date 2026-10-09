@@ -1147,7 +1147,7 @@ run_binding_pass() {
   bound_message capture-browser 'capture-browser needs an output path (-o)' capture-browser
   bound_message copy-mode-search-prompt 'terminal search is unsupported here' \
     copy-mode-search-prompt -t "$pane"
-  bound_message import-tmux-config 'no tmux configuration found' import-tmux-config
+  bound_message import-tmux-config 'No tmux configuration found' import-tmux-config
   bound_message restart-agent-pane "pane $pane is not an agent" restart-agent-pane -t "$pane"
   bound_message select-pane-kind \
     'select-pane-kind requires exactly one of: terminal, browser, agent, editor' select-pane-kind

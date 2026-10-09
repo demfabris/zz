@@ -970,6 +970,32 @@ impl Model {
         crate::mode_view::resolved_style(&border.style, &self.status.theme)
     }
 
+    /// `tty_default_colours`: the pane's grounds from `window-style`, each
+    /// replaced by `window-active-style`'s where the active pane sets one.
+    pub fn pane_window_style(&self, pane: PaneId) -> zz_protocol::TmuxStyle {
+        let Some(border) = self
+            .status
+            .pane_borders
+            .iter()
+            .find(|border| border.pane == pane)
+        else {
+            return zz_protocol::TmuxStyle::default();
+        };
+        let resolve = |value: &str| {
+            crate::mode_view::resolved_style(value, &self.status.theme).unwrap_or_default()
+        };
+        let base = resolve(&border.window_style);
+        let active = resolve(&border.window_active_style);
+        let set = |colour: Option<zz_protocol::TmuxColour>| {
+            colour.filter(|colour| *colour != zz_protocol::TmuxColour::Default)
+        };
+        zz_protocol::TmuxStyle {
+            fg: set(active.fg).or(set(base.fg)),
+            bg: set(active.bg).or(set(base.bg)),
+            ..zz_protocol::TmuxStyle::default()
+        }
+    }
+
     pub fn pane_rect(&self, pane: PaneId) -> Option<PaneRect> {
         self.layout
             .panes

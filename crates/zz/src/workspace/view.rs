@@ -2705,10 +2705,7 @@ impl AppView {
             .iter()
             .flat_map(|session| &session.windows)
             .find(|snapshot| snapshot.id == window)
-            .and_then(window_rows)
-            .unwrap_or_else(|| {
-                (self.pane_canvas_bounds.get().size.height / cell.height).floor() as u16
-            });
+            .map_or(0, |snapshot| snapshot.sy);
         self.float_drag = Some(FloatDragState {
             window,
             pane: float.pane,
@@ -4267,14 +4264,6 @@ fn pane_select_command(pane: PaneId) -> CommandInvocation {
     CommandInvocation::new("select-pane", ["-t", &pane.to_string()])
 }
 
-fn window_rows(window: &WindowSnapshot) -> Option<u16> {
-    let layout = zz_mux::legacy_layout(&window.layout_dump);
-    let (_, rest) = layout.split_once(',')?;
-    let (size, _) = rest.split_once(',')?;
-    let (_, rows) = size.split_once('x')?;
-    rows.parse().ok()
-}
-
 /// Toast tag for a daemon-timed message, so an explicit clear retires exactly
 /// the toast that message raised.
 fn timed_message_key(message_id: u64) -> String {
@@ -4442,6 +4431,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
         let attached = SessionId(1);
         let session = zz_protocol::SessionSnapshot {
@@ -4722,6 +4713,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
         MuxSnapshot {
             generation,
@@ -6632,6 +6625,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
         MuxSnapshot {
             generation: 10 + active.0 + generation_bias,
@@ -6986,9 +6981,15 @@ mod tests {
         let floating = PaneId(1);
         let mut snapshot = one_pane_snapshot(1);
         let window = &mut snapshot.sessions[0].windows[0];
-        let mut float_pane = window.panes[&tiled].clone();
+        let mut float_pane = window.panes.remove(&tiled).expect("the one pane to float");
         float_pane.id = floating;
         window.panes.insert(floating, float_pane);
+        window.layout = LayoutNode::Empty;
+        window.active_pane = floating;
+        window.pane_order = vec![floating];
+        window.pane_z_order = vec![floating];
+        window.sx = 100;
+        window.sy = 37;
         let float = FloatingPaneSnapshot {
             pane: floating,
             xoff: 4,
@@ -7001,12 +7002,10 @@ mod tests {
         };
         window.floating = vec![float];
         window.pane_border_status = PaneBorderStatus::Bottom;
-        window.layout_dump = concat!(
-            r#"{"V":2,"L":{"t":"v","w":100,"h":37,"x":0,"y":0,"c":["#,
-            r#"{"t":"p","w":100,"h":37,"x":0,"y":0,"l":1,"i":0,"I":"%0"},"#,
-            r#"{"t":"p","w":22,"h":8,"x":3,"y":29,"a":true,"i":1,"z":0,"I":"%1"}]}}"#
-        )
-        .to_owned();
+        window.layout_dump =
+            r#"{"V":2,"L":{"t":"p","w":22,"h":8,"x":3,"y":29,"a":true,"i":0,"z":0,"I":"%1"}}"#
+                .to_owned();
+        window.visible_layout_dump.clone_from(&window.layout_dump);
         mux.update(cx, |mux, cx| {
             mux.attach_snapshot_for_test(SessionId(0), snapshot, cx);
         });
@@ -7025,7 +7024,7 @@ mod tests {
             assert_eq!(
                 workspace.float_drag.map(|drag| drag.area.rows),
                 Some(37),
-                "the bottom status row is judged on the daemon's window, not the canvas"
+                "a window with no tiled pane judges the bottom status row on the daemon's height"
             );
         });
     }
@@ -7814,6 +7813,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
 
         assert!(pending.still_predicts(Some(&window), 12));

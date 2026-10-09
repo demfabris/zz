@@ -844,6 +844,14 @@ close_on_click, close_on_cancel }>`, both `#[serde(default)]`; a float's cell is
 in window cells, offsets may be negative, and `visible` is false for a float hidden by zoom or
 zoomed itself. `TreeOp::WindowLayout` appends the same two fields. `LayoutNode` appends the unit
 variant `Empty`, which `WindowSnapshot.layout` holds when the window has no tiled pane.
+`WindowSnapshot` then appends the window's own size, `sx` and `sy` (`#[serde(default)]`, 0 from
+an older encoder), and `TreeOp::WindowLayout` appends the same two, so a client knows the window's
+height when no tiled pane's layout dump carries it (float.clients: a float drag's bottom-status
+row). `PaneBorderPresentation` appends `window_style` and `window_active_style`
+(`#[serde(default)]`, empty unless a `window-style` or `window-active-style` is set anywhere), the
+expanded options `tty_default_colours` takes a pane's grounds from, with `window_active_style`
+sent for the active pane only; the raw TUI resolves their theme colours through the status line's
+theme slots, so a `display-popup`'s `popup-style` paints the modal's default cells.
 `InputMessage::MouseKey` appends `press: Option<(u16, u16)>` (`#[serde(default)]`), the client cell
 of the button-down that latched the gesture. `float_wire_tests` pins the encodings.
 `display-popup` is now a modal floating pane, so `EventPayload::Popup` and `InputMessage::Popup`

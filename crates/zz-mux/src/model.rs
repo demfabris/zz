@@ -4654,6 +4654,7 @@ impl MuxState {
         let pane_base_index = self.pane_base_index(window.id);
         let layout_dump = window.layout_string(LayoutFormat::V2, pane_base_index);
         let visible_layout_dump = window.visible_layout_string(LayoutFormat::V2, pane_base_index);
+        let (sx, sy) = window.layout.extent();
         WindowSnapshot {
             id: window.id,
             index: window.index,
@@ -4725,6 +4726,8 @@ impl MuxState {
                 close_on_click: modal.close_on_click,
                 close_on_cancel: modal.close_on_cancel,
             }),
+            sx,
+            sy,
         }
     }
 

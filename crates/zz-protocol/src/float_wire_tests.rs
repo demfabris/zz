@@ -55,6 +55,8 @@ fn window() -> WindowSnapshot {
             close_on_click: false,
             close_on_cancel: true,
         }),
+        sx: 80,
+        sy: 300,
     }
 }
 
@@ -72,7 +74,8 @@ fn snapshot(window: WindowSnapshot) -> MuxSnapshot {
     }
 }
 
-const FLOATING_AND_MODAL_TAIL: [u8; 14] = [1, 7, 5, 4, 20, 6, 1, 0, 1, 1, 7, 1, 0, 1];
+const FLOATING_MODAL_AND_SIZE_TAIL: [u8; 17] =
+    [1, 7, 5, 4, 20, 6, 1, 0, 1, 1, 7, 1, 0, 1, 80, 172, 2];
 
 #[test]
 fn empty_layout_holds_tag_two() {
@@ -89,10 +92,10 @@ fn empty_layout_holds_tag_two() {
 }
 
 #[test]
-fn window_snapshot_appends_floating_then_modal() {
+fn window_snapshot_appends_floating_modal_then_size() {
     let window = window();
     let bytes = postcard::to_stdvec(&window).unwrap();
-    assert!(bytes.ends_with(&FLOATING_AND_MODAL_TAIL));
+    assert!(bytes.ends_with(&FLOATING_MODAL_AND_SIZE_TAIL));
     assert_eq!(
         postcard::from_bytes::<WindowSnapshot>(&bytes).unwrap(),
         window
@@ -101,16 +104,20 @@ fn window_snapshot_appends_floating_then_modal() {
     let object = json.as_object_mut().unwrap();
     object.remove("floating");
     object.remove("modal");
+    object.remove("sx");
+    object.remove("sy");
     let old = serde_json::from_value::<WindowSnapshot>(json).unwrap();
     assert!(old.floating.is_empty());
     assert_eq!(old.modal, None);
+    assert_eq!((old.sx, old.sy), (0, 0));
 }
 
 #[test]
-fn window_layout_delta_carries_floating_and_modal() {
+fn window_layout_delta_carries_floating_modal_and_size() {
     let mut before = window();
     before.floating.clear();
     before.modal = None;
+    before.sy = 24;
     let after = window();
     let before = snapshot(before);
     let after = snapshot(after);
@@ -122,8 +129,26 @@ fn window_layout_delta_carries_floating_and_modal() {
         .collect::<Vec<_>>();
     assert_eq!(layouts.len(), 1);
     let bytes = postcard::to_stdvec(layouts[0]).unwrap();
-    assert!(bytes.ends_with(&FLOATING_AND_MODAL_TAIL));
+    assert!(bytes.ends_with(&FLOATING_MODAL_AND_SIZE_TAIL));
     assert_eq!(&postcard::from_bytes::<TreeOp>(&bytes).unwrap(), layouts[0]);
+    let mut applied = before;
+    delta.apply(&mut applied).unwrap();
+    assert_eq!(applied.sessions, after.sessions);
+}
+
+#[test]
+fn a_window_size_change_alone_sends_the_layout() {
+    let mut before = window();
+    before.sy = 24;
+    let before = snapshot(before);
+    let after = snapshot(window());
+    let delta = TreeDelta::between(&before, &after);
+    assert!(
+        delta
+            .ops
+            .iter()
+            .any(|op| matches!(op, TreeOp::WindowLayout { sy: 300, .. }))
+    );
     let mut applied = before;
     delta.apply(&mut applied).unwrap();
     assert_eq!(applied.sessions, after.sessions);

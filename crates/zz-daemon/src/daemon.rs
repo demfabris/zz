@@ -41983,8 +41983,12 @@ fn status_request_with_facts(
 }
 
 const BORDER_FORMAT_CACHE_BYTES: usize = 1024 * 1024;
-const BORDER_FORMAT_TEMPLATES: [&str; 2] =
-    ["#{E:pane-border-style}", "#{E:pane-active-border-style}"];
+const BORDER_FORMAT_TEMPLATES: [&str; 4] = [
+    "#{E:pane-border-style}",
+    "#{E:pane-active-border-style}",
+    "#{E:window-style}",
+    "#{E:window-active-style}",
+];
 
 struct CachedBorderPresentations {
     revision: (u64, u64, u64, u64),
@@ -42061,6 +42065,8 @@ impl CachedBorderPresentations {
             bytes = bytes
                 .saturating_add(pane.context.retained_bytes())
                 .saturating_add(pane.presentation.style.capacity())
+                .saturating_add(pane.presentation.window_style.capacity())
+                .saturating_add(pane.presentation.window_active_style.capacity())
                 .saturating_add(
                     pane.callback_values
                         .capacity()
@@ -42210,6 +42216,27 @@ fn border_format_style(
     crate::status::expand_style(format, context, hooks)
 }
 
+/// `tty_default_colours` takes a pane's grounds from `window-style`, and
+/// from `window-active-style` where the active pane's sets one, so the
+/// client gets both, expanded, and resolves their theme colours itself.
+fn window_style_presentation(
+    engine: &MuxEngine,
+    active: bool,
+    context: &zz_mux::StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> (String, String) {
+    if !engine.has_window_style_settings() {
+        return (String::new(), String::new());
+    }
+    let window_style = crate::status::expand_style(BORDER_FORMAT_TEMPLATES[2], context, hooks);
+    let window_active_style = if active {
+        crate::status::expand_style(BORDER_FORMAT_TEMPLATES[3], context, hooks)
+    } else {
+        String::new()
+    };
+    (window_style, window_active_style)
+}
+
 #[cfg(test)]
 #[path = "daemon/format_border_tests.rs"]
 mod format_border_tests;
@@ -42323,10 +42350,16 @@ fn border_presentations_at(
             if let Some(count) = pane_in_mode {
                 hooks.set_pane_in_mode_count(*pane, count);
             }
-            let format = BORDER_FORMAT_TEMPLATES[usize::from(*pane == window_state.active_pane)];
+            let active = *pane == window_state.active_pane;
+            let format = BORDER_FORMAT_TEMPLATES[usize::from(active)];
+            let style = border_format_style(format, &context, &mut hooks);
+            let (window_style, window_active_style) =
+                window_style_presentation(&inner.engine, active, &context, &mut hooks);
             let presentation = zz_protocol::PaneBorderPresentation {
                 pane: *pane,
-                style: border_format_style(format, &context, &mut hooks),
+                style,
+                window_style,
+                window_active_style,
             };
             let mut callback_context = zz_mux::StatusContext::default();
             callback_context.session_id.clone_from(&context.session_id);
@@ -42388,14 +42421,16 @@ fn uncached_border_presentations(
             .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
             .map(|pane| {
                 let context = contexts.status_context(Some(session), Some(window), Some(*pane));
-                let format = if *pane == window_state.active_pane {
-                    "#{E:pane-active-border-style}"
-                } else {
-                    "#{E:pane-border-style}"
-                };
+                let active = *pane == window_state.active_pane;
+                let format = BORDER_FORMAT_TEMPLATES[usize::from(active)];
+                let style = border_format_style(format, &context, &mut hooks);
+                let (window_style, window_active_style) =
+                    window_style_presentation(&inner.engine, active, &context, &mut hooks);
                 zz_protocol::PaneBorderPresentation {
                     pane: *pane,
-                    style: border_format_style(format, &context, &mut hooks),
+                    style,
+                    window_style,
+                    window_active_style,
                 }
             })
             .collect(),

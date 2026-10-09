@@ -317,6 +317,17 @@ Recorded by float.clients (2026-10-09).
   names kept, so clients match the retired tag without naming the popup.
 - The raw TUI fills a window with no tiled pane with the default `fill-character` inside cell
   (`bg=themedarkgrey`); a user `fill-character` is not read.
+- `WindowSnapshot` and `TreeOp::WindowLayout` also append the window's `sx` and `sy`: with no tiled
+  pane the layout dump carries no window height, and the drag's bottom-status correction needs it.
+- `PaneBorderPresentation` also appends each pane's expanded `window-style` and, for the active
+  pane, `window-active-style`. The raw TUI paints a pane's default cells in them, per ground as
+  `tty_default_colours` takes them, with theme colours resolved through the status line's slots, so
+  a `display-popup`'s `popup-style` (`bg=themedarkgrey,fg=themewhite`) matches 3.8. The desktop and
+  the web/iOS clients keep drawing the daemon's pane appearance, where `window-style` is already
+  applied but a theme colour maps to zz's own terminal palette slot.
+- `compat/tui-overlays.sh` asserts its popup cases with three known differences rewritten out, each
+  from the modal-pane ruling (gap `display-popup.modal-pane`): the title one column right of 3.8's
+  box, the window's `O` flag on the status row, and a centred popup a row higher at an odd height.
 
 # zz-only extensions
 

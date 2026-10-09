@@ -2954,6 +2954,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
 
         assert_eq!(window_pane_rect(&window, PaneId(1)), None);

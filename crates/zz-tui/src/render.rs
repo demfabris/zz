@@ -52,6 +52,7 @@ pub(crate) fn merge_damage(damage: &mut FrameDamage, incoming: FrameDamage) {
 struct PaintedPane {
     viewport: TerminalViewport,
     rect: Rect,
+    defaults: [Option<TmuxColour>; 2],
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -913,7 +914,9 @@ impl Renderer {
                         })
                     });
                     self.blank_is_default = cleared_to_default || known_blank;
+                    self.terminal_defaults = model.pane_window_style(entry.pane);
                     self.paint_terminal(entry.pane, viewport, content, force, damage.as_ref());
+                    self.terminal_defaults = TmuxStyle::default();
                     self.blank_is_default = false;
                     if let Some(mode) = mode {
                         self.paint_mode_position(mode, viewport, content, model);
@@ -1086,9 +1089,11 @@ impl Renderer {
         force: bool,
         damage: Option<&FrameDamage>,
     ) {
+        let defaults = [self.terminal_defaults.fg, self.terminal_defaults.bg];
         if !force
             && self.painted.get(&pane).is_some_and(|previous| {
                 previous.rect == rect
+                    && previous.defaults == defaults
                     && previous.viewport.columns == viewport.columns
                     && previous.viewport.rows == viewport.rows
                     && previous.viewport.foreground == viewport.foreground
@@ -1103,6 +1108,7 @@ impl Renderer {
         let previous = self.painted.remove(&pane);
         let structural_change = previous.as_ref().is_none_or(|previous| {
             previous.rect != rect
+                || previous.defaults != defaults
                 || previous.viewport.columns != viewport.columns
                 || previous.viewport.rows != viewport.rows
                 || previous.viewport.foreground != viewport.foreground
@@ -1136,6 +1142,7 @@ impl Renderer {
             PaintedPane {
                 viewport: viewport.clone(),
                 rect,
+                defaults,
             },
         );
     }
@@ -4402,6 +4409,8 @@ mod tests {
                     pane_z_order: Vec::new(),
                     floating: Vec::new(),
                     modal: None,
+                    sx: 0,
+                    sy: 0,
                 }],
                 viewers: Vec::new(),
             }],
@@ -5245,6 +5254,8 @@ mod tests {
                     pane_z_order: Vec::new(),
                     floating: Vec::new(),
                     modal: None,
+                    sx: 0,
+                    sy: 0,
                 }],
                 viewers: Vec::new(),
             }],
@@ -5415,6 +5426,54 @@ mod tests {
             source_placements(&[placement_at(5, 2)], (3, 0))[0].viewport_col,
             2
         );
+    }
+
+    #[test]
+    fn a_float_paints_its_default_cells_in_its_window_style() {
+        let float = zz_protocol::FloatingPaneSnapshot {
+            xoff: 4,
+            yoff: 2,
+            sx: 6,
+            sy: 2,
+            ..CLIPPED
+        };
+        let paint = |window_style: &str, window_active_style: &str| {
+            let mut model = tiled_under_float(float, None);
+            let mut status = (*model.status).clone();
+            status.pane_borders = vec![zz_protocol::PaneBorderPresentation {
+                pane: PaneId(8),
+                style: String::new(),
+                window_style: window_style.to_owned(),
+                window_active_style: window_active_style.to_owned(),
+            }];
+            model.status = std::sync::Arc::new(status);
+            model.viewports.insert(
+                PaneId(8),
+                TerminalViewport::blank(6, 2, SessionStatus::Running),
+            );
+            let entry = model.pane_rect(PaneId(8)).expect("the float's rect");
+            let mut renderer = Renderer::new();
+            renderer.paint_entry(&model, &entry, true, false);
+            (
+                model.pane_window_style(PaneId(8)),
+                String::from_utf8_lossy(&renderer.output).into_owned(),
+            )
+        };
+
+        let (style, output) = paint("bg=themedarkgrey,fg=themewhite", "");
+        assert_eq!(style.fg, Some(TmuxColour::Rgb(0x00e5_e5e5)));
+        assert_eq!(style.bg, Some(TmuxColour::Rgb(0x0026_2626)));
+        assert!(
+            output.contains("\x1b[38;2;229;229;229m\x1b[48;2;38;38;38m      "),
+            "{output:?}"
+        );
+
+        let (_, plain) = paint("", "");
+        assert!(!plain.contains("\x1b[48;2;38;38;38m"), "{plain:?}");
+
+        let (style, _) = paint("fg=blue,bg=red", "bg=green,fg=default");
+        assert_eq!(style.fg, Some(TmuxColour::Basic(4)));
+        assert_eq!(style.bg, Some(TmuxColour::Basic(2)));
     }
 
     #[test]

@@ -2416,6 +2416,8 @@ mod tests {
                             pane_z_order: vec![PaneId(1)],
                             floating: Vec::new(),
                             modal: None,
+                            sx: 0,
+                            sy: 0,
                         }],
                     }],
                     focused_window: Some(WindowId(1)),

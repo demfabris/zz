@@ -30,6 +30,30 @@
       "reason": "Settled 2026-09-02 as a native decision rather than a gap, because the clause it carried describes a zz-only surface with no pinned counterpart. The pin has no remote client at all: pinned tmux d77c9dc6 talks to one local socket, `-L` and `-S` name a path on this machine, and there is no host argument, no forwarding and nothing to preflight, so there is no pin behaviour this slug could be measured against. On the zz side the routing is a design decision the ssh-only consolidation already made: `--host` resolves statically to an ssh lifecycle, because the only forward constructor starts one, and the local CLI already does the part that has a tmux analogue, preparing a whole command vector against an already-running compatible daemon before it commits. An existing-only remote discovery pass would mean a second, connectionless probe channel over ssh purely to classify a vector, which is infrastructure zz does not want to carry for a classification step; the cost of the static route is that a `--host` vector that would have been refused locally is refused after the ssh lifecycle starts instead of before. Reopen only if zz grows a cheap existing-only remote probe for another reason and this classification can ride it."
     },
     {
+      "id": "capture.line-times",
+      "title": "Keep capture-pane -I unimplemented: the engine keeps no per-line history time",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "terminal",
+      "items": [
+        "flag:capture-pane:-I"
+      ],
+      "evidence": [
+        "resource:compat/tmux-oracle.json",
+        "resource:crates/zz-terminal/src/session.rs"
+      ],
+      "acceptance": [
+        "capture-pane -I stays an unsupported flag until the terminal engine records when each line entered history."
+      ],
+      "depends_on": [],
+      "reason": "Registered 2026-10-09 by catch-up item pin.formats-options. In the pin capture-pane -I prints grid_line_time before each line: grid_scroll_history and grid_scroll_history_region stamp a line with the current time as it moves into history, and visible lines print 0. zz's history lives in libghostty, whose pages carry no per-row time, and zz cannot see which rows move into history once the scrollback is at its limit, so a side table in the session would drift from the rows it describes. Printing 0 for every line would look like support and lie about history lines, so the flag keeps answering as unsupported until the engine grows a per-row stamp."
+    },
+    {
       "id": "capture.rich-transports",
       "title": "Add rich capture transports",
       "decision": "native",
@@ -1456,37 +1480,16 @@
       ],
       "owner": "mux",
       "items": [
-        "flag:capture-pane:-I",
         "flag:display-message:-j",
-        "flag:show-hooks:-F",
-        "flag:show-options:-F",
-        "flag:show-window-options:-F",
-        "flag:split-window:-B",
         "format:history_added",
         "format:history_collected",
         "format:history_generation",
-        "format:pane_command_duration",
-        "format:pane_command_end_time",
-        "format:pane_command_running",
-        "format:pane_command_start_time",
-        "format:pane_command_status",
-        "format:pane_last_output_time",
-        "format:pane_last_prompt_time",
         "format:pane_modal_flag",
-        "format:pane_output_generation",
-        "format:pane_private_modes",
-        "format:pane_unzoomed_height",
-        "format:pane_unzoomed_width",
         "format:window_modal_pane",
-        "option-default:fill-character",
-        "option-default:pane-active-border-style",
-        "option-default:status-format",
         "option:clear-on-attach",
         "option:copy-mode-current-line-style",
-        "semantic:fill-character-format-contexts",
         "semantic:format-modifier-animation",
         "semantic:mode-format-contexts-3-8",
-        "semantic:remain-on-exit-failed-key",
         "semantic:show-options-format-contexts"
       ],
       "evidence": [
@@ -1504,7 +1507,7 @@
         "The new context formats resolve: is_inside and is_outside for fill-character, clipboard_invalid, copy_line_numbers and refresh_active, and the customize-mode environment and monitor rows."
       ],
       "depends_on": [],
-      "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item."
+      "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item. 2026-10-09, lane pin.formats-options: remain-on-exit takes failed-key (kept after a failed exit, dismissed by a key like key); the 3.8 defaults of fill-character, pane-active-border-style and status-format[1] and [2] are in; show-options, show-window-options and show-hooks take -F with the option_* contexts and, for show-hooks -B, hook_monitor_target and hook_monitor_format; split-window -B validates against pane-border-lines and sets the new pane's option; pane_command_*, pane_last_output_time, pane_last_prompt_time, pane_output_generation and pane_private_modes come from the pane's own OSC 133 marks, output and DEC private modes, and pane_unzoomed_width and pane_unzoomed_height from the tiled layout cell; is_inside and is_outside are registered native with fill-character, which options.native-mode-styles already accepts; capture-pane -I moved to capture.line-times. Left open: display-message -j needs the json.c port that pin.layout-v2 brings (in review on catchup/pin.layout-v2), and reuses it after that merge; history_added, history_collected and history_generation need an engine counter, because libghostty only exposes the current scrollback row count and lines pushed out at the limit are invisible to zz; pane_modal_flag and window_modal_pane are correct as constants (zz has no modal panes) and close with float.core; clear-on-attach (raw TUI alternate-screen entry on attach; the GPUI client has no alternate screen) and copy-mode-current-line-style (raw TUI copy-mode line paint) are stored only; the A modifier parses, picks frames on the pin's 100 ms clock and expands to nothing outside status formats, and status lines show a frame, but the daemon neither redraws the status line every 100 ms nor bypasses its per-second completed-status cache, and border formats expand it to nothing because border text is stamped into the snapshot; hook_fire_count and hook_fire_time need per-hook fire counters at the firing sites; the 3.8 copy, client and customize mode contexts are not started."
     },
     {
       "id": "pin.hooks-events",

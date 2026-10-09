@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
-Tracked gap groups: **50**. Classified items: **449**.
+Tracked gap groups: **51**. Classified items: **429**.
 
-- Status: open: 11, accepted: 39.
-- Decision: adopt: 11, native: 30, never: 9.
-- Priority: now: 1, next: 10, none: 39.
+- Status: open: 11, accepted: 40.
+- Decision: adopt: 11, native: 31, never: 9.
+- Priority: now: 1, next: 10, none: 40.
 - Closed history entries: 213.
-- Surface: command: 3, flag: 45, extension-flag: 11, native-command: 26, option: 34, option-scope: 4, option-default: 4, format: 58, hook: 21, native-hook: 1, key: 33, binding: 42, native-key: 92, semantic: 66, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 41, extension-flag: 11, native-command: 26, option: 34, option-scope: 4, option-default: 1, format: 47, hook: 21, native-hook: 1, key: 33, binding: 42, native-key: 92, semantic: 64, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 593 command-flag shapes (332 valueless, 253 required-value, 8 optional-value), positional minimum and maximum bounds, 183 options, 214 global formats, 204 scoped literal context pairs across 37 source producers, 5 derived context families, 37 format modifiers, 89 hooks, and 308 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 45 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 11 zz-only flags on tmux command names, 26 native command names, 34 options absent from `BEHAVES`, 58 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 4 option scope mismatches, 4 option default mismatches, 21 currently documented hook-producer gaps, 1 zz-only hook names, 33 omitted default keys, 42 divergent shared default bindings, 92 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 593 command-flag shapes (332 valueless, 253 required-value, 8 optional-value), positional minimum and maximum bounds, 183 options, 214 global formats, 204 scoped literal context pairs across 37 source producers, 5 derived context families, 37 format modifiers, 89 hooks, and 308 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 41 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 11 zz-only flags on tmux command names, 26 native command names, 34 options absent from `BEHAVES`, 47 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 4 option scope mismatches, 1 option default mismatches, 21 currently documented hook-producer gaps, 1 zz-only hook names, 33 omitted default keys, 42 divergent shared default bindings, 92 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -73,6 +73,7 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `aliases.remote-client-preflight` | Route a remote host statically to its ssh lifecycle | native | accepted | none | client | remote, scripts | none |
+| `capture.line-times` | Keep capture-pane -I unimplemented: the engine keeps no per-line history time | native | accepted | none | terminal | scripts | none |
 | `capture.rich-transports` | Add rich capture transports | native | accepted | none | terminal | scripts | none |
 | `clients.interactive-refresh` | Complete interactive client commands | native | accepted | none | client | remote | none |
 | `clients.read-only-and-focus` | Retain native client focus semantics | native | accepted | none | daemon | daily, remote | none |
@@ -131,6 +132,23 @@ Settled 2026-09-02 as a native decision rather than a gap, because the clause it
   - `resource:knowledge/tmux/divergences.md`
 - Acceptance:
   - `A `--host` CLI vector is classified against the static remote route and its ssh lifecycle without an existing-only discovery pass, while the local CLI keeps preparing against an already-running compatible daemon.`
+
+### `capture.line-times`: Keep capture-pane -I unimplemented: the engine keeps no per-line history time
+
+Registered 2026-10-09 by catch-up item pin.formats-options. In the pin capture-pane -I prints grid_line_time before each line: grid_scroll_history and grid_scroll_history_region stamp a line with the current time as it moves into history, and visible lines print 0. zz's history lives in libghostty, whose pages carry no per-row time, and zz cannot see which rows move into history once the scrollback is at its limit, so a side table in the session would drift from the rows it describes. Printing 0 for every line would look like support and lie about history lines, so the flag keeps answering as unsupported until the engine grows a per-row stamp.
+
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
+- Owner: `terminal`
+- User impact: scripts
+- Items: `flag:capture-pane:-I`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:crates/zz-terminal/src/session.rs`
+- Acceptance:
+  - `capture-pane -I stays an unsupported flag until the terminal engine records when each line entered history.`
 
 ### `capture.rich-transports`: Add rich capture transports
 
@@ -933,14 +951,14 @@ Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6
 
 ### `pin.formats-options`: Adopt the 3.8 formats, modifiers and options
 
-Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item.
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item. 2026-10-09, lane pin.formats-options: remain-on-exit takes failed-key (kept after a failed exit, dismissed by a key like key); the 3.8 defaults of fill-character, pane-active-border-style and status-format[1] and [2] are in; show-options, show-window-options and show-hooks take -F with the option_* contexts and, for show-hooks -B, hook_monitor_target and hook_monitor_format; split-window -B validates against pane-border-lines and sets the new pane's option; pane_command_*, pane_last_output_time, pane_last_prompt_time, pane_output_generation and pane_private_modes come from the pane's own OSC 133 marks, output and DEC private modes, and pane_unzoomed_width and pane_unzoomed_height from the tiled layout cell; is_inside and is_outside are registered native with fill-character, which options.native-mode-styles already accepts; capture-pane -I moved to capture.line-times. Left open: display-message -j needs the json.c port that pin.layout-v2 brings (in review on catchup/pin.layout-v2), and reuses it after that merge; history_added, history_collected and history_generation need an engine counter, because libghostty only exposes the current scrollback row count and lines pushed out at the limit are invisible to zz; pane_modal_flag and window_modal_pane are correct as constants (zz has no modal panes) and close with float.core; clear-on-attach (raw TUI alternate-screen entry on attach; the GPUI client has no alternate screen) and copy-mode-current-line-style (raw TUI copy-mode line paint) are stored only; the A modifier parses, picks frames on the pin's 100 ms clock and expands to nothing outside status formats, and status lines show a frame, but the daemon neither redraws the status line every 100 ms nor bypasses its per-second completed-status cache, and border formats expand it to nothing because border text is stamped into the snapshot; hook_fire_count and hook_fire_time need per-hook fire counters at the firing sites; the 3.8 copy, client and customize mode contexts are not started.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `next` / `medium`
 - Owner: `mux`
 - User impact: daily, scripts
-- Items: `flag:capture-pane:-I`, `flag:display-message:-j`, `flag:show-hooks:-F`, `flag:show-options:-F`, `flag:show-window-options:-F`, `flag:split-window:-B`, `format:history_added`, `format:history_collected`, `format:history_generation`, `format:pane_command_duration`, `format:pane_command_end_time`, `format:pane_command_running`, `format:pane_command_start_time`, `format:pane_command_status`, `format:pane_last_output_time`, `format:pane_last_prompt_time`, `format:pane_modal_flag`, `format:pane_output_generation`, `format:pane_private_modes`, `format:pane_unzoomed_height`, `format:pane_unzoomed_width`, `format:window_modal_pane`, `option-default:fill-character`, `option-default:pane-active-border-style`, `option-default:status-format`, `option:clear-on-attach`, `option:copy-mode-current-line-style`, `semantic:fill-character-format-contexts`, `semantic:format-modifier-animation`, `semantic:mode-format-contexts-3-8`, `semantic:remain-on-exit-failed-key`, `semantic:show-options-format-contexts`
+- Items: `flag:display-message:-j`, `format:history_added`, `format:history_collected`, `format:history_generation`, `format:pane_modal_flag`, `format:window_modal_pane`, `option:clear-on-attach`, `option:copy-mode-current-line-style`, `semantic:format-modifier-animation`, `semantic:mode-format-contexts-3-8`, `semantic:show-options-format-contexts`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.json`

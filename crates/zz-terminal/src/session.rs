@@ -34,7 +34,7 @@ use libghostty_vt::{
     terminal::{
         ClipboardContent, ClipboardLocation, ClipboardWriteError, ColorScheme, CompressionMode,
         ConformanceLevel, CursorStyle as GhosttyCursorStyle, DeviceAttributeFeature,
-        DeviceAttributes, DeviceType, GridRead, Mode, Point, PointCoordinate, PointSpace,
+        DeviceAttributes, DeviceType, GridRead, Mode, ModeKind, Point, PointCoordinate, PointSpace,
         PrimaryDeviceAttributes, ScreenSnapshot, ScrollViewport, SecondaryDeviceAttributes,
         SizeReportSize, TertiaryDeviceAttributes,
     },
@@ -453,12 +453,125 @@ struct EngineFilter {
     program_status: ProgramStatus,
     program_status_changed: bool,
     replies: Option<Rc<RefCell<PtyEffects>>>,
+    output: PaneOutputFacts,
+    cursor_blink_set: bool,
+}
+
+/// `format_cb_pane_private_modes`' table, in its order: the DEC private mode
+/// numbers whose state the format lists.
+pub const PRIVATE_MODE_NUMBERS: [u16; 14] = [
+    1, 6, 7, 12, 25, 1000, 1002, 1003, 1004, 1005, 1006, 2004, 2026, 2031,
+];
+
+const CURSOR_BLINK_MODE_BIT: usize = 3;
+
+/// `MODE_CURSOR_BLINKING_SET`: `?12h` and `?12l` both mark the blink state as
+/// the application's, which is the only time `pane_private_modes` lists 12.
+fn csi_sets_cursor_blink(parameters: &[u8], final_byte: u8) -> bool {
+    matches!(final_byte, b'h' | b'l')
+        && parameters
+            .strip_prefix(b"?")
+            .is_some_and(|modes| modes.split(|byte| *byte == b';').any(|mode| mode == b"12"))
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// What `input_parse_pane`, `input_parse_buffer` and `input_osc_133` keep on
+/// `struct window_pane`: the output generation and time, and the OSC 133
+/// prompt and command marks. Times are Unix seconds, 0 for never.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PaneOutputFacts {
+    pub output_generation: u64,
+    pub last_output_time: u64,
+    pub last_prompt_time: u64,
+    pub command_start_time: u64,
+    pub command_end_time: u64,
+    pub command_running: bool,
+    pub command_status: Option<u8>,
+}
+
+impl PaneOutputFacts {
+    fn output(&mut self, now: u64) {
+        self.output_generation += 1;
+        self.last_output_time = now;
+    }
+
+    fn osc_133(&mut self, mark: &[u8], now: u64) {
+        match mark.first() {
+            Some(b'A' | b'N') => self.last_prompt_time = now,
+            Some(b'C') => {
+                self.command_start_time = now;
+                self.command_end_time = 0;
+                self.command_running = true;
+                self.command_status = None;
+            }
+            Some(b'D') => {
+                self.command_end_time = now;
+                self.command_running = false;
+                self.command_status = Some(osc_133_exit_status(mark));
+            }
+            _ => {}
+        }
+    }
+
+    /// `format_cb_pane_command_duration`: up to now while the command runs,
+    /// never negative.
+    #[must_use]
+    pub fn command_duration(&self, now: u64) -> Option<u64> {
+        if self.command_start_time == 0 {
+            return None;
+        }
+        let end = if self.command_running {
+            now
+        } else {
+            self.command_end_time
+        };
+        Some(end.max(self.command_start_time) - self.command_start_time)
+    }
+}
+
+/// `input_osc_133_exit_status`: no status or a `key=value` field reads 0, a
+/// number outside 0..=255 reads 255.
+fn osc_133_exit_status(mark: &[u8]) -> u8 {
+    let Some(rest) = mark.get(1..).and_then(|rest| rest.strip_prefix(b";")) else {
+        return 0;
+    };
+    if rest.is_empty() || rest[0] == b'=' || rest[0] == b';' {
+        return 0;
+    }
+    let field = rest.split(|byte| *byte == b';').next().unwrap_or_default();
+    if field.contains(&b'=') {
+        return 0;
+    }
+    std::str::from_utf8(field)
+        .ok()
+        .and_then(|field| field.parse::<i64>().ok())
+        .and_then(|status| u8::try_from(status).ok())
+        .unwrap_or(255)
 }
 
 impl EngineFilter {
     fn facts(&self, terminal: &Terminal<'_, '_>) -> Result<TerminalFacts, WorkerError> {
         let alternate_on = terminal.active_screen()? == Screen::Alternate;
+        let mut private_modes = 0_u16;
+        for (bit, number) in PRIVATE_MODE_NUMBERS.iter().enumerate() {
+            if terminal
+                .mode(Mode::new(*number, ModeKind::Dec))
+                .unwrap_or(false)
+            {
+                private_modes |= 1 << bit;
+            }
+        }
+        if !self.cursor_blink_set {
+            private_modes &= !(1 << CURSOR_BLINK_MODE_BIT);
+        }
         Ok(TerminalFacts {
+            output: self.output,
+            private_modes,
             history_size: if alternate_on {
                 self.primary_history_size
             } else {
@@ -486,6 +599,9 @@ impl EngineFilter {
         bar: &mut Option<ProgressBar>,
         last_command_status: &mut Option<CommandStatusUpdate>,
     ) {
+        if !bytes.is_empty() {
+            self.output.output(unix_now());
+        }
         while !bytes.is_empty() {
             match self.state {
                 EngineState::Ground => {
@@ -527,6 +643,7 @@ impl EngineFilter {
                     bytes = &bytes[1..];
                     if byte >= 0x40 {
                         self.metadata_hint |= csi_touches_metadata(&self.sequence, byte);
+                        self.cursor_blink_set |= csi_sets_cursor_blink(&self.sequence, byte);
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
                             write_engine_csi(
                                 &self.sequence,
@@ -642,6 +759,7 @@ impl EngineFilter {
                     let final_byte = bytes[end];
                     let parameters = &bytes[escape + 2..end];
                     self.metadata_hint |= csi_touches_metadata(parameters, final_byte);
+                    self.cursor_blink_set |= csi_sets_cursor_blink(parameters, final_byte);
                     if csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);
                         write_engine_csi(
@@ -752,6 +870,9 @@ impl EngineFilter {
             self.program_title_writes += u64::from(!integration_title);
             return;
         }
+        if !overflowed && let Some(mark) = osc.strip_prefix(b"133;") {
+            self.output.osc_133(mark, unix_now());
+        }
         if is_prompt_start(&osc) {
             self.program_status_changed |= self.program_status.program_left();
             return;
@@ -798,6 +919,7 @@ impl EngineFilter {
 
     fn full_reset(&mut self) {
         self.metadata_hint = true;
+        self.cursor_blink_set = false;
         self.program_status_changed |= self.program_status.reset();
     }
 
@@ -1777,6 +1899,9 @@ fn terminal_event_channel(state: &Arc<EventQueueState>) -> (TerminalEventSender,
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TerminalFacts {
+    pub output: PaneOutputFacts,
+    /// One bit per [`PRIVATE_MODE_NUMBERS`] entry that is set.
+    pub private_modes: u16,
     pub history_size: usize,
     pub cursor_x: u16,
     pub cursor_y: u16,
@@ -16534,6 +16659,7 @@ mod tests {
                     mouse_tracking: false,
                     cursor_hidden: false,
                     program_title_writes: 0,
+                    ..filter.facts(&terminal).expect("alternate facts")
                 }
             );
             filter.write(
@@ -16562,6 +16688,7 @@ mod tests {
                     mouse_tracking: false,
                     cursor_hidden: false,
                     program_title_writes: 0,
+                    ..filter.facts(&terminal).expect("primary facts")
                 }
             );
         }
@@ -16923,6 +17050,62 @@ mod tests {
                 Some(CommandStatusUpdate::Exit(7)),
                 "split at {split}"
             );
+        }
+    }
+
+    #[test]
+    fn engine_filter_keeps_the_pins_osc_133_command_marks_and_private_modes() {
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
+        let mut filter = EngineFilter::default();
+        let mut write = |filter: &mut EngineFilter, bytes: &[u8]| {
+            filter.write(
+                bytes,
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut Vec::new(),
+                &mut None,
+                &mut None,
+            );
+            filter.facts(&terminal).expect("facts")
+        };
+        let fresh = write(&mut filter, b"");
+        assert_eq!(fresh.output, PaneOutputFacts::default());
+        assert_eq!(fresh.private_modes, 0b1_0100);
+        let prompt = write(&mut filter, b"\x1b]133;A\x07$ ");
+        assert_eq!(prompt.output.output_generation, 1);
+        assert_ne!(prompt.output.last_output_time, 0);
+        assert_ne!(prompt.output.last_prompt_time, 0);
+        assert_eq!(prompt.output.command_start_time, 0);
+        let running = write(&mut filter, b"\x1b]133;C\x07\x1b[?2004h\x1b[?1h");
+        assert!(running.output.command_running);
+        assert_eq!(running.output.command_status, None);
+        assert_eq!(running.output.output_generation, 2);
+        assert_eq!(running.private_modes, 0b1000_0001_0101);
+        let blinking = write(&mut filter, b"\x1b[?12h");
+        assert_eq!(blinking.private_modes, 0b1000_0001_1101);
+        let still = write(&mut filter, b"\x1b[?12l");
+        assert_eq!(still.private_modes, 0b1000_0001_0101);
+        for (mark, status) in [
+            (&b"D"[..], 0),
+            (b"D;3", 3),
+            (b"D;256", 255),
+            (b"D;x", 255),
+            (b"D;3;aid=1", 3),
+            (b"D;aid=1", 0),
+            (b"D;", 0),
+        ] {
+            let mut bytes = b"\x1b]133;".to_vec();
+            bytes.extend_from_slice(mark);
+            bytes.push(0x07);
+            let finished = write(&mut filter, &bytes);
+            assert!(!finished.output.command_running);
+            assert_eq!(
+                finished.output.command_status,
+                Some(status),
+                "{}",
+                String::from_utf8_lossy(mark)
+            );
+            assert_ne!(finished.output.command_end_time, 0);
         }
     }
 

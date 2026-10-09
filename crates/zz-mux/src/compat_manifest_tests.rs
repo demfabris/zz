@@ -601,7 +601,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(mux_literals.len(), 76);
+    assert_eq!(mux_literals.len(), 100);
     assert!(mux_literals.is_subset(&upstream_literals));
 
     let mut accepted_native_literals = BTreeSet::new();
@@ -617,7 +617,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(accepted_native_literals.len(), 37);
+    assert_eq!(accepted_native_literals.len(), 39);
     assert!(accepted_native_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&accepted_native_literals));
 
@@ -630,7 +630,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(missing_literals.len(), 47);
+    assert_eq!(missing_literals.len(), 21);
     assert!(missing_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&missing_literals));
     assert!(accepted_native_literals.is_disjoint(&missing_literals));
@@ -779,25 +779,8 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
     assert_eq!(upstream_modifiers.len(), 37);
     assert_eq!(upstream_modifiers.len(), oracle.format_modifiers.len());
     let implemented_modifiers = format_modifier_names().collect::<BTreeSet<_>>();
-    assert_eq!(implemented_modifiers.len(), 36);
-    let missing_modifiers = upstream_modifiers
-        .difference(&implemented_modifiers)
-        .copied()
-        .collect::<BTreeSet<_>>();
-    assert_eq!(missing_modifiers, BTreeSet::from(["A"]));
-    assert!(implemented_modifiers.is_subset(&upstream_modifiers));
-
-    let missing_modifier_items = BTreeMap::from([(
-        "A",
-        ("semantic:format-modifier-animation", "pin.formats-options"),
-    )]);
-    assert_eq!(
-        missing_modifier_items
-            .keys()
-            .copied()
-            .collect::<BTreeSet<_>>(),
-        missing_modifiers
-    );
+    assert_eq!(implemented_modifiers.len(), 37);
+    assert_eq!(implemented_modifiers, upstream_modifiers);
 
     assert!(
         items.keys().all(|item| !item.starts_with("context-format:")
@@ -836,10 +819,6 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         (
             ("cmd-show-options.c", "cmd_show_options_print"),
             "semantic:show-options-format-contexts",
-        ),
-        (
-            ("window-border.c", "window_set_fill_cell"),
-            "semantic:fill-character-format-contexts",
         ),
         (
             ("window-client.c", "window_client_draw_info"),
@@ -922,12 +901,11 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         .collect::<BTreeSet<_>>();
     assert_eq!(missing_hook_names.len(), 39);
     let missing_hook_item = "semantic:hook-event-payload-formats";
-    let mut owned_items = missing_modifier_items.values().copied().collect::<Vec<_>>();
-    owned_items.extend(
-        missing_literal_items
-            .values()
-            .map(|item| (*item, "pin.formats-options")),
-    );
+    let mut owned_items = missing_literal_items
+        .values()
+        .map(|item| (*item, "pin.formats-options"))
+        .collect::<Vec<_>>();
+    owned_items.push(("semantic:format-modifier-animation", "pin.formats-options"));
     owned_items.push((missing_hook_item, "pin.hooks-events"));
     for (item, owner) in owned_items {
         assert_eq!(
@@ -1364,11 +1342,11 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
     let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
     assert_eq!(formats.len(), 214, "pinned global format count changed");
-    assert_eq!(constant_formats.len(), 58, "tracked format count changed");
-    assert_eq!(direct_formats.len(), 99, "direct format count changed");
+    assert_eq!(constant_formats.len(), 47, "tracked format count changed");
+    assert_eq!(direct_formats.len(), 101, "direct format count changed");
     assert_eq!(
         delegated_formats.len(),
-        57,
+        66,
         "delegated format count changed"
     );
     assert!(
@@ -1389,7 +1367,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         nonconstant_formats.len(),
-        156,
+        167,
         "nonconstant format registration count changed"
     );
     let tracked_formats = items

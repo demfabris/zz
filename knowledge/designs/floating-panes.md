@@ -119,7 +119,7 @@ keeps `popup_position` (`:43372`), `parse_popup_dimension` (`:49960`) and the po
 |---|---|
 | none | `remain-on-exit on`, close on cancel |
 | `-E` / `-EE` | `remain-on-exit off` / `failed`, no close on cancel |
-| `-k` | `remain-on-exit key` (`failed-key` with `-EE`, which arrives with pin.move) |
+| `-k` | `remain-on-exit key` (`failed-key` with `-EE`; remain-on-exit takes failed-key since pin.formats-options) |
 | always | capture keys, over zoom, `remain-on-exit-format ""` |
 | `-B` / `-b` | pane `pane-border-lines none` / the value (`rounded` to `single`, `padded` to `spaces`) |
 | `-s` / `-S` | pane `window-style` + `window-active-style` / `pane-border-style` + `pane-active-border-style`; absent, from 3.8's `popup-style`, `popup-border-style`, `popup-border-lines` |

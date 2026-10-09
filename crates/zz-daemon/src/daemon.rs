@@ -10135,7 +10135,9 @@ impl Shared {
                         kind: PaneKindSnapshot::Browser(_) | PaneKindSnapshot::Picker,
                         ..
                     }
-                    | MuxEffect::SuppressAfterHook => {}
+                    | MuxEffect::SuppressAfterHook
+                    | MuxEffect::PaneMovedInWindow { .. }
+                    | MuxEffect::ZoomCycled { .. } => {}
                     MuxEffect::PaneWaitForExit { pane } => {
                         if let Some(terminal) = inner.terminals.get(pane).cloned() {
                             let entry = inner
@@ -11529,7 +11531,6 @@ impl Shared {
                     }
                     MuxEffect::KillServer => force_shutdown_requested = true,
                     MuxEffect::SnapshotChanged => snapshot_changed = true,
-                    MuxEffect::PaneMovedInWindow { .. } | MuxEffect::ZoomCycled { .. } => {}
                     MuxEffect::ModeStylesChanged => mode_styles_changed = true,
                     MuxEffect::UserOptionChanged { channel } => {
                         option_signals.push(channel.clone());

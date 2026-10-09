@@ -3224,7 +3224,7 @@ mod tests {
             BTreeMap::from([("none", 327), ("optional", 8), ("required", 250)])
         );
         assert_eq!((supported, unsupported), (577, 8));
-        assert_eq!(usage_overrides.len(), 23);
+        assert_eq!(usage_overrides.len(), 22);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

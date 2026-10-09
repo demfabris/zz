@@ -13,7 +13,7 @@
       "id": "fix.tui-colour",
       "track": "fix",
       "title": "Raw TUI honours terminal-overrides, terminal-features and user-keys",
-      "status": "review",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/client.rs",
@@ -33,11 +33,12 @@
         "options.client-terminal-negotiation keeps only extended-keys-format, assume-paste-time and xterm-keys, with the false 'zz never reads terminfo' claim removed."
       ],
       "branch": "catchup/fix.tui-colour",
-      "sha": null,
+      "sha": "8c952fd16",
       "notes": [
         "2026-10-09: lane done at 5451831a4: all 4 clauses met; wire: EventPayload::TerminalNegotiation + KeyCode::User under 108; also fixed set -s extended-keys/focus-events not reaching the TUI hello",
         "2026-10-09: fix-pass agent stalled 2h waiting on a dead background job; stopped and relaunched at 08:35 to continue from the uncommitted worktree changes and merge main",
-        "2026-10-09: relaunch done: fix pass a17168791 + merge of main f55cb4d94; all 4 P1 fixed with fail-first tests; terminal-overrides capability strings recorded; TUI-009 extended-keys rows pass on this branch (fixes that regression)"
+        "2026-10-09: relaunch done: fix pass a17168791 + merge of main f55cb4d94; all 4 P1 fixed with fail-first tests; terminal-overrides capability strings recorded; TUI-009 extended-keys rows pass on this branch (fixes that regression)",
+        "2026-10-09: relaunch + 2 reviews + final fix; merged; clippy x7, zz-tui, zz-daemon lib 1685, just compat check green on main"
       ]
     },
     {
@@ -66,7 +67,8 @@
       "notes": [
         "2026-10-09: found by pin.tui-fixtures; all six reproduce against both pins, so they are main regressions, not 3.8 drift. High priority: two break verified TUI obligations.",
         "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello",
-        "2026-10-09: TUI-009 extended-keys rows pass on catchup/fix.tui-colour (set -s extended-keys now published to the TUI); clause 2 closes when fix.tui-colour merges."
+        "2026-10-09: TUI-009 extended-keys rows pass on catchup/fix.tui-colour (set -s extended-keys now published to the TUI); clause 2 closes when fix.tui-colour merges.",
+        "2026-10-09: fix.tui-colour merged (8c952fd16); clause 2 (TUI-009 extended keys) should now pass on main: confirm with tui-caps and drop its 4 TUI-009 records when pin.tui-fixtures lands."
       ]
     },
     {

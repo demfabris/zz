@@ -374,11 +374,38 @@ const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] =
 const HOOK_PAYLOAD_CONTEXT_FORMATS: &[&str] = &[
     HOOK_ARGUMENTS_CONTEXT_FORMAT,
     "hook_client",
+    "hook_command_duration",
+    "hook_command_end_time",
+    "hook_command_start_time",
+    "hook_command_status",
+    "hook_created_empty",
+    "hook_created_respawn",
+    "hook_current_mode",
+    "hook_event",
+    "hook_height",
     HOOK_LAST_CONTEXT_FORMAT,
+    "hook_marked",
+    "hook_mode_entered",
+    "hook_new_name",
+    "hook_new_pane",
+    "hook_new_title",
+    "hook_new_window",
+    "hook_new_window_index",
+    "hook_new_window_name",
+    "hook_old_height",
+    "hook_old_name",
+    "hook_old_pane",
+    "hook_old_width",
+    "hook_old_window",
+    "hook_old_window_index",
+    "hook_old_window_name",
     HOOK_PANE_CONTEXT_FORMAT,
+    "hook_paste_buffer",
+    "hook_previous_mode",
     HOOK_SESSION_CONTEXT_FORMAT,
     HOOK_SESSION_NAME_CONTEXT_FORMAT,
     HOOK_VALUE_CONTEXT_FORMAT,
+    "hook_width",
     HOOK_WINDOW_CONTEXT_FORMAT,
     HOOK_WINDOW_INDEX_CONTEXT_FORMAT,
     HOOK_WINDOW_NAME_CONTEXT_FORMAT,
@@ -32702,7 +32729,7 @@ mod tests {
             global.lines().collect::<Vec<_>>(),
             MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalSession)
         );
-        assert_eq!(global.lines().count(), 63);
+        assert_eq!(global.lines().count(), 62);
         assert_eq!(
             global
                 .lines()
@@ -32982,7 +33009,7 @@ mod tests {
             .execute(&mut context, &command("show-hooks", &["-g"]))
             .unwrap()
             .output;
-        assert_eq!(session_hooks.lines().count(), 63);
+        assert_eq!(session_hooks.lines().count(), 62);
         assert!(
             !session_hooks
                 .lines()
@@ -33028,7 +33055,7 @@ mod tests {
             (
                 &["-g", "-H"] as &[&str],
                 TmuxOptionTarget::GlobalSession,
-                63,
+                62,
                 false,
             ),
             (
@@ -33040,7 +33067,7 @@ mod tests {
             (
                 &["-A", "-H"],
                 TmuxOptionTarget::Session(context.session.unwrap()),
-                63,
+                62,
                 true,
             ),
             (

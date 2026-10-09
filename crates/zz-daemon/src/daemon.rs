@@ -4710,6 +4710,8 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "alert-silence",
     "client-active",
     "client-attached",
+    "client-closed",
+    "client-created",
     "client-dark-theme",
     "client-detached",
     "client-focus-in",
@@ -4718,23 +4720,38 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "client-resized",
     "client-session-changed",
     "command-error",
+    "marked-pane-changed",
+    "pane-activity",
+    "pane-bell",
+    "pane-command-finished",
+    "pane-command-started",
+    "pane-created",
     "pane-died",
     "pane-exited",
     "pane-focus-in",
     "pane-focus-out",
     "pane-mode-changed",
+    "pane-mode-entered",
+    "pane-mode-exited",
+    "pane-moved",
+    "pane-resized",
     "pane-set-clipboard",
+    "pane-shell-prompt",
     "pane-title-changed",
     "session-closed",
     "session-created",
     "session-renamed",
     "session-window-changed",
+    "window-closed",
+    "window-created",
     "window-layout-changed",
     "window-linked",
     "window-pane-changed",
     "window-renamed",
     "window-resized",
     "window-unlinked",
+    "window-unzoomed",
+    "window-zoomed",
 ];
 
 mod hook_events;
@@ -53695,7 +53712,7 @@ mod tests {
         );
         assert_eq!(
             produced_non_after_hooks.len(),
-            30,
+            47,
             "explicit hook producer count changed"
         );
         assert!(
@@ -53722,7 +53739,7 @@ mod tests {
         }
         assert_eq!(
             tracked_hooks.len(),
-            21,
+            4,
             "runtime hook gap roster changed: {tracked_hooks:?}"
         );
 
@@ -53730,26 +53747,10 @@ mod tests {
             .union(&produced_non_after_hooks)
             .cloned()
             .collect::<BTreeSet<_>>();
-        let zz_only_hooks = ["after-queue"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(produced_hooks.len(), 68, "produced hook count changed");
+        assert_eq!(produced_hooks.len(), 85, "produced hook count changed");
         assert!(
             produced_hooks.is_disjoint(&tracked_hooks),
             "produced and tracked hooks overlap"
-        );
-        assert!(
-            zz_only_hooks.is_disjoint(&pinned_hooks),
-            "a zz-only hook is in the pin"
-        );
-        assert!(
-            zz_only_hooks
-                .iter()
-                .all(|hook| zz_mux::MuxEngine::after_command_hook(
-                    hook.strip_prefix("after-").expect("after hook")
-                ) == Some(hook.as_str())),
-            "zz-only hook is no longer produced"
         );
         let partition = produced_hooks
             .union(&tracked_hooks)

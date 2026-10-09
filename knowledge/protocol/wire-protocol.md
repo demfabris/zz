@@ -422,7 +422,7 @@ remain unchanged.
 Deferred event hooks clear the Control target and remain separate. Command replay retains the
 caller cwd for sourced hooks; Control hook framing clears the replay client, so sourced-hook cwd is
 a Control-only gap. Event-hook cwd and the three missing pane-event producers stay under their
-named gaps. Pinned `after-queue` is explicit-only and needs no automatic producer.
+named gaps. The 3.8 pin removed `after-queue` and zz no longer registers it.
 
 Command and Interactive replay transcripts closed without another wire field. Each source invocation
 appends its complete verbose batch, replay output, and buffered command-name or parser diagnostics in

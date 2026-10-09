@@ -893,11 +893,17 @@ pub(super) fn mux_hook_events_in(
     if command == "rename-session" {
         for session in after.listed_sessions() {
             if let Some((name, _)) = after.session(session)
-                && before
-                    .session(session)
-                    .is_some_and(|(previous, _)| previous != name)
+                && let Some((previous, _)) = before.session(session)
+                && previous != name
             {
-                events.push(session_event("session-renamed", session, name, after));
+                let mut event = session_event("session-renamed", session, name, after);
+                event
+                    .variables
+                    .insert("hook_old_name".to_owned(), previous.to_owned());
+                event
+                    .variables
+                    .insert("hook_new_name".to_owned(), name.to_owned());
+                events.push(event);
             }
         }
     }
@@ -969,14 +975,21 @@ pub(super) fn mux_hook_events_in(
             continue;
         };
         if previous.name != state.name {
-            events.push(window_event(
+            let mut event = window_event(
                 "window-renamed",
                 window,
                 state.session,
                 state.name,
                 state.active_pane,
                 after,
-            ));
+            );
+            event
+                .variables
+                .insert("hook_old_name".to_owned(), previous.name.to_owned());
+            event
+                .variables
+                .insert("hook_new_name".to_owned(), state.name.to_owned());
+            events.push(event);
         }
         if previous.active_pane != state.active_pane {
             events.push(window_event(
@@ -1022,13 +1035,11 @@ pub(super) fn mux_hook_events_in(
             .get(pane)
             .is_some_and(|(_, _, previous)| previous != title)
         {
-            events.push(pane_event(
-                "pane-title-changed",
-                *pane,
-                *session,
-                *window,
-                after,
-            ));
+            let mut event = pane_event("pane-title-changed", *pane, *session, *window, after);
+            event
+                .variables
+                .insert("hook_new_title".to_owned(), title.clone());
+            events.push(event);
         }
     }
     let removed_links = before_links

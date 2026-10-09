@@ -69,7 +69,8 @@ orchestrator never runs the full suite per item.
 
 Orchestrator shell habits: never `pkill -f <pattern>` (it matches the shell running it; list pids
 with `pgrep -f`, check `readlink /proc/<pid>/cwd`, then `kill` those pids), and chain a merge and
-its checks with `&&` only, so a failed merge never starts checks on the unmerged tree.
+its checks with `&&` only, so a failed merge never starts checks on the unmerged tree. A trailing
+`&` backgrounds the whole `&&` list, merge included: put the detached checks in their own command.
 
 Add a dated line to [Decisions](#decisions) for every call the orchestrator makes on fabrico's
 behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new lesson.

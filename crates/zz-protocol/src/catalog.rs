@@ -636,10 +636,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
     ),
     (
-        "display-panes",
-        "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]",
-    ),
-    (
         "join-pane",
         "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
     ),
@@ -2399,15 +2395,14 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-panes",
         aliases: &["displayp"],
         description: "Display pane numbers",
-        usage: "[-bN] [-d duration] [-t target-client] [template]",
+        usage: "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]",
         options: &[
             CommandOptionSpec::value("-d", FreeForm, "duration in milliseconds"),
-            CommandOptionSpec::flag("-b", "do not block other commands, always on in zz"),
             CommandOptionSpec::flag("-N", "disable pane selection"),
-            CommandOptionSpec::value("-t", FreeForm, "target client"),
-            CommandOptionSpec::unsupported_flag("-k"),
-            CommandOptionSpec::unsupported_value("-s"),
-            CommandOptionSpec::unsupported_flag("-Z"),
+            CommandOptionSpec::flag("-Z", "leave the window unzoomed"),
+            CommandOptionSpec::flag("-k", "kill the pane when the mode ends"),
+            CommandOptionSpec::value("-s", Window, "source window"),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -3171,13 +3166,10 @@ mod tests {
             .commands
     }
 
-    const FLAGS_THE_PIN_REMOVED: &[(&str, &str)] = &[("display-panes", "-b")];
-
     fn catalog_flag_shapes(spec: &CommandSpec) -> BTreeMap<String, String> {
         spec.options
             .iter()
             .filter(|option| !option.name.starts_with("--"))
-            .filter(|option| !FLAGS_THE_PIN_REMOVED.contains(&(spec.name, option.name)))
             .map(|option| {
                 let arity = if option.optional_value {
                     "optional"
@@ -3257,8 +3249,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 309), ("optional", 8), ("required", 234)])
         );
-        assert_eq!((supported, unsupported), (519, 33));
-        assert_eq!(usage_overrides.len(), 27);
+        assert_eq!((supported, unsupported), (521, 30));
+        assert_eq!(usage_overrides.len(), 26);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES
@@ -4050,7 +4042,7 @@ mod tests {
         for command in [
             CommandInvocation::new("display-panes", ["{ display-message action }"])
                 .with_command_blocks([0]),
-            CommandInvocation::new("display-panes", ["-bN", "{ display-message action }"])
+            CommandInvocation::new("display-panes", ["-kNZ", "{ display-message action }"])
                 .with_command_blocks([1]),
             CommandInvocation::new("display-panes", ["--", "{ display-message action }"])
                 .with_command_blocks([1]),
@@ -4059,7 +4051,7 @@ mod tests {
             parse_tmux_command_options(spec, &command).expect("command-or-string template");
         }
 
-        for option in ["-d", "-t"] {
+        for option in ["-d", "-s", "-t"] {
             let command =
                 CommandInvocation::new("display-panes", [option, "{ display-message option }"])
                     .with_command_blocks([1]);

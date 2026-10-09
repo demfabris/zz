@@ -1,10 +1,11 @@
 use zz_protocol::{
-    PaneMode, ThemeColours, TmuxAttributeState, TmuxColour, TmuxStyle, parse_tmux_colour,
+    PaneMode, PanesModeArea, PanesModeBorder, ThemeColours, TmuxAlign, TmuxAttributeState,
+    TmuxColour, TmuxStyle, parse_styled_segments, parse_tmux_colour,
 };
 
 use super::{
     Renderer,
-    chooser::{Grid, Paint, Trailing, plain},
+    chooser::{Grid, Paint, Trailing, acs_glyph, markup_width, plain},
 };
 use crate::{layout::Rect, mode_view::resolved_style, state::Model};
 
@@ -282,8 +283,169 @@ fn switch_surface(view: &SwitchView<'_>, rect: Rect, theme: &ThemeColours) -> Mo
     }
 }
 
+const CELL_BORDERS: [char; 13] = [
+    ' ', 'x', 'q', 'l', 'k', 'm', 'j', 'w', 'v', 't', 'u', 'n', '~',
+];
+
+struct PanesView<'a> {
+    areas: &'a [PanesModeArea],
+    borders: &'a [PanesModeBorder],
+    border_style: &'a str,
+    copy: bool,
+    format: bool,
+}
+
+fn panes_label(grid: &mut Grid, area: &PanesModeArea, base: &TmuxStyle) -> Option<(u16, u16)> {
+    if area.label.is_empty() || area.width == 0 {
+        return None;
+    }
+    let width = u16::try_from(markup_width(&area.label))
+        .unwrap_or(u16::MAX)
+        .min(area.width);
+    let align = parse_styled_segments(&area.label)
+        .iter()
+        .find_map(|segment| segment.style.align);
+    let column = match align {
+        Some(TmuxAlign::Right) => area.x + area.width - width,
+        Some(TmuxAlign::Centre | TmuxAlign::AbsoluteCentre) => area.x + (area.width - width) / 2,
+        _ => area.x,
+    };
+    grid.markup(column, area.y, width, &area.label, base, false);
+    Some((area.x, area.y))
+}
+
+fn panes_number(
+    grid: &mut Grid,
+    area: &PanesModeArea,
+    format: bool,
+    theme: &ThemeColours,
+) -> (u16, u16) {
+    let colour = resolve(&area.colour, theme);
+    let text = foreground(colour);
+    let digits = area.number.to_string();
+    let length = u16::try_from(digits.len()).unwrap_or(u16::MAX);
+    let letter = (area.number > 9 && area.number < 35)
+        .then(|| char::from(b'a' + u8::try_from(area.number - 10).unwrap_or(0)).to_string());
+    let (x, y, sx, sy) = (area.x, area.y, area.width, area.height);
+    if sx < length {
+        return (x, y);
+    }
+    let mut width = length.saturating_mul(PITCH).saturating_sub(1);
+    if sx < width || sy < if format { 7 } else { 5 } {
+        width = length;
+        if letter.is_some() && sx >= length + 2 {
+            width += 2;
+        }
+        let column = x + (sx - width) / 2;
+        let row = y + sy / 2;
+        let paint = Paint::Style(text.clone());
+        let mut cursor = (column + grid.text(column, row, &digits, &paint, sx), row);
+        if width > length
+            && let Some(letter) = &letter
+        {
+            cursor.0 += grid.text(cursor.0, row, &format!(" {letter}"), &paint, sx);
+        }
+        if format && sy > 1 {
+            return panes_label(grid, area, &text).unwrap_or(cursor);
+        }
+        return cursor;
+    }
+    let mut column = x + (sx - width) / 2;
+    let row = y + (sy - GLYPH) / 2;
+    let paint = Paint::Style(TmuxStyle {
+        fg: Some(TmuxColour::Default),
+        bg: Some(colour),
+        ..TmuxStyle::default()
+    });
+    let mut cursor = (x, y);
+    for character in digits.chars() {
+        let Some(index) = clock_index(character) else {
+            continue;
+        };
+        for down in 0..GLYPH {
+            for across in 0..GLYPH {
+                if CLOCK_TABLE[index][usize::from(down)][usize::from(across)] {
+                    grid.text(column + across, row + down, " ", &paint, 1);
+                    cursor = (column + across + 1, row + down);
+                }
+            }
+        }
+        column += PITCH;
+    }
+    if sy <= 6 {
+        return cursor;
+    }
+    if let Some(label) = panes_label(grid, area, &text) {
+        cursor = label;
+    }
+    if let Some(letter) = &letter {
+        grid.text(column - 2, row + GLYPH, letter, &Paint::Style(text), 1);
+        cursor = (column - 1, row + GLYPH);
+    }
+    cursor
+}
+
+fn panes_surface(view: &PanesView<'_>, rect: Rect, theme: &ThemeColours) -> ModeSurface {
+    let mut grid = Grid::new(rect.width, rect.height);
+    let mut cursor = (0, 0);
+    for area in view.areas {
+        if area.x >= rect.width || area.y >= rect.height {
+            continue;
+        }
+        let width = area.width.min(rect.width - area.x);
+        let height = area.height.min(rect.height - area.y);
+        if let Some(viewport) = &area.viewport {
+            if view.copy {
+                grid.copy(area.x, area.y, width, height, viewport);
+            } else {
+                grid.preview(area.x, area.y, width, height, viewport);
+            }
+        }
+        let clipped = PanesModeArea {
+            pane: area.pane,
+            number: area.number,
+            x: area.x,
+            y: area.y,
+            width,
+            height,
+            colour: area.colour.clone(),
+            label: area.label.clone(),
+            viewport: None,
+        };
+        cursor = panes_number(&mut grid, &clipped, view.format, theme);
+    }
+    let border = Paint::Style(resolved_style(view.border_style, theme).unwrap_or_else(plain));
+    for cell in view.borders {
+        let glyph = acs_glyph(CELL_BORDERS[usize::from(cell.cell).min(12)]);
+        grid.text(cell.x, cell.y, &glyph.to_string(), &border, 1);
+        cursor = (cell.x + 1, cell.y);
+    }
+    ModeSurface {
+        grid,
+        cursor,
+        cursor_visible: false,
+    }
+}
+
 pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> ModeSurface {
     match mode {
+        PaneMode::Panes {
+            areas,
+            borders,
+            border_style,
+            copy,
+            format,
+        } => panes_surface(
+            &PanesView {
+                areas,
+                borders,
+                border_style,
+                copy: *copy,
+                format: *format,
+            },
+            rect,
+            theme,
+        ),
         PaneMode::Customize {
             state,
             presentation,
@@ -354,6 +516,69 @@ mod tests {
     use crate::layout::Rect;
     use zz_protocol::{PaneMode, ThemeColours};
     use zz_terminal::TerminalAppearance;
+
+    #[test]
+    fn the_panes_mode_draws_digits_labels_and_borders_and_parks_the_cursor_like_the_pin() {
+        let area = |pane, number, x, width, colour: &str, label: &str| zz_protocol::PanesModeArea {
+            pane: zz_protocol::PaneId(pane),
+            number,
+            x,
+            y: 0,
+            width,
+            height: 23,
+            colour: colour.to_owned(),
+            label: label.to_owned(),
+            viewport: None,
+        };
+        let mode = PaneMode::Panes {
+            areas: vec![
+                area(0, 0, 0, 40, "red", "#[align=right]40x23"),
+                area(1, 11, 41, 39, "blue", "#[align=right]39x23"),
+            ],
+            borders: (0..23)
+                .map(|y| zz_protocol::PanesModeBorder { x: 40, y, cell: 1 })
+                .collect(),
+            border_style: "bg=colour235,fg=colour250".to_owned(),
+            copy: true,
+            format: true,
+        };
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 23,
+        };
+        let theme = ThemeColours::default();
+        let drawn = surface(&mode, rect, &theme);
+        assert_eq!(drawn.cursor, (41, 22));
+        assert!(!drawn.cursor_visible);
+        let mut output = Vec::new();
+        drawn.grid.emit_into(
+            &mut output,
+            0,
+            0,
+            &theme,
+            &TerminalAppearance::default(),
+            Trailing::Pane { reaches_edge: true },
+        );
+        let text = String::from_utf8_lossy(&output);
+        assert!(text.contains("40x23"), "{text}");
+        assert!(text.contains("39x23"), "{text}");
+        assert!(text.contains('\u{2502}'), "{text}");
+        assert!(
+            text.contains('b'),
+            "the letter under pane 11 is missing: {text}"
+        );
+
+        let single = PaneMode::Panes {
+            areas: vec![area(0, 0, 0, 80, "red", "")],
+            borders: Vec::new(),
+            border_style: String::new(),
+            copy: true,
+            format: true,
+        };
+        assert_eq!(surface(&single, rect, &theme).cursor, (42, 13));
+    }
 
     #[test]
     fn a_switch_row_keeps_its_dim_runs_over_the_selection_style() {

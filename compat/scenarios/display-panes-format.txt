@@ -1,4 +1,4 @@
-# display-panes-format stores at session scope, serves the pin default, and
+# display-panes-format is a window option in 3.8, serves the pin default, and
 # resolves as an option-name format without re-expansion.
 out: show-options -gv display-panes-format
 fmt: #{display-panes-format}

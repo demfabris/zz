@@ -1,11 +1,13 @@
 mod customize;
 mod mode_prompt;
+mod panes_mode;
 mod switch_mode;
 pub use customize::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CustomizeMenu, CustomizeMenuItem,
     CustomizeMode, CustomizeResult, customize_menu_feed,
 };
 pub use mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
+pub use panes_mode::{PanesModeAreaGeometry, PanesModeGeometry};
 pub use switch_mode::{SwitchAction, SwitchMode};
 
 use std::{
@@ -118,6 +120,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "display-panes-time",
     "display-panes-colour",
     "display-panes-active-colour",
+    "display-panes-border-style",
     "message-limit",
     "buffer-limit",
     "set-clipboard",
@@ -1396,6 +1399,10 @@ pub enum MuxEffect {
         selectable: bool,
         template: Option<CommandPromptTemplate>,
         source: Option<SourceSpan>,
+        source_window: WindowId,
+        source_session: SessionId,
+        kill_source: bool,
+        zoom: bool,
     },
     DisplayMessage {
         pane: Option<PaneId>,
@@ -1509,6 +1516,29 @@ pub enum PaneModeRequest {
     Clock,
     Customize(Box<CustomizeMode>),
     Switch(Box<SwitchMode>),
+    Panes(Box<PanesMode>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanesMode {
+    pub source_session: SessionId,
+    pub source_window: WindowId,
+    pub duration_ms: u32,
+    pub ignore_keys: bool,
+    pub template: Option<CommandPromptTemplate>,
+    pub source: Option<SourceSpan>,
+    pub kill_source: bool,
+    pub zoom: bool,
+    pub token: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisplayPanesOptions {
+    pub time_ms: u32,
+    pub colour: String,
+    pub active_colour: String,
+    pub format: String,
+    pub border_style: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -3469,9 +3499,8 @@ impl MuxEngine {
     }
 
     #[must_use]
-    pub fn display_panes_format_for_session(&self, session: Option<SessionId>) -> String {
-        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
-        self.scalar_option_effective(target, "display-panes-format")
+    pub fn display_panes_format_for_window(&self, window: WindowId) -> String {
+        self.scalar_option_effective(TmuxOptionTarget::Window(window), "display-panes-format")
             .unwrap_or_default()
             .to_owned()
     }
@@ -3846,8 +3875,20 @@ impl MuxEngine {
     }
 
     #[must_use]
-    pub fn display_panes_time_for_session(&self, session: SessionId) -> u32 {
-        self.session_knobs(session).display_panes_time_ms
+    pub fn display_panes_options(&self, window: WindowId) -> DisplayPanesOptions {
+        let target = TmuxOptionTarget::Window(window);
+        let value = |name: &str| {
+            self.scalar_option_effective(target, name)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        DisplayPanesOptions {
+            time_ms: self.window_knobs(window).display_panes_time_ms,
+            colour: value("display-panes-colour"),
+            active_colour: value("display-panes-active-colour"),
+            format: value("display-panes-format"),
+            border_style: value("display-panes-border-style"),
+        }
     }
 
     #[must_use]
@@ -5115,7 +5156,7 @@ impl MuxEngine {
             .checked_add(u32::try_from(offset).ok()?)
     }
 
-    fn pane_at_index(&self, window: WindowId, index: u32) -> Option<PaneId> {
+    pub fn pane_at_index(&self, window: WindowId, index: u32) -> Option<PaneId> {
         let offset = index.checked_sub(self.pane_base_index_for_window(window))?;
         self.state
             .windows
@@ -10062,22 +10103,34 @@ impl MuxEngine {
                 }
             })
             .transpose()?;
-        let pane = self.resolve_pane(None, context.window, context.pane)?;
-        let duration_ms = options.value("-d").map_or_else(
-            || {
-                let window = self
-                    .state
-                    .window_for_pane(pane)
-                    .expect("display-panes pane was resolved");
-                let session = self.state.windows[&window].session;
-                Ok(self.display_panes_time_for_session(session))
-            },
-            |value| {
-                value.parse::<u32>().map_err(|_| {
-                    ServerError::InvalidCommand(format!(
-                        "display-panes duration must be an unsigned millisecond value: {value}"
-                    ))
+        let source_window = options
+            .value("-s")
+            .map(|target| self.resolve_window(Some(target), context.session, context.window))
+            .transpose()?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let target_window = self
+            .state
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let source_window = source_window.unwrap_or(target_window);
+        let source_session = if source_window == target_window {
+            context
+                .session
+                .filter(|session| {
+                    self.state
+                        .sessions
+                        .get(session)
+                        .is_some_and(|state| state.windows.contains(&target_window))
                 })
+                .unwrap_or(self.state.windows[&target_window].session)
+        } else {
+            self.state.windows[&source_window].session
+        };
+        let duration_ms = options.value("-d").map_or_else(
+            || Ok(self.window_knobs(target_window).display_panes_time_ms),
+            |value| {
+                parse_strtonum(value, 0, i64::from(u32::MAX), "delay")
+                    .map(|value| u32::try_from(value).expect("delay is bounded"))
             },
         )?;
         Ok(Execution::effect(MuxEffect::DisplayPanes {
@@ -10086,6 +10139,10 @@ impl MuxEngine {
             selectable: !options.has("-N"),
             template,
             source: invocation.source.clone(),
+            source_window,
+            source_session,
+            kill_source: options.has("-k"),
+            zoom: !options.has("-Z"),
         }))
     }
 
@@ -34997,7 +35054,7 @@ mod tests {
         assert_eq!(engine.bell_action_for_session(session), BellAction::Other);
         assert_eq!(engine.visual_bell_for_session(session), VisualBell::Both);
         assert_eq!(engine.key_table_for_session(session), "custom");
-        assert_eq!(engine.display_panes_time_for_session(session), 1400);
+        assert_eq!(engine.display_panes_options(window).time_ms, 1400);
         assert_eq!(engine.window_size(window), WindowSize::Largest);
         assert!(!engine.allow_set_title(pane));
         assert_eq!(
@@ -37323,7 +37380,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 149);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 150);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)
@@ -37892,7 +37949,7 @@ mod tests {
         );
         assert_eq!(
             global.base.get("display-panes-format").map(String::as_str),
-            Some("#[align=right]#{pane_width}x#{pane_height}")
+            Some("#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}")
         );
 
         let scoped = engine.status_row_variables_for_session(Some(session));
@@ -38149,41 +38206,48 @@ mod tests {
     }
 
     #[test]
-    fn display_panes_format_resolves_session_then_global_then_default() {
+    fn display_panes_options_resolve_window_then_global_then_default() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
             .execute(&mut context, &command("new-session", &["-s", "fmt"]))
             .unwrap();
-        let session = context.session.expect("session id");
+        let window = context.window.expect("window id");
+        let options = engine.display_panes_options(window);
         assert_eq!(
-            engine.display_panes_format_for_session(Some(session)),
-            "#[align=right]#{pane_width}x#{pane_height}"
+            options.format,
+            "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
         );
+        assert_eq!(options.border_style, "bg=themedarkgrey,fg=themelightgrey");
+        assert_eq!(options.time_ms, 1000);
         engine
             .execute(
                 &mut context,
                 &command("set-option", &["-g", "display-panes-format", "GLOBAL"]),
             )
             .unwrap();
-        assert_eq!(
-            engine.display_panes_format_for_session(Some(session)),
-            "GLOBAL"
-        );
+        assert_eq!(engine.display_panes_format_for_window(window), "GLOBAL");
         engine
             .execute(
                 &mut context,
                 &command(
                     "set-option",
-                    &["-t", "fmt", "display-panes-format", "#{pane_index}"],
+                    &["-w", "-t", "fmt:", "display-panes-format", "#{pane_index}"],
                 ),
             )
             .unwrap();
-        assert_eq!(
-            engine.display_panes_format_for_session(Some(session)),
-            "#{pane_index}"
-        );
-        assert_eq!(engine.display_panes_format_for_session(None), "GLOBAL");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-w", "-t", "fmt:", "display-panes-time", "250"],
+                ),
+            )
+            .unwrap();
+        let options = engine.display_panes_options(window);
+        assert_eq!(options.format, "#{pane_index}");
+        assert_eq!(options.time_ms, 250);
     }
 
     #[test]
@@ -42859,58 +42923,58 @@ mod tests {
     }
 
     #[test]
-    fn display_panes_builds_a_timed_native_overlay_effect() {
+    fn display_panes_builds_a_pane_mode_effect_with_the_pin_flags() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
         let pane = context.pane.unwrap();
+        let window = context.window.unwrap();
+        let session = context.session.unwrap();
+        let effect =
+            |duration_ms, selectable, template, kill_source, zoom| MuxEffect::DisplayPanes {
+                pane,
+                duration_ms,
+                selectable,
+                template,
+                source: None,
+                source_window: window,
+                source_session: session,
+                kill_source,
+                zoom,
+            };
 
-        for (name, args, duration_ms) in [
-            ("display-panes", Vec::new(), 1_000),
-            ("displayp", vec!["-b", "-d2500"], 2_500),
-            ("display-panes", vec!["-d", "0"], 0),
+        for (name, args, expected) in [
+            (
+                "display-panes",
+                Vec::new(),
+                effect(1_000, true, None, false, true),
+            ),
+            (
+                "displayp",
+                vec!["-d2500", "-k"],
+                effect(2_500, true, None, true, true),
+            ),
+            (
+                "display-panes",
+                vec!["-d", "0", "-Z"],
+                effect(0, true, None, false, false),
+            ),
+            (
+                "display-panes",
+                vec!["-N", "-t", "work:0.0", "-s", "work:0"],
+                effect(1_000, false, None, false, true),
+            ),
         ] {
-            let execution = engine.execute(&mut context, &command(name, &args)).unwrap();
             assert_eq!(
-                execution.effects,
-                vec![MuxEffect::DisplayPanes {
-                    pane,
-                    duration_ms,
-                    selectable: true,
-                    template: None,
-                    source: None,
-                }]
+                engine
+                    .execute(&mut context, &command(name, &args))
+                    .unwrap()
+                    .effects,
+                vec![expected]
             );
         }
-        engine
-            .execute(
-                &mut context,
-                &command("set-option", &["display-time", "1200"]),
-            )
-            .unwrap();
-        assert_eq!(
-            engine
-                .execute(&mut context, &command("display-panes", &[]))
-                .unwrap()
-                .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1_000,
-                selectable: true,
-                template: None,
-                source: None,
-            }]
-        );
-        assert!(matches!(
-            engine
-                .execute(&mut context, &command("display-message", &["hello"]))
-                .unwrap()
-                .effects
-                .as_slice(),
-            [MuxEffect::DisplayMessage { text, duration_ms: None, .. }] if text == "hello"
-        ));
         engine
             .execute(
                 &mut context,
@@ -42919,55 +42983,44 @@ mod tests {
             .unwrap();
         assert_eq!(
             engine
-                .execute(&mut context, &command("display-panes", &[]))
-                .unwrap()
-                .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1200,
-                selectable: true,
-                template: None,
-                source: None,
-            }]
-        );
-
-        assert_eq!(
-            engine
-                .execute(
-                    &mut context,
-                    &command("display-panes", &["-N", "-t", "client"]),
-                )
-                .unwrap()
-                .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1200,
-                selectable: false,
-                template: None,
-                source: None,
-            }]
-        );
-        assert!(matches!(
-            engine.execute(&mut context, &command("display-panes", &["-d", "forever"])),
-            Err(ServerError::InvalidCommand(_))
-        ));
-        assert_eq!(
-            engine
                 .execute(
                     &mut context,
                     &command("display-panes", &["select-pane -t %%%"]),
                 )
                 .unwrap()
                 .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1200,
-                selectable: true,
-                template: Some(CommandPromptTemplate::String(
+            vec![effect(
+                1200,
+                true,
+                Some(CommandPromptTemplate::String(
                     "select-pane -t %%%".to_owned()
                 )),
-                source: None,
-            }]
+                false,
+                true,
+            )]
+        );
+        for (args, message) in [
+            (vec!["-d", "forever"], "delay invalid"),
+            (vec!["-d", "-5"], "delay too small"),
+            (vec!["-d", "99999999999"], "delay too large"),
+            (
+                vec!["-t", "missing", "-d", "forever"],
+                "can't find pane: missing",
+            ),
+            (
+                vec!["-s", "missing", "-t", "nope"],
+                "can't find window: missing",
+            ),
+        ] {
+            let error = engine
+                .execute(&mut context, &command("display-panes", &args))
+                .unwrap_err();
+            assert_eq!(error.tmux_message(), message, "{args:?}");
+        }
+        assert!(
+            engine
+                .execute(&mut context, &command("display-panes", &["-b"]))
+                .is_err()
         );
     }
 

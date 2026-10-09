@@ -195,6 +195,7 @@ CASE_LABEL=""
 FAILURES=0
 CHECKS=0
 RECORDS=0
+declare -A RECORD_OWNERS=([unattributed]=0)
 LAST_DIFFERED=0
 MESSAGE_HOLD_MS=20000
 INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
@@ -456,12 +457,36 @@ check_value() {
   compare_value "${!mode_name}" "$@"
   RECORD_REASON=""
 }
+case_owner() {
+  case "$1" in
+  border-click/* | status-clicks/*)
+    printf 'gap:pin.keys-copy'
+    ;;
+  customize-mouse-*)
+    printf 'gap:pin.formats-options'
+    ;;
+  esac
+}
+note_record() {
+  local owner
+  owner="$(case_owner "$1")"
+  [ -n "$owner" ] || owner=unattributed
+  RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
+  RECORDS=$((RECORDS + 1))
+}
+owner_tally() {
+  local key entries=()
+  for key in $(printf '%s\n' "${!RECORD_OWNERS[@]}" | LC_ALL=C sort); do
+    entries+=("$key=${RECORD_OWNERS[$key]}")
+  done
+  printf 'owners %s' "${entries[*]}"
+}
 compare_value() {
   local mode="$1" name="$2" zz_value="$3" pin_value="$4"
   if [ "$mode" = same ]; then
     CHECKS=$((CHECKS + 1))
   else
-    RECORDS=$((RECORDS + 1))
+    note_record "$name"
   fi
   if [ "$zz_value" = "$pin_value" ]; then
     LAST_DIFFERED=0
@@ -528,7 +553,7 @@ record_screen() {
   local name="$1" reason="$2" zz_rows tmux_rows index count
   mapfile -t zz_rows < <(capture_screen zz)
   mapfile -t tmux_rows < <(capture_screen tmux)
-  RECORDS=$((RECORDS + 1))
+  note_record "$name"
   count=0
   for ((index = 0; index < ROWS_UNDER_TEST; index++)); do
     [ "${zz_rows[index]-}" != "${tmux_rows[index]-}" ] && count=$((count + 1))
@@ -1210,19 +1235,15 @@ case_status_clicks() {
   wait_for 'the pin back to one window' pin_window_count_is 1
 }
 STATUS_MENU_DRIFT='PIN 3.8, gap:pin.keys-copy: 3.8 menus belong to the window (ad6832e6), so the window menu a status click opens for a window the client is not showing is drawn on that window and the pin client shows nothing, while zz draws it over the current window'
-pin_screen_shows() {
-  local attempt
-  for ((attempt = 0; attempt < 40; attempt++)); do
-    screen_has tmux "$1" && return 0
-    sleep 0.05
-  done
-  return 1
+pin_menus_follow_the_window() {
+  ! side_command tmux list-commands display-panes 2>/dev/null | grep -q -- '-b'
 }
 status_window_menu() {
   local button="$1" name="$2" label="$3"
   send_mouse_both "$button" "$column" "$row" M
   wait_for "$label on the zz screen" screen_has zz 'Rename'
-  if pin_screen_shows 'Rename'; then
+  if ! pin_menus_follow_the_window; then
+    wait_for "$label on the tmux screen" screen_has tmux 'Rename'
     settle_both Rename "$label"
     check_screen STATUS_MENU "$name"
     send_bytes zz $'\033'
@@ -1969,6 +1990,7 @@ run_cases() {
   case_customize_mouse_menu_outside
 
   printf '%s asserted checks, %s recorded checks\n' "$CHECKS" "$RECORDS"
+  printf '%s recorded not asserted (%s)\n' "$RECORDS" "$(owner_tally)"
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted checks differ\n' "$FAILURES" "$CHECKS"
     exit 1
@@ -2384,7 +2406,7 @@ run_self_check() {
     sc_one_sided_context_channel hyperlink
   self_check_case "zz's blank-cell probe aimed at the word" catches \
     sc_one_sided_context_channel blank-cell
-  if [ "$PIN_D77_MOUSE_TABLE" -eq 1 ]; then
+  if ! pin_menus_follow_the_window; then
     self_check_case "zz's window menu centred instead of over its status range" \
       catches sc_one_sided_status_menu_position
   else

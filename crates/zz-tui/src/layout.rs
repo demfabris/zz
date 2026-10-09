@@ -97,6 +97,9 @@ pub(crate) struct PaneRect {
     /// under `bottom`, and moves `yoff` down one row under `top`.
     pub border_status: PaneBorderStatus,
     pub status_on_border: bool,
+    /// The pane's own cell at the rect's top-left: a float clipped by the
+    /// window's left or top edge starts that many columns or rows in.
+    pub source: (u16, u16),
 }
 
 impl PaneRect {
@@ -430,6 +433,10 @@ pub(crate) fn resolve_float(
             rect: content,
             border_status,
             status_on_border: true,
+            source: (
+                u16::try_from(-xoff).unwrap_or(0),
+                u16::try_from(-yoff).unwrap_or(0),
+            ),
         },
         FloatFrame {
             pane: float.pane,
@@ -599,6 +606,7 @@ fn collect(
             rect,
             border_status,
             status_on_border: false,
+            source: (0, 0),
         }),
         LayoutNode::Empty => {}
         LayoutNode::Split {
@@ -723,18 +731,21 @@ mod tests {
             rect,
             border_status: PaneBorderStatus::Off,
             status_on_border: false,
+            source: (0, 0),
         };
         let top = PaneRect {
             pane: PaneId(0),
             rect,
             border_status: PaneBorderStatus::Top,
             status_on_border: false,
+            source: (0, 0),
         };
         let bottom = PaneRect {
             pane: PaneId(0),
             rect,
             border_status: PaneBorderStatus::Bottom,
             status_on_border: false,
+            source: (0, 0),
         };
         assert_eq!(off.content(), rect);
         assert_eq!(off.status_row().height, 0);

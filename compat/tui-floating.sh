@@ -23,6 +23,9 @@
 #   no-tiled         a window with no tiled pane and two floats
 #   modal-click      a click outside a modal changes nothing
 #   modal-close      a click outside a new-pane -O -C modal kills it
+#   clipped          a float pushed past the left and top window edges shows
+#                    its own columns and rows from the clipped offset on
+#   cursor-covered   a tiled pane's cursor under a float is hidden
 #
 # CONTROLLED VALUES, set on both sides: status-right '' and status-left L (the
 # clock and the host are not this surface's), window-status-current-format and
@@ -452,6 +455,26 @@ modal_cases() {
   verdict modal-close
 }
 
+clipped_case() {
+  CASE_LABEL=clipped
+  attach_both
+  run_on_both new-pane -x 24 -y 8 -X 10 -Y 6 \
+    "printf 'R0-ABCDEFGHIJKLMNOP\\nR1-ABCDEFGHIJKLMNOP\\nR2-ABCDEFGHIJKLMNOP\\n'; exec cat"
+  both_screen_has R2-ABCDEFGH 'the clipped float'
+  run_on_both move-pane -X -4 -Y -2
+  verdict clipped
+}
+
+cursor_covered_case() {
+  CASE_LABEL=cursor-covered
+  attach_both
+  new_float_on_both FLOAT-Q -x 20 -y 5 -X 0 -Y 0
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  wait_for 'the zz tiled pane active' active_index_is zz 0
+  wait_for 'the tmux tiled pane active' active_index_is tmux 0
+  verdict cursor-covered
+}
+
 printf 'floating pane differential at %sx%s (%s)\n' \
   "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$("$TMUX_BIN" -V)"
 overlap_cases
@@ -460,6 +483,8 @@ borderless_case
 popup_zoomed_case
 no_tiled_case
 modal_cases
+clipped_case
+cursor_covered_case
 
 if [ "$FAILURES" -ne 0 ]; then
   printf '%s of %s comparisons differ\n' "$FAILURES" "$CHECKS"

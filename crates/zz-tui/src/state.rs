@@ -1005,6 +1005,25 @@ impl Model {
             .copied()
     }
 
+    /// Whether a float drawn above `pane` covers the cell, which hides the
+    /// pane's cursor there as tmux 3.8's scene does.
+    pub fn covered_above(&self, pane: PaneId, column: u16, row: u16) -> bool {
+        let tiled = self.layout.tiled().len();
+        let front = self
+            .layout
+            .panes
+            .iter()
+            .position(|entry| entry.pane == pane)
+            .map_or(0, |index| {
+                index.saturating_sub(tiled) + usize::from(index >= tiled)
+            });
+        self.layout.floats.get(front..).is_some_and(|floats| {
+            floats
+                .iter()
+                .any(|float| float.hit_rect().contains(column, row))
+        })
+    }
+
     pub fn is_float(&self, pane: PaneId) -> bool {
         self.layout.float(pane).is_some()
     }
@@ -1088,6 +1107,7 @@ impl Model {
                             rect: canvas,
                             border_status: window.pane_border_status,
                             status_on_border: false,
+                            source: (0, 0),
                         }],
                         dividers: Vec::new(),
                         floats: Vec::new(),

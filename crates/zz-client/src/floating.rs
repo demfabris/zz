@@ -3,7 +3,9 @@
 //! window cells; a GUI only previews a drag locally and lands it with
 //! ordinary commands.
 
-use zz_protocol::{CommandInvocation, FloatingPaneSnapshot, PaneBorderLines, PaneId};
+use zz_protocol::{
+    CommandInvocation, FloatingPaneSnapshot, PaneBorderLines, PaneBorderStatus, PaneId,
+};
 
 /// A float's content box in window cells, borders outside it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -148,48 +150,63 @@ fn drag_axis(offset: i32, size: u16, near: bool, far: bool, delta: i32) -> (i32,
     (offset, u16::try_from(size).unwrap_or(u16::MAX))
 }
 
-/// The commands that land a dragged float on `target`, in the 3.8 command
-/// surface: sizes and positions are outer (borders included). A move is
-/// `move-pane -X -Y`; a right or bottom edge is `resize-pane -x -y`; an edge
-/// that moves the origin is `resize-pane -x -y ; move-pane -X -Y`, one command
-/// list sent in order.
+/// The window a drag happens in, as `resize-pane -y` reads it: the tiled
+/// `pane-border-status` and the height in cells.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FloatWindow {
+    pub border_status: PaneBorderStatus,
+    pub rows: u16,
+}
+
+/// The one command that lands a dragged float on `target`, in the 3.8
+/// command surface, where sizes and positions are outer (borders included).
+/// A move is `move-pane -X -Y`; a right or bottom edge is `resize-pane -x
+/// -y`; an edge that moves the origin is the command list `resize-pane -x -y
+/// ; move-pane -X -Y`, carried by `run-shell -C` so one request parses and
+/// runs it, and a failed resize stops the move. `resize-pane -y` adds a row
+/// for a float on the row under a top pane status (or above a bottom one),
+/// so the height sent takes that row back.
 #[must_use]
-pub fn float_drag_commands(
+pub fn float_drag_command(
     pane: PaneId,
     grip: FloatGrip,
+    start: FloatCells,
     target: FloatCells,
     lines: PaneBorderLines,
-) -> Vec<CommandInvocation> {
+    window: FloatWindow,
+) -> CommandInvocation {
     let pad = i32::from(lines != PaneBorderLines::None);
-    let target_pane = pane.to_string();
-    let mut commands = Vec::new();
-    if !grip.is_move() {
-        commands.push(CommandInvocation::new(
-            "resize-pane",
-            [
-                "-t".to_owned(),
-                target_pane.clone(),
-                "-x".to_owned(),
-                (i32::from(target.sx) + 2 * pad).to_string(),
-                "-y".to_owned(),
-                (i32::from(target.sy) + 2 * pad).to_string(),
-            ],
-        ));
-    }
-    if grip.moves_origin() {
-        commands.push(CommandInvocation::new(
+    let move_pane = format!(
+        "move-pane -t {pane} -X {} -Y {}",
+        target.xoff - pad,
+        target.yoff - pad
+    );
+    if grip.is_move() {
+        return CommandInvocation::new(
             "move-pane",
-            [
-                "-t".to_owned(),
-                target_pane,
-                "-X".to_owned(),
-                (target.xoff - pad).to_string(),
-                "-Y".to_owned(),
-                (target.yoff - pad).to_string(),
-            ],
-        ));
+            move_pane.split(' ').skip(1).map(str::to_owned),
+        );
     }
-    commands
+    let status_row = match window.border_status {
+        PaneBorderStatus::Top => start.yoff == 1,
+        PaneBorderStatus::Bottom => start.yoff + i32::from(start.sy) == i32::from(window.rows) - 1,
+        PaneBorderStatus::Off => false,
+    };
+    let height = i32::from(target.sy) + 2 * pad - i32::from(status_row);
+    let resize_pane = format!(
+        "resize-pane -t {pane} -x {} -y {height}",
+        i32::from(target.sx) + 2 * pad
+    );
+    if grip.moves_origin() {
+        return CommandInvocation::new(
+            "run-shell",
+            ["-C".to_owned(), format!("{resize_pane} ; {move_pane}")],
+        );
+    }
+    CommandInvocation::new(
+        "resize-pane",
+        resize_pane.split(' ').skip(1).map(str::to_owned),
+    )
 }
 
 #[cfg(test)]
@@ -202,35 +219,54 @@ mod tests {
         sx: 20,
         sy: 6,
     };
+    const PLAIN: FloatWindow = FloatWindow {
+        border_status: PaneBorderStatus::Off,
+        rows: 24,
+    };
 
-    fn words(commands: &[CommandInvocation]) -> Vec<String> {
-        commands
-            .iter()
-            .map(|command| {
-                std::iter::once(command.name.clone())
-                    .chain(command.args.iter().map(ToString::to_string))
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            })
-            .collect()
+    fn words(command: &CommandInvocation) -> String {
+        std::iter::once(command.name.clone())
+            .chain(command.args.iter().map(ToString::to_string))
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
-    /// The 3.8 grammar the commands are read with: `-X`/`-Y` are the outer
-    /// corner (content plus one when bordered), `-x`/`-y` the outer size.
-    fn apply(start: FloatCells, commands: &[CommandInvocation]) -> FloatCells {
+    /// The list a command carries, split the way `run-shell -C` parses it.
+    fn list(command: &CommandInvocation) -> Vec<Vec<String>> {
+        if command.name == "run-shell" {
+            return command.args[1]
+                .split(" ; ")
+                .map(|part| part.split(' ').map(str::to_owned).collect())
+                .collect();
+        }
+        vec![words(command).split(' ').map(str::to_owned).collect()]
+    }
+
+    /// zz's `resize-pane` and `move-pane` on a float (and 3.8's): `-X`/`-Y`
+    /// are the outer corner, `-x`/`-y` the outer size, and `-y` gains a row
+    /// on the row under a top pane status or above a bottom one.
+    fn apply(start: FloatCells, window: FloatWindow, command: &CommandInvocation) -> FloatCells {
         let mut float = start;
-        for command in commands {
-            let args: Vec<String> = command.args.iter().map(ToString::to_string).collect();
+        for words in list(command) {
             let value = |flag: &str| {
-                args.iter()
-                    .position(|arg| arg == flag)
-                    .and_then(|index| args.get(index + 1))
+                words
+                    .iter()
+                    .position(|word| word == flag)
+                    .and_then(|index| words.get(index + 1))
                     .and_then(|value| value.parse::<i32>().ok())
             };
-            match command.name.as_str() {
+            match words[0].as_str() {
                 "resize-pane" => {
+                    let status_row = match window.border_status {
+                        PaneBorderStatus::Top => float.yoff == 1,
+                        PaneBorderStatus::Bottom => {
+                            float.yoff + i32::from(float.sy) == i32::from(window.rows) - 1
+                        }
+                        PaneBorderStatus::Off => false,
+                    };
                     float.sx = u16::try_from(value("-x").unwrap() - 2).unwrap();
-                    float.sy = u16::try_from(value("-y").unwrap() - 2).unwrap();
+                    float.sy =
+                        u16::try_from(value("-y").unwrap() + i32::from(status_row) - 2).unwrap();
                 }
                 "move-pane" => {
                     float.xoff = value("-X").unwrap() + 1;
@@ -240,6 +276,15 @@ mod tests {
             }
         }
         float
+    }
+
+    fn grip(edges: &str) -> FloatGrip {
+        FloatGrip {
+            left: edges.contains('l'),
+            top: edges.contains('t'),
+            right: edges.contains('r'),
+            bottom: edges.contains('b'),
+        }
     }
 
     #[test]
@@ -301,103 +346,85 @@ mod tests {
     #[test]
     fn a_move_sends_move_pane_with_the_outer_corner() {
         let target = float_drag_preview(FLOAT, FloatGrip::MOVE, (5, -2));
-        let commands =
-            float_drag_commands(PaneId(3), FloatGrip::MOVE, target, PaneBorderLines::Single);
-        assert_eq!(words(&commands), ["move-pane -t %3 -X 14 -Y 1"]);
-        assert_eq!(apply(FLOAT, &commands), target);
-        let bare = float_drag_commands(PaneId(3), FloatGrip::MOVE, target, PaneBorderLines::None);
-        assert_eq!(words(&bare), ["move-pane -t %3 -X 15 -Y 2"]);
+        let command = float_drag_command(
+            PaneId(3),
+            FloatGrip::MOVE,
+            FLOAT,
+            target,
+            PaneBorderLines::Single,
+            PLAIN,
+        );
+        assert_eq!(words(&command), "move-pane -t %3 -X 14 -Y 1");
+        assert_eq!(apply(FLOAT, PLAIN, &command), target);
+        let bare = float_drag_command(
+            PaneId(3),
+            FloatGrip::MOVE,
+            FLOAT,
+            target,
+            PaneBorderLines::None,
+            PLAIN,
+        );
+        assert_eq!(words(&bare), "move-pane -t %3 -X 15 -Y 2");
     }
 
     #[test]
     fn a_right_or_bottom_edge_sends_only_resize_pane() {
         for (grip, delta) in [
-            (
-                FloatGrip {
-                    right: true,
-                    ..FloatGrip::MOVE
-                },
-                (4, 0),
-            ),
-            (
-                FloatGrip {
-                    bottom: true,
-                    ..FloatGrip::MOVE
-                },
-                (0, 3),
-            ),
-            (
-                FloatGrip {
-                    right: true,
-                    bottom: true,
-                    ..FloatGrip::MOVE
-                },
-                (-2, -1),
-            ),
+            (grip("r"), (4, 0)),
+            (grip("b"), (0, 3)),
+            (grip("rb"), (-2, -1)),
         ] {
             let target = float_drag_preview(FLOAT, grip, delta);
-            let commands = float_drag_commands(PaneId(3), grip, target, PaneBorderLines::Single);
-            assert_eq!(commands.len(), 1);
-            assert_eq!(commands[0].name, "resize-pane");
-            assert_eq!(apply(FLOAT, &commands), target);
+            let command = float_drag_command(
+                PaneId(3),
+                grip,
+                FLOAT,
+                target,
+                PaneBorderLines::Single,
+                PLAIN,
+            );
+            assert_eq!(command.name, "resize-pane");
+            assert_eq!(apply(FLOAT, PLAIN, &command), target);
             assert_eq!((target.xoff, target.yoff), (FLOAT.xoff, FLOAT.yoff));
         }
-        let target = float_drag_preview(
-            FLOAT,
-            FloatGrip {
-                right: true,
-                ..FloatGrip::MOVE
-            },
-            (4, 0),
-        );
+        let right = grip("r");
+        let target = float_drag_preview(FLOAT, right, (4, 0));
         assert_eq!(
-            words(&float_drag_commands(
+            words(&float_drag_command(
                 PaneId(3),
-                FloatGrip {
-                    right: true,
-                    ..FloatGrip::MOVE
-                },
+                right,
+                FLOAT,
                 target,
-                PaneBorderLines::Single
+                PaneBorderLines::Single,
+                PLAIN
             )),
-            ["resize-pane -t %3 -x 26 -y 8"]
+            "resize-pane -t %3 -x 26 -y 8"
         );
     }
 
     #[test]
-    fn a_left_top_or_top_left_resize_sends_resize_then_move_landing_on_the_preview() {
+    fn a_left_top_or_top_left_resize_is_one_command_list_landing_on_the_preview() {
         for (grip, delta) in [
-            (
-                FloatGrip {
-                    left: true,
-                    ..FloatGrip::MOVE
-                },
-                (-4, 0),
-            ),
-            (
-                FloatGrip {
-                    top: true,
-                    ..FloatGrip::MOVE
-                },
-                (0, 2),
-            ),
-            (
-                FloatGrip {
-                    left: true,
-                    top: true,
-                    ..FloatGrip::MOVE
-                },
-                (3, -2),
-            ),
+            (grip("l"), (-4, 0)),
+            (grip("t"), (0, 2)),
+            (grip("lt"), (3, -2)),
         ] {
             let target = float_drag_preview(FLOAT, grip, delta);
-            let commands = float_drag_commands(PaneId(7), grip, target, PaneBorderLines::Single);
-            let names: Vec<&str> = commands
+            let command = float_drag_command(
+                PaneId(7),
+                grip,
+                FLOAT,
+                target,
+                PaneBorderLines::Single,
+                PLAIN,
+            );
+            assert_eq!(command.name, "run-shell");
+            let names: Vec<String> = list(&command)
                 .iter()
-                .map(|command| command.name.as_str())
+                .map(|words| words[0].clone())
                 .collect();
             assert_eq!(names, ["resize-pane", "move-pane"]);
-            assert_eq!(apply(FLOAT, &commands), target);
+            assert_eq!(apply(FLOAT, PLAIN, &command), target);
             assert_eq!(
                 target.xoff + i32::from(target.sx),
                 FLOAT.xoff + i32::from(FLOAT.sx)
@@ -407,33 +434,66 @@ mod tests {
                 FLOAT.yoff + i32::from(FLOAT.sy)
             );
         }
-        let grip = FloatGrip {
-            left: true,
-            top: true,
-            ..FloatGrip::MOVE
-        };
-        let target = float_drag_preview(FLOAT, grip, (3, -2));
+        let corner = grip("lt");
+        let target = float_drag_preview(FLOAT, corner, (3, -2));
         assert_eq!(
-            words(&float_drag_commands(
+            words(&float_drag_command(
                 PaneId(7),
-                grip,
+                corner,
+                FLOAT,
                 target,
-                PaneBorderLines::Single
+                PaneBorderLines::Single,
+                PLAIN
             )),
-            [
-                "resize-pane -t %7 -x 19 -y 10",
-                "move-pane -t %7 -X 12 -Y 1"
-            ]
+            "run-shell -C resize-pane -t %7 -x 19 -y 10 ; move-pane -t %7 -X 12 -Y 1"
         );
     }
 
     #[test]
-    fn a_resize_never_collapses_the_content() {
-        let grip = FloatGrip {
-            left: true,
-            ..FloatGrip::MOVE
+    fn a_resize_on_the_row_under_a_pane_status_takes_the_status_row_back() {
+        let top = FloatWindow {
+            border_status: PaneBorderStatus::Top,
+            rows: 24,
         };
-        let target = float_drag_preview(FLOAT, grip, (50, 0));
+        let under_status = FloatCells { yoff: 1, ..FLOAT };
+        for (grip, delta) in [
+            (grip("r"), (4, 0)),
+            (grip("b"), (0, 3)),
+            (grip("lt"), (2, 1)),
+        ] {
+            let target = float_drag_preview(under_status, grip, delta);
+            let command = float_drag_command(
+                PaneId(2),
+                grip,
+                under_status,
+                target,
+                PaneBorderLines::Single,
+                top,
+            );
+            assert_eq!(apply(under_status, top, &command), target);
+        }
+        let bottom = FloatWindow {
+            border_status: PaneBorderStatus::Bottom,
+            rows: 24,
+        };
+        let over_status = FloatCells { yoff: 17, ..FLOAT };
+        let right = grip("r");
+        let target = float_drag_preview(over_status, right, (4, 0));
+        let command = float_drag_command(
+            PaneId(2),
+            right,
+            over_status,
+            target,
+            PaneBorderLines::Single,
+            bottom,
+        );
+        assert_eq!(words(&command), "resize-pane -t %2 -x 26 -y 7");
+        assert_eq!(apply(over_status, bottom, &command), target);
+    }
+
+    #[test]
+    fn a_resize_never_collapses_the_content() {
+        let target = float_drag_preview(FLOAT, grip("l"), (50, 0));
         assert_eq!(target.sx, 1);
         assert_eq!(target.xoff, FLOAT.xoff + i32::from(FLOAT.sx) - 1);
     }

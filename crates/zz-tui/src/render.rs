@@ -895,6 +895,7 @@ impl Renderer {
                 }
                 let force = force || pane_mode_changed;
                 if let Some(viewport) = model.pane_viewport(entry.pane) {
+                    let viewport = &*source_viewport(viewport, entry.source);
                     let damage = self.damage.remove(&entry.pane);
                     let mode = crate::mode_view::presentation(model, entry.pane, viewport);
                     self.selection_style = mode.and_then(|mode| {
@@ -2335,7 +2336,13 @@ impl Renderer {
             self.hide_cursor();
             return;
         };
-        self.place_viewport_cursor(pane, viewport, entry.content(), model);
+        let cropped = source_viewport(viewport, entry.source);
+        if viewport.cursor.is_some() && cropped.cursor.is_none() {
+            self.move_to(0, 0);
+            self.hide_cursor();
+            return;
+        }
+        self.place_viewport_cursor(pane, &cropped, entry.content(), model);
     }
 
     fn place_menu_cursor(&mut self, model: &Model) {
@@ -2445,12 +2452,30 @@ impl Renderer {
 
     fn place_viewport_cursor(
         &mut self,
-        _pane: PaneId,
+        pane: PaneId,
         viewport: &TerminalViewport,
         rect: Rect,
-        _model: &Model,
+        model: &Model,
     ) {
+        let covered = |column: u16, row: u16| {
+            model.covered_above(
+                pane,
+                rect.x.saturating_add(column),
+                rect.y.saturating_add(row),
+            )
+        };
         if let Some(overlay) = copy_cursor_overlay(viewport) {
+            if overlay.start < rect.width
+                && overlay.row < rect.height
+                && covered(overlay.start, overlay.row)
+            {
+                self.move_to(
+                    rect.x.saturating_add(overlay.start),
+                    rect.y.saturating_add(overlay.row),
+                );
+                self.hide_cursor();
+                return;
+            }
             if overlay.start >= rect.width || overlay.row >= rect.height {
                 self.hide_cursor();
                 return;
@@ -2471,6 +2496,14 @@ impl Renderer {
             .column()
             .saturating_sub(u16::from(cursor.at_wide_tail()));
         if column >= rect.width || cursor.row() >= rect.height {
+            self.hide_cursor();
+            return;
+        }
+        if covered(column, cursor.row()) {
+            self.move_to(
+                rect.x.saturating_add(column),
+                rect.y.saturating_add(cursor.row()),
+            );
             self.hide_cursor();
             return;
         }
@@ -2550,6 +2583,54 @@ fn viewport_row(viewport: &TerminalViewport, row: u16, width: u16) -> Option<&[P
     viewport
         .row(row)
         .map(|cells| &cells[..cells.len().min(usize::from(width))])
+}
+
+/// The part of a pane's grid a clipped float shows: its rows and columns
+/// from `source` on, so the window edge crops the pane instead of moving it.
+fn source_viewport(
+    viewport: &TerminalViewport,
+    source: (u16, u16),
+) -> std::borrow::Cow<'_, TerminalViewport> {
+    if source == (0, 0) {
+        return std::borrow::Cow::Borrowed(viewport);
+    }
+    let (left, top) = source;
+    let columns = viewport.columns.saturating_sub(left);
+    let rows = viewport.rows.saturating_sub(top);
+    let mut cropped = viewport.clone();
+    cropped.columns = columns;
+    cropped.rows = rows;
+    cropped.cells = (top..viewport.rows)
+        .filter_map(|row| viewport.row(row))
+        .flat_map(|cells| cells.iter().skip(usize::from(left)).copied())
+        .collect();
+    cropped.overlays = viewport
+        .overlays
+        .iter()
+        .filter(|overlay| overlay.row >= top && overlay.end > left)
+        .map(|overlay| {
+            let mut overlay = *overlay;
+            overlay.row -= top;
+            overlay.start = overlay.start.saturating_sub(left);
+            overlay.end -= left;
+            overlay
+        })
+        .collect();
+    cropped.kitty_placements = Arc::from([]);
+    cropped.cursor = viewport.cursor.and_then(|cursor| {
+        let column = cursor.column().checked_sub(left)?;
+        let row = cursor.row().checked_sub(top)?;
+        Some(zz_terminal::Cursor::new(
+            column,
+            row,
+            cursor.visible(),
+            cursor.blinking(),
+            cursor.at_wide_tail(),
+            cursor.style(),
+            cursor.color(),
+        ))
+    });
+    std::borrow::Cow::Owned(cropped)
 }
 
 const fn rects_overlap(a: Rect, b: Rect) -> bool {

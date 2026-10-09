@@ -52794,7 +52794,7 @@ mod tests {
         };
         assert_eq!(
             request.operation,
-            ClientFileOperation::ReadStdin { binary: false }
+            ClientFileOperation::ReadStdin { binary: true }
         );
         assert_eq!(read_global_option(&shared, "@before"), "yes");
         assert_eq!(read_global_option(&shared, "@after"), "");
@@ -87356,18 +87356,18 @@ set-option -g @alias-mixed-next yes
             assert!(!buffer.automatic);
         }
 
-        let error = shared
-            .buffer_command(
-                &context,
-                "show-buffer",
-                &["-b", "binary"].map(RawText::from),
-            )
-            .expect_err("binary output cannot cross the text command response");
-        assert!(matches!(
-            error,
-            DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.contains("non-UTF-8") && message.contains("save-buffer")
-        ));
+        assert_eq!(
+            shared
+                .buffer_command(
+                    &context,
+                    "show-buffer",
+                    &["-b", "binary"].map(RawText::from),
+                )
+                .expect("show binary buffer")
+                .output
+                .as_bytes(),
+            bytes
+        );
 
         shared
             .buffer_command(

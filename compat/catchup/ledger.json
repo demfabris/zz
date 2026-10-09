@@ -163,7 +163,7 @@
       "id": "fix.small-semantics",
       "track": "fix",
       "title": "pane_current_command fallback, refresh-client -l, new-session -t hint, registry hygiene",
-      "status": "todo",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -187,10 +187,11 @@
         "mouse.bound-context's reason points at the scrollbar and floating-pane items that actually block it.",
         "The raw TUI's top-left crop of an oversized pane and attach -r self-promotion via switch-client -r are recorded in divergences.md."
       ],
-      "branch": null,
+      "branch": "catchup/fix.small-semantics",
       "sha": null,
       "notes": [
-        "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'."
+        "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'.",
+        "2026-10-09: lane done at ecc91729e: 6 clauses + source-file dir note met; wire: EventPayload::ClipboardQuery and InputMessage::ClipboardReply under 108; lost lookup now renames to the fallback (rename-timing.sh not rerun)"
       ]
     },
     {
@@ -284,7 +285,7 @@
       "id": "pin.contract-breaks",
       "track": "pin",
       "title": "3.8 contract breaks: active-pane flag, %% quoting, q: escaping, relative targets",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -303,7 +304,7 @@
         "q: escapes {, }, newline and tab (d57d75de).",
         "Invalid relative targets such as +foo and -0 are errors (00f3899a)."
       ],
-      "branch": null,
+      "branch": "catchup/pin.contract-breaks",
       "sha": null,
       "notes": [
         "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here.",
@@ -315,7 +316,7 @@
       "id": "pin.layout-v2",
       "track": "pin",
       "title": "JSON v2 layout strings",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -335,10 +336,11 @@
         "The v2 writer has a place for floating panes so float.core only fills it in."
       ],
       "branch": "catchup/pin.layout-v2",
-      "sha": null,
+      "sha": "a8c0a080d",
       "notes": [
         "2026-10-09: lane done at f2455a131: all 4 clauses met; wire: ControlFlags.new_layouts appended under 108; snapshot dumps now v2 text; a plain select-pane now sends a TreeOp::WindowLayout (dump strings carry a/l), small extra delta traffic",
-        "2026-10-09: fix pass 5cd37e43c: 5 fixed; orchestrator ruling: refresh-client -B subscriptions print v2 regardless of new-layouts, as 3.8 measures (monitor.c formats have no client)"
+        "2026-10-09: fix pass 5cd37e43c: 5 fixed; orchestrator ruling: refresh-client -B subscriptions print v2 regardless of new-layouts, as 3.8 measures (monitor.c formats have no client)",
+        "2026-10-09: 2 reviews + final pass (v2 everywhere, v1 only on a control client's own command output); merged. Known limit: stored text holding a v2 string (show-options on a user option, list-keys) still gets the v1 rewrite for a control client without new-layouts"
       ]
     },
     {
@@ -396,7 +398,7 @@
       "id": "pin.formats-options",
       "track": "pin",
       "title": "3.8 formats, modifiers, options and show -F",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -416,8 +418,47 @@
         "show-options, show-window-options and show-hooks accept -F; display-message -j works; capture-pane -I is adopted or registered native (libghostty keeps no per-row time)."
       ],
       "branch": "catchup/pin.formats-options",
+      "sha": "beb67803b",
+      "notes": [
+        "2026-10-09: lane done at 3f09fc58a: 21/32 registry items closed (failed-key, 3.8 defaults, show -F, split-window -B, 11 formats, 2 native); the rest moved to pin.formats-options-2",
+        "2026-10-09: 2 reviews + final fix; 21/32 registry items closed; rest in pin.formats-options-2; merged"
+      ]
+    },
+    {
+      "id": "pin.formats-options-2",
+      "track": "pin",
+      "title": "Rest of the 3.8 formats and options",
+      "status": "todo",
+      "deps": [
+        "pin.formats-options",
+        "pin.layout-v2"
+      ],
+      "zones": [
+        "crates/zz-mux/src/formats.rs",
+        "crates/zz-mux/src/command.rs",
+        "crates/zz-daemon/src/status.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "crates/zz-terminal/src/session.rs",
+        "crates/zz-tui/src",
+        "compat/tmux-gaps.json"
+      ],
+      "gaps": [
+        "pin.formats-options"
+      ],
+      "accept": [
+        "display-message -j works as 3.8 (reuse the JSON parser pin.layout-v2 ported).",
+        "history_added, history_collected and history_generation resolve as 3.8 (engine-side counters) or are registered native with a measured reason.",
+        "clear-on-attach changes the raw TUI's attach the way 3.8 changes a terminal client's (no alternate screen, existing content scrolled into scrollback); the GUI's answer is recorded native if it has none.",
+        "copy-mode-current-line-style styles the cursor line in the raw TUI's copy mode as 3.8 does.",
+        "The A modifier animates in status and pane-border formats at 3.8's cadence without breaking the status render cache.",
+        "hook_fire_count and hook_fire_time resolve; the 3.8 mode context formats (copy_line_numbers, refresh_active, clipboard_invalid and the customize-mode rows) resolve.",
+        "The pin.formats-options gap closes except pane_modal_flag and window_modal_pane, which move to pane.floating-model."
+      ],
+      "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: leftovers of pin.formats-options; see its lane report in the ledger notes."
+      ]
     },
     {
       "id": "pin.keys-copy",
@@ -477,7 +518,7 @@
       "id": "float.core",
       "track": "float",
       "title": "Floating panes in the mux and daemon",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "float.design",
         "pin.layout-v2",
@@ -510,7 +551,7 @@
         "A round-trip test pins the appended snapshot, delta, LayoutNode::Empty and MouseKey.press encodings; one move-pane -X emits exactly one TreeOp::WindowLayout.",
         "choose-tree -O z lists panes in pane_z order; pane.floating-model turns adopted with each item closing as proved (option:editor in float.keys, nested-attach-in-popup keeps its fixture requirement); just compat check passes."
       ],
-      "branch": null,
+      "branch": "catchup/float.core",
       "sha": null,
       "notes": [
         "2026-10-09: pin.move moved semantic:move-pane-tiled-extension into adopted pane.floating-model; decide whether it closes or goes back to native."

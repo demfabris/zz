@@ -799,7 +799,7 @@ impl Default for WindowOptions {
         Self {
             clock_mode_colour: "themeblue".to_owned(),
             clock_mode_style: "24".to_owned(),
-            fill_character: String::new(),
+            fill_character: crate::tmux_options::FILL_CHARACTER_DEFAULT.to_owned(),
             monitor_activity: false,
             monitor_bell: true,
             monitor_silence_seconds: 0,

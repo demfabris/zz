@@ -3636,6 +3636,8 @@ pub enum EventPayload {
         wait_exit: bool,
         pause_after_ms: Option<u64>,
         no_output: bool,
+        #[serde(default)]
+        new_layouts: bool,
     },
     SubscriptionChanged {
         name: String,
@@ -4837,6 +4839,7 @@ mod tests {
                 wait_exit: false,
                 pause_after_ms: None,
                 no_output: false,
+                new_layouts: false,
             }),
             44
         );

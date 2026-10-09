@@ -126,6 +126,7 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
             wait_exit: false,
             pause_after_ms: None,
             no_output: false,
+            new_layouts: false,
         }),
         44
     );

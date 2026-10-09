@@ -244,8 +244,8 @@ Variables resolve against the client's attached session, focused window, and act
 session row backfills its active window and pane. A window row backfills its active pane. The
 `session_format`, `window_format`, and `pane_format` flags retain the row type from before that
 backfill. `display-message` resolves its target first and uses a pane row, matching tmux's
-`FORMAT_TYPE_PANE`. The `window_layout` value is the checksummed cell tree that `select-layout <string>`
-accepts. While zoomed, it remains the saved tiled tree and `window_visible_layout` reports the
+`FORMAT_TYPE_PANE`. The `window_layout` value is tmux 3.8's JSON v2 layout string (the checksummed v1 tree for a
+control client without `new-layouts`), and `select-layout <string>` accepts both. While zoomed, it remains the saved tiled tree and `window_visible_layout` reports the
 one-pane zoom tree. On the status line, `window_active` and `pane_active` read `1` and `#F` includes `*`.
 The four geometry variables always answer from the cell-authoritative layout tree: a headless
 window is born at tmux's `default-size` 80x24 and reports its exact allocations, a drawn window

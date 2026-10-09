@@ -55,6 +55,30 @@
       "reason": "D is GRID_LINE_DEAD, which grid_reflow_dead leaves on the source lines a reflow has moved out, and X is GRID_LINE_EXTENDED, which grid_extended_cell sets the first time a row stores a cell outside the compact 8-bit form (UTF-8 wider than one byte, a wide cell, RGB or underline colour, a link, a tab, an attribute above 0xff) and which stays until the row is cleared (cmd-capture-pane.c:356-371, grid.c:154-170, grid.c:1298). Both describe how tmux stores a row, not what the row holds, and libghostty's page rows have no such states, so zz does not invent them. Measured 2026-10-09 against the pins d77c9dc6 and 3.8 (7f2a35ad) on a 20x8 pane: every row holding a link or a non-ASCII cell carries X there, the only letter difference in capture-pane -F on that screen."
     },
     {
+      "id": "capture.line-times",
+      "title": "Keep capture-pane -I unimplemented: the engine keeps no per-line history time",
+      "decision": "native",
+      "status": "accepted",
+      "priority": "none",
+      "ease": "none",
+      "impact": [
+        "scripts"
+      ],
+      "owner": "terminal",
+      "items": [
+        "flag:capture-pane:-I"
+      ],
+      "evidence": [
+        "resource:compat/tmux-oracle.json",
+        "resource:crates/zz-terminal/src/session.rs"
+      ],
+      "acceptance": [
+        "capture-pane -I stays an unsupported flag until the terminal engine records when each line entered history."
+      ],
+      "depends_on": [],
+      "reason": "Registered 2026-10-09 by catch-up item pin.formats-options. In the pin capture-pane -I prints grid_line_time before each line: grid_scroll_history and grid_scroll_history_region stamp a line with the current time as it moves into history, and visible lines print 0. zz's history lives in libghostty, whose pages carry no per-row time, and zz cannot see which rows move into history once the scrollback is at its limit, so a side table in the session would drift from the rows it describes. Printing 0 for every line would look like support and lie about history lines, so the flag keeps answering as unsupported until the engine grows a per-row stamp."
+    },
+    {
       "id": "capture.rich-transports",
       "title": "Add the raw grid and pending-input capture transports",
       "decision": "native",
@@ -1481,37 +1505,16 @@
       ],
       "owner": "mux",
       "items": [
-        "flag:capture-pane:-I",
         "flag:display-message:-j",
-        "flag:show-hooks:-F",
-        "flag:show-options:-F",
-        "flag:show-window-options:-F",
-        "flag:split-window:-B",
         "format:history_added",
         "format:history_collected",
         "format:history_generation",
-        "format:pane_command_duration",
-        "format:pane_command_end_time",
-        "format:pane_command_running",
-        "format:pane_command_start_time",
-        "format:pane_command_status",
-        "format:pane_last_output_time",
-        "format:pane_last_prompt_time",
         "format:pane_modal_flag",
-        "format:pane_output_generation",
-        "format:pane_private_modes",
-        "format:pane_unzoomed_height",
-        "format:pane_unzoomed_width",
         "format:window_modal_pane",
-        "option-default:fill-character",
-        "option-default:pane-active-border-style",
-        "option-default:status-format",
         "option:clear-on-attach",
         "option:copy-mode-current-line-style",
-        "semantic:fill-character-format-contexts",
         "semantic:format-modifier-animation",
         "semantic:mode-format-contexts-3-8",
-        "semantic:remain-on-exit-failed-key",
         "semantic:show-options-format-contexts"
       ],
       "evidence": [
@@ -1529,7 +1532,7 @@
         "The new context formats resolve: is_inside and is_outside for fill-character, clipboard_invalid, copy_line_numbers and refresh_active, and the customize-mode environment and monitor rows."
       ],
       "depends_on": [],
-      "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item."
+      "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item. 2026-10-09, lane pin.formats-options: remain-on-exit takes failed-key (kept after a failed exit, dismissed by a key like key); the 3.8 defaults of fill-character, pane-active-border-style and status-format[1] and [2] are in; show-options, show-window-options and show-hooks take -F with the option_* contexts and, for show-hooks -B, hook_monitor_target and hook_monitor_format; split-window -B validates against pane-border-lines and sets the new pane's option; pane_command_*, pane_last_output_time, pane_last_prompt_time, pane_output_generation and pane_private_modes come from the pane's own OSC 133 marks, output and DEC private modes, and pane_unzoomed_width and pane_unzoomed_height from the tiled layout cell; is_inside and is_outside are registered native with fill-character, which options.native-mode-styles already accepts; capture-pane -I moved to capture.line-times. Left open: display-message -j needs the json.c port that pin.layout-v2 brings (in review on catchup/pin.layout-v2), and reuses it after that merge; history_added, history_collected and history_generation need an engine counter, because libghostty only exposes the current scrollback row count and lines pushed out at the limit are invisible to zz; pane_modal_flag and window_modal_pane are correct as constants (zz has no modal panes) and close with float.core; clear-on-attach (raw TUI alternate-screen entry on attach; the GPUI client has no alternate screen) and copy-mode-current-line-style (raw TUI copy-mode line paint) are stored only; the A modifier parses, picks frames on the pin's 100 ms clock and expands to nothing outside status formats, and status lines show a frame, but the daemon neither redraws the status line every 100 ms nor bypasses its per-second completed-status cache, and border formats expand it to nothing because border text is stamped into the snapshot; hook_fire_count and hook_fire_time need per-hook fire counters at the firing sites; the 3.8 copy, client and customize mode contexts are not started."
     },
     {
       "id": "pin.hooks-events",
@@ -1626,30 +1629,6 @@
       ],
       "depends_on": [],
       "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.keys-copy. 3.8 grows the default tables from 303 to 308 bindings and adds four copy-mode commands."
-    },
-    {
-      "id": "pin.layout-v2",
-      "title": "Print the 3.8 JSON v2 layout strings",
-      "decision": "adopt",
-      "status": "open",
-      "priority": "next",
-      "ease": "hard",
-      "impact": [
-        "scripts"
-      ],
-      "owner": "mux",
-      "items": [
-        "semantic:layout-json-v2"
-      ],
-      "evidence": [
-        "resource:knowledge/research/2026-10-09-tmux-compat-revisit.md",
-        "resource:crates/zz-mux/src/command.rs"
-      ],
-      "acceptance": [
-        "#{window_layout}, #{window_visible_layout} and list-windows print the 3.8 JSON v2 form (bf43fdc0, d9692f7e); select-layout accepts v1 and v2; control clients get v1 unless they set the new-layouts flag."
-      ],
-      "depends_on": [],
-      "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.layout-v2. The layout string is a format value, so the structural inventory cannot see the change; it is a semantic item measured against a live 3.8 build."
     },
     {
       "id": "presentation.native-status",
@@ -4327,6 +4306,21 @@
         "file:compat/scenarios/smoke/fixtures/pane-tmux-path.py"
       ],
       "resolution": "The superseded product clause was: \"installed zz does not supply that wrapper, per the cycle-15 product decision\". Fabrico superseded that clause with the cycle-15 pane PATH decision below. The old behavior limited the private tmux wrapper to shell jobs; pane spawn supplied TMUX/TMUX_PANE/ZZ_* but no private PATH entry. The old no-shim job test remains a no-guard unit case, not a product justification for pane behavior. In the checked-in launcher fixture against pinned d77c9dc6, pane tmux display -p pane_id prints its own %0 and bare tmux prints \"sessions should be nested with care, unset $TMUX to force\" with newline, stderr only, rc1 (tmux.c nested-session check). Before this change both commands in a zz pane with pinned tmux first on PATH returned \"server exited unexpectedly\" with newline, stderr only, rc1. The old TmuxShimGuard script execed the bundled zz directly, so a zero-argument wrapper call selected its application entrypoint; the wrapper now refuses nested zero-argument calls before executing that binary. New stance: prepend the daemon private wrapper directory to each pane PATH as for jobs and retain the pin nested refusal. decided 2026-09-05 by fabrico for cycle 15; reversible. Closed semantic:pane-tmux-on-path and semantic:pane-nested-tmux-refusal. smoke/pane-tmux-path runs through zz_cli on the default scratch socket with the real pinned tmux on inherited PATH and no harness wrapper. It types commands into the pane PTY, compares own pane_id and exact nested-refusal stderr/status, repeats both after respawn, runs the corpus vim-tmux-navigator.tmux script from the shell, and executes the corpus Vim TmuxNavigateRight command under nvim --headless -u NONE -i NONE --noplugin to select the adjacent pane. The fixture requires nvim and the pinned plugin corpus. Unit tests cover environment precedence in both spawn paths and refusal before executing the wrapped binary. No wire change."
+    },
+    {
+      "id": "pin.layout-v2",
+      "title": "Print the 3.8 JSON v2 layout strings",
+      "closed_on": "2026-10-09",
+      "evidence": [
+        "resource:crates/zz-mux/src/layout.rs",
+        "resource:crates/zz-mux/src/layout/json.rs",
+        "resource:crates/zz-mux/src/layout_json_tests.rs",
+        "resource:crates/zz-mux/src/model.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-cli/src/control_mode.rs",
+        "scenario:compat/scenarios/layout-json-v2.txt"
+      ],
+      "resolution": "Closed by catch-up item pin.layout-v2 against the tmux 3.8 tag. semantic:layout-json-v2 is closed. #{window_layout}, #{window_visible_layout} and the list-windows default line print layout_append_v2's bytes: {\"V\":2,\"L\":cell}, each cell t, w, h, x, y, then c for a node or a (active), l (last-pane stack position), i (pane index from pane-base-index), z (floating only) and I for a pane. CellLayout::dump_as takes a LeafState callback per leaf, so floating panes only have to supply z; the v1 writer drops any leaf with a z and collapses single-child parents the way layout_custom_copy_layout does, and prints 0000, when nothing tiled is left. select-layout parses both forms: v1 with the pin's malformed layout header, invalid layout checksum, invalid layout and trailing data causes, v2 through a port of json.c and layout_parse_json_layout with every cause string, the version, active, index, z-index and last checks, cell counting and bottom-right trimming that drops a floating cell without a gift, then assignment in ascending i, the a leaf made active and the last-pane stack rebuilt from l. select-layout -o restores the active pane and last-pane stack saved with the previous layout when the saving command's client reads v2, as 3.8's v2 old_layout does, and an l on the active pane keeps it on the stack, where pane removal and moves leave it as window_lost_pane does. An ambiguous preset prefix now falls through to the parser as layout_set_lookup does (malformed layout header: main, where zz said ambiguous layout). A v2 string that still has a floating cell after trimming is refused with floating panes are not supported until float.core. Control clients: refresh-client -f and attach -f take new-layouts (listed in client_flags after wait-exit); formats only ever produce v2, and the daemon rewrites the output of a command such a client runs to v1 with zz_mux::legacy_layouts_in at the point it returns, so status lines, choosers, snapshots and every other client's output stay v2; refresh-client -B subscriptions print v2 whatever the flag says because monitor.c evaluates them with no client (measured on 3.8). %layout-change converts the snapshot's v2 strings back with zz_mux::legacy_layout, which reads JSON without the 200-object parse limit and never passes v2 through. Wire: WindowSnapshot dumps carry v2 and EventPayload::ControlFlags appends new_layouts under unreleased v108. Proof: crates/zz-mux/src/layout_json_tests.rs pins the measured 3.8 bytes for one pane, nested splits, select-pane, zoom (both formats and list-windows), resize-window, all seven presets and pane-base-index 3, the v2 read-back cases, and 31 malformed inputs with their exact causes; control_mode.rs pins %layout-change in both forms; compat/scenarios/layout-json-v2.txt replays the same steps against the pin."
     },
     {
       "id": "plugins.resurrect-save",

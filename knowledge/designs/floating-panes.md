@@ -119,7 +119,7 @@ keeps `popup_position` (`:43372`), `parse_popup_dimension` (`:49960`) and the po
 |---|---|
 | none | `remain-on-exit on`, close on cancel |
 | `-E` / `-EE` | `remain-on-exit off` / `failed`, no close on cancel |
-| `-k` | `remain-on-exit key` (`failed-key` with `-EE`, which arrives with pin.move) |
+| `-k` | `remain-on-exit key` (`failed-key` with `-EE`; remain-on-exit takes failed-key since pin.formats-options) |
 | always | capture keys, over zoom, `remain-on-exit-format ""` |
 | `-B` / `-b` | pane `pane-border-lines none` / the value (`rounded` to `single`, `padded` to `spaces`) |
 | `-s` / `-S` | pane `window-style` + `window-active-style` / `pane-border-style` + `pane-active-border-style`; absent, from 3.8's `popup-style`, `popup-border-style`, `popup-border-lines` |
@@ -226,6 +226,14 @@ floats appear where 3.8 has them, with `"z"` from a port of `layout_cell_zindex`
 last one first). The v1 string is the tiled copy (`layout_custom_create_compat`, `:495`), and with no
 tiled pane it is whatever 3.8's failed dump prints. The parser places `"z"` leaves as floats in place
 (`layout-custom.c:1056-1066`); v1 input keeps existing floats (`layout-custom.c:693-702`).
+
+pin.layout-v2 left the places to fill in (`crates/zz-mux/src/layout.rs`): the writer asks a
+`LeafState` per leaf and emits `"z"` before `"I"` when `z` is set, and the v1 writer already drops
+those leaves and collapses their parents, so floats need only `Window::leaf_state` to return the
+`layout_cell_zindex` port. The parser keeps each floating leaf's z-index and signed offsets in
+`ParsedLeaf::float`, trimming already removes a floating bottom-right cell without a gift, and the
+size checks skip floating cells; `MuxState::select_layout_string` refuses a layout that still has
+one (`floating panes are not supported`), which is the branch that places them.
 
 # Clients
 

@@ -21,7 +21,7 @@ use zz_protocol::{
 pub use zz_protocol::{TmuxColour, display_width, indexed_colour_rgb, parse_tmux_colour};
 
 use crate::{
-    MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::CellLayout,
+    MuxEngine, PaneKind, WindowSize, command::TmuxOptionTarget, layout::LayoutFormat,
     terminfo::TtyTerm,
 };
 
@@ -240,6 +240,8 @@ pub struct StatusValues {
     pub pane_title: String,
     pub pane_top: Option<u16>,
     pub pane_tty: String,
+    pub pane_unzoomed_height: Option<u16>,
+    pub pane_unzoomed_width: Option<u16>,
     pub pane_width: Option<u16>,
     pub pane_x: Option<u16>,
     pub pane_y: Option<u16>,
@@ -525,6 +527,8 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::PaneTitle => value.clone_into(&mut values.pane_title),
         FormatBacking::PaneTop => values.pane_top = value.parse().ok(),
         FormatBacking::PaneTty => value.clone_into(&mut values.pane_tty),
+        FormatBacking::PaneUnzoomedHeight => values.pane_unzoomed_height = value.parse().ok(),
+        FormatBacking::PaneUnzoomedWidth => values.pane_unzoomed_width = value.parse().ok(),
         FormatBacking::PaneWidth => values.pane_width = value.parse().ok(),
         FormatBacking::PaneX => values.pane_x = value.parse().ok(),
         FormatBacking::PaneY => values.pane_y = value.parse().ok(),
@@ -1040,6 +1044,8 @@ enum FormatBacking {
     PaneTitle,
     PaneTop,
     PaneTty,
+    PaneUnzoomedHeight,
+    PaneUnzoomedWidth,
     PaneWidth,
     PaneX,
     PaneY,
@@ -1219,11 +1225,11 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("pane_at_top", Pane, PaneAtTop),
     variable!("pane_bg", Pane, Empty),
     variable!("pane_bottom", Pane, PaneBottom),
-    variable!("pane_command_duration", Pane, Empty),
-    variable!("pane_command_end_time", Pane, Empty),
-    variable!("pane_command_running", Pane, Zero),
-    variable!("pane_command_start_time", Pane, Empty),
-    variable!("pane_command_status", Pane, Empty),
+    variable!("pane_command_duration", Pane, StatusHook),
+    variable!("pane_command_end_time", Pane, Time, StatusHook),
+    variable!("pane_command_running", Pane, StatusHook),
+    variable!("pane_command_start_time", Pane, Time, StatusHook),
+    variable!("pane_command_status", Pane, StatusHook),
     variable!("pane_current_command", Pane, PaneCurrentCommand),
     variable!("pane_current_path", Pane, PaneCurrentPath),
     variable!("pane_dead", Pane, PaneDead),
@@ -1241,21 +1247,21 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("pane_input_off", Pane, PaneInputOff),
     variable!("pane_key_mode", Pane, Empty),
     variable!("pane_last", Pane, PaneLast),
-    variable!("pane_last_output_time", Pane, Empty),
-    variable!("pane_last_prompt_time", Pane, Empty),
+    variable!("pane_last_output_time", Pane, Time, StatusHook),
+    variable!("pane_last_prompt_time", Pane, Time, StatusHook),
     variable!("pane_left", Pane, PaneLeft),
     variable!("pane_marked", Pane, PaneMarked),
     variable!("pane_marked_set", Pane, PaneMarkedSet),
     variable!("pane_modal_flag", Pane, Zero),
     variable!("pane_mode", Pane, StatusHook),
-    variable!("pane_output_generation", Pane, Zero),
+    variable!("pane_output_generation", Pane, StatusHook),
     variable!("pane_path", Pane, PanePath),
     variable!("pane_pb_progress", Pane, StatusHook),
     variable!("pane_pb_state", Pane, StatusHook),
     variable!("pane_pid", Pane, PanePid),
     variable!("pane_pipe", Pane, StatusHook),
     variable!("pane_pipe_pid", Pane, StatusHook),
-    variable!("pane_private_modes", Pane, Empty),
+    variable!("pane_private_modes", Pane, StatusHook),
     variable!("pane_right", Pane, PaneRight),
     variable!("pane_search_string", Pane, StatusHook),
     variable!("pane_start_command", Pane, PaneStartCommand),
@@ -1267,8 +1273,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("pane_top", Pane, PaneTop),
     variable!("pane_tty", Pane, PaneTty),
     variable!("pane_unseen_changes", Pane, StatusHook),
-    variable!("pane_unzoomed_height", Pane, Zero),
-    variable!("pane_unzoomed_width", Pane, Zero),
+    variable!("pane_unzoomed_height", Pane, PaneUnzoomedHeight),
+    variable!("pane_unzoomed_width", Pane, PaneUnzoomedWidth),
     variable!("pane_width", Pane, PaneWidth),
     variable!("pane_x", Pane, PaneX),
     variable!("pane_y", Pane, PaneY),
@@ -1457,6 +1463,8 @@ impl StatusValues {
             FormatBacking::PaneTitle => Cow::Borrowed(self.pane_title.as_str()),
             FormatBacking::PaneTop => optional_display(self.pane_top),
             FormatBacking::PaneTty => Cow::Borrowed(self.pane_tty.as_str()),
+            FormatBacking::PaneUnzoomedHeight => optional_display(self.pane_unzoomed_height),
+            FormatBacking::PaneUnzoomedWidth => optional_display(self.pane_unzoomed_width),
             FormatBacking::PaneWidth => optional_display(self.pane_width),
             FormatBacking::PaneX => optional_display(self.pane_x),
             FormatBacking::PaneY => optional_display(self.pane_y),
@@ -3227,11 +3235,9 @@ impl MuxEngine {
             context.window_manual_height = Some(window.manual_extent.1);
         }
         if dumps.window != Some(window.id) {
-            dumps.layout = window.layout.dump();
-            dumps.visible = window.zoomed_pane.map_or_else(
-                || dumps.layout.clone(),
-                |pane| CellLayout::new(pane, width, height).dump(),
-            );
+            let pane_base_index = self.state.pane_base_index(window.id);
+            dumps.layout = window.layout_string(LayoutFormat::V2, pane_base_index);
+            dumps.visible = window.visible_layout_string(LayoutFormat::V2, pane_base_index);
             dumps.window = Some(window.id);
         }
         context.window_layout.clone_from(&dumps.layout);
@@ -3326,6 +3332,13 @@ impl MuxEngine {
             context.pane_current_command = self.pane_command_fallback(pane.id);
         }
         let border_status = self.pane_border_status(window.id);
+        if let Some(cell) = window
+            .layout
+            .pane_geometry_with_border(pane.id, border_status)
+        {
+            context.pane_unzoomed_width = Some(cell.sx);
+            context.pane_unzoomed_height = Some(cell.sy);
+        }
         let geometry = window
             .displayed_pane_cell(pane.id, border_status)
             .map(|geometry| (geometry.sx, geometry.sy, geometry.xoff, geometry.yoff));
@@ -3545,9 +3558,22 @@ pub enum FormatJobTag {
     Pane(String),
 }
 
+pub const FORMAT_CYCLE_PERIOD_MS: u64 = 100;
+
 pub trait StatusHooks {
     fn strftime(&mut self, literal: &str) -> String;
     fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String;
+
+    /// The millisecond clock `format_cycle` divides into frames; `None`
+    /// outside status and border formats, where the modifier expands to
+    /// nothing.
+    fn cycle_clock(&mut self) -> Option<u64> {
+        None
+    }
+
+    /// A cycle with more than one frame was drawn, so the line has to be
+    /// redrawn every [`FORMAT_CYCLE_PERIOD_MS`].
+    fn cycle_animates(&mut self) {}
 
     fn stable_option_lookups(&self) -> bool {
         false
@@ -4006,6 +4032,14 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         self.inner.stable_option_lookups()
     }
 
+    fn cycle_clock(&mut self) -> Option<u64> {
+        self.inner.cycle_clock()
+    }
+
+    fn cycle_animates(&mut self) {
+        self.inner.cycle_animates();
+    }
+
     fn only_tmux_options(&self) -> bool {
         self.inner.only_tmux_options()
     }
@@ -4101,6 +4135,25 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             let indent = depth.min(FORMAT_LOOP_LIMIT);
             trace.push(format!("#{:indent$}{message}", ""));
         }
+    }
+
+    /// `format_cycle`: a status or border format shows one frame of the
+    /// comma-separated list for `count` periods of 100 ms each, and anything
+    /// else expands the modifier to nothing.
+    fn expand_cycle(&mut self, frames: &str, count: u64) -> String {
+        if frames.is_empty() {
+            return String::new();
+        }
+        let Some(clock) = self.hooks.cycle_clock() else {
+            return String::new();
+        };
+        let total = frames.bytes().filter(|byte| *byte == b',').count() + 1;
+        let index =
+            usize::try_from(clock / (count * FORMAT_CYCLE_PERIOD_MS)).unwrap_or(usize::MAX) % total;
+        if total > 1 {
+            self.hooks.cycle_animates();
+        }
+        frames.split(',').nth(index).unwrap_or_default().to_owned()
     }
 
     fn expand(&mut self, format: &str, depth: usize) -> RawText {
@@ -4480,6 +4533,12 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
     ) -> Result<RawText, ()> {
         let mut value = if let Some(word) = flags.interrogate {
             self.expand_interrogate(copy, word)
+        } else if let Some(count) = flags.cycle {
+            let value = self.expand_cycle(copy, count);
+            if self.tracing() {
+                self.log(depth, &format!("cycle '{copy}' is: {value}"));
+            }
+            RawText::from(value)
         } else if flags.literal {
             if self.tracing() {
                 self.log(depth, &format!("literal string is '{copy}'"));
@@ -5400,6 +5459,7 @@ enum ModifierKind {
     ContentSearch,
     Repeat,
     Interrogate,
+    Animate,
 }
 
 #[derive(Clone, Copy)]
@@ -5419,7 +5479,7 @@ impl FormatModifierSpec {
     }
 }
 
-const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 36] = [
+const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 37] = [
     FormatModifierSpec::new("||", ModifierKind::Or, false),
     FormatModifierSpec::new("&&", ModifierKind::And, false),
     FormatModifierSpec::new("!!", ModifierKind::NotNot, false),
@@ -5456,6 +5516,7 @@ const FORMAT_MODIFIER_SPECS: [FormatModifierSpec; 36] = [
     FormatModifierSpec::new("C", ModifierKind::ContentSearch, true),
     FormatModifierSpec::new("R", ModifierKind::Repeat, true),
     FormatModifierSpec::new("I", ModifierKind::Interrogate, true),
+    FormatModifierSpec::new("A", ModifierKind::Animate, true),
 ];
 
 #[cfg(test)]
@@ -5594,6 +5655,7 @@ struct ModifierFlags<'a> {
     content_search: Option<&'a str>,
     repeat: bool,
     interrogate: Option<&'a str>,
+    cycle: Option<u64>,
     time: TimeFlags<'a>,
     quote_shell: bool,
     quote_single: bool,
@@ -5777,6 +5839,16 @@ impl<'a> ModifierFlags<'a> {
                     flags.content_search = Some(modifier.args.first().map_or("", String::as_str));
                 }
                 ModifierKind::Repeat => flags.repeat = true,
+                ModifierKind::Animate => {
+                    flags.cycle = Some(
+                        modifier
+                            .args
+                            .first()
+                            .and_then(|count| count.parse::<u64>().ok())
+                            .filter(|count| (1..=100).contains(count))
+                            .unwrap_or(1),
+                    );
+                }
             }
         }
         flags
@@ -7407,6 +7479,60 @@ mod tests {
     }
 
     #[test]
+    fn animation_frames_follow_the_pins_format_cycle() {
+        struct Clock {
+            now: Option<u64>,
+            animates: bool,
+        }
+        impl StatusHooks for Clock {
+            fn strftime(&mut self, literal: &str) -> String {
+                literal.to_owned()
+            }
+
+            fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
+                String::new()
+            }
+
+            fn cycle_clock(&mut self) -> Option<u64> {
+                self.now
+            }
+
+            fn cycle_animates(&mut self) {
+                self.animates = true;
+            }
+        }
+        let frame = |format: &str, now: Option<u64>| {
+            let run = |enabled: bool| {
+                let mut clock = Clock {
+                    now,
+                    animates: false,
+                };
+                let value = compiled::with_enabled(enabled, || {
+                    expand_status(format, &context(), &mut clock)
+                });
+                (value, clock.animates)
+            };
+            let compiled = run(true);
+            assert_eq!(compiled, run(false), "{format}");
+            compiled
+        };
+        assert_eq!(frame("#{A:a,b,c}", None), (String::new(), false));
+        assert_eq!(frame("#{A:a,b,c}", Some(0)), ("a".to_owned(), true));
+        assert_eq!(frame("#{A:a,b,c}", Some(150)), ("b".to_owned(), true));
+        assert_eq!(frame("#{A:a,b,c}", Some(320)), ("a".to_owned(), true));
+        assert_eq!(frame("#{A/2:a,b,c}", Some(150)), ("a".to_owned(), true));
+        assert_eq!(frame("#{A/2:a,b,c}", Some(250)), ("b".to_owned(), true));
+        assert_eq!(frame("#{A/0:a,b}", Some(150)), ("b".to_owned(), true));
+        assert_eq!(frame("#{A/x:a,b}", Some(150)), ("b".to_owned(), true));
+        assert_eq!(frame("#{A:only}", Some(150)), ("only".to_owned(), false));
+        assert_eq!(frame("#{A:}", Some(150)), (String::new(), false));
+        assert_eq!(
+            frame("#{A:#{session_name},x}", Some(0)),
+            ("#{session_name}".to_owned(), true)
+        );
+    }
+
+    #[test]
     fn snapshot_contexts_share_universe_and_match_independent_formats() {
         let mut engine = MuxEngine::default();
         let (work, first_window, first_pane) = engine.state.create_session("work").unwrap();
@@ -7790,7 +7916,11 @@ mod tests {
                 "buffer_created",
                 "client_activity",
                 "client_created",
+                "pane_command_end_time",
+                "pane_command_start_time",
                 "pane_dead_time",
+                "pane_last_output_time",
+                "pane_last_prompt_time",
                 "session_activity",
                 "session_created",
                 "session_last_attached",
@@ -8196,7 +8326,7 @@ mod tests {
             zoomed
                 .variable("window_visible_layout")
                 .unwrap()
-                .ends_with(&format!(",{}", second_pane.0))
+                .ends_with(&format!(",\"I\":\"%{}\"}}}}", second_pane.0))
         );
     }
 

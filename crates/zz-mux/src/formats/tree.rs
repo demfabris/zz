@@ -232,16 +232,17 @@ impl FormatTree<'_> {
             }
             FormatBacking::WindowLayout => Cow::Owned(
                 window
-                    .map(|window| window.layout.dump())
+                    .map(|window| {
+                        window.layout_string(LayoutFormat::V2, state.pane_base_index(window.id))
+                    })
                     .unwrap_or_default(),
             ),
             FormatBacking::WindowVisibleLayout => Cow::Owned(
                 window
                     .map(|window| {
-                        let (width, height) = window.layout.extent();
-                        window.zoomed_pane.map_or_else(
-                            || window.layout.dump(),
-                            |pane| CellLayout::new(pane, width, height).dump(),
+                        window.visible_layout_string(
+                            LayoutFormat::V2,
+                            state.pane_base_index(window.id),
                         )
                     })
                     .unwrap_or_default(),
@@ -470,6 +471,20 @@ impl FormatTree<'_> {
                 } else {
                     Cow::Borrowed("")
                 }
+            }
+            FormatBacking::PaneUnzoomedHeight | FormatBacking::PaneUnzoomedWidth => {
+                let Some(cell) = window.zip(self.pane).and_then(|(window, pane)| {
+                    window
+                        .layout
+                        .pane_geometry_with_border(pane, engine.pane_border_status(window.id))
+                }) else {
+                    return Cow::Borrowed("");
+                };
+                optional_display(Some(if backing == FormatBacking::PaneUnzoomedWidth {
+                    cell.sx
+                } else {
+                    cell.sy
+                }))
             }
             FormatBacking::PaneAtBottom
             | FormatBacking::PaneAtLeft

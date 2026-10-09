@@ -82,7 +82,9 @@ with later OSC 0/2 output. Browser document-title changes arrive through tmux-co
 `select-pane -T`. Either title change advances `generation` and publishes a tree delta without
 renaming the containing window.
 
-`layout_dump` and `visible_layout_dump` carry tmux's checksummed cell-tree strings. Protocol v69
+`layout_dump` and `visible_layout_dump` carry tmux 3.8's JSON v2 layout strings (protocol v108;
+before that, the checksummed v1 cell tree). A control client converts them back to v1 with
+`zz_mux::legacy_layout` unless it set the `new-layouts` flag. Protocol v69
 appended the daemon-expanded `status_label` for the TUI's window-status loop. GUI clients ignore
 that label. Protocol v86 appended `activity`; the daemon copies its latched window-activity flag
 there, and selection clears it. Native window strips can render the flag from structured state

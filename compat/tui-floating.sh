@@ -34,6 +34,9 @@
 #                    display-popup sets (pane-border-style, window-style)
 #   clipped          a float pushed past the left and top window edges shows
 #                    its own columns and rows from the clipped offset on
+#   clipped-update   a clipped float's later output lands on its visible rows
+#   clipped-clock    clock-mode in a float past the left edge is cropped, not
+#                    centred again in what is left
 #   cursor-covered   a tiled pane's cursor under a float is hidden
 #
 # CONTROLLED VALUES, set on both sides: status-right '' and status-left L (the
@@ -495,6 +498,29 @@ clipped_case() {
   both_screen_has R2-ABCDEFGH 'the clipped float'
   run_on_both move-pane -X -4 -Y -2
   verdict clipped
+  CASE_LABEL=clipped-update
+  local side
+  for side in zz tmux; do
+    side_command "$side" send-keys -t "$(float_pane "$side" 1)" ECHO-LINE-SEEN Enter ||
+      die "$side refused send-keys"
+  done
+  wait_for 'the zz echo' screen_has zz LINE-SEEN
+  wait_for 'the tmux echo' screen_has tmux LINE-SEEN
+  verdict clipped-update
+}
+
+clipped_clock_case() {
+  CASE_LABEL=clipped-clock
+  attach_both
+  set_on_both clock-mode-style 24
+  new_float_on_both CLOCKF -x 30 -y 8 -X 10 -Y 6
+  run_on_both move-pane -X -12 -Y 2
+  local side
+  for side in zz tmux; do
+    side_command "$side" clock-mode -t "$(float_pane "$side" 1)" || die "$side refused clock-mode"
+  done
+  both_screen_lacks CLOCKF 'the float under clock-mode'
+  verdict clipped-clock
 }
 
 cursor_covered_case() {
@@ -517,6 +543,7 @@ no_tiled_case
 modal_cases
 popup_titled_case
 clipped_case
+clipped_clock_case
 cursor_covered_case
 
 if [ "$FAILURES" -ne 0 ]; then

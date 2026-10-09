@@ -890,13 +890,16 @@ impl Renderer {
                 if let Some(pane_mode) = pane.mode.as_ref() {
                     self.damage.remove(&entry.pane);
                     self.painted.remove(&entry.pane);
-                    self.paint_pane_mode(pane_mode, content, model);
+                    self.paint_pane_mode(pane_mode, content, entry.source, model);
                     return;
                 }
                 let force = force || pane_mode_changed;
                 if let Some(viewport) = model.pane_viewport(entry.pane) {
                     let viewport = &*source_viewport(viewport, entry.source);
-                    let damage = self.damage.remove(&entry.pane);
+                    let damage = self
+                        .damage
+                        .remove(&entry.pane)
+                        .map(|damage| source_damage(damage, entry.source.1));
                     let mode = crate::mode_view::presentation(model, entry.pane, viewport);
                     self.selection_style = mode.and_then(|mode| {
                         crate::mode_view::resolved_style(&mode.selection_style, &model.status.theme)
@@ -1027,6 +1030,19 @@ impl Renderer {
 
     fn reconcile_kitty_images(&mut self, model: &Model) {
         let browser_placements = &self.browser_placements;
+        let cropped: HashMap<PaneId, Vec<zz_terminal::KittyPlacement>> = model
+            .layout
+            .panes
+            .iter()
+            .filter(|entry| entry.source != (0, 0))
+            .filter_map(|entry| {
+                let viewport = model.pane_viewport(entry.pane)?;
+                Some((
+                    entry.pane,
+                    source_placements(&viewport.kitty_placements, entry.source),
+                ))
+            })
+            .collect();
         let tiled = model.layout.tiled().len();
         let panes = model
             .layout
@@ -1047,11 +1063,10 @@ impl Renderer {
                 match &pane.kind {
                     PaneKindSnapshot::Terminal => {
                         let viewport = model.pane_viewport(entry.pane)?;
-                        Some((
-                            entry.pane,
-                            entry.content(),
-                            viewport.kitty_placements.as_ref(),
-                        ))
+                        let placements = cropped
+                            .get(&entry.pane)
+                            .map_or_else(|| viewport.kitty_placements.as_ref(), Vec::as_slice);
+                        Some((entry.pane, entry.content(), placements))
                     }
                     PaneKindSnapshot::Browser(_) => {
                         let placement = browser_placements.get(&entry.pane)?;
@@ -2318,14 +2333,25 @@ impl Renderer {
             .and_then(|pane| pane.mode.as_ref())
         {
             let content = entry.content();
-            let surface = pane_mode::surface(mode, content, &model.status.theme);
-            let (column, row) = surface.cursor;
-            write_cursor_position(
-                &mut self.output,
+            let surface = pane_mode::surface(
+                mode,
+                pane_mode::full_rect(content, entry.source),
+                &model.status.theme,
+            );
+            let (Some(column), Some(row)) = (
+                surface.cursor.0.checked_sub(entry.source.0),
+                surface.cursor.1.checked_sub(entry.source.1),
+            ) else {
+                self.move_to(0, 0);
+                self.hide_cursor();
+                return;
+            };
+            let (column, row) = (
                 content.x.saturating_add(column),
                 content.y.saturating_add(row),
             );
-            if surface.cursor_visible {
+            write_cursor_position(&mut self.output, column, row);
+            if surface.cursor_visible && !model.covered_above(pane, column, row) {
                 self.output.extend_from_slice(b"\x1b[?25h");
             } else {
                 self.hide_cursor();
@@ -2631,6 +2657,36 @@ fn source_viewport(
         ))
     });
     std::borrow::Cow::Owned(cropped)
+}
+
+/// Damage rows are pane rows; a float clipped by the window's top edge
+/// shows pane row `top` on its first visible row.
+fn source_damage(damage: FrameDamage, top: u16) -> FrameDamage {
+    match damage {
+        FrameDamage::Rows(rows) if top != 0 => FrameDamage::Rows(
+            rows.into_iter()
+                .filter_map(|row| row.checked_sub(top))
+                .collect(),
+        ),
+        damage => damage,
+    }
+}
+
+/// The kitty placements a clipped float still shows, moved to its visible
+/// grid. An image that starts in the clipped-away part is not placed.
+fn source_placements(
+    placements: &[zz_terminal::KittyPlacement],
+    source: (u16, u16),
+) -> Vec<zz_terminal::KittyPlacement> {
+    placements
+        .iter()
+        .filter_map(|placement| {
+            let mut placement = placement.clone();
+            placement.viewport_col -= i32::from(source.0);
+            placement.viewport_row -= i32::from(source.1);
+            (placement.viewport_col >= 0 && placement.viewport_row >= 0).then_some(placement)
+        })
+        .collect()
 }
 
 const fn rects_overlap(a: Rect, b: Rect) -> bool {
@@ -5267,6 +5323,140 @@ mod tests {
         renderer.output.clear();
         renderer.reconcile_kitty_images(model);
         String::from_utf8_lossy(&renderer.output).into_owned()
+    }
+
+    fn tiled_under_float(
+        float: zz_protocol::FloatingPaneSnapshot,
+        mode: Option<zz_protocol::PaneMode>,
+    ) -> Model {
+        let tiled = PaneId(7);
+        let mut model = block_model(40, 12);
+        attach_one_pane(&mut model, tiled);
+        let mut snapshot = (*model.snapshot).clone();
+        let window = &mut snapshot.sessions[0].windows[0];
+        let pane = |id: PaneId, mode: Option<zz_protocol::PaneMode>| zz_protocol::PaneSnapshot {
+            id,
+            title: String::new(),
+            kind: PaneKindSnapshot::Terminal,
+            synchronized_input: false,
+            bell: false,
+            dead: false,
+            dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
+            border_status_text: String::new(),
+            mode,
+            status: None,
+        };
+        window.panes.insert(tiled, pane(tiled, mode));
+        window.panes.insert(float.pane, pane(float.pane, None));
+        window.floating = vec![float];
+        model.update_snapshot(std::sync::Arc::new(snapshot));
+        model
+    }
+
+    const CLIPPED: zz_protocol::FloatingPaneSnapshot = zz_protocol::FloatingPaneSnapshot {
+        pane: PaneId(8),
+        xoff: -3,
+        yoff: 2,
+        sx: 10,
+        sy: 4,
+        visible: true,
+        border_lines: PaneBorderLines::Single,
+        border_status: zz_protocol::PaneBorderStatus::Off,
+    };
+
+    fn placement_at(column: i32, columns: u32) -> KittyPlacement {
+        KittyPlacement {
+            image_id: 9,
+            image_generation: 1,
+            layer: zz_terminal::KittyLayer::AboveText,
+            viewport_col: column,
+            viewport_row: 0,
+            absolute_row: 0,
+            cell_offset_x: 0,
+            cell_offset_y: 0,
+            grid_cols: columns,
+            grid_rows: 1,
+            pixel_width: 2,
+            pixel_height: 1,
+            source_rect: None,
+        }
+    }
+
+    fn clipped_float_placements(column: i32) -> String {
+        let mut model = tiled_under_float(CLIPPED, None);
+        let mut viewport = TerminalViewport::blank(10, 4, SessionStatus::Running);
+        viewport.kitty_placements = std::sync::Arc::from([placement_at(column, 2)]);
+        model.viewports.insert(PaneId(8), viewport);
+        let mut renderer = Renderer::new();
+        renderer.enable_kitty_graphics();
+        renderer.install_kitty_image(KittyImageData {
+            pane: PaneId(8),
+            image_id: 9,
+            generation: 1,
+            width: 2,
+            height: 1,
+            bytes: vec![0, 0, 255, 255, 0, 255, 0, 255],
+        });
+        renderer.output.clear();
+        renderer.reconcile_kitty_images(&model);
+        String::from_utf8_lossy(&renderer.output).into_owned()
+    }
+
+    #[test]
+    fn a_clipped_float_places_only_the_images_it_still_shows_where_it_shows_them() {
+        assert!(
+            !clipped_float_placements(0).contains("\x1b_Ga=p"),
+            "an image in the clipped-away columns is not placed"
+        );
+        assert!(clipped_float_placements(5).contains("\x1b_Ga=p"));
+        assert_eq!(
+            source_placements(&[placement_at(5, 2)], (3, 0))[0].viewport_col,
+            2
+        );
+    }
+
+    #[test]
+    fn a_pane_mode_cursor_under_a_float_is_hidden() {
+        let mode = zz_protocol::PaneMode::Switch {
+            rows: vec!["cli".to_owned()],
+            selected: 0,
+            offset: 0,
+            selection_style: "noattr,bg=themeyellow,fg=themeblack".to_owned(),
+            prompt: "(search) ".to_owned(),
+            prompt_style: "bg=themeyellow,fg=themeblack".to_owned(),
+            prompt_cursor: 9,
+            matches: Vec::new(),
+            match_style: String::new(),
+        };
+        let open = zz_protocol::FloatingPaneSnapshot {
+            xoff: 30,
+            yoff: 8,
+            sx: 4,
+            sy: 1,
+            ..CLIPPED
+        };
+        let model = tiled_under_float(open, Some(mode.clone()));
+        let content = model.pane_rect(PaneId(7)).unwrap().content();
+        let cursor = pane_mode::surface(&mode, content, &model.status.theme).cursor;
+        let mut renderer = Renderer::new();
+        renderer.place_pane_cursor(&model);
+        assert!(String::from_utf8_lossy(&renderer.output).ends_with("\x1b[?25h"));
+
+        let covering = zz_protocol::FloatingPaneSnapshot {
+            xoff: i32::from(cursor.0) - 1,
+            yoff: i32::from(cursor.1),
+            sx: 4,
+            sy: 1,
+            ..CLIPPED
+        };
+        let model = tiled_under_float(covering, Some(mode));
+        let mut renderer = Renderer::new();
+        renderer.place_pane_cursor(&model);
+        let output = String::from_utf8_lossy(&renderer.output).into_owned();
+        assert!(!output.contains("\x1b[?25h"), "{output:?}");
+        assert!(output.ends_with("\x1b[?25l"), "{output:?}");
     }
 
     #[test]

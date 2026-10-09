@@ -845,7 +845,7 @@
       "id": "fix.formats-values-3-8",
       "track": "fix",
       "title": "formats-values scenario is red on main at the 3.8 pin",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/formats.rs",
@@ -858,13 +858,14 @@
         "The cause is named: a regression from a catch-up merge (which commit) or 3.8 drift (which tmux change)."
       ],
       "branch": "catchup/fix.formats-values-3-8",
-      "sha": null,
+      "sha": "1ffee6457",
       "notes": [
         "2026-10-09: found by pin.hooks-events-2 and confirmed by the orchestrator on main 51adcd7a5: OUT differs (zz prints rows tmux leaves out in the #{session_active} list filters); clean in compat/results/summary.md, which was stamped at the d77c9dc6 pin.",
         "2026-10-09: Lane done at 5cc71dda9: cause is 3.8 drift (tmux d9692f7e: list-sessions/windows/panes rows get the invoking client), zz now formats list rows with the invoking client; formats-values 48 steps clean vs 3.8. Follow-ups: format-window-cell-metrics and smoke/format-window-bigger red at 3.8 from the same commit (zz has no format facts for an unattached command client: client-PID name, focused, key table, 80 width, window_bigger 0; also new-session -P -F #{client_name}). Review 1 running.",
         "2026-10-09: Codex review 1: P1 unattached list invocations drop client facts (list-sessions -f '#{client_pid}'); the unattached-client facts follow-up moved here from fix.followups (same tmux d9692f7e); P2 recorded proof; fix pass sent.",
         "2026-10-09: Fix pass e7b468d9d: unattached command clients get 3.8's format facts (client-PID, focused, root, width 80, window_bigger 0); list rows and new-session -P use the invoking client's facts; formats-values 52, format-window-cell-metrics 8, smoke/format-window-bigger 3 clean at the tip (log in the worktree). Review 2 running.",
-        "2026-10-09: Codex review 2: P1 new-session -P keeps pre-attach facts (client_session empty), P2 unattached termfeatures empty with -T; final fix pass sent."
+        "2026-10-09: Codex review 2: P1 new-session -P keeps pre-attach facts (client_session empty), P2 unattached termfeatures empty with -T; final fix pass sent.",
+        "2026-10-09: Merged after the final fix pass (88deeb6ec: client_session after attach for new-session -P, -T features on unattached clients); merge checks green (clippy, zz-daemon 1589, zz-mux 684, compat check)."
       ]
     },
     {

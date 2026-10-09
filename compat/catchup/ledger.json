@@ -13,7 +13,7 @@
       "id": "fix.tui-colour",
       "track": "fix",
       "title": "Raw TUI honours terminal-overrides, terminal-features and user-keys",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/client.rs",
@@ -36,7 +36,8 @@
       "sha": null,
       "notes": [
         "2026-10-09: lane done at 5451831a4: all 4 clauses met; wire: EventPayload::TerminalNegotiation + KeyCode::User under 108; also fixed set -s extended-keys/focus-events not reaching the TUI hello",
-        "2026-10-09: fix-pass agent stalled 2h waiting on a dead background job; stopped and relaunched at 08:35 to continue from the uncommitted worktree changes and merge main"
+        "2026-10-09: fix-pass agent stalled 2h waiting on a dead background job; stopped and relaunched at 08:35 to continue from the uncommitted worktree changes and merge main",
+        "2026-10-09: relaunch done: fix pass a17168791 + merge of main f55cb4d94; all 4 P1 fixed with fail-first tests; terminal-overrides capability strings recorded; TUI-009 extended-keys rows pass on this branch (fixes that regression)"
       ]
     },
     {
@@ -64,7 +65,8 @@
       "sha": null,
       "notes": [
         "2026-10-09: found by pin.tui-fixtures; all six reproduce against both pins, so they are main regressions, not 3.8 drift. High priority: two break verified TUI obligations.",
-        "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello"
+        "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello",
+        "2026-10-09: TUI-009 extended-keys rows pass on catchup/fix.tui-colour (set -s extended-keys now published to the TUI); clause 2 closes when fix.tui-colour merges."
       ]
     },
     {
@@ -617,7 +619,8 @@
       "branch": "catchup/float.core",
       "sha": null,
       "notes": [
-        "2026-10-09: pin.move moved semantic:move-pane-tiled-extension into adopted pane.floating-model; decide whether it closes or goes back to native."
+        "2026-10-09: pin.move moved semantic:move-pane-tiled-extension into adopted pane.floating-model; decide whether it closes or goes back to native.",
+        "2026-10-09: session 1 at b4d83d69a: step 1 done, step 2 half (floating-panes scenario 75 steps clean vs 3.8; 21 pane.floating-model items closed). Resume: resize-pane on floats, swap-pane modal/float errors and -U/-D skipping floats, missing scenario lines, directional select-pane/compass hit order for floats, then steps 3-6"
       ]
     },
     {

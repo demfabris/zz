@@ -1,25 +1,33 @@
 # 3.8 counts the fires of each hook entry and keeps the second it last fired
 # (hooks.c options_hook_fired); show-hooks -F reads them as hook_fire_count and
-# hook_fire_time (cmd-show-options.c), and show-options leaves both out. 3.8
-# also counts an event whose hook entry has no commands, because the global
-# entry always exists, so the harness's own window renames before this file
-# would count under window-renamed there; zz counts a hook when it runs
-# commands, and the event hook here is one only this file fires.
+# hook_fire_time (cmd-show-options.c), and show-options leaves both out. The
+# global entry of every table hook always exists, so an event counts there
+# whether or not the hook has commands; a local entry that is unset and set
+# again starts at zero; a user hook counts on its own option.
+new-window -d -n fired-1
+out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} after-new-window
 set-hook -g after-new-window 'set-option -g @fired-new yes'
 out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} after-new-window
-new-window -d
-new-window -d
+new-window -d -n fired-2
+new-window -d -n fired-3
 out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} after-new-window
 set-hook after-new-window 'set-option -g @fired-local yes'
-new-window -d
+new-window -d -n fired-4
 out: show-hooks -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} after-new-window
 out: show-hooks -g -F #{option_name}:#{hook_fire_count} after-new-window
 set-hook -u after-new-window
-set-hook -g session-renamed 'set-option -g @fired-rename yes'
-out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} session-renamed
+set-hook after-new-window 'set-option -g @fired-again yes'
+out: show-hooks -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} after-new-window
+set-hook -u after-new-window
 new-session -d -s side
 rename-session -t side fired
+out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} session-renamed
+set-hook -g session-renamed 'set-option -g @fired-rename yes'
 rename-session -t fired side
 out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} session-renamed
+set-hook -g @user-hook 'set-option -g @fired-user yes'
+out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} @user-hook
+set-hook -E @user-hook
+out: show-hooks -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} @user-hook
 out: show-options -g -F #{option_name}:#{hook_fire_count}:#{?hook_fire_time,set,unset} status
 kill-session -t side

@@ -219,10 +219,7 @@ impl ClientTimers {
     fn sync(&mut self, shared: &Shared, deadlines: &mut Deadlines, now: Instant) {
         let animating = !shared.status.lock().animating_clients().is_empty();
         let inner = shared.inner.lock();
-        let animating = animating
-            || inner
-                .border_cycle
-                .load(std::sync::atomic::Ordering::Relaxed);
+        let animating = animating || inner.border_cycling();
         let intervals = Shared::status_timer_sessions(&inner)
             .collect::<BTreeSet<_>>()
             .into_iter()
@@ -848,12 +845,7 @@ impl Shared {
                 if !clients.is_empty() {
                     self.refresh_status_filtered(None, Some(&clients));
                 }
-                if self
-                    .inner
-                    .lock()
-                    .border_cycle
-                    .load(std::sync::atomic::Ordering::Relaxed)
-                {
+                if self.inner.lock().border_cycling() {
                     self.publish_mux_snapshots();
                 }
             }

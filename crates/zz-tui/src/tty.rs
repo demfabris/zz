@@ -185,8 +185,7 @@ const APPLICATION_ESCAPE_ENABLE: &[u8] = b"\x1b[?7727h";
 const APPLICATION_ESCAPE_DISABLE: &[u8] = b"\x1b[?7727l";
 
 fn arm_application_escape() {
-    if !terminal_carries("appesc") || APPLICATION_ESCAPE_ARMED.swap(true, Ordering::Relaxed)
-    {
+    if !terminal_carries("appesc") || APPLICATION_ESCAPE_ARMED.swap(true, Ordering::Relaxed) {
         return;
     }
     ACTIVE_OUTPUT.with(|output| {

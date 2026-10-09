@@ -683,16 +683,21 @@ fn add_command_payload(
 }
 
 fn pane_event_if_hooked(
-    inner: &ServerState,
+    inner: &mut ServerState,
     name: &'static str,
     pane: PaneId,
 ) -> Option<PendingHookEvent> {
     let event = PendingHookEvent::live_pane(name, pane, &inner.engine)?;
-    inner
+    let hooked = inner
         .engine
         .event_hook_commands(&event.context, name)
-        .is_some_and(|commands| !commands.is_empty())
-        .then_some(event)
+        .is_some_and(|commands| !commands.is_empty());
+    if !hooked {
+        inner
+            .engine
+            .note_event_hook_fired(&event.context, name, unix_timestamp());
+    }
+    hooked.then_some(event)
 }
 
 fn window_alert_notifications(
@@ -8114,17 +8119,24 @@ impl Shared {
         } else if let Some(hook) = match &result {
             Ok(_) => MuxEngine::after_command_hook(&name),
             Err(_) => Some("command-error"),
-        } && self.command_hook_set(hook)
-        {
-            let mut hook_context = match &result {
-                Ok(execution) => self.command_hook_context(&name, execution, context),
-                Err(_) => original_context,
-            };
-            {
-                let inner = self.inner.lock();
-                inner.engine.repair_context(&mut hook_context);
+        } {
+            if self.command_hook_set(hook) {
+                let mut hook_context = match &result {
+                    Ok(execution) => self.command_hook_context(&name, execution, context),
+                    Err(_) => original_context,
+                };
+                {
+                    let inner = self.inner.lock();
+                    inner.engine.repair_context(&mut hook_context);
+                }
+                self.run_command_hook(client, kind, &hook_context, command, hook, queue_execution)
+            } else {
+                self.inner
+                    .lock()
+                    .engine
+                    .note_hook_fired(context.session, hook, unix_timestamp());
+                String::new()
             }
-            self.run_command_hook(client, kind, &hook_context, command, hook, queue_execution)
         } else {
             String::new()
         };
@@ -8819,16 +8831,13 @@ impl Shared {
     ) -> String {
         let commands = {
             let mut inner = self.inner.lock();
-            let commands = inner
+            inner
+                .engine
+                .note_hook_fired(context.session, hook, unix_timestamp());
+            inner
                 .engine
                 .hook_commands(context.session, hook)
-                .filter(|commands| !commands.is_empty());
-            if commands.is_some() {
-                inner
-                    .engine
-                    .note_hook_fired(context.session, hook, unix_timestamp());
-            }
-            commands
+                .filter(|commands| !commands.is_empty())
         };
         let Some(commands) = commands else {
             return String::new();
@@ -9162,15 +9171,13 @@ impl Shared {
             context.set_no_client();
             context.set_replay_client(None);
             context.set_control_command_target(None);
+            inner
+                .engine
+                .note_event_hook_fired(&context, event.name, unix_timestamp());
             let commands = inner
                 .engine
                 .event_hook_commands(&context, event.name)
                 .filter(|commands| !commands.is_empty());
-            if commands.is_some() {
-                inner
-                    .engine
-                    .note_event_hook_fired(&context, event.name, unix_timestamp());
-            }
             (context, commands)
         };
         let commands = commands?;
@@ -28710,7 +28717,7 @@ impl Shared {
             {
                 return;
             }
-            let activity_hook = pane_event_if_hooked(&inner, "pane-activity", pane);
+            let activity_hook = pane_event_if_hooked(&mut inner, "pane-activity", pane);
             let mut silence_schedule = None;
             let mut alert_window = None;
             terminal_reads::pane_changed(&mut inner, pane);
@@ -29099,14 +29106,9 @@ impl Shared {
                 }
                 let snapshot = inner.engine.state.snapshot();
                 let facts = format_hook_facts(&inner);
-                let cycled = inner
-                    .border_cycle
-                    .load(std::sync::atomic::Ordering::Relaxed);
+                let cycled = inner.border_cycling();
                 let snapshots = stamped_snapshot_sends(&mut inner, tracked, &snapshot, &facts);
-                border_cycle_started = !cycled
-                    && inner
-                        .border_cycle
-                        .load(std::sync::atomic::Ordering::Relaxed);
+                border_cycle_started = !cycled && inner.border_cycling();
                 let requests = status_requests(
                     &inner,
                     targets,
@@ -30891,31 +30893,30 @@ impl Shared {
             return;
         }
         let events = {
-            let inner = self.inner.lock();
-            marks
-                .into_iter()
-                .filter_map(|mark| {
-                    let name = match mark.kind {
-                        zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
-                        zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
-                        zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
-                    };
-                    pane_event_if_hooked(&inner, name, pane).map(|mut event| {
-                        if mark.kind != zz_terminal::ShellMarkKind::Prompt {
-                            add_command_payload(&inner, &mut event, pane, &mark.facts);
-                        }
-                        event
-                    })
-                })
-                .collect::<Vec<_>>()
+            let mut inner = self.inner.lock();
+            let mut events = Vec::new();
+            for mark in marks {
+                let name = match mark.kind {
+                    zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
+                    zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
+                    zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
+                };
+                if let Some(mut event) = pane_event_if_hooked(&mut inner, name, pane) {
+                    if mark.kind != zz_terminal::ShellMarkKind::Prompt {
+                        add_command_payload(&inner, &mut event, pane, &mark.facts);
+                    }
+                    events.push(event);
+                }
+            }
+            events
         };
         self.run_event_hooks(events);
     }
 
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
         let pane_hook = {
-            let inner = self.inner.lock();
-            pane_event_if_hooked(&inner, "pane-bell", pane)
+            let mut inner = self.inner.lock();
+            pane_event_if_hooked(&mut inner, "pane-bell", pane)
         };
         if let Some(hook) = pane_hook {
             self.run_event_hooks(vec![hook]);
@@ -35818,7 +35819,7 @@ struct Client {
 
 #[derive(Default)]
 struct ServerState {
-    border_cycle: std::sync::atomic::AtomicBool,
+    border_cycle: parking_lot::Mutex<BTreeSet<ClientId>>,
     clients: BTreeMap<ClientId, Box<Client>>,
     agent_states: Arc<BTreeMap<PaneId, zz_protocol::AgentPaneWire>>,
     engine: MuxEngine,
@@ -36247,6 +36248,12 @@ struct PendingGuiRequest {
 }
 
 impl ServerState {
+    fn border_cycling(&self) -> bool {
+        let mut cycling = self.border_cycle.lock();
+        cycling.retain(|client| self.clients.contains_key(client));
+        !cycling.is_empty()
+    }
+
     #[inline]
     fn client(&self, id: ClientId) -> Option<&Client> {
         self.clients.get(&id).map(Box::as_ref)
@@ -44569,9 +44576,13 @@ fn stamp_snapshot_for_client_with(
         &contexts,
         snapshot,
     );
-    inner
-        .border_cycle
-        .store(border_cycle, std::sync::atomic::Ordering::Relaxed);
+    let mut cycling = inner.border_cycle.lock();
+    if border_cycle {
+        cycling.insert(client);
+    } else {
+        cycling.remove(&client);
+    }
+    drop(cycling);
     drop(contexts);
     stamp_pane_modes(inner, facts, snapshot);
 }

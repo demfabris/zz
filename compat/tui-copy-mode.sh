@@ -1263,6 +1263,20 @@ run_presentation() {
   type_both q
   copy_case 'presentation-current-line-cancel' format '#{pane_in_mode}=0'
   set_on_both copy-mode-current-line-style default
+
+  # Setting the style while a client sits in copy mode does not redraw: 3.8
+  # calls window_copy_style_changed only for PANE_STYLECHANGED, which this
+  # option never sets, so the row keeps its paint until the cursor moves, and
+  # then takes the new style, extended underlines included.
+  type_prefix_both '['
+  copy_case 'presentation-current-line-plain' format '#{pane_in_mode}=1'
+  set_on_both copy-mode-current-line-style 'fg=#101010,bg=#00cd00,curly-underscore'
+  copy_case 'presentation-current-line-set-in-mode' none ''
+  type_both C-p
+  copy_case 'presentation-current-line-set-moved' none ''
+  type_both q
+  copy_case 'presentation-current-line-set-cancel' format '#{pane_in_mode}=0'
+  set_on_both copy-mode-current-line-style default
 }
 
 # --- self-check ------------------------------------------------------------

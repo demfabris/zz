@@ -1314,7 +1314,7 @@ impl Renderer {
                     if current_style != Some((style, reverse, selected, matched)) {
                         sgr_reset = self.write_terminal_sgr(style, reverse, viewport, sgr_reset);
                         if let Some(line) = &line_style {
-                            write_selection_sgr(&mut self.output, line);
+                            write_line_sgr(&mut self.output, line);
                             sgr_reset = false;
                         }
                         if self.write_match_sgr(matched) {
@@ -1341,7 +1341,7 @@ impl Renderer {
             if current_style != Some((style, reverse, selected, matched)) {
                 sgr_reset = self.write_terminal_sgr(style, reverse, viewport, sgr_reset);
                 if let Some(line) = &line_style {
-                    write_selection_sgr(&mut self.output, line);
+                    write_line_sgr(&mut self.output, line);
                     sgr_reset = false;
                 }
                 if self.write_match_sgr(matched) {
@@ -3982,6 +3982,36 @@ fn trailing_clear(
     (width - start >= 10 && last_background == viewport.background).then_some(start)
 }
 
+fn write_line_sgr(output: &mut Vec<u8>, line: &TmuxStyle) {
+    let attributes = &line.attributes;
+    for (state, sequence) in [
+        (attributes.bold, b"\x1b[1m".as_slice()),
+        (attributes.dim, b"\x1b[2m".as_slice()),
+        (attributes.italics, b"\x1b[3m".as_slice()),
+        (attributes.underscore, b"\x1b[4m".as_slice()),
+        (attributes.double_underscore, b"\x1b[4:2m".as_slice()),
+        (attributes.curly_underscore, b"\x1b[4:3m".as_slice()),
+        (attributes.dotted_underscore, b"\x1b[4:4m".as_slice()),
+        (attributes.dashed_underscore, b"\x1b[4:5m".as_slice()),
+        (attributes.blink, b"\x1b[5m".as_slice()),
+        (attributes.reverse, b"\x1b[7m".as_slice()),
+        (attributes.hidden, b"\x1b[8m".as_slice()),
+        (attributes.strikethrough, b"\x1b[9m".as_slice()),
+        (attributes.overline, b"\x1b[53m".as_slice()),
+    ] {
+        if state == TmuxAttributeState::On {
+            output.extend_from_slice(sequence);
+        }
+    }
+    for (colour, ground) in [(line.fg, Ground::Foreground), (line.bg, Ground::Background)] {
+        if let Some(colour) =
+            colour.filter(|colour| !matches!(colour, TmuxColour::Default | TmuxColour::Terminal))
+        {
+            write_ground(output, Some(colour), Color::default(), ground);
+        }
+    }
+}
+
 fn write_selection_sgr(output: &mut Vec<u8>, selection: &TmuxStyle) {
     let attributes = &selection.attributes;
     for (state, sequence) in [
@@ -4306,6 +4336,13 @@ mod tests {
                 .unwrap()
                 .contains("\x1b[41m")
         );
+
+        mode.current_line_style = "curly-underscore".to_owned();
+        let mut renderer = Renderer::new();
+        renderer.current_line = crate::mode_view::current_line(&mode, &viewport, &theme);
+        renderer.blit_row(&viewport, 0, rect);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.contains("\x1b[4:3m"), "{output:?}");
     }
 
     #[test]

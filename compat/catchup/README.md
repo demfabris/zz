@@ -247,3 +247,9 @@ check `pgrep -af codex` on resume.
   branches take main by merge, not rebase: their history is on origin and several carry merges already, so a rebase would force-push
   and replay those. Registry, generated gaps.md and wire doc conflicts are resolved by the
   orchestrator; a code conflict is resolved too when it is local, and the relaunched lane compiles it.
+- 2026-10-09 orchestrator: fix.tui-regressions gets a final fix pass after two reviews (per-client
+  report places, stale reports sized from the client's window size) and merges without a third review,
+  each repro pinned by a daemon test.
+- 2026-10-09 orchestrator: pin.display-panes gets a final fix pass after two reviews: the desktop overlay
+  becomes a function of the pane's top mode instead of an object created at open, and copy-mode entry
+  replaces panes-mode; it merges without a third review, each P1 pinned by a daemon test.

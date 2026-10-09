@@ -45,7 +45,7 @@
       "id": "fix.tui-regressions",
       "track": "fix",
       "title": "Regressions the 3.8 fixture rebaseline found on main",
-      "status": "review",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-tui/src",
@@ -75,7 +75,8 @@
         "PAUSED 2026-10-09: integration done at aad92d4b7 (all fixtures, verify-claims TUI-014/TUI-003, zz-daemon/zz-cli, clippy, fmt, compat check green); needs its Codex review, then merge.",
         "2026-10-09: RESUMED: main merged at ce1ebd317 (both sides deleted a fixed known_drift case); Codex review running.",
         "2026-10-09: Codex review 1 (fix.tui-regressions-1.md): 1 P1, the stale-report guard in write_back_terminal_geometries drops control-client geometry too; fix pass launched in slot d.",
-        "2026-10-09: Fix pass fbc898683: stale interactive report replaced per client in terminal_geometry_for_mode_from, control-client size still writes back (a_stale_report_leaves_the_latest_control_size_to_write_back; zz-daemon 1689; tui-client-commands 406/406; clippy; fmt); review 2 running."
+        "2026-10-09: Fix pass fbc898683: stale interactive report replaced per client in terminal_geometry_for_mode_from, control-client size still writes back (a_stale_report_leaves_the_latest_control_size_to_write_back; zz-daemon 1689; tui-client-commands 406/406; clippy; fmt); review 2 running.",
+        "2026-10-09: Codex review 2 (fix.tui-regressions-2.md): 2 P1 (place marker per pane not per client; stale-report substitution keeps a smaller control size under window-size smallest); final fix pass sent, merges after it without a third review."
       ]
     },
     {
@@ -418,7 +419,7 @@
       "id": "pin.display-panes",
       "track": "pin",
       "title": "display-panes as a pane mode",
-      "status": "review",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -444,7 +445,8 @@
         "2026-10-09: codex review 1: 4 P1 + 5 P2 (template lost when -k host chosen, desktop routing by invoking client, -k dropped on desktop, wrong window unzoomed, ...); fix pass sent; full attached-client PASS moved to pin.hooks-events-2",
         "PAUSED 2026-10-09: fix pass 9a9628914 done (9 findings); second Codex review was stopped before it reported: rerun review.sh a pin.display-panes, then merge.",
         "2026-10-09: RESUMED: main (8e948fd46, the zpui/zz-kit/clients restructure plus pin.hooks-events) merged in at a1acf6309; daemon.rs pane-mode conflict hand-resolved (push_pane_mode wraps push_pane_mode_entry, Panes is panes-mode); lane relaunched to compile, prove the pane-mode hooks, rerun its scenarios; then review 2.",
-        "2026-10-09: Relaunch done at ebb54affb: merge compiles; pane-mode hooks fire on timer, overlay choice and mode re-entry like 3.8 (display-panes-format 38 steps, display-panes-template clean:36, args-parse 3, tui-overlays 39/39, zz-daemon 1690, zz-mux 679, clippy, fmt, compat check); review 2 running."
+        "2026-10-09: Relaunch done at ebb54affb: merge compiles; pane-mode hooks fire on timer, overlay choice and mode re-entry like 3.8 (display-panes-format 38 steps, display-panes-template clean:36, args-parse 3, tui-overlays 39/39, zz-daemon 1690, zz-mux 679, clippy, fmt, compat check); review 2 running.",
+        "2026-10-09: Codex review 2 (pin.display-panes-2.md): 4 P1 (overlay not tied to the mode: focus dismissal, -s source vs host window, viewers attaching later; copy-mode does not replace panes-mode) + 2 P2 (zoom marker, format_draw alignment); final fix pass sent (overlay derived from the pane mode), merges after it without a third review."
       ]
     },
     {
@@ -581,7 +583,7 @@
       "id": "pin.keys-copy",
       "track": "pin",
       "title": "3.8 default keys, menus and copy-mode commands",
-      "status": "review",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -605,7 +607,8 @@
         "2026-10-09: lane done at dca3b35a0: 10/11 closed; menus stay per-client (menus.client-owned, native) with 3.8's window-relative placement adopted; accepted by orchestrator (consistent with copy mode per client, TUI-014). Left: goto-line absolute numbering with line numbers on; GUI line numbers native.",
         "PAUSED 2026-10-09: fix pass 8eafea12a + merge of main cb3b3f244 committed; the post-merge checks (smoke/copy-mode-line-numbers vs 3.8, tui-overlays/tui-mouse --self-check, tui-copy-mode, zz-daemon lib, clippy, fmt, just compat check) did not run: run them, then a second review, then merge.",
         "2026-10-09: RESUMED: main merged clean at 5195f9272; lane relaunched for the post-merge checks; then review 2.",
-        "2026-10-09: Post-merge checks green at 2fef77246 (copy-mode-line-numbers 10 clean vs 3.8, tui-overlays 44/44, tui-mouse 51/51, zz-daemon 1687, zz-terminal 453, clippy, fmt, compat check); review 2 running."
+        "2026-10-09: Post-merge checks green at 2fef77246 (copy-mode-line-numbers 10 clean vs 3.8, tui-overlays 44/44, tui-mouse 51/51, zz-daemon 1687, zz-terminal 453, clippy, fmt, compat check); review 2 running.",
+        "2026-10-09: Codex review 2 (pin.keys-copy-2.md): 1 P1, refresh-now keeps stale search matches/search_snapshot; final fix pass sent to the lane, merges after it without a third review."
       ]
     },
     {

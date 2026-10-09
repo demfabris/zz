@@ -12,7 +12,7 @@ default = ["cef-runtime"]
 cef-runtime = ["dep:cef"]
 
 [dependencies]
-zz-client = { path = "../zz-client" }
+zz-client.workspace = true
 async-channel.workspace = true
 base64.workspace = true
 cef = { workspace = true, optional = true }
@@ -25,8 +25,8 @@ serde_json.workspace = true
 thiserror.workspace = true
 url.workspace = true
 wgpu.workspace = true
-zz-protocol = { path = "../zz-protocol" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-protocol.workspace = true
+zz-terminal.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 zpui.workspace = true

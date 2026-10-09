@@ -83,7 +83,7 @@ Every fact below was checked against the pinned dependencies on 2026-07-16.
 | sys bindings expose `cef_window_info_t::shared_texture_enabled`, `cef_window_info_t::external_begin_frame_enabled`, `cef_browser_host_t::send_external_begin_frame`, `cef_render_handler_t::on_accelerated_paint`, and `cef_accelerated_paint_info_t` with native-pixmap planes (fd/stride/offset/modifier) on Linux | `cef-dll-sys` bindings |
 | `on_paint` is only invoked when `shared_texture_enabled` is 0 . the two delivery paths are mutually exclusive per browser | `cef-dll-sys` doc comment on `on_paint` |
 | CEF 150 no longer documents a 60 fps maximum for `windowless_frame_rate` (min 1, default 30) | `cef-dll-sys` doc comment |
-| The [GPUI pin](/references/gpui-revision.md)'s Linux renderer is `zpui_wgpu::WgpuRenderer` (Wayland and X11) on **wgpu 29.0.4** . the same wgpu major the `cef` crate's import helper targets, and `Cargo.lock` resolves a single `wgpu 29.0.4` | Zed checkout `crates/zpui_linux/src/linux/wayland/window.rs`, workspace `Cargo.toml`, zz `Cargo.lock` |
+| The [GPUI pin](/references/zpui.md)'s Linux renderer is `zpui_wgpu::WgpuRenderer` (Wayland and X11) on **wgpu 29.0.4** . the same wgpu major the `cef` crate's import helper targets, and `Cargo.lock` resolves a single `wgpu 29.0.4` | Zed checkout `crates/zpui_linux/src/linux/wayland/window.rs`, workspace `Cargo.toml`, zz `Cargo.lock` |
 
 The wgpu alignment is the load-bearing discovery: the import glue is **type-compatible with
 GPUI's renderer out of the box**. No hand-rolled Vulkan external-memory code, no blade fork:
@@ -127,7 +127,7 @@ paint an externally imported `wgpu::Texture`".
 
 ## GPUI carried patch
 
-Two small patches carried on the existing [GPUI pin](/references/gpui-revision.md):
+Two small patches carried on the existing [GPUI pin](/references/zpui.md):
 
 1. Expose the renderer's `wgpu::Device`/`Queue` to the embedding app.
 2. A paint primitive (or extension of the existing image element) that samples an
@@ -159,8 +159,8 @@ permanent atomic readback fallback limits a failure to one pane recreation inste
 | No explicit fence | `AcceleratedPaintInfo` carries no sync fd; sampling a pool texture while viz writes it tears | v1 copy-on-receive blit; rely on dmabuf implicit sync where honored; M5 revisits |
 | Pool-slot reuse | Holding an imported texture past the slot's next paint shows stale/torn content | Track slots by handle identity; release on blit; never sample after release |
 | Modifier negotiation | dmabufs arrive with vendor tiling (Intel Y-tile, AMD DCC); NVIDIA proprietary support varies by driver generation | wgpu/Vulkan `VK_EXT_image_drm_format_modifier` via the crate helper; fall back to readback tier on import failure |
-| wgpu version lockstep | The `cef` crate and the GPUI pin must resolve to the same wgpu major or the import type-compatibility breaks (Windows sidesteps this: neither GPUI nor the D3D11 tier uses wgpu there, but the same rule applies to the `windows` crate version, which is why the tier codes against `zpui::windows`) | Both at wgpu 30 today; add a CI assertion; coordinate bumps with [the CEF update playbook](/playbooks/updating-cef.md) and the [GPUI pin](/references/gpui-revision.md) |
-| Carried GPUI patches | Two patches ride every GPUI pin bump | Keep them minimal and documented in [GPUI revision pin](/references/gpui-revision.md); consider upstreaming the external-texture element to Zed |
+| wgpu version lockstep | The `cef` crate and the GPUI pin must resolve to the same wgpu major or the import type-compatibility breaks (Windows sidesteps this: neither GPUI nor the D3D11 tier uses wgpu there, but the same rule applies to the `windows` crate version, which is why the tier codes against `zpui::windows`) | Both at wgpu 30 today; add a CI assertion; coordinate bumps with [the CEF update playbook](/playbooks/updating-cef.md) and the [GPUI pin](/references/zpui.md) |
+| Carried GPUI patches | Two patches ride every GPUI pin bump | Keep them minimal and documented in [GPUI revision pin](/references/zpui.md); consider upstreaming the external-texture element to Zed |
 | Popup widget textures | Dropdowns/selects arrive as a second `PaintElementType`; today non-VIEW paints are dropped | Same policy initially; a popup-surface slot is follow-up work either way |
 | Resize races | Shared-texture dims lag pane dims for a frame or two during resize | Same latest-wins + dimension-validation discipline the mailbox already applies |
 | HiDPI | Device-scale handling that keeps Wayland sharp today must carry over to imported textures | The [OSR rendering](/browser/osr-rendering.md) DPI rules apply unchanged . frames stay in device pixels |
@@ -200,7 +200,7 @@ permanent atomic readback fallback limits a failure to one pane recreation inste
 - [`zz-browser`](/crates/zz-browser.md) and [`app`](/crates/zz.md) . the crates the mailbox
   and element changes land in
 - [End-to-end data flow](/architecture/data-flow.md) . the frame paths this plan re-routes
-- [GPUI revision pin](/references/gpui-revision.md) and [CEF artifact lock](/references/cef-artifacts.md)
+- [GPUI revision pin](/references/zpui.md) and [CEF artifact lock](/references/cef-artifacts.md)
   . the two pins whose lockstep (wgpu 29) this plan depends on
 - [Updating the CEF pin](/playbooks/updating-cef.md) . bump procedure that must now also check
   wgpu alignment

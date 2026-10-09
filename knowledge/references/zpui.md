@@ -1,45 +1,55 @@
 ---
 type: Reference
-title: GPUI source
-description: Where zz's GPUI crates live (gpui/), how to change them or pull an upstream Zed fix, and what zz's GPUI changes do. gpui-component is not a dependency.
-resource: gpui/Cargo.toml
-tags: [gpui, reference, vendored]
+title: zpui
+description: zpui, our GPUI fork in zpui/: where its crates live, how to change them or pull an upstream Zed fix, and what zz changed. gpui-component is not a dependency.
+resource: zpui/Cargo.toml
+tags: [zpui, gpui, reference, vendored]
 timestamp: 2026-10-09T00:00:00Z
 ---
 
 # Overview
 
-zz's GPUI layer lives in `gpui/`: the 22 GPUI crates split out of Zed on 2026-10-05. They
-spent four days as their own repository, [`demfabris/gpui`](https://github.com/demfabris/gpui),
-and moved into this repo on 2026-10-09 with their history (`git subtree add` of
-`99114ccc`), so `git log -- gpui` reaches back to the split. The first commit there is upstream
+zpui is zz's UI framework: Zed's GPUI, split out on 2026-10-05 and owned since. Its crates
+live in `zpui/`. They spent four days as their own repository,
+[`demfabris/gpui`](https://github.com/demfabris/gpui), moved into this repo on 2026-10-09
+with their history (`git subtree add` of `99114ccc`), and were renamed the same day: `gpui`
+is `zpui`, and `gpui_apple`, `gpui_linux`, `gpui_macos`, `gpui_macros`, `gpui_platform`,
+`gpui_shared_string`, `gpui_util`, `gpui_web`, `gpui_wgpu` and `gpui_windows` are `zpui_*`, in
+code as well as in Cargo. Zed's utility crates (`collections`, `sum_tree`, `refineable`,
+`scheduler`, `zlog`, `ztracing`, `http_client`, `util_macros`, `perf`) keep their names.
+`zpui_ios`, the UIKit backend, joined from `crates/zz-gpui-ios`. Runtime names did not change:
+`GPUI_*` and `ZZ_GPUI_*` environment variables, iOS bundle ids, and the `zz-gpui` data
+directory.
+
+`git log -- zpui gpui` reaches back to the split. The first commit there is upstream
 `zed-industries/zed` at `933d8d9381`, limited to those crates; the next 89 are the commits that
 lived on the old `demfabris/zed` `zz-patches` branch (tip `5a00ac89a4`), replayed under new
-commit IDs. Upstream fixes come in by hand, when we want them.
+commit IDs. Upstream fixes come in by hand, when we want them; Zed patches name `gpui`, so
+they need the paths and identifiers mapped to zpui's.
 
 Commit IDs cited below come from the old `demfabris/zed` fork, which stays up as an archive. The
-same commits exist under `gpui/` with the same subjects.
+same commits exist under `zpui/` with the same subjects.
 
 On Linux, `zpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-`gpui/` is its own Cargo workspace (its root `Cargo.toml` holds the shared dependency versions
+`zpui/` is its own Cargo workspace (its root `Cargo.toml` holds the shared dependency versions
 and Zed's lints), excluded from the zz workspace. Both zz workspaces depend on it by path:
 
 | Place | Role |
 | --- | --- |
-| `Cargo.toml`, `[workspace.dependencies]` | `gpui`, `zpui_platform`, and `zpui_wgpu` (the iOS crate's direct renderer dependency) as `path = "gpui/crates/…"`. |
-| `clients/web/Cargo.toml` | The browser client's own workspace, `path = "../../gpui/crates/…"`. |
+| `Cargo.toml`, `[workspace.dependencies]` | `zpui`, `zpui_platform`, `zpui_wgpu`, `zpui_ios` and `sum_tree` as `path = "zpui/crates/…"`. |
+| `clients/web/Cargo.toml` | The browser client's own workspace, `path = "../../zpui/crates/…"`. |
 
 Because the crates are not workspace members, `cargo clippy --workspace` and
 `cargo test --workspace` skip them and `[profile.dev.package."*"]` still optimizes them in dev
-builds. `cargo fmt --all` does format them, since it follows path dependencies. Run gpui's own
-checks from inside `gpui/`.
+builds. `cargo fmt --all` does format them, since it follows path dependencies. Run zpui's own
+checks from inside `zpui/`.
 
-**`gpui-component` is not a dependency.** It was forked into `crates/zz-ui` (`zz-ui`) and both
+**`gpui-component` is not a dependency.** It was forked into `crates/zz-kit` and both
 `gpui-component` and `gpui-component-assets` are gone from the workspace and its lockfiles; nothing
-outside `gpui` itself is left. The fork's source revision and per-module port notes live in
-`crates/zz-ui/UPSTREAM.md`, not here.
+outside zpui itself is left. The fork's source revision and per-module port notes live in
+`crates/zz-kit/UPSTREAM.md`, not here.
 
 # Pane renderer changes
 
@@ -48,7 +58,7 @@ use position-seeded stochastic alpha rounding in 1/128 steps to reduce banding. 
 this before any required premultiplication. Dithering changes only alpha.
 The GPU test `faint_inset_shadows_dither_dark_composites` checks variation, noise size,
 brightness, and opaque composition. Both workspaces build these changes
-from `gpui/`.
+from `zpui/`.
 
 Blurred shadows also follow the element's superellipse cross-section in Metal, WGPU, and
 DirectX. The earlier carried smoothing fix covered only unblurred shadows, leaving the 2px
@@ -234,20 +244,22 @@ above).
 
 ```toml
 # Cargo.toml [workspace.dependencies]
-gpui = { path = "gpui/crates/gpui" }
-zpui_platform = { path = "gpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
-zpui_wgpu = { path = "gpui/crates/zpui_wgpu" }
+zpui = { path = "zpui/crates/zpui" }
+zpui_platform = { path = "zpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+zpui_wgpu = { path = "zpui/crates/zpui_wgpu" }
 ```
 
-Landing a GPUI change: edit `gpui/` in the same commit as the zz code that needs it. Run
-`cargo check --workspace` and `cargo test -p <crate>` inside `gpui/` for the crates you touched,
+Landing a zpui change: edit `zpui/` in the same commit as the zz code that needs it. Run
+`cargo check --workspace` and `cargo test -p <crate>` inside `zpui/` for the crates you touched,
 then the zz workspace gates and `just web build`.
 
-Pulling a fix from upstream Zed: crate paths under `gpui/` match Zed's, so a patch limited to the
-touched crates applies with a directory prefix.
+Pulling a fix from upstream Zed: zpui's crate layout matches Zed's with `gpui` renamed to `zpui`,
+so a patch limited to the touched crates applies once its paths and identifiers are mapped.
 
 ```bash
-git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/zpui_wgpu | git am -3 --directory=gpui
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu > fix.patch
+# map crates/gpui* paths to crates/zpui* and gpui:: to zpui:: in fix.patch, then
+git am -3 --directory=zpui fix.patch
 ```
 
 The two rebase sections below are history from the patch-branch era. Their layout sizes and

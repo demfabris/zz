@@ -9,9 +9,9 @@ timestamp: 2026-10-06T00:00:00Z
 
 # Overview
 
-**`zz-ui` (`crates/zz-ui`) is zz's base component layer.** It is a full fork of `gpui-component`, not a
+**`zz-kit` (`crates/zz-kit`) is zz's base component layer**, re-exported by `zz-ui`. It is a full fork of `gpui-component`, not a
 dependency on it: commit `7811a47` vendored the widget set and removed the upstream crate from the
-workspace entirely. The fork revision and the per-module port notes live in `crates/zz-ui/UPSTREAM.md`;
+workspace entirely. The fork revision and the per-module port notes live in `crates/zz-kit/UPSTREAM.md`;
 read that file before widening or diverging the surface.
 
 Application chrome must use zz-ui's components and theme vocabulary rather than maintaining a
@@ -27,15 +27,15 @@ The browser client in `clients/web` (`just web run`) uses the shared GPUI compon
 
 1. Every application-chrome color comes from a `cx.theme()` root or a `Colorize` derivation of one.
    The palette has six roots (`background`, `foreground`, `accent`, `success`, `warning`,
-   `danger`) plus the fixed per-mode `scrim` in `crates/zz-ui/src/widget/foundation/theme_color.rs`; panels, hover fills, muted text, and
+   `danger`) plus the fixed per-mode `scrim` in `crates/zz-kit/src/foundation/theme_color.rs`; panels, hover fills, muted text, and
    focus rings are derived at paint time by `Colorize` in
-   `crates/zz-ui/src/widget/foundation/color.rs`. Choose the nearest derivation, such as
+   `crates/zz-kit/src/foundation/color.rs`. Choose the nearest derivation, such as
    `background.raised(1)`, `background.hover()`, or `foreground.muted()`; do not color-match an old
    literal.
 2. Check the zz-ui widget set before hand-rolling a control. A custom GPUI
    element is appropriate only when a component cannot preserve required input routing,
    rendering, or interaction behavior. When a fork-local widget must diverge from upstream, record
-   why in `crates/zz-ui/UPSTREAM.md`.
+   why in `crates/zz-kit/UPSTREAM.md`.
 3. `clippy.toml` enforces the chrome-color rule by disallowing calls to `zpui::rgb`, `zpui::rgba`,
    and `zpui::hsla`. Keep any exemption narrowly scoped and document why the color is not
    application chrome.
@@ -221,7 +221,7 @@ do not multiply metrics by `UiZoom` again. Browser viewports already receive the
 scale factor, so native-to-CEF geometry follows the same rule. Geometry that must remain physically
 screen-sized needs to opt out explicitly with `UiZoom::unzoomed`.
 
-The thin clients compute their zoom in `interface_zoom` (`clients/gpui-shared/src/settings.rs`).
+The thin clients compute their zoom in `interface_zoom` (`clients/app/src/app/settings.rs`).
 On iPad the system text size multiplies the stored UI zoom unless **Match system text size** is off.
 On iPhone there is no UI zoom: the system text size (Dynamic Type) is the scale, capped at 135%
 because zoom grows controls and icons as well as text, and Settings hides both rows.
@@ -339,8 +339,8 @@ theme base before applying the factor. Browser pages remain opaque.
 
 # Related
 
-- `crates/zz-ui/UPSTREAM.md` . the fork's source revision and per-module record of what was ported,
+- `crates/zz-kit/UPSTREAM.md` . the fork's source revision and per-module record of what was ported,
   trimmed, or rewritten
-- [GPUI revision pin](/references/gpui-revision.md) . the pinned GPUI sources
+- [GPUI revision pin](/references/zpui.md) . the pinned GPUI sources
 - [`app` crate](/crates/zz.md) . the GPUI client governed by these conventions
 - [Terminal appearance](/terminal/appearance.md) . the independent terminal color model

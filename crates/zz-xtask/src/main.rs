@@ -410,7 +410,7 @@ fn build_linux_binaries(release: bool, features: Option<&str>) -> Result<PathBuf
 fn build_windows_library(release: bool, features: Option<&str>) -> Result<PathBuf, Box<dyn Error>> {
     println!("Building {APP_NAME}.dll...");
     let mut command = cargo_command();
-    command.arg("build");
+    command.arg("rustc");
     if release {
         command.arg("--release");
     }
@@ -423,6 +423,8 @@ fn build_windows_library(release: bool, features: Option<&str>) -> Result<PathBu
             "--package",
             APP_NAME,
             "--lib",
+            "--crate-type",
+            "cdylib",
         ])
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());

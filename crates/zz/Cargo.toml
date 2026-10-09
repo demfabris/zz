@@ -15,9 +15,6 @@ agent-pane = ["dep:agent-client-protocol", "dep:fff-search", "dep:ignore", "zz-u
 editor-pane = ["dep:fff-search", "dep:ignore", "zz-ui/editor"]
 hotreload = ["dep:dioxus-devtools"]
 
-[lib]
-crate-type = ["rlib", "cdylib"]
-
 [[bin]]
 name = "zz"
 path = "src/main.rs"
@@ -39,8 +36,8 @@ path = "src/bin/zz_external_texture_fixture.rs"
 required-features = ["desktop"]
 
 [dependencies]
-zz-cli = { path = "../zz-cli" }
-zz-config = { path = "../zz-config" }
+zz-cli.workspace = true
+zz-config = { workspace = true, features = ["update"] }
 agent-client-protocol = { workspace = true, optional = true }
 async-channel.workspace = true
 base64.workspace = true
@@ -61,21 +58,21 @@ sysinfo.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 url.workspace = true
-zz-client = { path = "../zz-client" }
-zz-mux = { path = "../zz-mux" }
-zz-protocol = { path = "../zz-protocol" }
-zz-ui = { path = "../zz-ui", features = ["editor", "tree-sitter"] }
+zz-client.workspace = true
+zz-mux.workspace = true
+zz-protocol.workspace = true
+zz-ui = { workspace = true, features = ["editor", "tree-sitter"] }
 
 [target.'cfg(not(target_os = "ios"))'.dependencies]
 zpui_platform.workspace = true
 mimalloc.workspace = true
 semver = "1"
 wgpu.workspace = true
-zz-browser = { path = "../zz-browser" }
-zz-chrome-import = { path = "../zz-chrome-import" }
-zz-daemon = { path = "../zz-daemon" }
-zz-terminal = { path = "../zz-terminal" }
-zz-tui = { path = "../zz-tui" }
+zz-browser.workspace = true
+zz-chrome-import.workspace = true
+zz-daemon = { workspace = true, features = ["default"] }
+zz-terminal = { workspace = true, features = ["default"] }
+zz-tui.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 cef.workspace = true
@@ -102,7 +99,6 @@ x11rb.workspace = true
 
 [dev-dependencies]
 zpui = { workspace = true, features = ["test-support"] }
-pollster.workspace = true
 tempfile.workspace = true
 
 # The X11/Wayland backend also compiles into unix test builds so it

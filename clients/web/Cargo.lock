@@ -9060,12 +9060,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "workspace-hack"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "beffa227304dbaea3ad6a06ac674f9bc83a3dec3b7f63eeb442de37e7cb6bb01"
-
-[[package]]
 name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9370,18 +9364,6 @@ dependencies = [
  "windows-capture",
  "x11",
  "xcb",
-]
-
-[[package]]
-name = "zed-sum-tree"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d490156d0d7311855564d6e1d6dccab992405a0c0e15e1c8ef18920c02177e35"
-dependencies = [
- "arrayvec",
- "log",
- "rayon",
- "workspace-hack",
 ]
 
 [[package]]
@@ -10013,7 +9995,7 @@ dependencies = [
  "rust-embed",
  "serde",
  "smallvec",
- "tracing",
+ "sum_tree",
  "tree-sitter",
  "tree-sitter-json",
  "tree-sitter-language",
@@ -10024,7 +10006,6 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "web-time",
- "zed-sum-tree",
  "zpui",
 ]
 

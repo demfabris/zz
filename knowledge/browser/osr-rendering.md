@@ -298,5 +298,5 @@ suppressed by equality checks.
 - [NVIDIA Linux CEF accelerated OSR failure](/research/2026-08-07-nvidia-cef-accelerated-osr.md)
 - [Browser lifecycle](/browser/lifecycle.md)
 - [Input translation](/browser/input-translation.md)
-- [GPUI revision](/references/gpui-revision.md)
+- [GPUI revision](/references/zpui.md)
 - [Browser-core crate](/crates/zz-browser.md)

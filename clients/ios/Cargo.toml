@@ -9,18 +9,18 @@ publish = false
 
 [target.'cfg(target_os = "ios")'.dependencies]
 env_logger.workspace = true
-futures = "0.3"
+futures.workspace = true
 zpui.workspace = true
-zpui_ios = { path = "../../zpui/crates/zpui_ios" }
-zz-app = { path = "../app" }
-zz-ui = { path = "../../crates/zz-ui", features = ["agent", "tree-sitter"] }
+zpui_ios.workspace = true
+zz-app.workspace = true
+zz-ui = { workspace = true, features = ["agent", "tree-sitter"] }
 
 [target.'cfg(target_os = "ios")'.dev-dependencies]
 image.workspace = true
-zz-client = { path = "../../crates/zz-client" }
-zz-daemon = { path = "../../crates/zz-daemon", default-features = false }
-zz-protocol = { path = "../../crates/zz-protocol" }
-zz-terminal = { path = "../../crates/zz-terminal", default-features = false }
+zz-client.workspace = true
+zz-daemon.workspace = true
+zz-protocol.workspace = true
+zz-terminal.workspace = true
 
 [lints]
 workspace = true

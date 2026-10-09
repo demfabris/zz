@@ -53,7 +53,7 @@ hides the outer shadow that cannot share that mask.
 | Shadow blur radius | 6 logical pixels |
 | Window corner smoothing | p-norm exponent 4 |
 
-The [GPUI revision reference](/references/gpui-revision.md) owns the fork pin and
+The [GPUI revision reference](/references/zpui.md) owns the fork pin and
 carried-patch history. Read the live manifests and branch before relying on the
 revision in this dated report.
 

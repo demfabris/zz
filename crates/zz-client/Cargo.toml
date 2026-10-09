@@ -17,18 +17,16 @@ neo_frizbee = "=0.11.0"
 parking_lot.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-unicode-width = "0.2.2"
-web-time = "1.1.0"
-zz-protocol = { path = "../zz-protocol" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+unicode-width.workspace = true
+web-time.workspace = true
+zz-protocol.workspace = true
+zz-terminal.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 getrandom.workspace = true
 
 [dev-dependencies]
-zz-daemon = { path = "../zz-daemon" }
-log = { workspace = true }
-tempfile = { workspace = true }
+zz-daemon = { workspace = true, features = ["default"] }
 
 [lints]
 workspace = true

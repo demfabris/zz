@@ -9,24 +9,24 @@ publish = false
 
 [features]
 default = []
-agent = []
+agent = ["dep:merman"]
 editor = ["zz-kit/editor"]
 tree-sitter = ["zz-kit/tree-sitter"]
 
 [dependencies]
-image = { version = "=0.25.10", default-features = false }
+image.workspace = true
 log.workspace = true
 markdown = { version = "1.0", features = ["serde"] }
-merman.workspace = true
+merman = { workspace = true, optional = true }
 parking_lot.workspace = true
 serde_json.workspace = true
 smallvec.workspace = true
-web-time = "1.1.0"
+web-time.workspace = true
 zpui.workspace = true
-zz-client = { path = "../zz-client" }
-zz-kit = { path = "../zz-kit" }
-zz-protocol = { path = "../zz-protocol" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-client.workspace = true
+zz-kit.workspace = true
+zz-protocol.workspace = true
+zz-terminal.workspace = true
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
 url.workspace = true

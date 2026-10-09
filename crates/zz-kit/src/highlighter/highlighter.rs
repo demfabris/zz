@@ -295,7 +295,7 @@ impl SyntaxHighlighter {
         match Self::build_for_language(&lang) {
             Ok(result) => result,
             Err(err) => {
-                tracing::warn!(
+                log::warn!(
                     "SyntaxHighlighter init failed, fallback to use `text`, {}",
                     err
                 );
@@ -544,7 +544,7 @@ impl SyntaxHighlighter {
             let query = match Query::new(&config.grammar()?, &config.highlights) {
                 Ok(query) => Arc::new(query),
                 Err(error) => {
-                    tracing::error!(
+                    log::error!(
                         "failed to build injection query for {:?}: {:?}",
                         config.name,
                         error

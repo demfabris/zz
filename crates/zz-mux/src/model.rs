@@ -2116,16 +2116,16 @@ impl MuxState {
         let previous = window.saved_layout(self.legacy_layout_saves);
         let old_z = window.z_order.clone();
         window.layout = next;
-        let mut floating: Vec<PaneId> = match &selection {
-            Some(selection) => selection.floats.clone(),
-            None => old_z
-                .iter()
-                .copied()
-                .filter(|pane| window.layout.is_floating(*pane))
-                .collect::<Vec<_>>(),
-        };
-        floating.extend(window.layout.tiled_panes());
-        window.z_order = floating;
+        if let Some(selection) = &selection {
+            let mut z_order = selection.floats.clone();
+            z_order.extend(
+                old_z
+                    .iter()
+                    .copied()
+                    .filter(|pane| !window.layout.is_floating(*pane)),
+            );
+            window.z_order = z_order;
+        }
         window.previous_layout = Some(Box::new(previous));
         window.last_extent_probe = None;
         if let Some(selection) = selection {
@@ -3294,7 +3294,8 @@ impl MuxState {
                 index: self.windows[&window].index,
             });
         }
-        if !exact && let Some((forward, offset)) = parse_offset(target) {
+        if !exact && let Some(offset) = parse_offset(target) {
+            let (forward, offset) = offset.map_err(|()| not_found())?;
             if index_mode {
                 let current = self.windows[&state.active_window].index;
                 let index = if forward {
@@ -3345,7 +3346,8 @@ impl MuxState {
                 });
             }
         }
-        if let Ok(index) = target.parse::<u32>()
+        if !target.starts_with(['+', '-'])
+            && let Ok(index) = target.parse::<u32>()
             && index <= MAX_WINDOW_INDEX
         {
             let window = self.window_at_index(session, index);
@@ -3537,7 +3539,8 @@ impl MuxState {
                 .pane_in_direction(state.active_pane, *direction)?
                 .ok_or_else(not_found);
         }
-        if let Some((forward, offset)) = parse_offset(target) {
+        if let Some(offset) = parse_offset(target) {
+            let (forward, offset) = offset.map_err(|()| not_found())?;
             let current = state
                 .pane_order
                 .iter()
@@ -4764,20 +4767,22 @@ fn normalize_pane_target(target: &str) -> &str {
     }
 }
 
-fn parse_offset(target: &str) -> Option<(bool, u32)> {
+fn parse_offset(target: &str) -> Option<Result<(bool, u32), ()>> {
     let (forward, offset) = match target.as_bytes().first() {
         Some(b'+') => (true, &target[1..]),
         Some(b'-') => (false, &target[1..]),
         _ => return None,
     };
-    let offset = if offset.is_empty() {
-        1
-    } else {
-        offset.parse::<u32>().ok()?
-    };
-    (1..=MAX_WINDOW_INDEX)
-        .contains(&offset)
-        .then_some((forward, offset))
+    if offset.is_empty() {
+        return Some(Ok((forward, 1)));
+    }
+    let offset = offset
+        .trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+        .parse::<i64>()
+        .ok()
+        .and_then(|offset| u32::try_from(offset).ok())
+        .filter(|offset| (1..=MAX_WINDOW_INDEX).contains(offset));
+    Some(offset.map(|offset| (forward, offset)).ok_or(()))
 }
 
 #[derive(Clone)]
@@ -6359,6 +6364,37 @@ mod tests {
         assert_eq!(pane_size(trimmed, first), (49, 20));
         assert_eq!(pane_size(trimmed, third), (50, 20));
         assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn serialized_layouts_keep_the_tiled_z_order() {
+        let mut state = MuxState::default();
+        let (_, window, first) = state.create_session("work").unwrap();
+        let second = state
+            .split_pane_with(
+                first,
+                Axis::Horizontal,
+                PaneKind::Terminal,
+                SplitPlacement {
+                    before: true,
+                    ..SplitPlacement::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            state.windows[&window].layout.panes_in_order(),
+            [second, first]
+        );
+        assert_eq!(state.windows[&window].z_order(), [first, second]);
+
+        state
+            .select_layout_string(window, "0209,80x24,0,0{40x24,0,0,1,39x24,41,0,0}")
+            .unwrap();
+        assert_eq!(
+            state.windows[&window].layout.panes_in_order(),
+            [second, first]
+        );
+        assert_eq!(state.windows[&window].z_order(), [first, second]);
     }
 
     #[test]

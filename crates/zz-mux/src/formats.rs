@@ -3320,9 +3320,11 @@ impl MuxEngine {
                 .join(" ");
         }
         if let Some(facts) = self.pane_runtime_facts(pane.id) {
-            context
-                .pane_current_command
-                .clone_from(&facts.current_command);
+            if !pane.dead {
+                context
+                    .pane_current_command
+                    .clone_from(&facts.current_command);
+            }
             if pane.dead {
                 context.pane_current_path.clear();
             } else {
@@ -3348,6 +3350,9 @@ impl MuxEngine {
             context
                 .pane_start_path
                 .clone_from(&context.pane_current_path);
+        }
+        if context.pane_current_command.is_empty() && matches!(pane.kind, PaneKind::Terminal) {
+            context.pane_current_command = self.pane_command_fallback(pane.id);
         }
         let border_status = self.pane_border_status(window.id);
         if let Some(cell) = window
@@ -6485,7 +6490,7 @@ fn dirname(value: &[u8]) -> RawText {
 fn quote_shell(value: &[u8]) -> RawText {
     let mut output = Vec::with_capacity(value.len() * 2);
     for byte in value {
-        if b"|&;<>()$`\\\"'*?[# =%".contains(byte) {
+        if b"|&;<>(){}$`\\\"'*?[# =%\n\t".contains(byte) {
             output.push(b'\\');
         }
         output.push(*byte);
@@ -6518,7 +6523,7 @@ fn quote_style(value: &[u8]) -> RawText {
     RawText::from_bytes(output)
 }
 
-fn quote_argument(value: &str) -> String {
+pub(crate) fn quote_argument(value: &str) -> String {
     if value.is_empty() {
         return "''".to_owned();
     }
@@ -8407,6 +8412,10 @@ mod tests {
         assert_eq!(expand("#{l:#{session_name}}"), "#{session_name}");
         assert_eq!(expand("#{q:pane_title}"), "/tmp/a\\ b/main");
         assert_eq!(expand("#{q/s:pane_title}"), "'/tmp/a b/main'");
+        assert_eq!(
+            quote_shell(b"a{b} c\n\t").as_bytes(),
+            b"a\\{b\\}\\ c\\\n\\\t"
+        );
         assert_eq!(expand("#{b:#{l:/x/y}}"), "/x/y");
 
         let mut context = context();

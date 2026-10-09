@@ -1,0 +1,10 @@
+# A pane with no process answers pane_current_command from its start command,
+# then from the shell it was spawned with (format.c format_cb_current_command).
+new-session -d -s fallback -x 200 -y 80
+set-option -g default-shell /bin/sh
+split-window -d -E -t fallback:0.0
+out: display-message -p -t fallback:0.1 #{pane_current_command}|#{pane_start_command}
+set-option -g default-command "exec cat"
+split-window -d -E -t fallback:0.0
+out: list-panes -t fallback:0 -f #{pane_index} -F #{pane_index}|#{pane_current_command}|#{pane_start_command}
+set-option -gu default-command

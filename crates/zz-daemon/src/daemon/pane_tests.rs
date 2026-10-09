@@ -565,7 +565,7 @@ fn an_interactive_zsh_pane_runs_jobs_in_the_foreground_of_its_tty() {
 
 #[cfg(unix)]
 #[test]
-fn a_lookup_that_loses_the_foreground_process_keeps_the_pane_command() {
+fn a_lookup_that_loses_the_foreground_process_answers_the_start_command() {
     let shared = Arc::new(Shared::new(1));
     let mut context = ExecutionContext::default();
     run(
@@ -576,23 +576,160 @@ fn a_lookup_that_loses_the_foreground_process_keeps_the_pane_command() {
     );
     let pane = pane_of(&shared, &mut context, "lost-foreground:0.0");
     let terminal = terminal(&shared, pane);
-    let command = || {
+    let target = pane.to_string();
+    let command = |context: &mut ExecutionContext| {
+        run(
+            &shared,
+            context,
+            "display-message",
+            &["-p", "-t", &target, "#{pane_current_command}"],
+        )
+        .trim_end()
+        .to_owned()
+    };
+    wait_until("the watcher's first runtime sync", || {
         shared
             .inner
             .lock()
             .engine
             .pane_runtime_facts(pane)
-            .map(|facts| facts.current_command.clone())
-            .unwrap_or_default()
-    };
-    wait_until("the watcher's first runtime sync", || !command().is_empty());
+            .is_some_and(|facts| !facts.current_command.is_empty())
+    });
     thread::sleep(Duration::from_millis(500));
     shared.synchronize_pane_runtime(pane, &terminal, "sleep", None, false, Instant::now());
-    assert_eq!(command(), "sleep");
+    assert_eq!(command(&mut context), "sleep");
     shared.synchronize_pane_runtime(pane, &terminal, "", None, false, Instant::now());
-    assert_eq!(command(), "sleep");
+    assert_eq!(command(&mut context), "cat");
     shared.synchronize_pane_runtime(pane, &terminal, "bash", None, false, Instant::now());
-    assert_eq!(command(), "bash");
+    assert_eq!(command(&mut context), "bash");
+    shared.request_shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_lost_lookup_at_a_due_rename_names_the_window_from_the_start_command() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "lost-name", "exec sh -c 'exec cat'"],
+    );
+    let pane = pane_of(&shared, &mut context, "lost-name:0.0");
+    let terminal = terminal(&shared, pane);
+    let names = |context: &mut ExecutionContext| {
+        run(
+            &shared,
+            context,
+            "display-message",
+            &[
+                "-p",
+                "-t",
+                "lost-name:0",
+                "#{window_name}|#{pane_current_command}",
+            ],
+        )
+        .trim_end()
+        .to_owned()
+    };
+    wait_until("cat in the foreground", || {
+        terminal_current_command(&terminal) == "cat"
+    });
+    thread::sleep(Duration::from_millis(600));
+    shared.synchronize_pane_runtime(pane, &terminal, "cat", None, false, Instant::now());
+    assert_eq!(names(&mut context), "cat|cat");
+    thread::sleep(Duration::from_millis(600));
+    shared.synchronize_pane_runtime(pane, &terminal, "", None, false, Instant::now());
+    assert_eq!(names(&mut context), "sh|sh");
+    shared.request_shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn a_pane_without_a_process_answers_its_start_command_then_its_shell() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "no-process", "-x", "200", "-y", "80"],
+    );
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &["-g", "default-shell", "/bin/sh"],
+    );
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &["-g", "remain-on-exit", "on"],
+    );
+    let fresh = |context: &mut ExecutionContext, args: &[&str]| {
+        let mut command = vec!["-d", "-P", "-F", "#{pane_id}", "-t", "no-process:0"];
+        command.extend_from_slice(args);
+        run(&shared, context, "split-window", &command)
+            .trim()
+            .to_owned()
+    };
+    let empty_shell = fresh(&mut context, &["-E"]);
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &["-g", "default-command", "exec cat"],
+    );
+    let empty_default = fresh(&mut context, &["-E"]);
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &["-gu", "default-command"],
+    );
+    let dead_exec = fresh(&mut context, &["exec /bin/true x"]);
+    let dead_list = fresh(&mut context, &["sh -c 'exit 3'"]);
+    let dead_argv = fresh(&mut context, &["/bin/true", "x", "y z"]);
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &["-g", "default-shell", "/bin/bash"],
+    );
+    let format = |context: &mut ExecutionContext, pane: &str, format: &str| {
+        run(
+            &shared,
+            context,
+            "display-message",
+            &["-p", "-t", pane, format],
+        )
+        .trim_end()
+        .to_owned()
+    };
+    for pane in [&dead_exec, &dead_list, &dead_argv] {
+        wait_until("the command to exit", || {
+            format(&mut context, pane, "#{pane_dead}") == "1"
+        });
+    }
+    for (pane, expected) in [
+        (&empty_shell, "sh|"),
+        (&empty_default, "cat|\"exec cat\""),
+        (&dead_exec, "true|\"exec /bin/true x\""),
+        (&dead_list, "sh|\"sh -c 'exit 3'\""),
+        (&dead_argv, "true|/bin/true x \"y z\""),
+    ] {
+        assert_eq!(
+            format(
+                &mut context,
+                pane,
+                "#{pane_current_command}|#{pane_start_command}"
+            ),
+            expected,
+            "{pane}"
+        );
+    }
     shared.request_shutdown();
 }
 

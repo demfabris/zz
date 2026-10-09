@@ -69,7 +69,8 @@ orchestrator never runs the full suite per item.
 
 Orchestrator shell habits: never `pkill -f <pattern>` (it matches the shell running it; list pids
 with `pgrep -f`, check `readlink /proc/<pid>/cwd`, then `kill` those pids), and chain a merge and
-its checks with `&&` only, so a failed merge never starts checks on the unmerged tree.
+its checks with `&&` only, so a failed merge never starts checks on the unmerged tree. A trailing
+`&` backgrounds the whole `&&` list, merge included: put the detached checks in their own command.
 
 Add a dated line to [Decisions](#decisions) for every call the orchestrator makes on fabrico's
 behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new lesson.
@@ -181,7 +182,10 @@ so one of them may run beside the compiling lanes. On macOS there is no `systemd
 Stuck looks like: the same full command 4 or more times in a lane's last 60 calls, the same failure
 signature 4 or more times, no transcript write for 20 minutes, two memory kills, or hours of calls
 with no commit. A high raw failure rate alone means nothing. A stuck lane gets one redirect, then is
-stopped with its work committed as WIP.
+stopped with its work committed as WIP. To check a lane cheaply: newest mtime under its
+worktree's `crates` and `compat` (`find ... -newermt '-30 minutes'`) and processes whose cwd is in
+it. A lane that waits on a background job can stall silently for hours (fix.tui-colour,
+2026-10-09): stop it and relaunch with "continue from the uncommitted changes".
 
 ## Codex
 
@@ -212,5 +216,9 @@ check `pgrep -af codex` on resume.
   marks on resize, repeated alternate-on, IL/DL) and merges without a third review; IL/DL may be
   recorded as an engine limit if it does not fit. Zz approximates tmux's per-row output flag with
   tracked pins, so its edge cases are bounded by budget, not chased to the end.
+- 2026-10-09 orchestrator: float.core runs as repeated 240-minute sessions in six ordered steps
+  (model, commands, zoom/focus, daemon and display-popup, wire, formats/registry), each step its
+  own commit; a relaunch continues from the branch and the last session's report. It is reviewed
+  once all six steps are in.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

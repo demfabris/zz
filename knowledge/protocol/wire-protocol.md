@@ -818,6 +818,14 @@ capabilities set `verbs` (`zz_protocol::agent_stream::AGENT_VERBS`); every other
 the vendor. A zz command's reply carries `_meta.zz.reply`, the message id of the command's echoed
 prompt row, and a tool update may carry `_meta.zz.exitCode`.
 
+v108 also carries `refresh-client -l` for the raw TUI. `EventPayload` appends the unit variant
+`ClipboardQuery` after `ControlCommandStarted`: the daemon asks the target client to send its outer
+terminal an OSC 52 query (`\e]52;;?\a`, `tty_clipboard_query`) and keeps the query pending for
+5 s. `InputMessage` appends `ClipboardReply { data: Vec<u8> }` after `ClientTerminalSizeV2`: the
+decoded bytes of the terminal's OSC 52 answer. The daemon stores them as a new automatic buffer, as
+`tty_keys_clipboard` does with `paste_add`, only while a query to that client is pending; a reply
+outside that window is dropped. Clients that do not answer OSC 52 ignore the query.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

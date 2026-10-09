@@ -332,12 +332,17 @@ pub struct ClientCore {
     confirm: Option<ConfirmState>,
     outbound: VecDeque<Outbound>,
     events: VecDeque<CoreEvent>,
+    clipboard_query: bool,
 }
 
 impl ClientCore {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn take_clipboard_query(&mut self) -> bool {
+        std::mem::take(&mut self.clipboard_query)
     }
 
     /// Reduce one decoded message. Drain [`Self::poll_outbound`] and
@@ -1224,6 +1229,7 @@ impl ClientCore {
             | EventPayload::CommandStdout { .. }
             | EventPayload::CommandClientExit
             | EventPayload::SubscriptionChanged { .. } => {}
+            EventPayload::ClipboardQuery => self.clipboard_query = true,
         }
     }
 
@@ -1675,23 +1681,23 @@ mod tests {
             session,
             snapshot: snapshot_with(&[]),
             read_only: false,
-            client_flags: "active-pane".to_owned(),
+            client_flags: "no-detach-on-destroy".to_owned(),
         });
         assert!(!core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "active-pane");
+        assert_eq!(core.attached_client_flags(), "no-detach-on-destroy");
 
         core.handle_message(ProtocolMessage::Attached {
             session,
             snapshot: snapshot_with(&[]),
             read_only: true,
-            client_flags: "ignore-size,active-pane".to_owned(),
+            client_flags: "ignore-size,no-detach-on-destroy".to_owned(),
         });
         assert!(core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "ignore-size,active-pane");
+        assert_eq!(core.attached_client_flags(), "ignore-size,no-detach-on-destroy");
 
         core.handle_message(event(EventPayload::detached_requested(session, None)));
         assert!(core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "ignore-size,active-pane");
+        assert_eq!(core.attached_client_flags(), "ignore-size,no-detach-on-destroy");
 
         core.clear_attachment();
         assert!(!core.attached_read_only());

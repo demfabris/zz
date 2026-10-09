@@ -55,7 +55,9 @@ impl Knobs {
                         "dark" => Some(ThemeMode::Dark),
                         "system" => None,
                         _ => {
-                            return Err(format!("theme must be light, dark or system, not {value}"));
+                            return Err(format!(
+                                "theme must be light, dark or system, not {value}"
+                            ));
                         }
                     }
                 }

@@ -195,6 +195,7 @@ CASE_LABEL=""
 FAILURES=0
 CHECKS=0
 RECORDS=0
+declare -A RECORD_OWNERS=([unattributed]=0)
 LAST_DIFFERED=0
 MESSAGE_HOLD_MS=20000
 INNER_SHELL="ENV= PS1='\$ ' exec /bin/sh"
@@ -456,12 +457,36 @@ check_value() {
   compare_value "${!mode_name}" "$@"
   RECORD_REASON=""
 }
+case_owner() {
+  case "$1" in
+  border-click/* | status-clicks/*)
+    printf 'gap:pin.keys-copy'
+    ;;
+  customize-mouse-*)
+    printf 'gap:pin.formats-options'
+    ;;
+  esac
+}
+note_record() {
+  local owner
+  owner="$(case_owner "$1")"
+  [ -n "$owner" ] || owner=unattributed
+  RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
+  RECORDS=$((RECORDS + 1))
+}
+owner_tally() {
+  local key entries=()
+  for key in $(printf '%s\n' "${!RECORD_OWNERS[@]}" | LC_ALL=C sort); do
+    entries+=("$key=${RECORD_OWNERS[$key]}")
+  done
+  printf 'owners %s' "${entries[*]}"
+}
 compare_value() {
   local mode="$1" name="$2" zz_value="$3" pin_value="$4"
   if [ "$mode" = same ]; then
     CHECKS=$((CHECKS + 1))
   else
-    RECORDS=$((RECORDS + 1))
+    note_record "$name"
   fi
   if [ "$zz_value" = "$pin_value" ]; then
     LAST_DIFFERED=0
@@ -528,7 +553,7 @@ record_screen() {
   local name="$1" reason="$2" zz_rows tmux_rows index count
   mapfile -t zz_rows < <(capture_screen zz)
   mapfile -t tmux_rows < <(capture_screen tmux)
-  RECORDS=$((RECORDS + 1))
+  note_record "$name"
   count=0
   for ((index = 0; index < ROWS_UNDER_TEST; index++)); do
     [ "${zz_rows[index]-}" != "${tmux_rows[index]-}" ] && count=$((count + 1))
@@ -726,6 +751,9 @@ case_click_user_binding() {
 # The event the binding was invoked FROM. `set-option -F` expands its value
 # through the command's own format tree, which is where format.c publishes
 # mouse_x, mouse_y and mouse_pane from the invoking mouse record.
+outlast_the_pin_click_timeout() {
+  sleep 0.35
+}
 case_click_user_binding_target() {
   CASE_LABEL=click-user-binding-target
   run_on_both set-option -gu @mousectx
@@ -735,6 +763,7 @@ case_click_user_binding_target() {
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 7))" "$((top + 5))"
   wait_for 'the pin published the mouse context' pin_option_set @mousectx
   settle_both MARK-userctx 'the mouse context click'
@@ -1137,12 +1166,21 @@ case_border_click() {
   right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   click_both 0 "$((right + 2))" "$((top + 4))"
-  wait_for 'the pin cleared its mark on a border click' pin_marked_set_is 0
-  settle_both MARK-borderclick 'the border click'
-  assert_value border-click/marked-set "$(marked_set zz)" "$(marked_set tmux)"
+  if pin_border_click_clears_mark; then
+    wait_for 'the pin cleared its mark on a border click' pin_marked_set_is 0
+    settle_both MARK-borderclick 'the border click'
+    assert_value border-click/marked-set "$(marked_set zz)" "$(marked_set tmux)"
+  else
+    settle_both MARK-borderclick 'the border click'
+    record_value border-click/marked-set "$BORDER_CLICK_DRIFT" "$(marked_set zz)" "$(marked_set tmux)"
+  fi
   assert_value border-click/active-pane \
     "$(active_pane_index zz)" "$(active_pane_index tmux)"
   unsplit_both
+}
+BORDER_CLICK_DRIFT='PIN 3.8, gap:pin.keys-copy: 3.8 binds MouseDown1Border to select-pane -t= (key-bindings.c), so a border click no longer clears the marked pane on the pin, while zz keeps the d77c9dc6 select-pane -M binding'
+pin_border_click_clears_mark() {
+  side_command tmux list-keys -T root MouseDown1Border 2>/dev/null | grep -q 'select-pane -M'
 }
 marked_set() {
   side_command "$1" display-message -p -t "=$INNER_SESSION:0.0" \
@@ -1190,26 +1228,34 @@ case_status_clicks() {
   check_value STATUS status-clicks/window-after-wheel-up \
     "$(current_window zz)" "$(current_window tmux)"
 
-  send_mouse_both 2 "$column" "$row" M
-  both_screen_has 'Rename' 'the window menu'
-  settle_both Rename 'the status right click'
-  check_screen STATUS_MENU status-clicks/right-click-screen
-  send_bytes zz $'\033'
-  send_bytes tmux $'\033'
-  both_screen_lacks 'Rename' 'the window menu closed'
-  send_mouse_both 2 "$column" "$row" m
-
-  send_mouse_both 10 "$column" "$row" M
-  both_screen_has 'Rename' 'the alt window menu'
-  settle_both Rename 'the alt status right click'
-  check_screen STATUS_MENU status-clicks/alt-right-click-screen
-  send_bytes zz $'\033'
-  send_bytes tmux $'\033'
-  both_screen_lacks 'Rename' 'the alt window menu closed'
-  send_mouse_both 10 "$column" "$row" m
+  status_window_menu 2 status-clicks/right-click-screen 'the window menu'
+  status_window_menu 10 status-clicks/alt-right-click-screen 'the alt window menu'
   respawn_shell_both
   run_on_both kill-window -t "=$INNER_SESSION:1"
   wait_for 'the pin back to one window' pin_window_count_is 1
+}
+STATUS_MENU_DRIFT='PIN 3.8, gap:pin.keys-copy: 3.8 menus belong to the window (ad6832e6), so the window menu a status click opens for a window the client is not showing is drawn on that window and the pin client shows nothing, while zz draws it over the current window'
+pin_menus_follow_the_window() {
+  ! side_command tmux list-commands display-panes 2>/dev/null | grep -q -- '-b'
+}
+status_window_menu() {
+  local button="$1" name="$2" label="$3"
+  send_mouse_both "$button" "$column" "$row" M
+  wait_for "$label on the zz screen" screen_has zz 'Rename'
+  if ! pin_menus_follow_the_window; then
+    wait_for "$label on the tmux screen" screen_has tmux 'Rename'
+    settle_both Rename "$label"
+    check_screen STATUS_MENU "$name"
+    send_bytes zz $'\033'
+    send_bytes tmux $'\033'
+    both_screen_lacks 'Rename' "$label closed"
+  else
+    wait_settled zz Rename "$label"
+    record_screen "$name" "$STATUS_MENU_DRIFT"
+    send_bytes zz $'\033'
+    wait_for "$label gone from the zz screen" screen_lacks zz 'Rename'
+  fi
+  send_mouse_both "$button" "$column" "$row" m
 }
 status_column_of() {
   local row index
@@ -1593,7 +1639,7 @@ case_customize_mouse_click() {
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   click_both 0 "$((left + 3))" "$((top + 6))"
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-click/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-click/screen
   mode_leave_both
 }
 
@@ -1613,7 +1659,7 @@ case_customize_mouse_double_click() {
   send_mouse_both 0 "$((left + 3))" "$((top + 2))" M
   send_mouse_both 0 "$((left + 3))" "$((top + 2))" m
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-double-click/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-double-click/screen
   send_to_pane_both "=$INNER_SESSION:0.0" Escape
   settle_pointer
   mode_leave_both
@@ -1633,13 +1679,13 @@ case_customize_mouse_quiet() {
   send_wheel_both 64 "$((left + 3))" "$((top + 4))" M
   send_wheel_both 65 "$((left + 3))" "$((top + 4))" M
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-wheel/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-wheel/screen
   check_value MODE_POINTER customize-mouse-wheel/pane-mode \
     "$(side_command zz display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')" \
     "$(side_command tmux display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')"
   click_both 0 "$((left + 3))" "$((top + 18))"
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-preview/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-preview/screen
   mode_leave_both
 }
 
@@ -1660,7 +1706,7 @@ case_customize_mouse_prompt() {
   settle_pointer
   send_to_pane_both "=$INNER_SESSION:0.0" Z
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-prompt/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-prompt/screen
   send_to_pane_both "=$INNER_SESSION:0.0" Escape
   settle_pointer
   mode_leave_both
@@ -1761,10 +1807,10 @@ case_customize_mouse_menu() {
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Tag All' 'the tree menu'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-open/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-open/screen
   menu_release_both 2 "$column" "$row"
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-release/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-release/screen
   CLICK_SABOTAGE_SIDE=""
   CLICK_SABOTAGE_COLUMN=""
   CLICK_SABOTAGE_ROW=""
@@ -1787,7 +1833,7 @@ case_customize_mouse_menu() {
   menu_drag_release_both "$column" "$row" "$((column - 1))" "$((row + 4))"
   both_screen_lacks 'Tag All' 'the tree menu after Tag'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-tag/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag/screen
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Tag All' 'the tree menu for Tag None'
   settle_pointer
@@ -1795,7 +1841,7 @@ case_customize_mouse_menu() {
   send_bytes tmux 'T'
   both_screen_lacks 'Tag All' 'the tree menu after Tag None'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-tag-none/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag-none/screen
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Tag All' 'the tree menu for control T'
   settle_pointer
@@ -1803,7 +1849,7 @@ case_customize_mouse_menu() {
   send_bytes tmux $'\024'
   both_screen_has 'Tag All' 'the tree menu kept by control T'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-tag-ctrl/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag-ctrl/screen
   menu_release_both 2 "$column" "$row"
   settle_pointer
   menu_press_both 2 "$column" "$row"
@@ -1820,7 +1866,7 @@ case_customize_mouse_menu() {
   send_mouse tmux 2 "$((column - 1))" "$((row + 5))" m
   both_screen_lacks 'Tag All' 'the tree menu after Tag All'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-tag-all/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag-all/screen
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Tag All' 'the tree menu for Select'
   settle_pointer
@@ -1828,7 +1874,7 @@ case_customize_mouse_menu() {
   send_bytes tmux $'\r'
   both_screen_lacks 'Tag All' 'the tree menu after Select'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-select/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-select/screen
   send_to_pane_both "=$INNER_SESSION:0.0" Escape
   settle_pointer
   menu_press_both 2 "$column" "$row"
@@ -1852,12 +1898,12 @@ case_customize_mouse_menu_outside() {
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Scroll Left' 'the outside menu'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-outside-open/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-outside-open/screen
   send_bytes zz '<'
   send_bytes tmux '<'
   both_screen_lacks 'Scroll Left' 'the outside menu after Scroll Left'
   settle_pointer
-  check_screen MODE_POINTER customize-mouse-menu-outside-scroll/screen
+  check_screen CUSTOMIZE_POINTER customize-mouse-menu-outside-scroll/screen
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Scroll Left' 'the outside menu for Cancel'
   settle_pointer
@@ -1904,6 +1950,8 @@ RIGHT_CLICK_MODE=same
 RIGHT_CLICK_REASON=""
 MODE_POINTER_MODE=same
 MODE_POINTER_REASON=""
+CUSTOMIZE_POINTER_MODE=record
+CUSTOMIZE_POINTER_REASON='PIN 3.8, gap:pin.formats-options: 3.8 rebuilt the customize tree (window-customize.c: hooks and environment sections, and Edit and Changed Only in its pointer menu), so every screen of the tree and its menu differs while zz draws the d77c9dc6 tree'
 
 run_cases() {
   start_both
@@ -1942,6 +1990,7 @@ run_cases() {
   case_customize_mouse_menu_outside
 
   printf '%s asserted checks, %s recorded checks\n' "$CHECKS" "$RECORDS"
+  printf '%s recorded not asserted (%s)\n' "$RECORDS" "$(owner_tally)"
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted checks differ\n' "$FAILURES" "$CHECKS"
     exit 1
@@ -1957,6 +2006,13 @@ run_cases() {
 # cannot satisfy a sabotage: it never fails.
 SELF_CHECK_FAILURES=0
 
+customize_sabotage() {
+  if [ "$CUSTOMIZE_POINTER_MODE" = same ]; then
+    self_check_case "$1" catches "$2"
+  else
+    printf 'note  self-check %s skipped: %s\n' "$1" "$CUSTOMIZE_POINTER_REASON"
+  fi
+}
 self_check_case() {
   local name="$1" expectation="$2" before="$FAILURES"
   shift 2
@@ -2303,6 +2359,8 @@ sc_one_sided_customize_menu_outside_column() {
 run_self_check() {
   start_both
   printf 'self-check: one deliberate one-sided difference per channel\n'
+  PIN_D77_MOUSE_TABLE=1
+  pin_border_click_clears_mark || PIN_D77_MOUSE_TABLE=0
 
   self_check_case 'control, a click with nothing sabotaged' quiet \
     case_click_selects_pane
@@ -2320,8 +2378,12 @@ run_self_check() {
     sc_one_sided_click_target
   self_check_case 'the same root mouse binding set differently on zz' catches \
     sc_one_sided_binding_value
-  self_check_case 'MouseDown1Border unbound on zz only' catches \
-    sc_one_sided_border_click
+  if [ "$PIN_D77_MOUSE_TABLE" -eq 1 ]; then
+    self_check_case 'MouseDown1Border unbound on zz only' catches \
+      sc_one_sided_border_click
+  else
+    printf 'note  self-check MouseDown1Border unbound on zz only skipped: %s\n' "$BORDER_CLICK_DRIFT"
+  fi
   self_check_case 'the border mouse binding set differently on zz' catches \
     sc_one_sided_border_binding
   self_check_case "zz's context click aimed one cell further along" catches \
@@ -2344,8 +2406,13 @@ run_self_check() {
     sc_one_sided_context_channel hyperlink
   self_check_case "zz's blank-cell probe aimed at the word" catches \
     sc_one_sided_context_channel blank-cell
-  self_check_case "zz's window menu centred instead of over its status range" \
-    catches sc_one_sided_status_menu_position
+  if ! pin_menus_follow_the_window; then
+    self_check_case "zz's window menu centred instead of over its status range" \
+      catches sc_one_sided_status_menu_position
+  else
+    printf "note  self-check zz's window menu centred instead of over its status range skipped: %s\n" \
+      "$STATUS_MENU_DRIFT"
+  fi
   self_check_case 'WheelDownStatus unbound on zz only' catches \
     sc_one_sided_status_wheel
   self_check_case 'WheelUpPane unbound on zz only' catches \
@@ -2364,22 +2431,15 @@ run_self_check() {
     sc_one_sided_second_click
   self_check_case 'only the focus-out report sent to zz with focus-events off' catches \
     sc_one_sided_focus_off
-  self_check_case "zz's customize click aimed three rows higher" catches \
-    sc_one_sided_customize_click
+  customize_sabotage "zz's customize click aimed three rows higher" sc_one_sided_customize_click
   self_check_case "switch-mode's wheel held back on zz only" catches \
     sc_one_sided_switch_wheel
-  self_check_case "zz's tree menu press aimed one row lower" catches \
-    sc_one_sided_customize_menu_row
-  self_check_case "zz's tree menu press aimed seventeen cells right" catches \
-    sc_one_sided_customize_menu_column
-  self_check_case "zz's tree menu release held back" catches \
-    sc_one_sided_customize_menu_release
-  self_check_case "zz's tree menu drag released on the press cell" catches \
-    sc_one_sided_customize_menu_drag
-  self_check_case "zz's Tag All drag released on the Tag row" catches \
-    sc_one_sided_customize_menu_tagall
-  self_check_case "zz's outside menu press aimed twenty cells right" catches \
-    sc_one_sided_customize_menu_outside_column
+  customize_sabotage "zz's tree menu press aimed one row lower" sc_one_sided_customize_menu_row
+  customize_sabotage "zz's tree menu press aimed seventeen cells right" sc_one_sided_customize_menu_column
+  customize_sabotage "zz's tree menu release held back" sc_one_sided_customize_menu_release
+  customize_sabotage "zz's tree menu drag released on the press cell" sc_one_sided_customize_menu_drag
+  customize_sabotage "zz's Tag All drag released on the Tag row" sc_one_sided_customize_menu_tagall
+  customize_sabotage "zz's outside menu press aimed twenty cells right" sc_one_sided_customize_menu_outside_column
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check cases did not behave as required\n' "$SELF_CHECK_FAILURES"

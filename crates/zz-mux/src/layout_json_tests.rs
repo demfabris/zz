@@ -386,3 +386,93 @@ fn legacy_layout_matches_the_harness_converter() {
         assert_eq!(legacy_layout(layout), expected, "{layout}");
     }
 }
+
+fn panes_line(probe: &mut Probe) -> String {
+    probe
+        .run(&[
+            "list-panes",
+            "-t",
+            "w",
+            "-F",
+            "#{pane_index}:#{pane_id}:a#{pane_active}:l#{pane_last}",
+        ])
+        .replace('\n', " ")
+}
+
+#[test]
+fn select_layout_restore_brings_back_the_saved_selection_like_the_pin() {
+    let mut probe = Probe::new();
+    probe.run(&["split-window", "-h", "-t", "w"]);
+    probe.run(&["split-window", "-v", "-t", "w:0.1"]);
+    let start = probe.fmt("#{window_layout}");
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l0 1:%1:a0:l1 2:%2:a1:l0");
+    probe.run(&[
+        "select-layout",
+        "-t",
+        "w",
+        r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"a":true,"i":0},{"t":"v","w":39,"h":24,"x":41,"y":0,"c":[{"t":"p","w":39,"h":12,"x":41,"y":0,"i":1},{"t":"p","w":39,"h":11,"x":41,"y":13,"i":2}]}]}}"#,
+    ]);
+    let applied = probe.fmt("#{window_layout}");
+    assert_eq!(panes_line(&mut probe), "0:%0:a1:l0 1:%1:a0:l0 2:%2:a0:l0");
+    probe.run(&["select-layout", "-t", "w", "-o"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l0 1:%1:a0:l1 2:%2:a1:l0");
+    assert_eq!(probe.fmt("#{window_layout}"), start);
+    probe.run(&["select-layout", "-t", "w", "-o"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a1:l0 1:%1:a0:l0 2:%2:a0:l0");
+    assert_eq!(probe.fmt("#{window_layout}"), applied);
+    probe.run(&["select-layout", "-t", "w", "even-horizontal"]);
+    probe.run(&["select-pane", "-t", "w:0.2"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l1 1:%1:a0:l0 2:%2:a1:l0");
+    probe.run(&["select-layout", "-t", "w", "-o"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a1:l0 1:%1:a0:l0 2:%2:a0:l0");
+    assert_eq!(probe.fmt("#{window_layout}"), applied);
+    assert!(probe.engine.state.validate().is_ok());
+}
+
+#[test]
+fn a_last_index_on_the_active_pane_keeps_it_on_the_stack_like_the_pin() {
+    let mut probe = Probe::new();
+    probe.run(&["split-window", "-h", "-t", "w"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l1 1:%1:a1:l0");
+    probe.run(&[
+        "select-layout",
+        "-t",
+        "w",
+        r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"i":0},{"t":"p","w":39,"h":24,"x":41,"y":0,"l":0,"i":1}]}}"#,
+    ]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l0 1:%1:a1:l1");
+    assert!(probe.engine.state.validate().is_ok());
+    probe.run(&["last-pane", "-t", "w"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l0 1:%1:a1:l1");
+    probe.run(&["select-pane", "-t", "w:0.0"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a1:l0 1:%1:a0:l1");
+    probe.run(&["last-pane", "-t", "w"]);
+    assert_eq!(panes_line(&mut probe), "0:%0:a0:l1 1:%1:a1:l0");
+    assert!(probe.engine.state.validate().is_ok());
+}
+
+#[test]
+fn legacy_layout_converts_trees_deeper_than_the_json_parse_limit() {
+    let depth = 230;
+    let mut body = "1x1,0,0,0".to_owned();
+    let mut width = 1;
+    for _ in 0..depth {
+        width += 2;
+        body = format!("{width}x1,0,0{{{body},1x1,0,0,0}}");
+    }
+    let checksum = body.bytes().fold(0_u16, |checksum, byte| {
+        checksum.rotate_right(1).wrapping_add(u16::from(byte))
+    });
+    let parsed = CellLayout::parse(&format!("{checksum:04x},{body}")).unwrap();
+    let panes = (0..=depth).map(PaneId).collect::<Vec<_>>();
+    let mut next = 0;
+    let (layout, _) = parsed.into_layout(&panes, &mut || {
+        next += 1;
+        zz_protocol::SplitId(next)
+    });
+    let leaf = |_| LeafState::default();
+    let v2 = layout.dump_as(LayoutFormat::V2, &leaf);
+    assert!(v2.starts_with("{\"V\":2"));
+    assert_eq!(legacy_layout(&v2), layout.dump_as(LayoutFormat::V1, &leaf));
+    assert_eq!(legacy_layout("{\"V\":2,\"L\":{}}"), "0000,");
+}

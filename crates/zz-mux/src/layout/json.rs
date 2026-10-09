@@ -95,6 +95,10 @@ struct Token {
 }
 
 pub(super) fn parse(input: &str) -> Result<Json<'_>, String> {
+    parse_within(input, PARSE_DEPTH_MAX)
+}
+
+pub(super) fn parse_within(input: &str, depth_max: usize) -> Result<Json<'_>, String> {
     let input = input.split('\0').next().unwrap_or_default();
     if input.is_empty() {
         return Err("empty input".to_owned());
@@ -105,6 +109,7 @@ pub(super) fn parse(input: &str) -> Result<Json<'_>, String> {
         tokens: &tokens,
         cursor: 0,
         depth: 0,
+        depth_max,
     };
     if parser.peek().kind != Kind::OpenObject {
         return Err(parser.error("expected object", parser.peek().offset));
@@ -228,6 +233,7 @@ struct Parser<'a, 't> {
     tokens: &'t [Token],
     cursor: usize,
     depth: usize,
+    depth_max: usize,
 }
 
 impl<'a> Parser<'a, '_> {
@@ -270,7 +276,7 @@ impl<'a> Parser<'a, '_> {
 
     fn object(&mut self) -> Result<Json<'a>, String> {
         self.depth += 1;
-        if self.depth > PARSE_DEPTH_MAX {
+        if self.depth > self.depth_max {
             return Err(self.error("parse depth exceeded", self.peek().offset));
         }
         self.cursor += 1;

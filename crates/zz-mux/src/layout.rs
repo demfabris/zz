@@ -244,7 +244,7 @@ impl CellLayout {
     pub(crate) fn parse(input: &str) -> Result<ParsedLayout, LayoutParseError> {
         let input = input.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
         if input.starts_with('{') {
-            parse_v2(input)
+            parse_v2(&json::parse(input).map_err(LayoutParseError)?)
         } else {
             parse_v1(input.as_bytes())
         }
@@ -843,8 +843,7 @@ fn parse_v1(input: &[u8]) -> Result<ParsedLayout, LayoutParseError> {
     Ok(ParsedLayout { root, version: 1 })
 }
 
-fn parse_v2(input: &str) -> Result<ParsedLayout, LayoutParseError> {
-    let json = json::parse(input).map_err(LayoutParseError)?;
+fn parse_v2(json: &Json<'_>) -> Result<ParsedLayout, LayoutParseError> {
     let version = json.number("V").map_err(LayoutParseError)?;
     let root = json.object("L").map_err(LayoutParseError)?;
     let mut active = 0;
@@ -970,10 +969,16 @@ fn parsed_leaves(node: &ParsedNode, leaves: &mut Vec<ParsedLeaf>) {
 
 #[must_use]
 pub fn legacy_layout(layout: &str) -> String {
-    match CellLayout::parse(layout) {
-        Ok(parsed) if parsed.version == 2 => dump_v1(tiled_copy_parsed(&parsed.root)),
-        _ => layout.to_owned(),
+    let trimmed = layout.trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r']);
+    if !trimmed.starts_with('{') {
+        return layout.to_owned();
     }
+    json::parse_within(trimmed, usize::MAX)
+        .and_then(|json| parse_v2_cell(json.object("L")?, &mut 0))
+        .map_or_else(
+            |_| "0000,".to_owned(),
+            |root| dump_v1(tiled_copy_parsed(&root)),
+        )
 }
 
 fn tiled_copy(node: &CellNode, floating: &dyn Fn(PaneId) -> bool) -> Option<CellNode> {

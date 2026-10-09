@@ -186,7 +186,7 @@
       "id": "fix.mode-styles",
       "track": "fix",
       "title": "Raw TUI reads tree-mode styles and prompt cursor style and colour",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon/chooser_presentation.rs",
@@ -204,7 +204,9 @@
       ],
       "branch": "catchup/fix.mode-styles",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: Lane done at da2a38286: tree-mode styles from options (tui-choosers 86/86), prompt cursor style/colour in the raw TUI (tui-overlays 49/49), registry groups shrunk; wire append under 108 (PromptCursor); found a prompt mode-switch republish bug and fixed it. Follow-ups: mode prompts (chooser filter, customize, switch) ignore prompt cursor style and message-style/message-command-style. Review 1 running."
+      ]
     },
     {
       "id": "fix.small-semantics",
@@ -491,7 +493,7 @@
       "id": "pin.hooks-events-2",
       "track": "pin",
       "title": "Rest of the 3.8 hook surface",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.hooks-events"
       ],
@@ -513,7 +515,7 @@
         "The pin.hooks-events gap closes.",
         "compat/attached-client.sh's probe_client_event_hooks passes at 3.8: client-active fills #{hook_session} and #{hook_session_name} (3.8 prints |$0|attached,)."
       ],
-      "branch": null,
+      "branch": "catchup/pin.hooks-events-2",
       "sha": null,
       "notes": [
         "2026-10-09: leftovers of pin.hooks-events.",
@@ -652,7 +654,7 @@
       "id": "float.core",
       "track": "float",
       "title": "Floating panes in the mux and daemon",
-      "status": "active",
+      "status": "review",
       "deps": [
         "float.design",
         "pin.layout-v2",
@@ -695,14 +697,15 @@
         "2026-10-09: RESUMED: main merged at 04ed1a96d (registry, wire doc, gaps.md by hand); session 3 relaunched (compile, exit code 129, remain-on-exit timing, resize-pane -y, register the 9 display-popup smoke diffs); Codex review 1 running on 04ed1a96d.",
         "2026-10-09: Codex review 1 (float.core-1.md): 9 P1 + 1 P2 (preset split-id panic, popup retention before spawn, float split validates late, new-pane -I stdin, popup kill 129, resize/move on zoomed floats, after-split-window hook, border-status -y, new-pane -M closed early); sent to the session 3 lane.",
         "2026-10-09: Session 3 done at 8c786438c: review 1's 10 findings fixed (new-pane -M reopened into float.keys); display-popup.modal-pane gap + 9 known differentials (34cd5da4); floating-panes 182 + floating-zoom 55 + floating-events 39 steps clean vs 3.8; 5 crates' full tests, clippy, fmt, compat check. Review 2 running.",
-        "2026-10-09: Codex review 2 (float.core-2.md): 5 P1 (float split -l parsed late, select active pane clears zoom, join-pane loses zoomed float z order, -P forward ignores hidden floats, float border title off with window status off: already fixed on float.clients) + 1 P2 (more layout round trips); final fix pass sent, no third review."
+        "2026-10-09: Codex review 2 (float.core-2.md): 5 P1 (float split -l parsed late, select active pane clears zoom, join-pane loses zoomed float z order, -P forward ignores hidden floats, float border title off with window status off: already fixed on float.clients) + 1 P2 (more layout round trips); final fix pass sent, no third review.",
+        "2026-10-09: Final fix pass done at ae87b1ec0 (review 2's findings 1-4 + P2; finding 5 lives on float.clients): floating-panes 211, floating-zoom 77, floating-events 39 steps clean vs 3.8; zz-mux 693. Done; merges to main with float.clients and float.keys as one unit."
       ]
     },
     {
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "review",
+      "status": "active",
       "deps": [
         "float.core"
       ],
@@ -733,7 +736,8 @@
         "2026-10-09: branches from catchup/float.core (not main): float.core alone on main would make popups invisible. The float track merges to main as one unit (core + clients + keys).",
         "PAUSED 2026-10-09: branch catchup/float.clients created from catchup/float.core in slot b; no lane launched yet.",
         "2026-10-09: RESUMED: fast-forwarded to float.core 04ed1a96d; session 1 launched in slot b (raw TUI, zz-client, desktop, web/iOS). Zone clients/gpui-shared/src is now clients/app/src.",
-        "2026-10-09: Session 1 done at f61c2f2f1 (float.core 8c786438c merged in): tui-floating.sh 10/10 vs 3.8 on glyphs/cursor/pane list (colours not compared), click/modal clauses, kitty-placement test, zz-client floating tests, modal capture test, popup code gone. Not met: desktop/web screenshots (gamescope vkCreateInstance -9 here; web build works, no headless browser render). Found: display-popup -T draws no title (float.core). Review 1 running on catchup/float.core...HEAD."
+        "2026-10-09: Session 1 done at f61c2f2f1 (float.core 8c786438c merged in): tui-floating.sh 10/10 vs 3.8 on glyphs/cursor/pane list (colours not compared), click/modal clauses, kitty-placement test, zz-client floating tests, modal capture test, popup code gone. Not met: desktop/web screenshots (gamescope vkCreateInstance -9 here; web build works, no headless browser render). Found: display-popup -T draws no title (float.core). Review 1 running on catchup/float.core...HEAD.",
+        "2026-10-09: Codex review 1 (float.clients-1.md): 8 P1 (capture modal vs terminal shortcuts, float header steals rows, rejected drag sticks, resize border-status adjust, TUI clip offset, web clip insets, cursor under a float, iOS browsers hidden by any float) + 2 P2 (one command list, screenshots); fix pass sent. Screenshots blocked: the alienware NVIDIA GPU fell off the bus (nvidia-smi Unknown Error), gamescope vkCreateInstance -9; needs a reboot or another machine."
       ]
     },
     {

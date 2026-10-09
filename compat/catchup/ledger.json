@@ -843,7 +843,7 @@
       "id": "fix.formats-values-3-8",
       "track": "fix",
       "title": "formats-values scenario is red on main at the 3.8 pin",
-      "status": "review",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/formats.rs",
@@ -859,7 +859,8 @@
       "sha": null,
       "notes": [
         "2026-10-09: found by pin.hooks-events-2 and confirmed by the orchestrator on main 51adcd7a5: OUT differs (zz prints rows tmux leaves out in the #{session_active} list filters); clean in compat/results/summary.md, which was stamped at the d77c9dc6 pin.",
-        "2026-10-09: Lane done at 5cc71dda9: cause is 3.8 drift (tmux d9692f7e: list-sessions/windows/panes rows get the invoking client), zz now formats list rows with the invoking client; formats-values 48 steps clean vs 3.8. Follow-ups: format-window-cell-metrics and smoke/format-window-bigger red at 3.8 from the same commit (zz has no format facts for an unattached command client: client-PID name, focused, key table, 80 width, window_bigger 0; also new-session -P -F #{client_name}). Review 1 running."
+        "2026-10-09: Lane done at 5cc71dda9: cause is 3.8 drift (tmux d9692f7e: list-sessions/windows/panes rows get the invoking client), zz now formats list rows with the invoking client; formats-values 48 steps clean vs 3.8. Follow-ups: format-window-cell-metrics and smoke/format-window-bigger red at 3.8 from the same commit (zz has no format facts for an unattached command client: client-PID name, focused, key table, 80 width, window_bigger 0; also new-session -P -F #{client_name}). Review 1 running.",
+        "2026-10-09: Codex review 1: P1 unattached list invocations drop client facts (list-sessions -f '#{client_pid}'); the unattached-client facts follow-up moved here from fix.followups (same tmux d9692f7e); P2 recorded proof; fix pass sent."
       ]
     },
     {
@@ -890,8 +891,7 @@
         "2026-10-09 (pin.hooks-events-2): zz pane prompts belong to the client (close on detach, a status prompt replaces them); in 3.8 the prompt stays on the pane.",
         "2026-10-09 (pin.display-panes): with -s naming another window the desktop overlay draws indicators on panes not on screen (desktop renderer).",
         "2026-10-09 (pin.hooks-events-2): zz events still carry d77 payload keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events), visible in wait-for -E -v; needs a 3.8 payload table per event (PendingHookEvent::window/::pane back many events; a daemon test and control notifications read those keys). Control and attached clients' wait-for -E -v lines arrive at wake, not per event.",
-        "2026-10-09 (pin.formats-options-2): clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48.",
-        "2026-10-09 (fix.formats-values-3-8): format-window-cell-metrics and smoke/format-window-bigger are red at 3.8 from tmux d9692f7e: an unattached command client gets format facts in 3.8 (client name client-PID, focused, key table root, width 80, window_bigger 0) and none in zz; also new-session -P -F '#{client_name}'. The smoke fixture hardcodes big=[] for list rows and needs updating to 3.8."
+        "2026-10-09 (pin.formats-options-2): clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48."
       ]
     },
     {

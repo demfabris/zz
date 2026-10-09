@@ -24,7 +24,7 @@ use crate::{
 pub const GLASS_SHADER: &str = include_str!("glass.wgsl");
 
 /// The most shapes one glass primitive melts together.
-pub const GLASS_MAX_SHAPES: usize = 4;
+pub const GLASS_MAX_SHAPES: usize = 8;
 
 /// The deepest level of the blur chain. Level `n` is the viewport scaled by
 /// `2^-n`.
@@ -1153,7 +1153,7 @@ mod tests {
 
     #[test]
     fn uniform_blocks_match_the_shader_layout() {
-        assert_eq!(std::mem::size_of::<GlassUniform>(), 288);
+        assert_eq!(std::mem::size_of::<GlassUniform>(), 416);
         assert_eq!(std::mem::size_of::<GlassBlurUniform>(), 32);
     }
 

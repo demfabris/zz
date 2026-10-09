@@ -435,6 +435,10 @@ impl PlatformWindow for TestWindow {
         WindowBackgroundAppearance::Opaque
     }
 
+    fn supports_backdrop_sampling(&self) -> bool {
+        true
+    }
+
     fn is_subpixel_rendering_supported(&self) -> bool {
         false
     }

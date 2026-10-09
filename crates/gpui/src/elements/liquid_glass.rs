@@ -3,10 +3,11 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     AbsoluteLength, AnyElement, App, Bounds, Corners, DispatchPhase, Div, Element, ElementId,
-    GlassMaterial, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement,
-    Interactivity, Interpolate, IntoElement, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent,
-    MouseUpEvent, ParentElement, Pixels, Point, SpringConfig, SpringState, Stateful,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, div, point, size,
+    GlassMaterial, GlassShape, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
+    InteractiveElement, Interactivity, Interpolate, IntoElement, LayoutId, MouseButton,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SpringConfig,
+    SpringState, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, point,
+    size,
 };
 
 /// Glass that answers the pointer: it swells and lights up from where it is
@@ -166,9 +167,20 @@ struct LiquidGlassState {
     updated_at: Instant,
 }
 
+/// What a laid out [`LiquidGlass`] paints this frame.
+pub struct LiquidGlassFrame {
+    state: Rc<RefCell<LiquidGlassState>>,
+    hitbox: Hitbox,
+    shape: GlassShape,
+    material: GlassMaterial,
+    presence: f32,
+    /// Whether an enclosing group paints this glass as part of its body.
+    grouped: bool,
+}
+
 impl Element for LiquidGlass {
     type RequestLayoutState = AnyElement;
-    type PrepaintState = Hitbox;
+    type PrepaintState = LiquidGlassFrame;
 
     fn id(&self) -> Option<ElementId> {
         Some(self.id.clone())
@@ -199,7 +211,7 @@ impl Element for LiquidGlass {
 
     fn prepaint(
         &mut self,
-        _id: Option<&GlobalElementId>,
+        id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         bounds: Bounds<Pixels>,
         content: &mut Self::RequestLayoutState,
@@ -207,19 +219,8 @@ impl Element for LiquidGlass {
         cx: &mut App,
     ) -> Self::PrepaintState {
         content.prepaint(window, cx);
-        window.insert_hitbox(bounds, HitboxBehavior::Normal)
-    }
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
 
-    fn paint(
-        &mut self,
-        id: Option<&GlobalElementId>,
-        _inspector_id: Option<&InspectorElementId>,
-        bounds: Bounds<Pixels>,
-        content: &mut Self::RequestLayoutState,
-        hitbox: &mut Self::PrepaintState,
-        window: &mut Window,
-        cx: &mut App,
-    ) {
         let state = window.with_element_state(
             id.expect("liquid glass has an id"),
             |state: Option<Rc<RefCell<LiquidGlassState>>>, _| {
@@ -235,7 +236,7 @@ impl Element for LiquidGlass {
                             on: true,
                         },
                         touch: point(0.5, 0.5),
-                        updated_at: Instant::now(),
+                        updated_at: cx.background_executor().now(),
                     }))
                 });
                 (state.clone(), state)
@@ -244,7 +245,7 @@ impl Element for LiquidGlass {
 
         let (press, hover, presence, touch) = {
             let mut state = state.borrow_mut();
-            let now = Instant::now();
+            let now = cx.background_executor().now();
             let delta = now.duration_since(state.updated_at).as_secs_f32().min(0.1);
             state.updated_at = now;
             state.hover.on = hitbox.is_hovered(window);
@@ -286,23 +287,60 @@ impl Element for LiquidGlass {
         let scale = (1. + (self.hover_scale - 1.) * hover + (self.press_scale - 1.) * press)
             * (0.92 + 0.08 * presence);
         let grown = size(bounds.size.width * scale, bounds.size.height * scale);
-        let glass_bounds = Bounds::new(
-            bounds.center() - point(grown.width / 2., grown.height / 2.),
-            grown,
-        );
-        let rem_size = window.rem_size();
         let radii = self
             .corner_radii
-            .to_pixels(rem_size)
+            .to_pixels(window.rem_size())
             .clamp_radii_for_quad_size(bounds.size);
-        let radii = Corners {
-            top_left: radii.top_left * scale,
-            top_right: radii.top_right * scale,
-            bottom_right: radii.bottom_right * scale,
-            bottom_left: radii.bottom_left * scale,
+        let shape = GlassShape {
+            bounds: Bounds::new(
+                bounds.center() - point(grown.width / 2., grown.height / 2.),
+                grown,
+            ),
+            corner_radii: Corners {
+                top_left: radii.top_left * scale,
+                top_right: radii.top_right * scale,
+                bottom_right: radii.bottom_right * scale,
+                bottom_left: radii.bottom_left * scale,
+            },
         };
-        if presence > 0.001 {
-            window.paint_glass(glass_bounds, radii, &material);
+
+        let grouped = presence > 0.001
+            && window.glass_groups.last().is_some_and(|group| {
+                group.borrow_mut().push(GroupedGlass {
+                    shape,
+                    press,
+                    touch,
+                });
+                true
+            });
+
+        LiquidGlassFrame {
+            state,
+            hitbox,
+            shape,
+            material,
+            presence,
+            grouped,
+        }
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        content: &mut Self::RequestLayoutState,
+        frame: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let presence = frame.presence;
+        if presence > 0.001 && !frame.grouped {
+            window.paint_glass(
+                frame.shape.bounds,
+                frame.shape.corner_radii,
+                &frame.material,
+            );
         }
         // Gone glass paints nothing, so its content takes no input either.
         if self.shown || presence > 0.001 {
@@ -311,8 +349,8 @@ impl Element for LiquidGlass {
             });
         }
 
-        let down_state = state.clone();
-        let down_hitbox = hitbox.clone();
+        let down_state = frame.state.clone();
+        let down_hitbox = frame.hitbox.clone();
         window.on_mouse_event(move |event: &MouseDownEvent, phase, window, _| {
             if phase == DispatchPhase::Bubble
                 && event.button == MouseButton::Left
@@ -328,7 +366,7 @@ impl Element for LiquidGlass {
                 window.refresh();
             }
         });
-        let up_state = state.clone();
+        let up_state = frame.state.clone();
         window.on_mouse_event(move |event: &MouseUpEvent, phase, window, _| {
             if phase == DispatchPhase::Capture && event.button == MouseButton::Left {
                 let mut state = up_state.borrow_mut();
@@ -338,13 +376,284 @@ impl Element for LiquidGlass {
                 }
             }
         });
-        let move_hitbox = hitbox.clone();
+        let move_state = frame.state.clone();
+        let move_hitbox = frame.hitbox.clone();
         window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, _| {
             if phase == DispatchPhase::Bubble
-                && move_hitbox.is_hovered(window) != state.borrow().hover.on
+                && move_hitbox.is_hovered(window) != move_state.borrow().hover.on
             {
                 window.refresh();
             }
         });
+    }
+}
+
+/// The glass shapes the [`liquid_glass`] children of a group registered while
+/// it prepainted them.
+pub type GlassGroupShapes = Rc<RefCell<Vec<GroupedGlass>>>;
+
+/// One child's shape in a [`GlassGroup`], and how it is being pressed.
+#[derive(Clone, Copy, Debug)]
+pub struct GroupedGlass {
+    shape: GlassShape,
+    press: f32,
+    touch: Point<f32>,
+}
+
+/// A container whose [`liquid_glass`] children, at any depth, are painted as
+/// one glass body: wherever two come closer than the material's merge
+/// radius they melt into each other, so a button swelling under a press
+/// bleeds into its neighbors. The group's material replaces the children's
+/// own; their press glow carries over.
+///
+/// Style it and give it children like a `div`. One body holds up to
+/// [`GLASS_MAX_SHAPES`](crate::GLASS_MAX_SHAPES) shapes; more are drawn as
+/// further bodies that do not merge with the first.
+pub fn glass_group(id: impl Into<ElementId>, material: GlassMaterial) -> GlassGroup {
+    let id = id.into();
+    GlassGroup {
+        id: id.clone(),
+        content: Some(div().id(id)),
+        material,
+    }
+}
+
+/// See [`glass_group`].
+pub struct GlassGroup {
+    id: ElementId,
+    content: Option<Stateful<Div>>,
+    material: GlassMaterial,
+}
+
+impl GlassGroup {
+    fn content(&mut self) -> &mut Stateful<Div> {
+        self.content
+            .as_mut()
+            .expect("glass group content is taken only when laid out")
+    }
+}
+
+impl Styled for GlassGroup {
+    fn style(&mut self) -> &mut StyleRefinement {
+        self.content().style()
+    }
+}
+
+impl ParentElement for GlassGroup {
+    fn extend(&mut self, elements: impl IntoIterator<Item = AnyElement>) {
+        self.content().extend(elements);
+    }
+}
+
+impl InteractiveElement for GlassGroup {
+    fn interactivity(&mut self) -> &mut Interactivity {
+        self.content().interactivity()
+    }
+}
+
+impl StatefulInteractiveElement for GlassGroup {}
+
+impl IntoElement for GlassGroup {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl Element for GlassGroup {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = Vec<GroupedGlass>;
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let mut content = self
+            .content
+            .take()
+            .expect("glass group is laid out once")
+            .into_any_element();
+        (content.request_layout(window, cx), content)
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        content: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self::PrepaintState {
+        window.glass_groups.push(GlassGroupShapes::default());
+        content.prepaint(window, cx);
+        let shapes = window
+            .glass_groups
+            .pop()
+            .expect("the group pushed its own shapes");
+        shapes.take()
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        content: &mut Self::RequestLayoutState,
+        grouped: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        for body in grouped.chunks(crate::GLASS_MAX_SHAPES) {
+            let shapes: Vec<GlassShape> = body.iter().map(|glass| glass.shape).collect();
+            let mut material = self.material;
+            if let Some(pressed) = body
+                .iter()
+                .max_by(|a, b| a.press.total_cmp(&b.press))
+                .filter(|glass| glass.press > 0.001)
+            {
+                let union = shapes
+                    .iter()
+                    .map(|shape| shape.bounds)
+                    .reduce(|a, b| a.union(&b))
+                    .unwrap_or_default();
+                let bounds = pressed.shape.bounds;
+                let at = bounds.origin
+                    + point(
+                        bounds.size.width * pressed.touch.x,
+                        bounds.size.height * pressed.touch.y,
+                    );
+                let longest = bounds.size.width.max(bounds.size.height);
+                material = Interpolate::interpolate(
+                    material,
+                    material
+                        .glow(0.22)
+                        .glow_radius(longest * 0.9)
+                        .glow_center(point(
+                            (at.x - union.origin.x) / union.size.width.max(Pixels(1.)),
+                            (at.y - union.origin.y) / union.size.height.max(Pixels(1.)),
+                        )),
+                    pressed.press,
+                );
+            }
+            window.paint_glass_shapes(&shapes, &material);
+        }
+        content.paint(window, cx);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Duration;
+
+    use super::*;
+    use crate::{Context, Modifiers, Render, TestAppContext, VisualTestContext, px};
+
+    struct Button;
+
+    impl Render for Button {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                liquid_glass("button", GlassMaterial::regular())
+                    .appear(false)
+                    .absolute()
+                    .left(px(20.))
+                    .top(px(20.))
+                    .size(px(40.))
+                    .rounded_full(),
+            )
+        }
+    }
+
+    fn glass_width(cx: &mut VisualTestContext) -> f32 {
+        cx.update(|window, _| {
+            window
+                .painted_glasses()
+                .iter()
+                .map(|glass| glass.shape_bounds().size.width.0)
+                .fold(0., f32::max)
+        })
+    }
+
+    fn next_frame(cx: &mut VisualTestContext, after: Duration) {
+        cx.executor().advance_clock(after);
+        cx.update(|window, cx| window.simulate_next_frame(cx));
+        cx.run_until_parked();
+    }
+
+    #[crate::test]
+    fn pressing_swells_the_glass_and_releasing_settles_it(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| Button);
+        cx.run_until_parked();
+        let rest = glass_width(cx);
+        let scale = cx.update(|window, _| window.scale_factor());
+        assert_eq!(rest, 40. * scale);
+
+        let center = point(px(40.), px(40.));
+        cx.simulate_mouse_move(center, None, Modifiers::none());
+        cx.simulate_mouse_down(center, MouseButton::Left, Modifiers::none());
+        for _ in 0..30 {
+            next_frame(cx, Duration::from_millis(16));
+        }
+        let pressed = glass_width(cx);
+        assert!(pressed > rest * 1.08, "pressed glass is {pressed} wide");
+
+        cx.simulate_mouse_up(center, MouseButton::Left, Modifiers::none());
+        for _ in 0..120 {
+            next_frame(cx, Duration::from_millis(16));
+        }
+        assert_eq!(glass_width(cx), rest);
+    }
+
+    struct Row {
+        grouped: bool,
+    }
+
+    impl Render for Row {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            let buttons = (0..3usize).map(|index| {
+                liquid_glass(("button", index), GlassMaterial::regular())
+                    .appear(false)
+                    .size(px(40.))
+                    .rounded_full()
+            });
+            let row = div().flex().gap(px(4.));
+            if self.grouped {
+                glass_group("row", GlassMaterial::regular())
+                    .child(row.children(buttons))
+                    .into_any_element()
+            } else {
+                row.children(buttons).into_any_element()
+            }
+        }
+    }
+
+    #[crate::test]
+    fn groups_paint_their_glass_children_as_one_body(cx: &mut TestAppContext) {
+        let bodies = |grouped: bool, cx: &mut TestAppContext| {
+            let (_, cx) = cx.add_window_view(move |_, _| Row { grouped });
+            cx.run_until_parked();
+            cx.update(|window, _| {
+                window
+                    .painted_glasses()
+                    .iter()
+                    .map(|glass| glass.shape_count)
+                    .collect::<Vec<_>>()
+            })
+        };
+        assert_eq!(bodies(false, cx), vec![1, 1, 1]);
+        assert_eq!(bodies(true, cx), vec![3]);
     }
 }

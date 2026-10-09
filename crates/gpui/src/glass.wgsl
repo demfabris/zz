@@ -16,7 +16,7 @@ struct GlassShape {
 }
 
 struct Glass {
-    shapes: array<GlassShape, 4>,
+    shapes: array<GlassShape, 8>,
     // The rectangle drawn: origin.xy, size.zw.
     quad: vec4<f32>,
     // Level 0 texels holding this glass's backdrop: min.xy, max.zw.

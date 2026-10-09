@@ -12,8 +12,8 @@ use std::{cell::RefCell, f32::consts::PI, rc::Rc, time::Duration};
 use gpui::{
     AnimationPhase, App, Bounds, Context, GlassMaterial, GlassShape, LiquidRect, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, SpringConfig,
-    SpringState, Window, WindowBounds, WindowOptions, canvas, div, hsla, linear_color_stop,
-    linear_gradient, liquid_glass, point, prelude::*, px, rgb, size,
+    SpringState, Window, WindowBounds, WindowOptions, canvas, div, glass_group, hsla,
+    linear_color_stop, linear_gradient, liquid_glass, point, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use web_time::Instant;
@@ -644,6 +644,33 @@ impl Render for LiquidGlassDemo {
                     })),
             );
         }
+
+        // A row of buttons painted as one body: they sit just apart, and a
+        // press swells one into its neighbors.
+        let bar = self.tab_bar();
+        layer = layer.child(
+            glass_group("row", material.merge(px(18.)))
+                .absolute()
+                .left(bar.origin.x + px(40.))
+                .top(bar.origin.y - px(86.))
+                .flex()
+                .gap(px(12.))
+                .children(["A", "B", "C", "D", "E"].into_iter().enumerate().map(
+                    |(index, label)| {
+                        liquid_glass(("row", index), material)
+                            .press_scale(1.22)
+                            .size(px(52.))
+                            .rounded_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_color(gpui::white())
+                            .text_size(px(16.))
+                            .cursor_pointer()
+                            .child(label)
+                    },
+                )),
+        );
 
         // A card that lenses in and out with the "+" button.
         let stage = self.stage();

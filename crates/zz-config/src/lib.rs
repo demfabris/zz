@@ -1933,8 +1933,6 @@ pub fn config_overrides_for_host(
         .collect()
 }
 
-pub mod settings;
-
 #[cfg(test)]
 mod tests {
     use super::*;

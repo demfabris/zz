@@ -1022,6 +1022,12 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     }
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas>;
     fn is_subpixel_rendering_supported(&self) -> bool;
+    /// Whether the renderer can read back what it has drawn so far in a
+    /// frame, which [`Glass`](crate::Glass) needs. Windows that cannot get a
+    /// translucent fill in its place.
+    fn supports_backdrop_sampling(&self) -> bool {
+        false
+    }
 
     // macOS specific methods
     fn get_title(&self) -> String {

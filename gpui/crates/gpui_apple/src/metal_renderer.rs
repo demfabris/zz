@@ -1,4 +1,5 @@
 use crate::metal_atlas::MetalAtlas;
+use crate::metal_glass::{MetalGlass, scene_has_glass};
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use cocoa::{
@@ -140,6 +141,8 @@ pub struct MetalRenderer {
     shader_layer_targets: Vec<metal::Texture>,
     shader_layer_inputs: Vec<metal::Texture>,
     shader_layers_drawn: bool,
+    /// Built when a scene first paints glass; `Err` once building failed.
+    glass: Option<Result<MetalGlass, ()>>,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
@@ -394,6 +397,7 @@ impl MetalRenderer {
             shader_layer_targets: Vec::new(),
             shader_layer_inputs: Vec::new(),
             shader_layers_drawn: false,
+            glass: None,
             unit_vertices,
             instance_buffer_pool,
             sprite_atlas,
@@ -442,6 +446,18 @@ impl MetalRenderer {
 
     fn transactional_present(&self) -> bool {
         self.presents_with_transaction || self.underlay_active
+    }
+
+    /// Whether this renderer can draw glass, building its pipelines the
+    /// first time it is asked. Windows paint a plain fill in its place when
+    /// it cannot.
+    pub fn supports_glass(&mut self) -> bool {
+        let glass = self.glass.get_or_insert_with(|| {
+            MetalGlass::new(&self.device)
+                .inspect_err(|error| log::error!("glass is unavailable: {error:#}"))
+                .map_err(drop)
+        });
+        glass.is_ok()
     }
 
     fn layer_opaque(&self) -> bool {
@@ -581,6 +597,12 @@ impl MetalRenderer {
         })?;
         let atlas_frame = self.sprite_atlas.begin_frame();
         self.shader_layers_drawn = false;
+        if scene_has_glass(scene) {
+            self.supports_glass();
+        }
+        if let Some(Ok(glass)) = &mut self.glass {
+            glass.begin_frame();
+        }
         let command_buffer = self.draw_primitives_to_texture(
             scene,
             &instance_bindings,
@@ -591,6 +613,9 @@ impl MetalRenderer {
         if !self.shader_layers_drawn {
             self.shader_layer_targets.clear();
             self.shader_layer_inputs.clear();
+        }
+        if let Some(Ok(glass)) = &mut self.glass {
+            glass.end_frame();
         }
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
@@ -852,6 +877,33 @@ impl MetalRenderer {
                         texture,
                         viewport_size,
                         None,
+                    );
+                }
+                PrimitiveBatch::Glass(range) => {
+                    let Some(Ok(glass)) = &mut self.glass else {
+                        continue;
+                    };
+                    command_encoder.end_encoding();
+                    let pending = glass.draw(
+                        &self.device,
+                        command_buffer,
+                        &scene.glasses[range],
+                        texture,
+                        scene.window_corner_mask,
+                    );
+                    command_encoder = new_command_encoder_for_texture(
+                        command_buffer,
+                        texture,
+                        viewport_size,
+                        None,
+                    );
+                    glass.draw_pending(
+                        command_encoder,
+                        &pending,
+                        Size {
+                            width: viewport_size.width.0,
+                            height: viewport_size.height.0,
+                        },
                     );
                 }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
@@ -2264,6 +2316,15 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn glass_lenses_its_backdrop() -> Result<()> {
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
+        gpui::check_glass_rendering(|scene| {
+            renderer.render_scene_to_image(scene, size(64.into(), 64.into()))
+        })
+    }
+
     const SWAP_OR_TINT: &str = r#"
 @group(0) @binding(0) var content: texture_2d<f32>;
 @group(0) @binding(1) var<uniform> tint: vec4<f32>;
@@ -2478,6 +2539,137 @@ fn main(@location(0) position: vec2<f32>) -> @location(0) vec4<f32> {
             "pane glow {width}x{height}: background {plain:.3} ms, with glow {glow:.3} ms, glow {:.3} ms/frame",
             glow - plain
         );
+        Ok(())
+    }
+
+    fn glass_bench_scene(
+        width: f32,
+        height: f32,
+        glasses: &[(Bounds<f32>, f32, gpui::GlassMaterial)],
+    ) -> Scene {
+        let mut scene = Scene::default();
+        let stripes = 24;
+        for index in 0..stripes {
+            let stripe_width = width / stripes as f32;
+            let bounds = Bounds::new(
+                point(px(index as f32 * stripe_width), px(0.0)),
+                size(px(stripe_width), px(height)),
+            )
+            .scale(1.0);
+            scene.insert_primitive(solid_quad(
+                bounds,
+                hsla(index as f32 / stripes as f32, 0.8, 0.5, 1.0),
+            ));
+        }
+        for (rect, radius, material) in glasses {
+            let bounds = Bounds::new(
+                point(ScaledPixels(rect.origin.x), ScaledPixels(rect.origin.y)),
+                size(
+                    ScaledPixels(rect.size.width),
+                    ScaledPixels(rect.size.height),
+                ),
+            );
+            let mut shapes: [(Bounds<ScaledPixels>, gpui::Corners<ScaledPixels>);
+                gpui::GLASS_MAX_SHAPES] = Default::default();
+            shapes[0] = (bounds, gpui::Corners::all(ScaledPixels(*radius)));
+            scene.insert_primitive(gpui::Glass {
+                order: 0,
+                bounds: bounds.dilate(ScaledPixels(3.0)),
+                backdrop_bounds: bounds.dilate(ScaledPixels(material.backdrop_reach().as_f32())),
+                content_mask: ContentMask {
+                    bounds: Bounds::new(point(px(0.0), px(0.0)), size(px(width), px(height)))
+                        .scale(1.0),
+                },
+                shapes,
+                shape_count: 1,
+                corner_smoothing: 2.0,
+                material: *material,
+            });
+        }
+        scene.finish();
+        scene
+    }
+
+    #[test]
+    #[ignore = "benchmark: cargo test -p gpui_apple --release bench_glass -- --ignored --nocapture"]
+    fn bench_glass() -> Result<()> {
+        use gpui::GlassMaterial;
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
+        let (width, height) = (5344.0, 2964.0);
+        let target = size((width as i32).into(), (height as i32).into());
+        let mut time = |glasses: &[(Bounds<f32>, f32, GlassMaterial)]| -> Result<f64> {
+            let scene = glass_bench_scene(width, height, glasses);
+            renderer.render_scene_to_image(&scene, target)?;
+            let frames = 120;
+            let start = std::time::Instant::now();
+            for _ in 0..frames {
+                renderer.render_scene(&scene, target)?;
+            }
+            renderer.render_scene_to_image(&scene, target)?;
+            Ok(start.elapsed().as_secs_f64() * 1000.0 / f64::from(frames + 1))
+        };
+        let rect = |x: f32, y: f32, w: f32, h: f32| Bounds::new(point(x, y), size(w, h));
+        // Lengths below are device pixels, as the scene holds them: a 2x
+        // display doubles the logical values.
+        let scale = |material: GlassMaterial| GlassMaterial {
+            blur: material.blur * 2.0,
+            bezel: material.bezel * 2.0,
+            refraction: material.refraction * 2.0,
+            glint_width: material.glint_width * 2.0,
+            edge_width: material.edge_width * 2.0,
+            merge: material.merge * 2.0,
+            ..material
+        };
+        let regular = scale(GlassMaterial::regular());
+        let frosted = scale(GlassMaterial::frosted());
+        let clear = scale(GlassMaterial::clear());
+        let buttons: Vec<_> = (0..10)
+            .map(|index| {
+                (
+                    rect(200.0 + index as f32 * 140.0, 200.0, 100.0, 100.0),
+                    50.0,
+                    regular,
+                )
+            })
+            .collect();
+        let cases: Vec<(&str, Vec<(Bounds<f32>, f32, GlassMaterial)>)> = vec![
+            ("background only", vec![]),
+            ("one 100x100 button", vec![buttons[0].clone()]),
+            ("ten buttons in a row", buttons.clone()),
+            ("toolbar under its buttons", {
+                let mut glasses = vec![(rect(150.0, 170.0, 1450.0, 160.0), 80.0, regular)];
+                glasses.extend(buttons.clone());
+                glasses
+            }),
+            (
+                "frosted sidebar 640x2800",
+                vec![(rect(60.0, 80.0, 640.0, 2800.0), 56.0, frosted)],
+            ),
+            (
+                "clear glass over the whole window",
+                vec![(rect(0.0, 0.0, width, height), 0.0, clear)],
+            ),
+            (
+                "frosted glass over the whole window",
+                vec![(rect(0.0, 0.0, width, height), 0.0, frosted)],
+            ),
+        ];
+        let mut best = |glasses: &[(Bounds<f32>, f32, GlassMaterial)]| -> Result<f64> {
+            let mut fastest = f64::MAX;
+            for _ in 0..5 {
+                fastest = fastest.min(time(glasses)?);
+            }
+            Ok(fastest)
+        };
+        let base = best(&[])?;
+        for (name, glasses) in &cases {
+            let ms = best(glasses)?;
+            println!(
+                "glass {width}x{height} {name}: {ms:.3} ms/frame (+{:.3})",
+                ms - base
+            );
+        }
         Ok(())
     }
 

@@ -402,6 +402,9 @@ impl DirectXRenderer {
                     }
                     self.upload_scene_buffers(scene)
                 }
+                // This renderer cannot read back the frame, so its windows
+                // paint glass as a plain fill and never produce any.
+                PrimitiveBatch::Glass(_) => Ok(()),
             }
             .with_context(|| {
                 format!(

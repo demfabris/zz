@@ -6,4 +6,5 @@
 //! by GPUI's Apple platform backends.
 
 mod metal_atlas;
+mod metal_glass;
 pub mod metal_renderer;

@@ -13,24 +13,25 @@ use crate::{
     AsyncWindowContext, AtlasTile, AvailableSpace, Background, BorderStyle, Bounds, BoxShadow,
     Capslock, Context, Corners, CursorHideMode, CursorStyle, CustomShader, Decorations,
     DevicePixels, DispatchActionListener, DispatchNodeId, DispatchTree, DisplayId, Edges, Effect,
-    Entity, EntityId, EventEmitter, FileDropEvent, FontId, Global, GlobalElementId, GlyphId,
-    GlyphRenderOptions, GpuSpecs, Hsla, InputHandler, IsZero, KeyBinding, KeyContext, KeyDownEvent,
-    KeyEvent, Keystroke, KeystrokeEvent, LayoutId, LineLayoutIndex, Modifiers,
-    ModifiersChangedEvent, MonochromeSprite, MouseButton, MouseEvent, MouseMoveEvent, MouseUpEvent,
-    Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput, PlatformInputHandler,
-    PlatformWindow, Point, PolychromeSprite, Priority, PromptButton, PromptLevel, Quad, Render,
-    RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams, Replay, ResizeEdge,
-    SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y, ScaledPixels, Scene,
-    ScrollDelta, ShaderLayerDescriptor, Shadow, SharedString, Size, StrikethroughStyle, Style,
-    SubpixelSprite, SubscriberSet, Subscription, SystemWindowTab, SystemWindowTabController,
-    TabStopMap, TaffyLayoutEngine, Task, TextInputConfiguration, TextInputStateChange,
-    TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState, TransformationMatrix,
-    Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    WindowControls, WindowCornerMask, WindowDecorations, WindowOptions, WindowParams,
+    Entity, EntityId, EventEmitter, FileDropEvent, FontId, Glass, GlassMaterial, GlassShape,
+    Global, GlobalElementId, GlyphId, GlyphRenderOptions, GpuSpecs, Hsla, InputHandler, IsZero,
+    KeyBinding, KeyContext, KeyDownEvent, KeyEvent, Keystroke, KeystrokeEvent, LayoutId,
+    LineLayoutIndex, Modifiers, ModifiersChangedEvent, MonochromeSprite, MouseButton, MouseEvent,
+    MouseMoveEvent, MouseUpEvent, Path, Pixels, PlatformAtlas, PlatformDisplay, PlatformInput,
+    PlatformInputHandler, PlatformWindow, Point, PolychromeSprite, Priority, PromptButton,
+    PromptLevel, Quad, Render, RenderGlyphParams, RenderImage, RenderImageParams, RenderSvgParams,
+    Replay, ResizeEdge, SMOOTH_SVG_SCALE_FACTOR, SUBPIXEL_VARIANTS_X, SUBPIXEL_VARIANTS_Y,
+    ScaledPixels, Scene, ScrollDelta, ShaderLayerDescriptor, Shadow, SharedString, Size,
+    StrikethroughStyle, Style, SubpixelSprite, SubscriberSet, Subscription, SystemWindowTab,
+    SystemWindowTabController, TabStopMap, TaffyLayoutEngine, Task, TextInputConfiguration,
+    TextInputStateChange, TextRenderingMode, TextStyle, TextStyleRefinement, ThermalState,
+    TransformationMatrix, Underline, UnderlineStyle, WindowAppearance, WindowBackgroundAppearance,
+    WindowBounds, WindowControls, WindowCornerMask, WindowDecorations, WindowOptions, WindowParams,
     WindowTextSystem, WindowVisibility, point, prelude::*, px, rems, size, transparent_black,
 };
 
 use crate::gestures::{GestureTuning, RecognizedTouchGesture, TouchGestureRecognizer};
+use crate::glass::glass_shape_slots;
 use crate::interactive::TouchEvent;
 use anyhow::{Context as _, Result, anyhow};
 use collections::{FxHashMap, FxHashSet};
@@ -1283,6 +1284,8 @@ pub struct Window {
     pub(crate) rendered_entity_stack: Vec<EntityId>,
     pub(crate) element_offset_stack: Vec<Point<Pixels>>,
     pub(crate) element_opacity: f32,
+    /// Glass groups being prepainted, innermost last; see [`crate::glass_group`].
+    pub(crate) glass_groups: Vec<crate::GlassGroupShapes>,
     pub(crate) content_mask_stack: Vec<ContentMask<Pixels>>,
     pub(crate) requested_autoscroll: Option<Bounds<Pixels>>,
     /// The [`TextInputConfiguration`] most recently forwarded to the platform
@@ -2163,6 +2166,7 @@ impl Window {
             element_offset_stack: Vec::new(),
             content_mask_stack: Vec::new(),
             element_opacity: 1.0,
+            glass_groups: Vec::new(),
             requested_autoscroll: None,
             last_text_input_configuration: None,
             focused_text_input_active: false,
@@ -2857,6 +2861,12 @@ impl Window {
     #[cfg(any(test, feature = "test-support"))]
     pub fn painted_quads(&self) -> Vec<Quad> {
         self.rendered_frame.scene.quads.clone()
+    }
+
+    /// Returns the glass in the most recently rendered frame's scene.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn painted_glasses(&self) -> Vec<Glass> {
+        self.rendered_frame.scene.glasses.clone()
     }
 
     /// Returns the underlines in the most recently rendered frame's scene.
@@ -4704,6 +4714,105 @@ impl Window {
         let result = f(self);
         self.next_frame.scene.pop_shader_layer();
         result
+    }
+
+    /// Paint liquid glass over `bounds`: what was painted beneath it shows
+    /// through, refracted at the rim, blurred, tinted, and lit as `material`
+    /// says. Paint the glass's own content after it.
+    ///
+    /// Where the renderer cannot read back the frame, a translucent fill
+    /// stands in. Inside [`Self::paint_layer`], everything shares one draw
+    /// order, so glass there draws after the rest of the layer.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_glass(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        material: &GlassMaterial,
+    ) {
+        self.paint_glass_with_smoothing(bounds, corner_radii, material, None);
+    }
+
+    /// [`Self::paint_glass`] with corners smoothed by `corner_smoothing`
+    /// instead of the window's default, to match an element that sets its
+    /// own.
+    pub fn paint_glass_with_smoothing(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        corner_radii: Corners<Pixels>,
+        material: &GlassMaterial,
+        corner_smoothing: Option<f32>,
+    ) {
+        self.paint_glass_shapes_with_smoothing(
+            &[GlassShape {
+                bounds,
+                corner_radii,
+            }],
+            material,
+            corner_smoothing,
+        );
+    }
+
+    /// Paint one glass body made of several shapes, which melt into each
+    /// other wherever they come closer than [`GlassMaterial::merge`]. Only
+    /// the first [`GLASS_MAX_SHAPES`](crate::GLASS_MAX_SHAPES) are drawn.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_glass_shapes(&mut self, shapes: &[GlassShape], material: &GlassMaterial) {
+        self.paint_glass_shapes_with_smoothing(shapes, material, None);
+    }
+
+    /// [`Self::paint_glass_shapes`] with corners smoothed by
+    /// `corner_smoothing` instead of the window's default.
+    pub fn paint_glass_shapes_with_smoothing(
+        &mut self,
+        shapes: &[GlassShape],
+        material: &GlassMaterial,
+        corner_smoothing: Option<f32>,
+    ) {
+        self.invalidator.debug_assert_paint();
+        if shapes.is_empty() {
+            return;
+        }
+
+        let opacity = self.element_opacity();
+        if !self.platform_window.supports_backdrop_sampling() {
+            // paint_quad applies the element's opacity itself.
+            let fill = material.fallback_fill();
+            for shape in shapes {
+                self.paint_quad(PaintQuad {
+                    bounds: shape.bounds,
+                    corner_radii: shape.corner_radii,
+                    background: fill.into(),
+                    border_widths: Edges::default(),
+                    border_color: transparent_black(),
+                    border_style: BorderStyle::default(),
+                    corner_smoothing,
+                });
+            }
+            return;
+        }
+
+        let scale_factor = self.scale_factor();
+        let (slots, shape_count, shape_bounds) = glass_shape_slots(shapes, scale_factor);
+        let mut material = material.scale(scale_factor);
+        material.opacity *= opacity;
+        let bounds = shape_bounds.dilate(ScaledPixels(material.edge_width.as_f32().max(0.) + 1.5));
+        // The backdrop takes in what the glass draws too, its contour
+        // included, so the glass orders after everything under any of it.
+        let reach = material.backdrop_reach().as_f32();
+        let backdrop_bounds = shape_bounds.dilate(ScaledPixels(reach)).union(&bounds);
+        self.next_frame.scene.insert_primitive(Glass {
+            order: 0,
+            bounds,
+            backdrop_bounds,
+            content_mask: self.snapped_content_mask(),
+            shapes: slots,
+            shape_count,
+            corner_smoothing: corner_smoothing.unwrap_or(self.default_corner_smoothing),
+            material,
+        });
     }
 
     /// Paint the drop (non-inset) shadows from `shadows` into the scene at the current

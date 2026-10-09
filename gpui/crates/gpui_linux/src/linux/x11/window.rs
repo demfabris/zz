@@ -1637,6 +1637,10 @@ impl PlatformWindow for X11Window {
         self.0.state.borrow().background_appearance
     }
 
+    fn supports_backdrop_sampling(&self) -> bool {
+        self.0.state.borrow().renderer.supports_backdrop_sampling()
+    }
+
     fn is_subpixel_rendering_supported(&self) -> bool {
         self.0
             .state

@@ -2024,6 +2024,10 @@ impl PlatformWindow for MacWindow {
         false
     }
 
+    fn supports_backdrop_sampling(&self) -> bool {
+        self.0.lock().renderer.supports_glass()
+    }
+
     fn set_edited(&mut self, edited: bool) {
         unsafe {
             let window = self.0.lock().native_window;

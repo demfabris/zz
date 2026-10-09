@@ -5,8 +5,8 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels,
-    Point, Radians, ScaledPixels, SharedString, Size, bounds_tree::BoundsTree, point,
+    AtlasTextureId, AtlasTile, Background, Bounds, ContentMask, Corners, Edges, Glass, Hsla,
+    Pixels, Point, Radians, ScaledPixels, SharedString, Size, bounds_tree::BoundsTree, point,
 };
 use std::{
     fmt::Debug,
@@ -71,6 +71,7 @@ pub struct Scene {
     pub polychrome_sprites: Vec<PolychromeSprite>,
     pub surfaces: Vec<PaintSurface>,
     pub shader_layers: Vec<ShaderLayer>,
+    pub glasses: Vec<Glass>,
     open_shader_layers: Vec<OpenShaderLayer>,
 }
 
@@ -95,6 +96,7 @@ impl Scene {
         self.polychrome_sprites.clear();
         self.surfaces.clear();
         self.shader_layers.clear();
+        self.glasses.clear();
         self.open_shader_layers.clear();
     }
 
@@ -174,11 +176,17 @@ impl Scene {
             return false;
         }
 
+        // Glass reads its whole backdrop, clipped or not, so it orders after
+        // everything painted under any of it.
+        let ordered_bounds = match &primitive {
+            Primitive::Glass(glass) => glass.backdrop_bounds,
+            _ => clipped_bounds,
+        };
         let order = self
             .layer_stack
             .last()
             .copied()
-            .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+            .unwrap_or_else(|| self.primitive_bounds.insert(ordered_bounds));
         match &mut primitive {
             Primitive::Shadow(shadow) => {
                 shadow.order = order;
@@ -217,6 +225,10 @@ impl Scene {
                 layer.order = order;
                 self.shader_layers.push(layer.clone());
             }
+            Primitive::Glass(glass) => {
+                glass.order = order;
+                self.glasses.push(glass.clone());
+            }
         }
         true
     }
@@ -248,6 +260,7 @@ impl Scene {
             .sort_by_key(|sprite| (sprite.order, sprite.tile.texture_id.index));
         self.surfaces.sort_by_key(|surface| surface.order);
         self.shader_layers.sort_by_key(|layer| layer.order);
+        self.glasses.sort_by_key(|glass| glass.order);
     }
 
     #[cfg_attr(
@@ -277,6 +290,8 @@ impl Scene {
             surfaces_iter: self.surfaces.iter().peekable(),
             shader_layers_start: 0,
             shader_layers_iter: self.shader_layers.iter().peekable(),
+            glasses_start: 0,
+            glasses_iter: self.glasses.iter().peekable(),
         }
     }
 }
@@ -300,6 +315,7 @@ pub(crate) enum PrimitiveKind {
     PolychromeSprite,
     Surface,
     ShaderLayer,
+    Glass,
 }
 
 pub(crate) enum PaintOperation {
@@ -322,6 +338,7 @@ pub enum Primitive {
     PolychromeSprite(PolychromeSprite),
     Surface(PaintSurface),
     ShaderLayer(ShaderLayer),
+    Glass(Glass),
 }
 
 #[expect(missing_docs)]
@@ -337,6 +354,9 @@ impl Primitive {
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Surface(surface) => &surface.bounds,
             Primitive::ShaderLayer(layer) => &layer.bounds,
+            // Glass reads what lies past its edge, so it orders after
+            // everything painted under its whole backdrop.
+            Primitive::Glass(glass) => &glass.backdrop_bounds,
         }
     }
 
@@ -351,6 +371,7 @@ impl Primitive {
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Surface(surface) => &surface.content_mask,
             Primitive::ShaderLayer(layer) => &layer.content_mask,
+            Primitive::Glass(glass) => &glass.content_mask,
         }
     }
 }
@@ -381,6 +402,8 @@ struct BatchIterator<'a> {
     surfaces_iter: Peekable<slice::Iter<'a, PaintSurface>>,
     shader_layers_start: usize,
     shader_layers_iter: Peekable<slice::Iter<'a, ShaderLayer>>,
+    glasses_start: usize,
+    glasses_iter: Peekable<slice::Iter<'a, Glass>>,
 }
 
 impl<'a> Iterator for BatchIterator<'a> {
@@ -417,6 +440,10 @@ impl<'a> Iterator for BatchIterator<'a> {
             (
                 self.shader_layers_iter.peek().map(|layer| layer.order),
                 PrimitiveKind::ShaderLayer,
+            ),
+            (
+                self.glasses_iter.peek().map(|glass| glass.order),
+                PrimitiveKind::Glass,
             ),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
@@ -577,6 +604,20 @@ impl<'a> Iterator for BatchIterator<'a> {
                 self.shader_layers_start = layers_end;
                 Some(PrimitiveBatch::ShaderLayers(layers_start..layers_end))
             }
+            PrimitiveKind::Glass => {
+                let glasses_start = self.glasses_start;
+                let mut glasses_end = glasses_start + 1;
+                self.glasses_iter.next();
+                while self
+                    .glasses_iter
+                    .next_if(|glass| (glass.order, batch_kind) < max_order_and_kind)
+                    .is_some()
+                {
+                    glasses_end += 1;
+                }
+                self.glasses_start = glasses_end;
+                Some(PrimitiveBatch::Glass(glasses_start..glasses_end))
+            }
         }
     }
 }
@@ -610,6 +651,7 @@ pub enum PrimitiveBatch {
     },
     Surfaces(Range<usize>),
     ShaderLayers(Range<usize>),
+    Glass(Range<usize>),
 }
 
 impl PrimitiveBatch {
@@ -643,6 +685,7 @@ impl PrimitiveBatch {
             }
             Self::Surfaces(range) => format!("surfaces ({})", range.len()),
             Self::ShaderLayers(range) => format!("shader layers ({})", range.len()),
+            Self::Glass(range) => format!("glass ({})", range.len()),
         }
     }
 }
@@ -1189,6 +1232,12 @@ impl Debug for ShaderLayer {
             .field("bounds", &self.bounds)
             .field("shader", &self.shader)
             .finish_non_exhaustive()
+    }
+}
+
+impl From<Glass> for Primitive {
+    fn from(glass: Glass) -> Self {
+        Primitive::Glass(glass)
     }
 }
 

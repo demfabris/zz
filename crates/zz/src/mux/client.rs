@@ -746,7 +746,7 @@ struct HostConnection {
     reconnect_attempt_in_flight: Option<u32>,
     reconnect_attach: Option<ReconnectAttachState>,
     in_flight_commands: RwLock<VecDeque<(u64, String)>>,
-    failed_commands: VecDeque<u64>,
+    watched_commands: RwLock<VecDeque<(u64, bool)>>,
     ssh_auth_declined: bool,
     background_core: ClientCore,
 }
@@ -774,7 +774,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
-            failed_commands: VecDeque::new(),
+            watched_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         }
@@ -846,7 +846,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
-            failed_commands: VecDeque::new(),
+            watched_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         })
@@ -866,11 +866,21 @@ impl HostConnection {
         in_flight.remove(index).map(|(_, name)| name)
     }
 
-    fn record_failed_command(&mut self, request_id: u64) {
-        while self.failed_commands.len() >= MAX_TRACKED_COMMANDS {
-            self.failed_commands.pop_front();
+    fn watch_command(&self, request_id: u64) {
+        let mut watched = self.watched_commands.write();
+        while watched.len() >= MAX_TRACKED_COMMANDS {
+            watched.pop_front();
         }
-        self.failed_commands.push_back(request_id);
+        watched.push_back((request_id, false));
+    }
+
+    fn settle_command(&self, request_id: u64) -> bool {
+        let mut watched = self.watched_commands.write();
+        let Some((_, settled)) = watched.iter_mut().find(|(id, _)| *id == request_id) else {
+            return false;
+        };
+        *settled = true;
+        true
     }
 
     fn reroute(&self, host: HostId) {
@@ -2774,14 +2784,23 @@ impl MuxClient {
     }
 
     pub fn execute_tracked(&self, command: CommandInvocation) -> Option<u64> {
-        self.execute_on_host(self.attached_host, command)
+        let request_id = self.execute_on_host(self.attached_host, command)?;
+        self.attached_connection().watch_command(request_id);
+        Some(request_id)
     }
 
     #[must_use]
-    pub fn command_failed(&self, request_id: u64) -> bool {
+    pub fn command_settled(&self, request_id: u64) -> bool {
         self.attached_connection()
-            .failed_commands
-            .contains(&request_id)
+            .watched_commands
+            .read()
+            .iter()
+            .any(|&(id, settled)| id == request_id && settled)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn watch_command_for_test(&self, request_id: u64) {
+        self.attached_connection().watch_command(request_id);
     }
 
     pub fn execute_on_host(&self, host: HostId, command: CommandInvocation) -> Option<u64> {
@@ -3704,8 +3723,8 @@ impl MuxClient {
         if request_id == 0 {
             return false;
         }
-        let tracked = self.connections.get_mut(&host).and_then(|connection| {
-            connection.record_failed_command(request_id);
+        let tracked = self.connections.get(&host).and_then(|connection| {
+            connection.settle_command(request_id);
             connection.take_command(request_id)
         });
         match tracked {
@@ -3871,6 +3890,7 @@ impl MuxClient {
                 }) => {
                     if let Some(connection) = self.connections.get(&host) {
                         connection.take_command(request_id);
+                        connection.settle_command(request_id);
                     }
                 }
                 _ => {}
@@ -4381,7 +4401,11 @@ impl MuxClient {
                 }
             }
             CommandResponse::Success { request_id, .. } => {
-                self.attached_connection().take_command(request_id);
+                let connection = self.attached_connection();
+                connection.take_command(request_id);
+                if connection.settle_command(request_id) {
+                    cx.notify();
+                }
                 self.error = None;
             }
         }

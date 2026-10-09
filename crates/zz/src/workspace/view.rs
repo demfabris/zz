@@ -931,7 +931,7 @@ impl AppView {
             if view
                 .float_drag
                 .and_then(|drag| drag.request)
-                .is_some_and(|request| mux.read(cx).command_failed(request))
+                .is_some_and(|request| mux.read(cx).command_settled(request))
             {
                 view.float_drag = None;
                 cx.notify();
@@ -2691,13 +2691,24 @@ impl AppView {
         press: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.mux.read(cx).execute(pane_select_command(float.pane));
+        let mux = self.mux.read(cx);
+        mux.execute(pane_select_command(float.pane));
         if self
             .float_drag
             .is_some_and(|drag| drag.committed_snapshot_revision.is_some())
         {
             return;
         }
+        let rows = mux
+            .snapshot()
+            .sessions
+            .iter()
+            .flat_map(|session| &session.windows)
+            .find(|snapshot| snapshot.id == window)
+            .and_then(window_rows)
+            .unwrap_or_else(|| {
+                (self.pane_canvas_bounds.get().size.height / cell.height).floor() as u16
+            });
         self.float_drag = Some(FloatDragState {
             window,
             pane: float.pane,
@@ -2705,7 +2716,7 @@ impl AppView {
             lines: float.border_lines,
             area: FloatWindow {
                 border_status,
-                rows: (self.pane_canvas_bounds.get().size.height / cell.height).floor() as u16,
+                rows,
             },
             start: FloatCells::from(&float),
             press,
@@ -4254,6 +4265,14 @@ fn dead_label(snapshot: Option<&zz_protocol::PaneSnapshot>) -> Option<String> {
 
 fn pane_select_command(pane: PaneId) -> CommandInvocation {
     CommandInvocation::new("select-pane", ["-t", &pane.to_string()])
+}
+
+fn window_rows(window: &WindowSnapshot) -> Option<u16> {
+    let layout = zz_mux::legacy_layout(&window.layout_dump);
+    let (_, rest) = layout.split_once(',')?;
+    let (size, _) = rest.split_once(',')?;
+    let (_, rows) = size.split_once('x')?;
+    rows.parse().ok()
 }
 
 /// Toast tag for a daemon-timed message, so an explicit clear retires exactly
@@ -6791,8 +6810,10 @@ mod tests {
         assert!(workspace.read_with(cx, |workspace, _| workspace.split_drag.is_none()));
     }
 
-    #[zpui::test]
-    fn a_refused_float_drag_drops_its_preview_without_a_snapshot(cx: &mut TestAppContext) {
+    fn settled_float_drag_drops_its_preview(
+        cx: &mut TestAppContext,
+        reply: impl Fn(u64) -> zz_protocol::CommandResponse,
+    ) {
         cx.update(zz_ui::init);
         let mux_slot = Rc::new(RefCell::new(None));
         let captured_mux = Rc::clone(&mux_slot);
@@ -6867,39 +6888,146 @@ mod tests {
             });
             cx.notify();
         });
+        mux.read_with(cx, |mux, _| mux.watch_command_for_test(7));
         cx.run_until_parked();
         assert_ne!(drawn(cx), resting, "a committed drag previews the move");
         let revision = workspace.read_with(cx, |workspace, _| workspace.snapshot_revision);
 
-        let refuse = |request_id, cx: &mut zpui::VisualTestContext| {
+        let settle = |request_id, cx: &mut zpui::VisualTestContext| {
             mux.update(cx, |mux, cx| {
                 mux.handle_message_for_test(
-                    zz_protocol::ProtocolMessage::CommandResponse(
-                        zz_protocol::CommandResponse::Error {
-                            request_id,
-                            error: zz_protocol::ServerError::InvalidCommand(
-                                "client is read-only".to_owned(),
-                            ),
-                            output: zz_protocol::RawText::default(),
-                        },
-                    ),
+                    zz_protocol::ProtocolMessage::CommandResponse(reply(request_id)),
                     cx,
                 );
             });
             cx.run_until_parked();
         };
-        refuse(6, cx);
+        settle(6, cx);
         assert!(
             workspace.read_with(cx, |workspace, _| workspace.float_drag.is_some()),
-            "another request's failure leaves the drag alone"
+            "another request's reply leaves the drag alone"
         );
 
-        refuse(7, cx);
+        settle(7, cx);
         workspace.read_with(cx, |workspace, _| {
             assert!(workspace.float_drag.is_none());
             assert_eq!(workspace.snapshot_revision, revision);
         });
-        assert_eq!(drawn(cx), resting, "the refused drag left its preview up");
+        assert_eq!(drawn(cx), resting, "the settled drag left its preview up");
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.begin_float_drag(
+                WindowId(0),
+                PaneBorderStatus::Off,
+                float,
+                FloatGrip::MOVE,
+                zpui::size(px(8.0), px(16.0)),
+                Point::default(),
+                cx,
+            );
+            assert!(
+                workspace
+                    .float_drag
+                    .is_some_and(|drag| drag.committed_snapshot_revision.is_none()),
+                "a settled drag no longer blocks the next one"
+            );
+        });
+    }
+
+    #[zpui::test]
+    fn a_refused_float_drag_drops_its_preview_without_a_snapshot(cx: &mut TestAppContext) {
+        settled_float_drag_drops_its_preview(cx, |request_id| {
+            zz_protocol::CommandResponse::Error {
+                request_id,
+                error: zz_protocol::ServerError::InvalidCommand("client is read-only".to_owned()),
+                output: zz_protocol::RawText::default(),
+            }
+        });
+    }
+
+    #[zpui::test]
+    fn an_accepted_float_drag_that_changed_nothing_drops_its_preview(cx: &mut TestAppContext) {
+        settled_float_drag_drops_its_preview(cx, |request_id| {
+            zz_protocol::CommandResponse::Success {
+                request_id,
+                output: zz_protocol::RawText::default(),
+                exit_code: 0,
+                stderr: String::new(),
+                stdout_claim: zz_protocol::StdoutClaim::None,
+            }
+        });
+    }
+
+    #[zpui::test]
+    fn a_float_drag_measures_rows_from_the_daemon_window(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let tiled = PaneId(0);
+        let floating = PaneId(1);
+        let mut snapshot = one_pane_snapshot(1);
+        let window = &mut snapshot.sessions[0].windows[0];
+        let mut float_pane = window.panes[&tiled].clone();
+        float_pane.id = floating;
+        window.panes.insert(floating, float_pane);
+        let float = FloatingPaneSnapshot {
+            pane: floating,
+            xoff: 4,
+            yoff: 30,
+            sx: 20,
+            sy: 6,
+            visible: true,
+            border_lines: PaneBorderLines::Single,
+            border_status: PaneBorderStatus::Off,
+        };
+        window.floating = vec![float];
+        window.pane_border_status = PaneBorderStatus::Bottom;
+        window.layout_dump = concat!(
+            r#"{"V":2,"L":{"t":"v","w":100,"h":37,"x":0,"y":0,"c":["#,
+            r#"{"t":"p","w":100,"h":37,"x":0,"y":0,"l":1,"i":0,"I":"%0"},"#,
+            r#"{"t":"p","w":22,"h":8,"x":3,"y":29,"a":true,"i":1,"z":0,"I":"%1"}]}}"#
+        )
+        .to_owned();
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), snapshot, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.begin_float_drag(
+                WindowId(0),
+                PaneBorderStatus::Bottom,
+                float,
+                FloatGrip::MOVE,
+                zpui::size(px(8.0), px(16.0)),
+                Point::default(),
+                cx,
+            );
+            assert_eq!(
+                workspace.float_drag.map(|drag| drag.area.rows),
+                Some(37),
+                "the bottom status row is judged on the daemon's window, not the canvas"
+            );
+        });
     }
 
     /// `rendering.geometry-residue`'s probe. The desktop client measures its

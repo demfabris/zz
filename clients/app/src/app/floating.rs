@@ -274,3 +274,110 @@ impl AppShell {
 }
 
 pub(super) use zz_ui::tmux_style::tmux_style_colour as style_color;
+
+impl AppShell {
+    pub(super) fn cell_size(
+        &self,
+        active: &zz_protocol::WindowSnapshot,
+        cx: &Context<Self>,
+    ) -> (f32, f32) {
+        std::iter::once(active.active_pane)
+            .chain(self.terminals.keys().copied())
+            .find_map(|pane| self.terminals.get(&pane))
+            .map_or((8.0, 18.0), |terminal| {
+                let (width, height) = terminal.read(cx).cell_size();
+                (f32::from(width), f32::from(height))
+            })
+    }
+
+    pub(super) fn float_layer(
+        &self,
+        active: &zz_protocol::WindowSnapshot,
+        floats: &[zz_protocol::FloatingPaneSnapshot],
+        panes: &mut std::collections::HashMap<zz_protocol::PaneId, AnyElement>,
+        cx: &mut Context<Self>,
+    ) -> Vec<AnyElement> {
+        let cell = self.cell_size(active, cx);
+        let canvas = self.pane_canvas_bounds.get().size;
+        let canvas = (f32::from(canvas.width), f32::from(canvas.height));
+        let mut layer = Vec::new();
+        for float in floats {
+            let Some(content) = panes.remove(&float.pane) else {
+                continue;
+            };
+            if let Some(modal) = active.modal.filter(|modal| modal.pane == float.pane) {
+                let pane = modal.pane;
+                layer.push(
+                    div()
+                        .id(("web-modal-scrim", pane.0))
+                        .absolute()
+                        .inset_0()
+                        .occlude()
+                        .bg(cx.theme().background.opacity(0.4))
+                        .on_mouse_down(
+                            zpui::MouseButton::Left,
+                            cx.listener(move |this, _: &MouseDownEvent, _, cx| {
+                                if modal.close_on_click {
+                                    this.command(
+                                        "kill-pane",
+                                        vec!["-t".into(), pane.to_string()],
+                                        cx,
+                                    );
+                                }
+                                cx.stop_propagation();
+                            }),
+                        )
+                        .into_any_element(),
+                );
+            }
+            let bordered = float.border_lines != zz_protocol::PaneBorderLines::None;
+            let Some(placed) = zz_client::floating::float_pixels(
+                zz_client::floating::FloatCells::from(float),
+                bordered,
+                cell,
+                canvas,
+            ) else {
+                continue;
+            };
+            let title = active
+                .panes
+                .get(&float.pane)
+                .filter(|_| float.border_status.is_on())
+                .map(|pane| pane.border_status_text.clone())
+                .unwrap_or_default();
+            let border_color = if active.active_pane == float.pane {
+                cx.theme().accent
+            } else {
+                cx.theme().border()
+            };
+            let frame = placed.frame;
+            let inset = |content: Option<f32>, frame: f32| {
+                px(content.map_or(0.0, |content| content - frame))
+            };
+            layer.push(
+                div()
+                    .absolute()
+                    .left(px(frame.x))
+                    .top(px(frame.y))
+                    .w(px(frame.width))
+                    .h(px(frame.height))
+                    .child(
+                        FloatingSurface::new(("web-float", float.pane.0), content, cx)
+                            .title(title)
+                            .content_inset(
+                                inset(placed.content.map(|content| content.x), frame.x),
+                                inset(placed.content.map(|content| content.y), frame.y),
+                            )
+                            .colors(
+                                cx.theme().background.raised(1).opaque(),
+                                cx.theme().foreground,
+                                border_color,
+                            )
+                            .bordered(bordered),
+                    )
+                    .into_any_element(),
+            );
+        }
+        layer
+    }
+}

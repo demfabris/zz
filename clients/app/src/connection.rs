@@ -1078,9 +1078,6 @@ impl Connection {
     }
 
     fn request_history(&mut self, pane: PaneId, prefetch: Option<u32>, cx: &mut Context<Self>) {
-        if self.core.popup().is_some_and(|popup| popup.pane == pane) {
-            return;
-        }
         if let Some((start, count)) = self.history.request(
             pane,
             prefetch,

@@ -16,7 +16,7 @@ use zz_client::{
     },
     scrollback::RetainedTerminalViewport,
 };
-use zz_protocol::{InputMessage, PaneId, PopupAction, TerminalUiCommand};
+use zz_protocol::{InputMessage, PaneId, TerminalUiCommand};
 use zz_terminal::{
     AppearanceConfigKey, AppearanceSource, KeyAction, KeyCode, KeyInput, PointerCellEvent,
     SearchCase, SearchDirection, SearchMode, SearchQuery, SearchStatus, SessionStatus,
@@ -129,6 +129,7 @@ pub struct TerminalPane {
     surface_bounds: Bounds<Pixels>,
     cell_width: Pixels,
     line_height: Pixels,
+    floating: bool,
     text_font: Option<(Font, Pixels)>,
     scale: f32,
     force_local_selection: bool,
@@ -177,7 +178,6 @@ pub struct TerminalPane {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TerminalSurface {
     Pane,
-    Popup,
     CommandOutput,
 }
 
@@ -271,6 +271,7 @@ impl TerminalPane {
             surface_bounds: Bounds::default(),
             cell_width: px(8.),
             line_height: px(18.),
+            floating: false,
             text_font: None,
             scale: 1.0,
             force_local_selection: false,
@@ -327,10 +328,16 @@ impl TerminalPane {
         self
     }
 
-    pub fn new_popup(pane: PaneId, connection: Entity<Connection>, cx: &mut Context<Self>) -> Self {
-        let mut this = Self::new(pane, connection, cx);
-        this.surface = TerminalSurface::Popup;
-        this
+    #[must_use]
+    pub const fn cell_size(&self) -> (Pixels, Pixels) {
+        (self.cell_width, self.line_height)
+    }
+
+    pub fn set_floating(&mut self, floating: bool, cx: &mut Context<Self>) {
+        if self.floating != floating {
+            self.floating = floating;
+            cx.notify();
+        }
     }
 
     pub fn new_command_output(
@@ -426,15 +433,11 @@ impl TerminalPane {
                         .map_or(1.0, |appearance| appearance.background_opacity),
                 )
             });
-        if self.surface == TerminalSurface::Popup {
-            background
-        } else {
-            cx.theme()
-                .background
-                .opaque()
-                .blend(background)
-                .opacity(cx.theme().pane_background_opacity)
-        }
+        cx.theme()
+            .background
+            .opaque()
+            .blend(background)
+            .opacity(cx.theme().pane_background_opacity)
     }
 
     fn observe_image_hover(&mut self, uri: Option<Arc<str>>, cx: &mut Context<Self>) {
@@ -508,31 +511,11 @@ impl TerminalPane {
     fn viewport<'a>(&self, core: &'a zz_client::ClientCore) -> Option<&'a TerminalViewport> {
         match self.surface {
             TerminalSurface::CommandOutput => core.command_output().map(|(_, viewport)| viewport),
-            _ => core.viewport(self.pane),
+            TerminalSurface::Pane => core.viewport(self.pane),
         }
     }
 
     fn send(&self, input: InputMessage, cx: &mut Context<Self>) {
-        let input = if self.surface == TerminalSurface::Popup {
-            match input {
-                InputMessage::Key {
-                    input,
-                    text_follows,
-                    ..
-                } => InputMessage::Popup {
-                    action: PopupAction::Key {
-                        input,
-                        text_follows,
-                    },
-                },
-                InputMessage::Text { text, .. } => InputMessage::Popup {
-                    action: PopupAction::Text(text),
-                },
-                other => other,
-            }
-        } else {
-            input
-        };
         self.connection
             .update(cx, |connection, cx| connection.input(self.pane, input, cx));
     }
@@ -543,9 +526,6 @@ impl TerminalPane {
                 TerminalSurface::Pane => InputMessage::TerminalView {
                     pane: self.pane,
                     action,
-                },
-                TerminalSurface::Popup => InputMessage::Popup {
-                    action: PopupAction::TerminalView(action),
                 },
                 TerminalSurface::CommandOutput => InputMessage::CommandOutputView { action },
             },
@@ -1466,7 +1446,7 @@ impl TerminalPane {
                     .core
                     .retained_command_output()
                     .map(|(_, retained)| retained),
-                _ => connection.core.retained_viewport(self.pane),
+                TerminalSurface::Pane => connection.core.retained_viewport(self.pane),
             }?;
             let appearance = localized_font_appearance(
                 &connection.core,
@@ -1565,7 +1545,6 @@ impl TerminalPane {
                     },
                     cx,
                 ),
-                TerminalSurface::Popup => {}
             }
         }
         Some(paint)
@@ -1892,11 +1871,9 @@ impl Render for TerminalPane {
             {
                 bottom_right.push(terminal_link_popup(presented_uri(uri), cx).into_any_element());
             }
-            if self.surface != TerminalSurface::Popup {
-                mode = terminal_mode_text(viewport.mode, viewport.unseen_output);
-                if let Some(status) = terminal_status_text(&viewport.status) {
-                    bottom_right.push(terminal_status_popup(status, cx).into_any_element());
-                }
+            mode = terminal_mode_text(viewport.mode, viewport.unseen_output);
+            if let Some(status) = terminal_status_text(&viewport.status) {
+                bottom_right.push(terminal_status_popup(status, cx).into_any_element());
             }
         }
         self.observe_image_hover(
@@ -1920,7 +1897,7 @@ impl Render for TerminalPane {
             .rounded_br(self.corner_radii.bottom_right)
             .font(font)
             .text_size(font_size)
-            .when(self.surface != TerminalSurface::Popup, |root| {
+            .when(!self.floating, |root| {
                 root.pl(px(appearance.padding_left))
                     .pr(px(appearance.padding_right))
                     .pt(px(appearance.padding_top))

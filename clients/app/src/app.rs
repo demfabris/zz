@@ -167,7 +167,6 @@ pub struct AppShell {
     chooser_keys: BTreeSet<String>,
     menu_selection: Option<usize>,
     focused_pane: Option<PaneId>,
-    popup_terminal: Option<(PaneId, Entity<TerminalPane>)>,
     output_terminal: Option<(u64, Entity<TerminalPane>)>,
     split_drag: Option<SplitDragState>,
     terminal_resize_suppressed: Rc<Cell<bool>>,
@@ -248,7 +247,6 @@ impl AppShell {
                         this.focused_pane = None;
                         this.compact.reset_attachment();
                         this.waiting_panes.clear();
-                        this.popup_terminal = None;
                         this.output_terminal = None;
                         this.set_split_drag(None);
                         this.pane_drag = None;
@@ -388,7 +386,6 @@ impl AppShell {
             chooser_keys: BTreeSet::new(),
             menu_selection: None,
             focused_pane: None,
-            popup_terminal: None,
             output_terminal: None,
             split_drag: None,
             terminal_resize_suppressed: Rc::new(Cell::new(false)),
@@ -644,7 +641,7 @@ impl AppShell {
             cx.stop_propagation();
             return;
         }
-        if core.popup().is_some() || core.command_output().is_some() {
+        if core.modal_capture().is_some() || core.command_output().is_some() {
             return;
         }
         if self.settings.is_none()
@@ -829,7 +826,7 @@ impl AppShell {
         cx: &mut Context<Self>,
     ) {
         let core = &self.connection.read(cx).core;
-        if core.popup().is_some() || core.menu().is_some() || core.confirm().is_some() {
+        if core.menu().is_some() || core.confirm().is_some() {
             return;
         }
         let close_prompt = core.command_prompt().is_some();
@@ -1602,7 +1599,6 @@ impl AppShell {
             && core.command_prompt().is_none()
             && core.menu().is_none()
             && core.confirm().is_none()
-            && core.popup().is_none()
             && core.command_output().is_none();
         let output = core
             .command_output_id()
@@ -1612,7 +1608,20 @@ impl AppShell {
         self.pane_bounds
             .borrow_mut()
             .retain(|pane, _| active_window.panes.contains_key(pane));
-        for (pane_id, _) in rects {
+        let floats: Vec<zz_protocol::FloatingPaneSnapshot> = active_window
+            .floating
+            .iter()
+            .rev()
+            .filter(|float| float.visible)
+            .copied()
+            .collect();
+        let pane_ids: Vec<PaneId> = rects
+            .into_iter()
+            .map(|(pane, _)| pane)
+            .chain(floats.iter().map(|float| float.pane))
+            .collect();
+        for pane_id in pane_ids {
+            let is_float = floats.iter().any(|float| float.pane == pane_id);
             let Some(pane) = active_window.panes.get(&pane_id) else {
                 continue;
             };
@@ -1656,6 +1665,7 @@ impl AppShell {
                             cx,
                         );
                         terminal.set_rows_above(false, cx);
+                        terminal.set_floating(is_float, cx);
                     });
                     terminal.clone().into_any_element()
                 }
@@ -2031,6 +2041,13 @@ impl AppShell {
             );
         }
         let content = self.render_layout(&layout, &active_window, &mut panes, cx);
+        let float_layer = self.float_layer(&active_window, &floats, &mut panes, cx);
+        let content = div()
+            .relative()
+            .size_full()
+            .child(content)
+            .children(float_layer)
+            .into_any_element();
         let mut overlays = Vec::new();
         if !self.connection.read(cx).connected {
             overlays.push(
@@ -2122,7 +2139,7 @@ impl AppShell {
         } = node
         else {
             let zz_protocol::LayoutNode::Pane(pane) = node else {
-                unreachable!()
+                return div().size_full().into_any_element();
             };
             return panes
                 .remove(pane)
@@ -2675,82 +2692,13 @@ impl AppShell {
         )
     }
 
-    fn terminal_overlay(
-        &mut self,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    fn terminal_overlay(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
         let core = &self.connection.read(cx).core;
-        let popup = core.popup().cloned();
         let output = core
             .command_output_id()
             .zip(core.command_output().map(|(pane, _)| pane));
-        if let Some(popup) = popup {
-            if self
-                .popup_terminal
-                .as_ref()
-                .is_none_or(|(pane, _)| *pane != popup.pane)
-            {
-                let connection = self.connection.clone();
-                let terminal = cx.new(|cx| TerminalPane::new_popup(popup.pane, connection, cx));
-                terminal.read(cx).focus_handle(cx).focus(window, cx);
-                self.popup_terminal = Some((popup.pane, terminal));
-            }
-            let terminal = self.popup_terminal.as_ref()?.1.clone();
-            let bordered = popup.border_lines != zz_protocol::PopupBorderLines::None;
-            let frame = zz_ui::command::floating::floating_frame(
-                popup.left,
-                popup.top,
-                popup.width,
-                popup.height,
-                popup.client_columns,
-                popup.client_rows,
-                popup.cell_width_px,
-                popup.cell_height_px,
-                bordered,
-                zpui::point(px(0.0), px(0.0)),
-                self.floating_canvas_size(window),
-                window.scale_factor(),
-            );
-            let background = floating::style_color(
-                &popup.style,
-                "bg",
-                cx.theme().background.raised(1).opaque(),
-                cx,
-            );
-            let foreground = floating::style_color(&popup.style, "fg", cx.theme().foreground, cx);
-            let border_color =
-                floating::style_color(&popup.border_style, "fg", cx.theme().border(), cx);
-            return Some(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .occlude()
-                    .child(
-                        div()
-                            .absolute()
-                            .left(frame.bounds.origin.x)
-                            .top(frame.bounds.origin.y)
-                            .w(frame.bounds.size.width)
-                            .h(frame.bounds.size.height)
-                            .child(
-                                zz_ui::pane::FloatingSurface::new(
-                                    "web-display-popup",
-                                    terminal,
-                                    cx,
-                                )
-                                .title(popup.title)
-                                .content_inset(frame.inset_x, frame.inset_y)
-                                .colors(background, foreground, border_color)
-                                .bordered(bordered),
-                            ),
-                    )
-                    .into_any_element(),
-            );
-        }
-        let popup_closed = self.popup_terminal.take().is_some();
         let output_closed = output.is_none() && self.output_terminal.take().is_some();
-        if popup_closed || output_closed {
+        if output_closed {
             self.focused_pane = None;
             cx.notify();
         }
@@ -2841,7 +2789,6 @@ impl Render for AppShell {
                 && core.command_prompt().is_none()
                 && core.menu().is_none()
                 && core.confirm().is_none()
-                && core.popup().is_none()
                 && core.command_output().is_none()
                 && core.display_panes().is_none();
             let visible: BTreeSet<_> = if unobstructed && compact {
@@ -2852,9 +2799,18 @@ impl Render for AppShell {
                         let layout = window
                             .zoomed_pane
                             .map_or(window.layout, zz_protocol::LayoutNode::Pane);
+                        let floats: Vec<PaneId> = window
+                            .floating
+                            .iter()
+                            .filter(|float| float.visible)
+                            .map(|float| float.pane)
+                            .collect();
+                        let front = floats.first().copied();
                         pane_rects(&layout)
                             .into_iter()
                             .map(|(pane, _)| pane)
+                            .filter(|_| floats.is_empty())
+                            .chain(front)
                             .collect()
                     })
                     .unwrap_or_default()
@@ -2867,10 +2823,7 @@ impl Render for AppShell {
                 });
             }
         }
-        let mut terminal_overlays = self
-            .terminal_overlay(window, cx)
-            .into_iter()
-            .collect::<Vec<_>>();
+        let mut terminal_overlays = self.terminal_overlay(cx).into_iter().collect::<Vec<_>>();
         terminal_overlays.extend(self.floating_overlay(window, cx));
         let mut overlays = Vec::new();
         if !compact && self.slideover && !self.inline_sidebar(window) && self.settings.is_none() {

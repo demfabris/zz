@@ -138,7 +138,7 @@
       "id": "fix.capture-e-links",
       "track": "fix",
       "title": "capture-pane -e keeps OSC 8 hyperlinks",
-      "status": "active",
+      "status": "review",
       "deps": [
         "fix.capture-links"
       ],
@@ -154,14 +154,15 @@
       "branch": "catchup/fix.capture-e-links",
       "sha": null,
       "notes": [
-        "2026-10-09: found by fix.capture-links; zz can read per-cell URIs now."
+        "2026-10-09: found by fix.capture-links; zz can read per-cell URIs now.",
+        "2026-10-09: Lane done at a6748bd12: -e wraps links in OSC 8 like 3.8 (escaped_capture_wraps_links_in_osc_8_like_the_pin; smoke/capture-e-links 12 steps clean; zz-terminal 452). id= links and back-to-back same-URI links stay engine limits (no link id from libghostty, no-engine-patch ruling). Follow-ups: capture-pane -M -e emits no OSC 8; capture.terminal-engine-limits reason should mention the -e effects. Review 1 running."
       ]
     },
     {
       "id": "fix.chooser-preview",
       "track": "fix",
       "title": "choose-tree/choose-client/choose-buffer -N and -NN",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/command.rs",
@@ -175,13 +176,15 @@
       ],
       "branch": "catchup/fix.chooser-preview",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: Lane done at 572ce8e3d: -N off, -NN big for choose-tree/client/buffer and customize-mode; tui-choosers 96/96 incl. 18 preview-flag checkpoints vs 3.8; zz-daemon 1693; clippy; fmt. Desktop chooser has no preview pane (documented). Review 1 running."
+      ]
     },
     {
       "id": "fix.mode-styles",
       "track": "fix",
       "title": "Raw TUI reads tree-mode styles and prompt cursor style and colour",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon/chooser_presentation.rs",
@@ -197,7 +200,7 @@
         "prompt-cursor-style, prompt-cursor-colour, prompt-command-cursor-style and prompt-command-cursor-colour are honoured by the raw TUI prompt.",
         "Both registry groups shrink to what stays native (GUI presentation, copy-mode line numbers, fill-character, message-format if not done)."
       ],
-      "branch": null,
+      "branch": "catchup/fix.mode-styles",
       "sha": null,
       "notes": []
     },
@@ -241,7 +244,7 @@
       "id": "fix.option-bytes",
       "track": "fix",
       "title": "Bytes survive option, environment, command-block and guard-output paths",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/command.rs",
@@ -257,11 +260,12 @@
         "X=a<fd>b in one sourced file then set-buffer -b y \"$X\" in another stores 61 fd 62 as 3.8 does (the second file takes the text-only parse path and reads the lossy global_environment_variable accessor).",
         "A UTF-8 control client gets raw bytes for an inserted or sourced show-buffer as 3.8 does (ControlCommandGuard.output is a String in the protocol today; changing it is a wire append under the unreleased version)."
       ],
-      "branch": null,
+      "branch": "catchup/fix.option-bytes",
       "sha": null,
       "notes": [
         "2026-10-09: found by fix.streams: UserOptions is BTreeMap<String,String> in zz-mux, so non-UTF-8 values read back as U+FFFD; set-option and show-options pass values as String.",
-        "2026-10-09: fix.streams handed over its findings 3 and 4 and the guard-output String; measured cases are in protocol.binary-streams' close in compat/tmux-gaps.json."
+        "2026-10-09: fix.streams handed over its findings 3 and 4 and the guard-output String; measured cases are in protocol.binary-streams' close in compat/tmux-gaps.json.",
+        "2026-10-09: Launched in slot g (slot f stays on capture-e-links until its review reports)."
       ]
     },
     {

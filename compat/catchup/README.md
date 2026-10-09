@@ -106,9 +106,9 @@ Each rule cost an earlier campaign real time. The source is in brackets
    `crates/zz-protocol/src` (not `catalog.rs` or `lib.rs`) and main still says 107, move it to 108,
    move both assertions (`message.rs`, `tests/hunt_claims.rs`) and open 108 in
    `knowledge/protocol/wire-protocol.md`. If main already says 108 and no tag shipped it, append
-   under 108. `python3 compat/wire-version.py` tells you. `feat/native-agent-drivers` and
-   `feat/osc-7501` also claim 108; that is fine while it is unreleased. [A release froze the
-   version lanes were appending to, three times.]
+   under 108 (main is on unreleased 108 since native-agent-drivers and osc-7501 merged on
+   2026-10-09). `python3 compat/wire-version.py` tells you. [A release froze the version lanes
+   were appending to, three times.]
 8. **Bash calls die at 600 s.** Run long builds and fixtures detached
    (`setsid nohup <cmd> > <log> 2>&1 &`, append an `EXIT $?` marker) and poll the log. Never end
    your turn waiting on a background task. [A reviewer that did was dropped, LOG.]
@@ -187,5 +187,7 @@ check `pgrep -af codex` on resume.
   orchestrator manages parallelism and worktrees; instructions must survive a machine switch.
 - 2026-10-09 orchestrator: pin the `3.8` tag (7f2a35ad), not master. Master deleted popups and the
   `popup-*` options, which would break configs today; it is the next pin move, not this one.
+- 2026-10-09 orchestrator: wave 1 launched on alienware: `pin.move` (slot a), `fix.tui-colour`
+  (slot b), `float.design` (slot c, no compile).
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

@@ -29,27 +29,41 @@ pub fn browser_data_dir() -> io::Result<PathBuf> {
 }
 
 #[cfg(target_os = "linux")]
-fn platform_data_dir() -> Option<PathBuf> {
-    env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| {
-        env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join(".local").join("share"))
-    })
+pub fn platform_data_dir() -> Option<PathBuf> {
+    absolute_env_path("XDG_DATA_HOME")
+        .or_else(|| absolute_env_path("HOME").map(|home| home.join(".local").join("share")))
 }
 
-#[cfg(target_os = "macos")]
-fn platform_data_dir() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join("Library").join("Application Support"))
+/// iOS keeps the same layout, inside the app container `HOME` points at.
+#[cfg(any(target_os = "macos", target_os = "ios"))]
+pub fn platform_data_dir() -> Option<PathBuf> {
+    absolute_env_path("HOME").map(|home| home.join("Library").join("Application Support"))
 }
 
 #[cfg(target_os = "windows")]
-fn platform_data_dir() -> Option<PathBuf> {
-    env::var_os("LOCALAPPDATA").map(PathBuf::from)
+pub fn platform_data_dir() -> Option<PathBuf> {
+    absolute_env_path("LOCALAPPDATA")
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn platform_data_dir() -> Option<PathBuf> {
+#[cfg(not(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows"
+)))]
+pub fn platform_data_dir() -> Option<PathBuf> {
     None
+}
+
+#[cfg(any(
+    target_os = "linux",
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "windows"
+))]
+fn absolute_env_path(key: &str) -> Option<PathBuf> {
+    env::var_os(key)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
 }

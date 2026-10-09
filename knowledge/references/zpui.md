@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: zpui
-description: zpui, our GPUI fork in crates/zpui and crates/zpui-*: where its crates live, how to change them or pull an upstream Zed fix, and what zz changed. gpui-component is not a dependency.
+description: zpui, our GPUI fork (crates/zpui and crates/zpui-*) - where its crates live, how to change them or pull an upstream Zed fix, and what zz changed. gpui-component is not a dependency.
 resource: crates/zpui/Cargo.toml
 tags: [zpui, gpui, reference, vendored]
 timestamp: 2026-10-09T00:00:00Z

@@ -673,7 +673,7 @@
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "float.core"
       ],
@@ -698,7 +698,7 @@
         "A zz-client test shows a focused modal with capture_keys sends the prefix key to the pane.",
         "rg 'PopupState|PopupAction|EventPayload::Popup' finds nothing under crates/zz, crates/zz-tui, crates/zz-client or clients/."
       ],
-      "branch": null,
+      "branch": "catchup/float.clients",
       "sha": null,
       "notes": [
         "2026-10-09: branches from catchup/float.core (not main): float.core alone on main would make popups invisible. The float track merges to main as one unit (core + clients + keys)."

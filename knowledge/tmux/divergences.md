@@ -709,6 +709,11 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   100x30 erased-background probe differences. See
   `compat/tui/evidence/TUI-017/attempt-10/notes.md` and the 2026-09-18 amendments in
   `knowledge/designs/tui-parity.md`.
+  Live `-e` captures also wrap linked text in the pin's OSC 8 opens and closes (2026-10-09):
+  after the cell's SGR codes, with the pin's missing reopen on a wrapped continuation and its
+  repeat of the last cell's codes before a row-end close under `-J` and `-T`. Keyed on the URI
+  for the reason below, an open never carries `id=`, and back-to-back anonymous links with one
+  URI open once here and twice on the pin.
   `-H` prints each line's links once per capture, and `-F` prefixes each line with the pin's
   H, O, P and W letters (2026-10-09). The pin keys a link on the id each OSC 8 open gets, zz
   on a run of cells sharing one URI, so back-to-back anonymous links with the same URI print

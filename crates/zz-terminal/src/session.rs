@@ -9006,8 +9006,14 @@ struct CaptureWork {
     visible_start: u64,
     output: String,
     separator: bool,
-    previous: libghostty_vt::style::Style,
+    previous: CaptureCarry,
     reply: ActorReply<Result<String, TerminalCaptureError>>,
+}
+
+#[derive(Default)]
+struct CaptureCarry {
+    style: libghostty_vt::style::Style,
+    link: Option<Vec<u8>>,
 }
 
 impl CaptureWork {
@@ -9079,7 +9085,7 @@ impl CaptureWork {
                 visible_start,
                 output: String::new(),
                 separator: false,
-                previous: libghostty_vt::style::Style::default(),
+                previous: CaptureCarry::default(),
                 reply,
             }),
             result => {
@@ -9216,18 +9222,13 @@ fn capture_terminal_marked(
         }
         return capture_mode_revision(mode, options);
     }
-    capture_grid(
-        terminal,
-        options,
-        &mut libghostty_vt::style::Style::default(),
-        output_rows,
-    )
+    capture_grid(terminal, options, &mut CaptureCarry::default(), output_rows)
 }
 
 fn capture_grid(
     terminal: &impl CaptureGrid,
     options: CaptureOptions,
-    previous: &mut libghostty_vt::style::Style,
+    previous: &mut CaptureCarry,
     output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
     let active_screen = terminal.capture_screen().map_err(capture_failure)?;
@@ -9434,14 +9435,7 @@ fn capture_hyperlinks(
                 current = None;
                 continue;
             }
-            let length = match grid.hyperlink_uri(&mut buffer) {
-                Ok(length) => length,
-                Err(libghostty_vt::Error::OutOfSpace { required }) => {
-                    buffer.resize(required, 0);
-                    grid.hyperlink_uri(&mut buffer).map_err(capture_failure)?
-                }
-                Err(error) => return Err(capture_failure(error)),
-            };
+            let length = capture_link_uri(&grid, &mut buffer)?;
             let uri = &buffer[..length];
             if current.as_deref() == Some(uri) {
                 continue;
@@ -9512,11 +9506,13 @@ fn capture_styled_terminal(
     (start, end): (u64, u64),
     history_rows: u64,
     columns: u16,
-    previous: &mut libghostty_vt::style::Style,
+    previous: &mut CaptureCarry,
     output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
+    let escaped = options.escape_nonprintable;
     let mut output = String::new();
     let mut graphemes = vec!['\0'; 8];
+    let mut uri = vec![0_u8; 256];
     for row in start..=end {
         let y = u32::try_from(row).unwrap_or(u32::MAX);
         let mut used = 0;
@@ -9546,6 +9542,8 @@ fn capture_styled_terminal(
                 .unwrap_or(columns)
         };
         let mut line = String::new();
+        let mut code = String::new();
+        let mut has_link = false;
         for x in 0..width {
             let grid = terminal
                 .grid_ref(Point::Screen(PointCoordinate { x, y }))
@@ -9572,8 +9570,36 @@ fn capture_styled_terminal(
                 }
                 CellContentTag::Codepoint | CellContentTag::CodepointGrapheme => {}
             }
-            push_capture_sgr(&mut line, *previous, style);
-            *previous = style;
+            code.clear();
+            push_capture_sgr(&mut code, previous.style, style);
+            if escaped {
+                code = code.replace('\u{1b}', "\\033");
+            }
+            previous.style = style;
+            let length =
+                if wide != CellWide::SpacerHead && cell.has_hyperlink().map_err(capture_failure)? {
+                    capture_link_uri(&grid, &mut uri)?
+                } else {
+                    0
+                };
+            let cell_uri = (length > 0).then(|| &uri[..length]);
+            if cell_uri != previous.link.as_deref() {
+                if let Some(visible) = cell_uri
+                    .map(visible_uri)
+                    .filter(|visible| visible.len() <= MAX_HYPERLINK_URI)
+                {
+                    push_capture_link(&mut code, &visible, escaped);
+                    has_link = true;
+                    previous.link = cell_uri.map(<[u8]>::to_vec);
+                } else {
+                    if has_link {
+                        push_capture_link(&mut code, "", escaped);
+                        has_link = false;
+                    }
+                    previous.link = None;
+                }
+            }
+            line.push_str(&code);
             let count = match grid.graphemes(&mut graphemes) {
                 Ok(count) => count,
                 Err(libghostty_vt::Error::OutOfSpace { required }) => {
@@ -9587,9 +9613,15 @@ fn capture_styled_terminal(
             };
             if count == 0 {
                 line.push(' ');
+            } else if escaped && count == 1 && graphemes[0] == '\\' {
+                line.push_str("\\\\");
             } else {
                 line.extend(graphemes[..count].iter());
             }
+        }
+        if has_link {
+            line.push_str(&code);
+            push_capture_link(&mut line, "", escaped);
         }
         if options.number_lines {
             push_capture_line_number(&mut output, row, history_rows);
@@ -9619,12 +9651,36 @@ fn capture_styled_terminal(
         None,
         CaptureOptions {
             number_lines: false,
+            escape_nonprintable: false,
             ..options
         },
         start,
         history_rows,
         None,
     ))
+}
+
+fn capture_link_uri(
+    grid: &libghostty_vt::screen::GridRef<'_>,
+    buffer: &mut Vec<u8>,
+) -> Result<usize, TerminalCaptureError> {
+    match grid.hyperlink_uri(buffer) {
+        Ok(length) => Ok(length),
+        Err(libghostty_vt::Error::OutOfSpace { required }) => {
+            buffer.resize(required, 0);
+            grid.hyperlink_uri(buffer).map_err(capture_failure)
+        }
+        Err(error) => Err(capture_failure(error)),
+    }
+}
+
+fn push_capture_link(output: &mut String, uri: &str, escaped: bool) {
+    let escape = if escaped { "\\033" } else { "\u{1b}" };
+    output.push_str(escape);
+    output.push_str("]8;;");
+    output.push_str(uri);
+    output.push_str(escape);
+    output.push_str(if escaped { "\\\\" } else { "\\" });
 }
 
 fn capture_sgr_attributes(style: libghostty_vt::style::Style) -> [(bool, &'static str); 13] {

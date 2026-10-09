@@ -24,6 +24,7 @@ pub(super) fn queue_command(command: &CommandInvocation) -> bool {
         || matches!(
             name,
             "split-window"
+                | "new-pane"
                 | "list-keys"
                 | "wait-for"
                 | "run-shell"
@@ -51,6 +52,7 @@ pub(super) fn task_command(command: &CommandInvocation) -> bool {
         || matches!(
             name,
             "split-window"
+                | "new-pane"
                 | "list-keys"
                 | "wait-for"
                 | "run-shell"

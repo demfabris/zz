@@ -167,3 +167,41 @@ out: list-panes -t mv:0 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{p
 err: move-pane -P top-left -t mv:0.0
 new-pane -t mv:0.0
 out: list-panes -t mv:0 -O z -F #{pane_id}:#{pane_z}
+
+# One tile and one float: a preset lays out the tile and leaves the float.
+new-session -d -s sl
+new-pane -t sl
+select-layout -t sl even-horizontal
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t sl #{window_layout}
+
+# split-window on a float checks -E and -B before it shrinks the float.
+err: split-window -h -E -t sl.1 true
+err: split-window -h -B sideways -t sl.1
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# resize-pane -y on a float counts the pane-border-status row at the top or
+# bottom edge of the window.
+set -w -t sl pane-border-status top
+move-pane -P top-left -t sl.1
+resize-pane -t sl.1 -y 8
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+set -w -t sl pane-border-status bottom
+move-pane -P bottom-left -t sl.1
+resize-pane -t sl.1 -y 6
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+set -w -t sl pane-border-status off
+
+# A zoomed or hidden float is not floating: placement refuses it and resize
+# unzooms first.
+resize-pane -Z -t sl.1
+err: move-pane -X 10 -t sl.1
+err: move-pane -z 0 -t sl.1
+resize-pane -t sl.1 -x 30
+out: display-message -p -t sl #{window_zoomed_flag}
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+resize-pane -Z -t sl.0
+err: move-pane -P centre -t sl.1
+resize-pane -t sl.1 -y 5
+out: display-message -p -t sl #{window_zoomed_flag}
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}

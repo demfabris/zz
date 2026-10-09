@@ -261,6 +261,70 @@ fn pane_stdin_requests_one_chunk_at_a_time_and_cancels_on_target_loss() {
 }
 
 #[test]
+fn new_pane_stdin_streams_into_the_float_it_creates() {
+    let shared = Arc::new(Shared::new(113));
+    let mailbox = OutboundMailbox::new();
+    let (client, _) =
+        shared.register_subscribed(ClientKind::Command, None, None, Arc::clone(&mailbox));
+    let _writer = ClientWriterRegistrationGuard::new(&shared, client, Arc::clone(&mailbox));
+    let mut context = ExecutionContext::default();
+    shared
+        .execute(
+            client,
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new("new-session", ["-d", "-s", "e11float", "exec sleep 30"]),
+        )
+        .unwrap();
+    let mut event_loop = EventLoop::empty(&shared).unwrap();
+    let mut command = CommandInvocation::new("new-pane", ["-d", "-I", "-t", "e11float:"]);
+    command.set_stdin_available(true);
+    let mut task = wait_queue::CommandTask::new(
+        &shared,
+        client,
+        ClientKind::Command,
+        &context,
+        1,
+        &command,
+        false,
+    )
+    .unwrap_or_else(|_| panic!("stdin task"));
+    assert!(matches!(task.run(true), wait_queue::Progress::Waiting));
+    let pane = {
+        let inner = shared.inner.lock();
+        assert_eq!(inner.client_file_waiters.len(), 1);
+        let pane = inner
+            .client_file_waiters
+            .first_key_value()
+            .unwrap()
+            .1
+            .pane
+            .unwrap();
+        assert!(
+            inner
+                .engine
+                .state
+                .windows
+                .values()
+                .any(|window| window.is_floating(pane))
+        );
+        pane
+    };
+    shared
+        .execute(
+            client,
+            ClientKind::Command,
+            &mut context,
+            &CommandInvocation::new("kill-pane", ["-t", &pane.to_string()]),
+        )
+        .unwrap();
+    assert!(task.ready());
+    assert!(matches!(task.run(true), wait_queue::Progress::Done));
+    event_loop.turn(&shared).unwrap();
+    shared.request_shutdown();
+}
+
+#[test]
 fn sourced_alias_keeps_raw_stdout_claim_across_a_file_reply() {
     let shared = Arc::new(Shared::new(114));
     shared

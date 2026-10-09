@@ -1789,7 +1789,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-D", "kill the modal pane on Escape or C-c"),
             CommandOptionSpec::flag("-K", "send every key to the modal pane"),
             CommandOptionSpec::flag("-L", "split instead of floating"),
-            CommandOptionSpec::flag("-M", "size the pane from the invoking mouse drag"),
+            CommandOptionSpec::unsupported_flag("-M"),
             CommandOptionSpec::flag("-O", "make the pane modal"),
             CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),
             CommandOptionSpec::value("-y", FreeForm, "height in cells or percent"),

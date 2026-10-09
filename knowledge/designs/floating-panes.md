@@ -279,14 +279,16 @@ Recorded by float.core (sessions 1 and 2, 2026-10-09); 3.8 wins where this plan 
 - Directional `select-pane` uses `window_pane_find_*`'s cell arithmetic over every pane once the
   window has a float; tiled-only windows keep the older normalized walk. Compass targets treat every
   float as bordered, because the mux model does not see `pane-border-lines none`.
-- `resize-pane -y` on a float skips 3.8's `pane-border-status` adjustment for a pane at the top or
-  bottom row.
-- `display-popup` sets `remain-on-exit`, `remain-on-exit-format` and, with `-T`, the border status and
-  format on the pane right after `new-pane` spawns it, so a command that exits within that instant
-  closes as `remain-on-exit off`. A command client waits through `new-pane -W`, so a signal exits
-  128+N and a popup killed by `kill-pane` or `-C` exits 0, not 129. Control clients still get
-  nothing, and a popup still needs a target client. `-C` also clears the target client's menus and
-  other overlays, as 3.8's `server_client_clear_overlay` did, before it kills the modal.
+- `display-popup` hands `remain-on-exit`, `remain-on-exit-format` and, with `-T`, the border status
+  and format to `new-pane` through `ExecutionContext::set_spawn_pane_options`, which sets them on
+  the new pane before the daemon spawns its process. A command client waits through `new-pane -W`,
+  so a signal exits 128+N and a popup killed by `kill-pane` or `-C` before its command exits answers
+  129, as `window_pane_wait_finish` does (`wait-pane --exit` keeps answering 0 for a killed pane).
+  Control clients still get nothing, and a popup still needs a target client. `-C` also clears the
+  target client's menus and other overlays, as 3.8's `server_client_clear_overlay` did, before it
+  kills the modal.
+- `new-pane -M` answers as an unsupported flag, as `move-pane -M` does: creating and sizing a float
+  from the drag needs the per-client drag float.keys builds, so `flag:new-pane:-M` is tracked there.
 - Modal `-D` and `-K` act in the daemon's key path before the key tables, and a click outside the
   modal is dropped (or kills a `-C` modal) in its mouse path, both keyed on the pane the client
   reports; drawing the modal and hit-testing floats on the client side is float.clients.

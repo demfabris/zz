@@ -1144,9 +1144,10 @@ impl StatusHooks for InertFormatHooks<'_> {
         String::new()
     }
 
-    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<RawText> {
         self.option_engine
             .and_then(|engine| engine.format_option_value(context, name))
+            .map(RawText::from)
     }
 }
 
@@ -7904,7 +7905,7 @@ impl Shared {
                 let body = MuxEngine::command_alias_group_body(command).expect("alias body");
                 parent.insert_foreground_child(InsertedQueueChild {
                     context: context.clone(),
-                    source: InsertedCommandSource::Block(body.to_owned()),
+                    source: InsertedCommandSource::Block(body.into()),
                     label: "<command-alias>".to_owned(),
                     control_target: context.control_command_target(),
                     mux_source,
@@ -13613,7 +13614,13 @@ impl Shared {
             let command = parsed.positional.first().map(|command| {
                 if parsed.command_mode {
                     if invocation.argument_is_command_block(parsed.positional_start) {
-                        typed_inserted_command_source(command, true)
+                        typed_inserted_command_source(
+                            invocation
+                                .args
+                                .get(parsed.positional_start)
+                                .expect("run-shell command argument"),
+                            true,
+                        )
                     } else {
                         let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                             &facts,
@@ -14060,9 +14067,9 @@ impl Shared {
             .iter()
             .enumerate()
             .skip(1)
-            .map(|(position, branch)| {
+            .map(|(position, _)| {
                 typed_inserted_command_source(
-                    branch,
+                    &command.args[parsed.positional_start + position],
                     command.argument_is_command_block(parsed.positional_start + position),
                 )
             })
@@ -14438,7 +14445,7 @@ impl Shared {
         let body = MuxEngine::command_alias_group_body(command).ok_or_else(|| {
             ServerError::CommandParse(format!("unknown command: {}", command.name))
         })?;
-        let source = InsertedCommandSource::Block(body.to_owned());
+        let source = InsertedCommandSource::Block(body.into());
         let control_target = context.control_command_target();
         let result = self.execute_inserted_commands_with_control_target_and_mux_source(
             client,
@@ -15178,18 +15185,20 @@ impl Shared {
         let (commands, prepared) = if let InsertedCommandSource::Commands(commands) = source {
             (commands.clone(), true)
         } else {
-            let (input, prepared) = match source {
-                InsertedCommandSource::String(input) => (input, false),
-                InsertedCommandSource::Block(input) => (input, true),
-                InsertedCommandSource::Commands(_)
-                | InsertedCommandSource::Shell(_)
-                | InsertedCommandSource::Hooks(_)
-                | InsertedCommandSource::Events(_) => unreachable!(),
-            };
             let mut parsed = {
                 let inner = self.inner.lock();
-                inner.engine.parse_config(label, input)
+                match source {
+                    InsertedCommandSource::String(input) => inner.engine.parse_config(label, input),
+                    InsertedCommandSource::Block(input) => {
+                        inner.engine.parse_config_raw(label, input)
+                    }
+                    InsertedCommandSource::Commands(_)
+                    | InsertedCommandSource::Shell(_)
+                    | InsertedCommandSource::Hooks(_)
+                    | InsertedCommandSource::Events(_) => unreachable!(),
+                }
             };
+            let prepared = matches!(source, InsertedCommandSource::Block(_));
             if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
                 return Err(DaemonError::InsertedCommandParse(diagnostic.message));
             }
@@ -15920,8 +15929,8 @@ impl Shared {
                 output,
                 error: true,
                 ..
-            } => Some(output.clone()),
-            EventPayload::ControlCommandGuardRaw {
+            }
+            | EventPayload::ControlCommandGuardRaw {
                 output,
                 error: true,
                 ..
@@ -29769,7 +29778,7 @@ impl Shared {
                 }
             } else {
                 EventPayload::ControlCommandGuard {
-                    output: String::from(output),
+                    output,
                     error,
                     sticky_failure,
                     flags,
@@ -34676,7 +34685,7 @@ impl ConfigParse {
                 .into_iter()
                 .map(|assignment| ConfigEnvironmentEntry {
                     name: assignment.name,
-                    value: assignment.value.into(),
+                    value: assignment.value,
                     hidden: assignment.hidden,
                 })
                 .collect(),
@@ -35401,18 +35410,18 @@ impl CapturedControlCommandEvents {
                 continue;
             };
             match event {
+                EventPayload::ControlCommandOutput { output } => {
+                    output.clear();
+                    output.push_str(&diagnostic.message);
+                    qualified += 1;
+                }
                 EventPayload::ControlCommandGuard {
                     output,
                     error: true,
                     sticky_failure: false,
                     ..
                 }
-                | EventPayload::ControlCommandOutput { output } => {
-                    output.clear();
-                    output.push_str(&diagnostic.message);
-                    qualified += 1;
-                }
-                EventPayload::ControlCommandGuardRaw {
+                | EventPayload::ControlCommandGuardRaw {
                     output,
                     error: true,
                     sticky_failure: false,
@@ -49028,7 +49037,7 @@ enum InsertedCommandSource {
     Commands(Vec<CommandInvocation>),
     Shell(String),
     String(String),
-    Block(String),
+    Block(RawText),
     Hooks(Box<HookQueueSource>),
     Events(Box<EventQueueSource>),
 }
@@ -49593,11 +49602,16 @@ fn parse_shell_delay_seconds(value: &str) -> Option<f64> {
     (seconds.is_finite() && seconds >= 0.0).then_some(seconds)
 }
 
-fn typed_inserted_command_source(argument: &str, command_block: bool) -> InsertedCommandSource {
-    if command_block && let Some(body) = command_block_body(argument) {
-        return InsertedCommandSource::Block(body.to_owned());
+fn typed_inserted_command_source(argument: &RawText, command_block: bool) -> InsertedCommandSource {
+    if command_block
+        && let Some(body) = argument
+            .as_bytes()
+            .strip_prefix(b"{")
+            .and_then(|rest| rest.strip_suffix(b"}"))
+    {
+        return InsertedCommandSource::Block(RawText::from_bytes(body));
     }
-    InsertedCommandSource::String(argument.to_owned())
+    InsertedCommandSource::String(argument.to_string())
 }
 
 fn select_if_shell_branch(
@@ -59079,16 +59093,61 @@ mod tests {
                 .as_bytes()
                 .to_vec()
         };
-        let option = output("show-options", &["-gv", "@binary"]);
-        assert!(
-            option.starts_with(b"a") && option.ends_with(b"b"),
-            "{option:?}"
+        assert_eq!(output("show-options", &["-gv", "@binary"]), b"a\xfeb");
+        assert_eq!(
+            output("show-options", &["-g", "@binary"]),
+            b"@binary a\\376b"
         );
+        assert_eq!(output("display-message", &["-p", "#{@binary}"]), b"a\xfeb");
         assert_eq!(output("show-buffer", &["-b", "sourced"]), b"c\xfed");
         assert_eq!(
             output("show-environment", &["-g", "BINARY_ENV"]),
             b"BINARY_ENV=e\xfef"
         );
+    }
+
+    #[test]
+    fn sourced_command_blocks_and_variables_keep_bytes_that_are_not_utf8() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(1);
+        let mut context = ExecutionContext::default();
+        let mut source = |stdin: &[u8]| {
+            let mut command = CommandInvocation::new("source-file", ["-"]);
+            command.set_stdin(RawText::from_bytes(stdin.to_vec()));
+            assert!(matches!(
+                shared.execute_command_request(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    1,
+                    &command
+                ),
+                CommandResponse::Success { exit_code: 0, .. }
+            ));
+        };
+        source(b"if-shell -F 1 { set-buffer -b block a\xfeb }\n");
+        source(b"BYTES_VARIABLE=a\xfdb\n");
+        source(b"set-buffer -b variable \"$BYTES_VARIABLE\"\n");
+        source(b"OCTAL_VARIABLE=a\\375b\n");
+        source(b"set-buffer -b octal \"$OCTAL_VARIABLE\"\n");
+        source(b"set-buffer -b escaped \"\\303\\251\\376\"\n");
+        let mut buffer = |name: &str| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-buffer", ["-b", name]),
+                )
+                .expect("show-buffer")
+                .output
+                .as_bytes()
+                .to_vec()
+        };
+        assert_eq!(buffer("block"), b"a\xfeb");
+        assert_eq!(buffer("variable"), b"a\xfdb");
+        assert_eq!(buffer("octal"), b"a\xfdb");
+        assert_eq!(buffer("escaped"), b"\xc3\xa9\xfe");
     }
 
     #[test]
@@ -68813,8 +68872,13 @@ set-option -g @alias-mixed-next yes
                     .filter(|message| matches!(
                         message,
                         ProtocolMessage::Event(Event {
-                            payload: EventPayload::ControlCommandGuard { output, .. }
-                                | EventPayload::ControlCommandOutput { output },
+                            payload: EventPayload::ControlCommandGuard { output, .. },
+                            ..
+                        }) if output == &diagnostic
+                    ) || matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ControlCommandOutput { output },
                             ..
                         }) if output == &diagnostic
                     ))
@@ -68887,8 +68951,13 @@ set-option -g @alias-mixed-next yes
                         .filter(|message| matches!(
                             message,
                             ProtocolMessage::Event(Event {
-                                payload: EventPayload::ControlCommandGuard { output, .. }
-                                    | EventPayload::ControlCommandOutput { output },
+                                payload: EventPayload::ControlCommandGuard { output, .. },
+                                ..
+                            }) if output == "syntax error"
+                        ) || matches!(
+                            message,
+                            ProtocolMessage::Event(Event {
+                                payload: EventPayload::ControlCommandOutput { output },
                                 ..
                             }) if output == "syntax error"
                         ))
@@ -74631,7 +74700,7 @@ set-option -g @alias-mixed-next yes
                             ..
                         },
                     ..
-                }) => Some(("guard", output, error, sticky_failure)),
+                }) => Some(("guard", String::from(output), error, sticky_failure)),
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ControlConfigError { text },
                     ..
@@ -107931,7 +108000,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             ..
                         },
                     ..
-                }) => Some((output, error, flags)),
+                }) => Some((String::from(output), error, flags)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -107983,7 +108052,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ControlCommandGuard { output, error, .. },
                     ..
-                }) => Some((output, error)),
+                }) => Some((String::from(output), error)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -120795,7 +120864,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             ..
                         },
                     ..
-                }) => Some((output, error, sticky_failure)),
+                }) => Some((String::from(output), error, sticky_failure)),
                 _ => None,
             })
             .collect()
@@ -120844,7 +120913,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             flags,
                         },
                     ..
-                }) => Some((output, error, sticky_failure, flags)),
+                }) => Some((String::from(output), error, sticky_failure, flags)),
                 _ => None,
             })
             .collect()

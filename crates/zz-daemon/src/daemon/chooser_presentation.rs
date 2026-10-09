@@ -453,20 +453,23 @@ impl StatusHooks for ScopedHooks<'_> {
         String::new()
     }
 
-    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
-        self.engine.format_option_value(context, name).or_else(|| {
-            name.starts_with('@')
-                .then(|| {
-                    self.engine.format_user_option(
-                        &context.pane_id,
-                        &context.window_id,
-                        &context.session_id,
-                        name,
-                    )
-                })
-                .flatten()
-                .map(str::to_owned)
-        })
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<RawText> {
+        self.engine
+            .format_option_value(context, name)
+            .map(RawText::from)
+            .or_else(|| {
+                name.starts_with('@')
+                    .then(|| {
+                        self.engine.format_user_option_bytes(
+                            &context.pane_id,
+                            &context.window_id,
+                            &context.session_id,
+                            name,
+                        )
+                    })
+                    .flatten()
+                    .cloned()
+            })
     }
 
     fn variable(&mut self, name: &str, _context: &zz_mux::StatusContext) -> Option<String> {

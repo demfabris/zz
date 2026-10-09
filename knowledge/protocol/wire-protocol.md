@@ -861,6 +861,13 @@ does, gated on the terminal's `cstyle` and `ccolour` features. `ChooserPreview::
 `tree-mode-border-style` of the previewed client's current window, which `window_client_draw` draws
 the rule above the client's status rows in.
 
+v108 also carries a control client's guard output as bytes (catch-up item `fix.option-bytes`).
+`EventPayload::ControlCommandGuard.output` becomes `RawText`, like `ControlCommandGuardRaw`
+already was, so a control client that never subscribed gets the bytes tmux 3.8's `cmdq_print`
+writes for a UTF-8 client instead of U+FFFD. postcard encodes a byte string and a UTF-8 string
+the same way, so a UTF-8 guard's frame is unchanged; one holding other bytes now decodes.
+`control_command_guard_output_round_trips_bytes_that_are_not_utf8` pins it.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

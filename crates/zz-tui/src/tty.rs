@@ -164,6 +164,14 @@ fn learn_terminal_features(features: &str) {
     arm_extended_keys();
 }
 
+pub(crate) fn adopt_negotiated_features(features: &[String]) {
+    zz_daemon::adopt_negotiated_terminal_features(features);
+    if terminal_colours().is_some() {
+        raise_terminal_colours(zz_daemon::client_terminal_colour_count());
+    }
+    arm_extended_keys();
+}
+
 static EXTENDED_KEYS_OPTION: AtomicBool = AtomicBool::new(false);
 static EXTENDED_KEYS_ARMED: AtomicBool = AtomicBool::new(false);
 
@@ -553,6 +561,26 @@ mod tests {
     #[test]
     fn the_startup_requests_carry_the_pin_three_attribute_queries() {
         assert!(TERMINAL_REQUESTS.ends_with(b"\x1b[c\x1b[>c\x1b[>q"));
+    }
+
+    #[test]
+    fn a_negotiated_extkeys_feature_writes_the_extended_key_request() {
+        let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&written);
+        let writer = crate::writer::TerminalWriter::with_sink(Box::new(move |bytes| {
+            sink.lock().unwrap().extend_from_slice(bytes);
+            Ok(())
+        }));
+        ACTIVE_OUTPUT.with(|output| {
+            *output.borrow_mut() = Some(std::rc::Rc::new(std::cell::RefCell::new(writer)));
+        });
+        EXTENDED_KEYS_OPTION.store(true, Ordering::Relaxed);
+        adopt_negotiated_features(&["extkeys".to_owned()]);
+        let armed = EXTENDED_KEYS_ARMED.swap(false, Ordering::Relaxed);
+        EXTENDED_KEYS_OPTION.store(false, Ordering::Relaxed);
+        ACTIVE_OUTPUT.with(|output| output.borrow_mut().take());
+        assert!(armed);
+        assert_eq!(written.lock().unwrap().as_slice(), EXTENDED_KEYS_ENABLE);
     }
 
     #[test]

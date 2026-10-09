@@ -223,6 +223,7 @@ pub(super) struct EventLoop {
     stdin: OwnedFd,
     signals: SignalInbox,
     parser: EventParser,
+    negotiation: Option<(Vec<String>, Vec<String>)>,
     escape_deadline: Option<Instant>,
     terminal_events: VecDeque<TerminalEvent>,
     prefer_terminal: bool,
@@ -249,6 +250,7 @@ impl EventLoop {
             stdin: io::stdin().as_fd().try_clone_to_owned()?,
             signals: SignalInbox::new()?,
             parser: EventParser::default(),
+            negotiation: None,
             escape_deadline: None,
             terminal_events: VecDeque::new(),
             prefer_terminal: false,
@@ -361,6 +363,32 @@ impl EventLoop {
         self.tty = Handoff::Own;
         self.tty_reported = None;
         self.buffered = true;
+    }
+
+    fn relay(
+        &mut self,
+        message: ProtocolMessage,
+        core: &Mutex<ClientCore>,
+        forward: impl FnOnce(ProtocolMessage),
+    ) {
+        let Some(message) = self.take_tty_message(message) else {
+            return;
+        };
+        forward(message);
+        self.adopt_negotiation(core);
+    }
+
+    pub fn adopt_negotiation(&mut self, core: &Mutex<ClientCore>) {
+        let core = lock_core(core);
+        let Some(negotiation) = core.terminal_negotiation() else {
+            return;
+        };
+        if self.negotiation.as_ref() == Some(negotiation) {
+            return;
+        }
+        self.parser.set_user_keys(&negotiation.1);
+        crate::tty::adopt_negotiated_features(&negotiation.0);
+        self.negotiation = Some(negotiation.clone());
     }
 
     pub fn await_clipboard_reply(&mut self) {
@@ -504,22 +532,21 @@ impl EventLoop {
             match received {
                 Ok(Some(message)) => {
                     read_socket = false;
-                    let Some(message) = self.take_tty_message(*message) else {
-                        continue;
-                    };
-                    forward_protocol_message(
-                        core,
-                        message,
-                        connection,
-                        events,
-                        frames,
-                        kitty_images,
-                        kitty_gate,
-                        |outbound| match outbound {
-                            Outbound::RequestFull(pane) => client.request_full(pane),
-                            Outbound::TreeSync => client.request_tree_sync(),
-                        },
-                    );
+                    self.relay(*message, core, |message| {
+                        forward_protocol_message(
+                            core,
+                            message,
+                            connection,
+                            events,
+                            frames,
+                            kitty_images,
+                            kitty_gate,
+                            |outbound| match outbound {
+                                Outbound::RequestFull(pane) => client.request_full(pane),
+                                Outbound::TreeSync => client.request_tree_sync(),
+                            },
+                        );
+                    });
                 }
                 Ok(None) => {
                     self.buffered = false;
@@ -765,6 +792,7 @@ mod tests {
                     registrations: Vec::new(),
                 },
                 parser: EventParser::default(),
+                negotiation: None,
                 escape_deadline: None,
                 terminal_events: VecDeque::new(),
                 prefer_terminal: false,
@@ -780,6 +808,60 @@ mod tests {
             peer,
             signal_writer,
         )
+    }
+
+    #[test]
+    fn bytes_relayed_after_a_negotiation_decode_with_its_user_keys() {
+        let (mut event_loop, _input, _peer, _signals) = pipe_loop();
+        let core = Mutex::new(ClientCore::new());
+        let forward = |message| lock_core(&core).handle_message(message);
+        event_loop.relay(
+            ProtocolMessage::Event(zz_protocol::Event {
+                sequence: 1,
+                payload: zz_protocol::EventPayload::TerminalNegotiation {
+                    features: Vec::new(),
+                    user_keys: vec!["\x1b[99~".to_owned()],
+                },
+            }),
+            &core,
+            forward,
+        );
+        event_loop.relay(
+            ProtocolMessage::TtyInputBytes {
+                bytes: b"\x1b[99~".to_vec(),
+            },
+            &core,
+            forward,
+        );
+        assert_eq!(
+            event_loop.terminal_events.drain(..).collect::<Vec<_>>(),
+            [TerminalEvent::Key(crate::terminal_event::KeyEvent::new(
+                crate::terminal_event::KeyCode::User(0),
+                crate::terminal_event::KeyModifiers::NONE,
+            ))]
+        );
+    }
+
+    #[test]
+    fn user_keys_set_on_the_loop_decode_daemon_relayed_bytes() {
+        let (mut event_loop, _input, _peer, _signals) = pipe_loop();
+        event_loop
+            .parser
+            .set_user_keys(&[String::new(), "\x1b[99~".to_owned()]);
+        assert!(
+            event_loop
+                .take_tty_message(ProtocolMessage::TtyInputBytes {
+                    bytes: b"\x1b[99~".to_vec()
+                })
+                .is_none()
+        );
+        assert_eq!(
+            event_loop.terminal_events.drain(..).collect::<Vec<_>>(),
+            [TerminalEvent::Key(crate::terminal_event::KeyEvent::new(
+                crate::terminal_event::KeyCode::User(1),
+                crate::terminal_event::KeyModifiers::NONE,
+            ))]
+        );
     }
 
     #[test]

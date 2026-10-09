@@ -3718,6 +3718,10 @@ pub enum EventPayload {
         guard: bool,
     },
     ClipboardQuery,
+    TerminalNegotiation {
+        features: Vec<String>,
+        user_keys: Vec<String>,
+    },
 }
 
 impl EventPayload {

@@ -79,6 +79,7 @@ pub(crate) enum KeyCode {
     Char(char),
     Esc,
     Unidentified,
+    User(u16),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -141,8 +142,15 @@ pub(crate) struct EventParser {
     paste: Vec<u8>,
     in_paste: bool,
     graphics_reply: Option<Instant>,
+    user_keys: Vec<(Box<[u8]>, u16)>,
     clipboard: Option<ClipboardReply>,
     clipboard_query: Option<Instant>,
+}
+
+enum UserKeyMatch {
+    Complete { consumed: usize, number: u16 },
+    Partial,
+    Absent,
 }
 
 #[derive(Default)]
@@ -166,6 +174,45 @@ impl ClipboardReply {
 }
 
 impl EventParser {
+    pub fn set_user_keys(&mut self, keys: &[String]) {
+        self.user_keys = keys
+            .iter()
+            .enumerate()
+            .filter(|(_, sequence)| !sequence.is_empty())
+            .filter_map(|(number, sequence)| {
+                Some((sequence.as_bytes().into(), u16::try_from(number).ok()?))
+            })
+            .collect();
+    }
+
+    fn user_key(&self, expired: bool) -> UserKeyMatch {
+        let mut found: Option<(usize, u16)> = None;
+        let mut longer = false;
+        for (sequence, number) in &self.user_keys {
+            if self.bytes.starts_with(sequence) {
+                if found.is_none_or(|best| (sequence.len(), *number) > best) {
+                    found = Some((sequence.len(), *number));
+                }
+            } else if sequence.starts_with(&self.bytes) {
+                longer = true;
+            }
+        }
+        if longer && !expired {
+            return UserKeyMatch::Partial;
+        }
+        found.map_or(UserKeyMatch::Absent, |(consumed, number)| {
+            UserKeyMatch::Complete { consumed, number }
+        })
+    }
+
+    fn take_user_key(&mut self, number: u16, consumed: usize, output: &mut Vec<Event>) {
+        self.bytes.drain(..consumed);
+        output.push(Event::Key(KeyEvent::new(
+            KeyCode::User(number),
+            KeyModifiers::NONE,
+        )));
+    }
+
     pub fn push(&mut self, input: &[u8], output: &mut Vec<Event>) {
         let remaining = MAX_BUFFER_BYTES.saturating_sub(self.bytes.len());
         self.bytes
@@ -174,7 +221,14 @@ impl EventParser {
     }
 
     pub fn has_pending_escape(&self) -> bool {
-        self.clipboard.is_some() || self.bytes.first() == Some(&0x1b)
+        self.clipboard.is_some() || self.bytes.first() == Some(&0x1b) || self.holds_user_key()
+    }
+
+    fn holds_user_key(&self) -> bool {
+        !self.bytes.is_empty()
+            && self.user_keys.iter().any(|(sequence, _)| {
+                sequence.len() > self.bytes.len() && sequence.starts_with(&self.bytes)
+            })
     }
 
     pub fn await_clipboard_reply(&mut self, deadline: Instant) {
@@ -229,11 +283,23 @@ impl EventParser {
             return;
         }
         if self.has_pending_escape() {
+            if let UserKeyMatch::Complete { consumed, number } = self.user_key(true) {
+                self.take_user_key(number, consumed, output);
+                self.parse(output);
+                return;
+            }
             if self.bytes.starts_with(b"\x1b[?") || self.bytes.starts_with(b"\x1b_") {
                 return;
             }
-            self.bytes.remove(0);
-            output.push(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+            if let Some(parsed) = parse_one(&self.bytes, self.graphics_reply.is_some()) {
+                self.bytes.drain(..parsed.consumed);
+                output.extend(parsed.event);
+                self.parse(output);
+                return;
+            }
+            if self.bytes.remove(0) == 0x1b {
+                output.push(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+            }
             self.parse(output);
         }
     }
@@ -292,6 +358,14 @@ impl EventParser {
                 self.bytes.drain(..PASTE_START.len());
                 self.in_paste = true;
                 continue;
+            }
+            match self.user_key(false) {
+                UserKeyMatch::Complete { consumed, number } => {
+                    self.take_user_key(number, consumed, output);
+                    continue;
+                }
+                UserKeyMatch::Partial => return,
+                UserKeyMatch::Absent => {}
             }
             let Some(parsed) = parse_one(&self.bytes, self.graphics_reply.is_some()) else {
                 return;
@@ -800,6 +874,146 @@ mod tests {
         let mut events = Vec::new();
         parser.push(bytes, &mut events);
         events
+    }
+
+    #[test]
+    fn a_user_key_extending_a_built_in_key_holds_it_until_escape_time() {
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["\x1b[Aq".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"\x1b[A", &mut events);
+        assert!(events.is_empty());
+        parser.flush_escape(&mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))]
+        );
+        events.clear();
+        parser.push(b"\x1b[Aq", &mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(
+                KeyCode::User(0),
+                KeyModifiers::NONE
+            ))]
+        );
+    }
+
+    #[test]
+    fn a_complete_user_key_waits_while_a_longer_one_can_still_arrive() {
+        let user = |number| Event::Key(KeyEvent::new(KeyCode::User(number), KeyModifiers::NONE));
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["\x1b[99~".to_owned(), "\x1b[99~q".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"\x1b[99~", &mut events);
+        assert!(events.is_empty());
+        parser.push(b"q", &mut events);
+        assert_eq!(events, [user(1)]);
+        events.clear();
+        parser.push(b"\x1b[99~", &mut events);
+        parser.flush_escape(&mut events);
+        assert_eq!(events, [user(0)]);
+    }
+
+    #[test]
+    fn a_completed_user_key_behind_a_private_csi_prefix_fires_at_escape_time() {
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["\x1b[?99~".to_owned(), "\x1b[?99~q".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"\x1b[?99~", &mut events);
+        assert!(events.is_empty());
+        parser.flush_escape(&mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(
+                KeyCode::User(0),
+                KeyModifiers::NONE
+            ))]
+        );
+        assert!(parser.is_idle());
+    }
+
+    #[test]
+    fn a_user_key_waits_for_a_longer_one_whatever_byte_it_starts_with() {
+        let user = |number| Event::Key(KeyEvent::new(KeyCode::User(number), KeyModifiers::NONE));
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["a".to_owned(), "ab".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"a", &mut events);
+        assert!(events.is_empty());
+        assert_eq!(
+            parser.pending_escape_delay(10),
+            Some(Duration::from_millis(10))
+        );
+        parser.push(b"b", &mut events);
+        assert_eq!(events, [user(1)]);
+        events.clear();
+        parser.push(b"a", &mut events);
+        parser.flush_escape(&mut events);
+        assert_eq!(events, [user(0)]);
+        events.clear();
+        parser.push(b"x", &mut events);
+        assert_eq!(events, typed("x"));
+        assert_eq!(parser.pending_escape_delay(10), None);
+    }
+
+    #[test]
+    fn a_sequence_on_two_user_keys_fires_the_later_one() {
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["\x1b[99~".to_owned(), "\x1b[99~".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"\x1b[99~", &mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(
+                KeyCode::User(1),
+                KeyModifiers::NONE
+            ))]
+        );
+    }
+
+    #[test]
+    fn user_keys_decode_to_the_user_key_their_index_names() {
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&[String::new(), "\x1b[99~".to_owned(), "\x1b[A".to_owned()]);
+        let user = |number| Event::Key(KeyEvent::new(KeyCode::User(number), KeyModifiers::NONE));
+        let mut events = Vec::new();
+        parser.push(b"\x1b[99~x\x1b[A\x1b[B", &mut events);
+        assert_eq!(
+            events,
+            [
+                user(1),
+                Event::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+                user(2),
+                Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            ]
+        );
+
+        events.clear();
+        parser.push(b"\x1b[9", &mut events);
+        assert!(events.is_empty());
+        parser.push(b"9~", &mut events);
+        assert_eq!(events, [user(1)]);
+
+        events.clear();
+        parser.push(b"\x1b[9", &mut events);
+        parser.flush_escape(&mut events);
+        assert_eq!(
+            events,
+            [
+                Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Char('9'), KeyModifiers::NONE)),
+            ]
+        );
+
+        parser.set_user_keys(&[]);
+        events.clear();
+        parser.push(b"\x1b[A", &mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))]
+        );
     }
 
     fn probing(bytes: &[u8]) -> Vec<Event> {

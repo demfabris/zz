@@ -15056,6 +15056,9 @@ fn encode_key(
     writer: &mut dyn Write,
     input_bytes: &mut Vec<u8>,
 ) -> Result<(), WorkerError> {
+    if matches!(input.key, KeyCode::User(_)) {
+        return Ok(());
+    }
     let mut modifiers = key::Mods::empty();
     modifiers.set(key::Mods::SHIFT, input.modifiers.shift());
     modifiers.set(key::Mods::CTRL, input.modifiers.control());
@@ -15188,7 +15191,7 @@ fn ghostty_key(key: KeyCode) -> key::Key {
             24 => key::Key::F24,
             _ => key::Key::Unidentified,
         },
-        KeyCode::Unidentified => key::Key::Unidentified,
+        KeyCode::Unidentified | KeyCode::User(_) => key::Key::Unidentified,
     }
 }
 
@@ -24886,6 +24889,32 @@ mod tests {
             0,
             "the pin's input_reset_cell puts the saved cursor back at 0,0"
         );
+    }
+
+    #[test]
+    fn a_user_key_reaches_the_pane_as_nothing() {
+        let terminal = new_terminal(80, 24, 16).expect("terminal");
+        let mut key_encoder = key::Encoder::new().expect("key encoder");
+        let mut key_event = key::Event::new().expect("key event");
+        let mut written = Vec::new();
+        let mut input_bytes = Vec::new();
+        encode_key(
+            &terminal,
+            &mut key_encoder,
+            &mut key_event,
+            KeyInput {
+                action: KeyAction::Press,
+                key: KeyCode::User(3),
+                modifiers: crate::Modifiers::default(),
+                text: None,
+                unshifted_codepoint: None,
+            },
+            Some(0x7f),
+            &mut written,
+            &mut input_bytes,
+        )
+        .expect("encode user key");
+        assert!(written.is_empty() && input_bytes.is_empty());
     }
 
     #[test]

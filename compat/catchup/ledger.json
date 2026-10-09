@@ -339,7 +339,7 @@
       "id": "float.design",
       "track": "float",
       "title": "Floating panes design: the popup becomes window-owned",
-      "status": "review",
+      "status": "merged",
       "deps": [],
       "zones": [
         "knowledge/designs/floating-panes.md",
@@ -356,10 +356,11 @@
         "Codex has reviewed it and fabrico has not objected in the ledger notes."
       ],
       "branch": "catchup/float.design",
-      "sha": null,
+      "sha": "feb932b3a",
       "notes": [
         "Design only, no compile: can run beside two compiling lanes.",
-        "2026-10-09: codex review 1: 4 P1 + 3 P2 (tile home is a cell, zoom unzoom and PTY size, v2 order, drag anchor transport, modal fallback, transfers); fix pass sent; rulings: allow tile-less windows, keep 3.8 v2 order"
+        "2026-10-09: codex review 1: 4 P1 + 3 P2 (tile home is a cell, zoom unzoom and PTY size, v2 order, drag anchor transport, modal fallback, transfers); fix pass sent; rulings: allow tile-less windows, keep 3.8 v2 order",
+        "2026-10-09: 2 codex reviews; merged"
       ]
     },
     {

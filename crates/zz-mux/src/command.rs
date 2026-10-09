@@ -10711,9 +10711,9 @@ impl MuxEngine {
             .into_iter()
             .find(|monitor| monitor.name == parsed.name)
         {
-            return Ok(Execution::output(
-                self.shown_monitor(context, options, monitor, hooks),
-            ));
+            return Ok(Execution::output(printed_lines(&[
+                self.shown_monitor(context, options, monitor, hooks)
+            ])));
         }
         if parsed.name.starts_with('@') && self.user_option_at_target(target, parsed.name).is_none()
         {
@@ -46248,6 +46248,13 @@ mod tests {
         assert_eq!(
             run(&["show-options", "-A", "update-environment"]),
             "update-environment"
+        );
+        run(&["set-hook", "-B", "@watch::#{session_name}"]);
+        assert_eq!(run(&["show-hooks", "-B", "-F", "", "@watch"]), "\n");
+        assert_eq!(run(&["show-hooks", "-B", "-F", ""]), "\n");
+        assert_eq!(
+            run(&["show-hooks", "-B", "-F", "#{hook_monitor_format}", "@watch"]),
+            "#{session_name}"
         );
     }
 

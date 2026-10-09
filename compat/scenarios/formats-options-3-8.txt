@@ -26,6 +26,9 @@ out: show-options -g -F #{option_name}:#{session_name} status
 set-hook -g after-new-window 'display-message hi'
 out: show-hooks -g -F #{option_name}|#{option_array_key}|#{option_value}|#{option_is_hook}|#{option_is_array} after-new-window
 set-hook -gu after-new-window
+set-hook -B @watch::#{session_name}
+out: show-hooks -B -F #{option_unset_name} @watch
+out: show-hooks -B -F #{option_name}|#{hook_monitor_target}|#{hook_monitor_format}|#{option_value} @watch
 out: show-hooks -g -F #{option_name}=#{option_value} @fmtcase
 out: show-hooks -g -F #{option_name}=#{option_value} status-keys
 out: show-options -g -F #{option_unset_name} status

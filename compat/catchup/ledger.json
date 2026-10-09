@@ -869,7 +869,7 @@
       "id": "fix.followups",
       "track": "fix",
       "title": "Small follow-ups the catch-up lanes reported",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-mux/src",
@@ -883,7 +883,7 @@
         "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
       ],
       "branch": "catchup/fix.followups",
-      "sha": null,
+      "sha": "dbd408ed9",
       "notes": [
         "2026-10-09 (fix.capture-e-links): capture-pane -M -e (copy-mode styled capture) emits no OSC 8; the capture.terminal-engine-limits reason should mention the -e effects (no id=, back-to-back same-URI links open once).",
         "2026-10-09 (fix.chooser-preview): refresh_chooser_previews resends the full chooser state to every tree-chooser client on every snapshot publish even when unchanged.",
@@ -896,7 +896,8 @@
         "2026-10-09 (pin.formats-options-2): clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48.",
         "2026-10-09 session 1 done (lane report): fixed capture -M -e, chooser resend memo, unquoted } outside a block, mode prompt styles/cursor; recorded with measured reasons: option-bytes lossy paths (divergence row rewritten), blank-line sizing, pane prompts owned by the client (orchestrator accepts, menus.client-owned precedent); skipped display-panes -s desktop. Leftovers moved to fix.followups-2.",
         "2026-10-09: Review 1 running on session 1.",
-        "2026-10-09: Codex review 1 (fix.followups-1.md): P1 chooser dedupe drops the presentation after a full chooser update (choose-tree -N f prompt never shows), P2 prompt_type/prompt_input in mode style expansion; final fix pass sent."
+        "2026-10-09: Codex review 1 (fix.followups-1.md): P1 chooser dedupe drops the presentation after a full chooser update (choose-tree -N f prompt never shows), P2 prompt_type/prompt_input in mode style expansion; final fix pass sent.",
+        "2026-10-09: Merged after the final fix pass (b35ae46ad: chooser state always followed by its presentation, prompt_type/prompt_input/prompt_flags in mode style expansion); merge checks green (clippy 6 crates, zz-protocol 291, zz-client 217, zz-terminal 456, zz-tui 272, daemon chooser 32, zz-mux 683)."
       ]
     },
     {
@@ -927,7 +928,8 @@
       "branch": null,
       "sha": null,
       "notes": [
-        "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs)."
+        "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs).",
+        "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux)."
       ]
     },
     {

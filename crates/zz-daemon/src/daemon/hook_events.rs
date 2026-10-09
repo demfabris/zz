@@ -1,5 +1,5 @@
 use zz_mux::{ChangeWindow, JournalChanges, MuxState};
-use zz_protocol::PaneBorderStatus;
+use zz_protocol::{CommandPromptType, PaneBorderStatus};
 
 use super::*;
 
@@ -1236,6 +1236,37 @@ pub(super) fn apply_operation_events(
             _ => {}
         }
     }
+    for event in events
+        .iter_mut()
+        .filter(|event| event.name == "pane-created")
+    {
+        let Some(pane) = event
+            .variables
+            .get(HOOK_PANE_CONTEXT_FORMAT)
+            .and_then(|pane| {
+                engine
+                    .state
+                    .windows
+                    .values()
+                    .flat_map(|window| window.panes.keys())
+                    .find(|candidate| candidate.to_string() == *pane)
+            })
+            .copied()
+        else {
+            continue;
+        };
+        let (command, path) = engine.pane_created_payload(pane);
+        if let Some(command) = command {
+            event
+                .variables
+                .insert("hook_pane_command".to_owned(), command);
+        }
+        if let Some(path) = path {
+            event
+                .variables
+                .insert("hook_pane_current_path".to_owned(), path);
+        }
+    }
 }
 
 pub(super) fn pane_mode_hook_events(
@@ -1549,4 +1580,383 @@ pub(super) fn assert_same_active_changes(
         moved(captured) == moved(journal),
         "the change journal missed an active window, active pane or bell change"
     );
+}
+
+fn prompt_type_name(prompt_type: CommandPromptType) -> &'static str {
+    match prompt_type {
+        CommandPromptType::Command => "command",
+        CommandPromptType::Search => "search",
+    }
+}
+
+pub(super) fn pane_prompt_hook_events(inner: &mut ServerState) -> Vec<PendingHookEvent> {
+    let current = inner
+        .clients
+        .iter()
+        .filter_map(|(client, state)| {
+            let prompt = state.command_prompt.as_ref()?;
+            Some((*client, (prompt.serial, prompt.pane?, prompt.prompt_type)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    if current.is_empty() && inner.open_pane_prompts.is_empty() {
+        return Vec::new();
+    }
+    let previous = std::mem::replace(&mut inner.open_pane_prompts, current);
+    let event = |name: &'static str, pane: PaneId, prompt_type: CommandPromptType| {
+        PendingHookEvent::live_pane(name, pane, &inner.engine).map(|mut event| {
+            event.variables.insert(
+                "hook_prompt_type".to_owned(),
+                prompt_type_name(prompt_type).to_owned(),
+            );
+            event
+        })
+    };
+    let mut events = previous
+        .iter()
+        .filter(|(client, (serial, _, _))| {
+            inner
+                .open_pane_prompts
+                .get(client)
+                .is_none_or(|(current, _, _)| current != serial)
+        })
+        .filter_map(|(_, (_, pane, prompt_type))| event("pane-prompt-closed", *pane, *prompt_type))
+        .collect::<Vec<_>>();
+    events.extend(
+        inner
+            .open_pane_prompts
+            .iter()
+            .filter(|(client, (serial, _, _))| {
+                previous
+                    .get(client)
+                    .is_none_or(|(before, _, _)| before != serial)
+            })
+            .filter_map(|(_, (_, pane, prompt_type))| {
+                event("pane-prompt-opened", *pane, *prompt_type)
+            }),
+    );
+    events
+}
+
+pub(super) fn complete_client_payload(engine: &MuxEngine, event: &mut PendingHookEvent) {
+    if !event.name.starts_with("client-") {
+        return;
+    }
+    let context = &event.context;
+    let variables = &mut event.variables;
+    if let Some(session) = context.session
+        && let Some(state) = engine.state.sessions.get(&session)
+    {
+        variables
+            .entry(HOOK_SESSION_CONTEXT_FORMAT.to_owned())
+            .or_insert_with(|| session.to_string());
+        variables
+            .entry(HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned())
+            .or_insert_with(|| state.name.clone());
+    }
+    if let Some(window) = context.window
+        && let Some(state) = engine.state.windows.get(&window)
+    {
+        variables
+            .entry(HOOK_WINDOW_CONTEXT_FORMAT.to_owned())
+            .or_insert_with(|| window.to_string());
+        variables
+            .entry(HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned())
+            .or_insert_with(|| state.name.clone());
+        variables
+            .entry("hook_window_index".to_owned())
+            .or_insert_with(|| state.index.to_string());
+    }
+    if let Some(pane) = context.pane
+        && engine.state.window_for_pane(pane).is_some()
+    {
+        variables
+            .entry(HOOK_PANE_CONTEXT_FORMAT.to_owned())
+            .or_insert_with(|| pane.to_string());
+    }
+}
+
+impl PendingHookEvent {
+    pub(super) fn with_session_change(
+        mut self,
+        state: &MuxState,
+        old: Option<SessionId>,
+        new: SessionId,
+    ) -> Self {
+        for (key, session) in [("new_session", Some(new)), ("old_session", old)] {
+            let Some(session) = session else {
+                continue;
+            };
+            self.variables
+                .insert(format!("hook_{key}"), session.to_string());
+            if let Some(found) = state.sessions.get(&session) {
+                self.variables
+                    .insert(format!("hook_{key}_name"), found.name.clone());
+            }
+        }
+        self
+    }
+
+    pub(super) fn with_exit_status(
+        mut self,
+        code: Option<u32>,
+        signal: Option<&str>,
+        success: bool,
+    ) -> Self {
+        if let Some(signal) = signal {
+            self.variables.insert(
+                "hook_exit_signal".to_owned(),
+                zz_mux::tmux_signal_name(signal),
+            );
+        } else if let Some(code) = code {
+            self.variables
+                .insert("hook_exit_status".to_owned(), code.to_string());
+        }
+        self.variables.insert(
+            "hook_exit_success".to_owned(),
+            u8::from(success).to_string(),
+        );
+        self
+    }
+}
+
+pub(super) struct EventWaiter {
+    client: ClientId,
+    name: String,
+    filter: Option<String>,
+    verbose: bool,
+    context: ExecutionContext,
+    output: String,
+    state: Arc<terminal_requests::CommandState>,
+}
+
+pub(super) fn event_payload(
+    name: &str,
+    variables: &BTreeMap<String, String>,
+) -> BTreeMap<String, String> {
+    let mut payload = variables
+        .iter()
+        .filter_map(|(key, value)| Some((key.strip_prefix("hook_")?.to_owned(), value.clone())))
+        .collect::<BTreeMap<_, _>>();
+    payload.insert("event".to_owned(), name.to_owned());
+    payload
+}
+
+pub(super) fn event_payload_lines(payload: &BTreeMap<String, String>) -> String {
+    let mut lines = String::new();
+    for (key, value) in payload {
+        let derived = key
+            .strip_suffix("_name")
+            .and_then(|stem| payload.get(stem))
+            .is_some_and(|value| value.starts_with(['$', '@']));
+        if !derived {
+            lines.push_str(key);
+            lines.push('=');
+            lines.push_str(value);
+            lines.push('\n');
+        }
+    }
+    lines
+}
+
+pub(super) fn take_event_waiter_wakes(
+    waiters: &mut Vec<EventWaiter>,
+    client: Option<ClientId>,
+) -> Vec<cmdq::WaitContinuation> {
+    let mut wakes = Vec::new();
+    waiters.retain(|waiter| {
+        if client.is_none_or(|client| client == waiter.client) {
+            wakes.push(waiter.state.continuation.clone());
+            false
+        } else {
+            true
+        }
+    });
+    wakes
+}
+
+impl Shared {
+    pub(super) fn event_waited(&self, name: &str) -> bool {
+        self.inner
+            .lock()
+            .event_waiters
+            .iter()
+            .any(|waiter| waiter.name == name)
+    }
+
+    pub(super) fn feed_event_waiters(&self, name: &str, variables: &BTreeMap<String, String>) {
+        let woken = {
+            let mut inner = self.inner.lock();
+            if !inner.event_waiters.iter().any(|waiter| waiter.name == name) {
+                return;
+            }
+            let payload = event_payload(name, variables);
+            let lines = event_payload_lines(&payload);
+            let passes = {
+                let facts = borrowed_format_hook_facts(&inner);
+                inner
+                    .event_waiters
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, waiter)| waiter.name == name)
+                    .map(|(index, waiter)| {
+                        let pass = waiter.filter.as_deref().is_none_or(|filter| {
+                            let mut hooks = DaemonFormatHooks::command_with_optional_variables(
+                                &facts,
+                                Some(&payload),
+                            );
+                            zz_mux::format_true(&inner.engine.expand_target_format(
+                                filter,
+                                &waiter.context,
+                                waiter.context.session,
+                                waiter.context.target_format_client(),
+                                &mut hooks,
+                            ))
+                        });
+                        (index, pass)
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let mut woken = Vec::new();
+            for (index, pass) in passes.into_iter().rev() {
+                if inner.event_waiters[index].verbose {
+                    inner.event_waiters[index].output.push_str(&lines);
+                }
+                if pass {
+                    woken.push(inner.event_waiters.remove(index));
+                }
+            }
+            woken.reverse();
+            woken
+        };
+        self.resolve_event_waiters(woken);
+    }
+
+    fn resolve_event_waiters(&self, woken: Vec<EventWaiter>) {
+        if woken.is_empty() {
+            return;
+        }
+        for waiter in woken {
+            waiter.state.resolve(Ok(Execution {
+                output: waiter.output.into(),
+                ..Execution::default()
+            }));
+        }
+        self.accept_wake.wake();
+    }
+
+    pub(super) fn wait_for_event(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        name: &str,
+        filter: Option<&str>,
+        verbose: bool,
+        list: bool,
+        wake: Option<&str>,
+    ) -> Result<Execution, DaemonError> {
+        if !MuxEngine::is_hook_event(name) {
+            return Err(ServerError::InvalidCommand(format!("invalid event: {name}")).into());
+        }
+        if list {
+            let inner = self.inner.lock();
+            let lines = inner
+                .event_waiters
+                .iter()
+                .filter(|waiter| waiter.name == name)
+                .map(|waiter| client_format_name(&inner, waiter.client) + "\n")
+                .collect::<String>();
+            return Ok(Execution {
+                output: lines.into(),
+                ..Execution::default()
+            });
+        }
+        if let Some(target) = wake {
+            let woken = {
+                let mut inner = self.inner.lock();
+                let index = inner.event_waiters.iter().position(|waiter| {
+                    waiter.name == name && client_format_name(&inner, waiter.client) == target
+                });
+                index.map(|index| inner.event_waiters.remove(index))
+            };
+            let Some(woken) = woken else {
+                return Err(
+                    ServerError::InvalidCommand(format!("waiter {target} not found")).into(),
+                );
+            };
+            self.resolve_event_waiters(vec![woken]);
+            return Ok(Execution::default());
+        }
+        if !matches!(kind, ClientKind::Command | ClientKind::Control)
+            || client == ClientId(u64::MAX)
+        {
+            return Err(ServerError::InvalidCommand("not able to wait".to_owned()).into());
+        }
+        let wake_owner = self.client_writers.lock().get(&client).map(Arc::downgrade);
+        let (continuation, state) = {
+            let mut inner = self.inner.lock();
+            if self.stopping.load(Ordering::Acquire)
+                || self.shutdown_pending.load(Ordering::Acquire)
+                || inner.client(client).is_none_or(|c| c.instance_id.is_none())
+            {
+                return Ok(Execution::default());
+            }
+            let continuation = cmdq::WaitContinuation::new(
+                self.command_item
+                    .as_ref()
+                    .and_then(|item| item.lock().wait()),
+                wake_owner,
+            );
+            let state = terminal_requests::CommandState::parked(continuation.clone());
+            inner.event_waiters.push(EventWaiter {
+                client,
+                name: name.to_owned(),
+                filter: filter.map(str::to_owned),
+                verbose,
+                context: context.clone(),
+                output: String::new(),
+                state: Arc::clone(&state),
+            });
+            (continuation, state)
+        };
+        self.report_command_queue_park();
+        if let Some(item) = &self.command_item {
+            let mut item = item.lock();
+            if item.loop_wait {
+                item.pending_wait = Some(Box::new(RegisteredWait {
+                    name: String::new(),
+                    continuation,
+                    #[cfg(unix)]
+                    shell: None,
+                    popup: None,
+                    overlay: None,
+                    leaf: None,
+                    guard: None,
+                    terminal: Some(state),
+                    file: None,
+                }));
+                return Ok(Execution::default());
+            }
+        }
+        #[cfg(any(test, windows))]
+        {
+            continuation.wait();
+            let mut result = Ok(Execution::default());
+            state.apply(&mut result);
+            result
+        }
+        #[cfg(all(unix, not(test)))]
+        {
+            let token = continuation.token;
+            self.inner
+                .lock()
+                .event_waiters
+                .retain(|waiter| waiter.state.continuation.token != token);
+            drop(state);
+            Err(
+                ServerError::InvalidCommand("not able to wait outside a command queue".to_owned())
+                    .into(),
+            )
+        }
+    }
 }

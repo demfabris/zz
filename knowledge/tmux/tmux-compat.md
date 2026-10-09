@@ -104,11 +104,11 @@ counts. The structural matches divide into 67 copy-mode, 78 copy-mode-vi, 19 mov
 12 root entries.
 
 Slice 10l closes hook-producer discovery with a daemon-owned source invariant. At the 3.8 pin it
-names 47 explicit event producers and derives 38 generic `after-<command>` producers whose suffix
+names 49 explicit event producers and derives 38 generic `after-<command>` producers whose suffix
 names an implemented command. 3.8 removed `after-queue` and zz dropped it with catch-up item
-pin.hooks-events. The 89 pinned hooks partition into those 85 produced hooks and four tracked gaps:
-`pane-prompt-opened` and `pane-prompt-closed` under `pin.hooks-events`, and the two session-group
-hooks under `sessions.linked-groups`. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
+pin.hooks-events. The 89 pinned hooks partition into those 87 produced hooks and two tracked gaps:
+the two session-group hooks under `sessions.linked-groups` (`pane-prompt-opened` and
+`pane-prompt-closed` joined the producers with catch-up item pin.hooks-events-2). It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
 closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves commands and
 unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
 unbound after ensuring its table. Structural key equality still does not prove every downstream

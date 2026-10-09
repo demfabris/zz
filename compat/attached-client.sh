@@ -3,17 +3,21 @@ set -eEuo pipefail
 set +B
 
 usage() {
-  printf 'usage: compat/attached-client.sh [--command-output|--lifecycle] [ZZ_BIN [TMUX_BIN]]\n' >&2
+  printf 'usage: compat/attached-client.sh [--command-output|--lifecycle|--client-events] [ZZ_BIN [TMUX_BIN]]\n' >&2
   printf '       ZZ_BIN=path TMUX_BIN=path compat/attached-client.sh\n' >&2
 }
 
 COMMAND_OUTPUT_ONLY=0
 LIFECYCLE_ONLY=0
+CLIENT_EVENTS_ONLY=0
 if [ "${1:-}" = --command-output ]; then
   COMMAND_OUTPUT_ONLY=1
   shift
 elif [ "${1:-}" = --lifecycle ]; then
   LIFECYCLE_ONLY=1
+  shift
+elif [ "${1:-}" = --client-events ]; then
+  CLIENT_EVENTS_ONLY=1
   shift
 fi
 
@@ -2591,6 +2595,7 @@ probe_client_event_hooks() {
   local event_tty
   local event_pid
   local event_context
+  local event_session
   local primary_event
   local event_active
   local event_focus_out
@@ -2616,12 +2621,13 @@ probe_client_event_hooks() {
     '#{session_id}|#{session_name}|#{window_id}|#{window_name}|#{pane_id}')" ||
     fixture_failure "$side could not select its client event context"
   event_context="${event_context//$'\r'/}"
+  event_session="$(printf '%s' "$event_context" | cut -d'|' -f1-2)"
 
-  primary_event="A|$primary_tty|$event_context||,"
-  event_active="A|$event_tty|$event_context||,"
-  event_focus_out="O|$event_tty|$event_context||,"
-  event_focus_in="I|$event_tty|$event_context||,"
-  event_resized="R|$event_tty|$event_context||,"
+  primary_event="A|$primary_tty|$event_context|$event_session,"
+  event_active="A|$event_tty|$event_context|$event_session,"
+  event_focus_out="O|$event_tty|$event_context|$event_session,"
+  event_focus_in="I|$event_tty|$event_context|$event_session,"
+  event_resized="R|$event_tty|$event_context|$event_session,"
 
   side_command "$side" set-option -g focus-events on ||
     fixture_failure "$side could not enable client focus events"
@@ -3835,6 +3841,12 @@ if [ "$LIFECYCLE_ONLY" -eq 1 ]; then
   probe_detach_reattach_cycle tmux
   probe_detach_reattach_cycle zz
   printf 'client lifecycle compatibility: PASS\n'
+  exit 0
+fi
+if [ "$CLIENT_EVENTS_ONLY" -eq 1 ]; then
+  probe_client_event_hooks zz
+  probe_client_event_hooks tmux
+  printf 'client event compatibility: PASS\n'
   exit 0
 fi
 if [ "$COMMAND_OUTPUT_ONLY" -eq 1 ]; then

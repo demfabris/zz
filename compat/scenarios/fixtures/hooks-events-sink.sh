@@ -1,0 +1,138 @@
+#!/bin/sh
+set -eu
+
+export LC_ALL=C
+
+if [ -n "${ZZ_SMOKE_ZZ_BIN:-}" ]; then
+    side=zz
+    main_client() {
+        "$ZZ_SMOKE_ZZ_BIN" --socket "$ZZ_SMOKE_ZZ_SOCKET" "$@"
+    }
+    control_client() {
+        env -u TMUX -u TMUX_PANE \
+            "$ZZ_SMOKE_ZZ_BIN" --socket "$ZZ_SMOKE_ZZ_SOCKET" \
+            -C attach-session -t w
+    }
+else
+    side=tmux
+    main_client() {
+        "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" "$@"
+    }
+    control_client() {
+        env -u TMUX -u TMUX_PANE \
+            "$ZZ_SMOKE_TMUX_BIN" -L "$ZZ_SMOKE_TMUX_LABEL" \
+            -C attach-session -t w
+    }
+fi
+
+work="$HOME/hooks-events-sink-$side"
+rm -rf "$work"
+mkdir -p "$work"
+seen=""
+
+wait_waiters() {
+    attempt=0
+    while [ "$attempt" -lt 200 ]; do
+        count="$(main_client wait-for -E -l "$1" | wc -l | tr -d ' ')"
+        if [ "$count" -ge "$2" ]; then
+            return
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    seen="$seen waiters-$1=missing"
+}
+
+wait_option() {
+    attempt=0
+    while [ "$attempt" -lt 200 ]; do
+        value="$(main_client show-options -gqv "$1")"
+        if [ -n "$value" ]; then
+            seen="$seen $1=$value"
+            return
+        fi
+        attempt=$((attempt + 1))
+        sleep 0.05
+    done
+    seen="$seen $1=missing"
+}
+
+lines() {
+    tr '\n' ';' <"$1"
+}
+
+main_client wait-for -E -v session-renamed >"$work/verbose" 2>&1 &
+verbose=$!
+wait_waiters session-renamed 1
+main_client rename-session -t w hevsink
+wait "$verbose" || true
+main_client rename-session -t hevsink w
+seen="$seen verbose=[$(lines "$work/verbose")]"
+
+main_client wait-for -E -v -F '#{==:#{new_name},hevb}' session-renamed >"$work/filter" 2>&1 &
+filter=$!
+wait_waiters session-renamed 1
+main_client rename-session -t w heva
+main_client rename-session -t heva hevb
+wait "$filter" || true
+main_client rename-session -t hevb w
+seen="$seen filter=[$(lines "$work/filter")]"
+
+main_client wait-for -E after-select-window >"$work/after" 2>&1 &
+after=$!
+wait_waiters after-select-window 1
+main_client select-window -t w:0
+wait "$after" || true
+seen="$seen after=[$(lines "$work/after")]"
+
+main_client wait-for -E -v @hevuser >"$work/user" 2>&1 &
+user=$!
+wait_waiters @hevuser 1
+main_client set-hook -E -t w:0 @hevother
+main_client set-hook -E -t w:0 @hevuser
+wait "$user" || true
+seen="$seen user=[$(grep -E '^(event|session|window|window_index)=' "$work/user" | tr '\n' ';')]"
+
+main_client wait-for -E session-renamed >"$work/woken" 2>&1 &
+woken=$!
+wait_waiters session-renamed 1
+waiter="$(main_client wait-for -E -l session-renamed)"
+main_client wait-for -E -w "$waiter" session-renamed
+wait "$woken" || true
+seen="$seen woken=[$(lines "$work/woken")]"
+seen="$seen nobody=[$(main_client wait-for -E -w hev-nobody session-renamed 2>&1 || true)]"
+seen="$seen invalid=[$(main_client wait-for -E hev-not-an-event 2>&1 || true)]"
+
+main_client set-hook -g pane-exited "set -gF @hev-exited '#{hook}/#{hook_exit_status}/#{hook_exit_signal}/#{hook_exit_success}'"
+main_client split-window -d -t w:0 'exit 3'
+wait_option @hev-exited
+main_client set-hook -gu pane-exited
+main_client set-option -g remain-on-exit on
+main_client set-hook -g pane-died "set -gF @hev-died '#{hook}/#{hook_exit_status}/#{hook_exit_signal}/#{hook_exit_success}'"
+main_client split-window -d -t w:0 'exit 0'
+wait_option @hev-died
+main_client set-option -gu @hev-died
+main_client kill-pane -t w:0.1
+main_client split-window -d -t w:0 'kill -TERM $$'
+wait_option @hev-died
+main_client kill-pane -t w:0.1
+main_client set-hook -gu pane-died
+main_client set-option -gu remain-on-exit
+
+main_client new-session -d -s hevother
+main_client set-option -g @hev-changed ''
+main_client set-hook -g client-session-changed "set -gaF @hev-changed '#{hook_old_session_name}>#{hook_new_session_name}/#{==:#{hook_session},#{hook_new_session}}+'"
+printf 'switch-client -t hevother\n' | control_client >/dev/null 2>&1 || true
+attempt=0
+while [ "$attempt" -lt 200 ]; do
+    case "$(main_client show-options -gqv @hev-changed)" in
+        *'>hevother'*) break ;;
+    esac
+    attempt=$((attempt + 1))
+    sleep 0.05
+done
+seen="$seen changed=$(main_client show-options -gqv @hev-changed)"
+main_client set-hook -gu client-session-changed
+main_client kill-session -t hevother
+
+main_client set-environment -g HOOKS_EVENTS_SINK "$(echo $seen)"

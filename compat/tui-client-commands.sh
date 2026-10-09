@@ -733,10 +733,6 @@ known_drift() {
   hooks-show-global)
     printf 'gap:pin.hooks-events'
     ;;
-  switch-mode-kill-visible | switch-mode-kill-covered | switch-mode-kill-uncovered | \
-    switch-mode-kill-survives-cover | switch-mode-kill-control)
-    printf 'TUI-014'
-    ;;
   esac
 }
 
@@ -751,16 +747,12 @@ known_drift_reason() {
   hooks-*)
     printf '%s' "PIN 3.8, gap:pin.hooks-events: 3.8 removed the after-queue hook, which zz still lists under show-hooks -g"
     ;;
-  switch-mode-*)
-    printf '%s' "REGRESSION measured 2026-10-09, not 3.8 drift: with a client attached, zz split-window -d -h shrinks an 80x23 window to 78 columns (-d -v takes one row instead), so the two panes read 39 and 38 where both pins read 40 and 39; split-window without -d, and the same split with no client attached, keep 80. These cases were asserted green at d77c9dc6 through TUI-014 attempt 20"
-    ;;
   esac
 }
 
 known_drift_channel() {
   case "$1" in
   gap:pin.formats-options) printf 'screen' ;;
-  TUI-014) printf 'state' ;;
   esac
 }
 

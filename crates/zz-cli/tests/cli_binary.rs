@@ -1829,8 +1829,6 @@ mod daemon_autostart {
             "40-later.conf",
             "display-message -p LATER_OUTPUT\n",
         );
-        let read_error = std::fs::read_to_string(&unreadable)
-            .expect_err("reading the source directory must fail");
         let continued = fixture.run(&[
             "source-file",
             &good,
@@ -1841,7 +1839,7 @@ mod daemon_autostart {
         assert_eq!(continued.stdout, b"GOOD_OUTPUT\nLATER_OUTPUT\n");
         assert_eq!(
             continued.stderr,
-            format!("{read_error}: {}\n", unreadable.display()).into_bytes()
+            format!("Input/output error: {}\n", unreadable.display()).into_bytes()
         );
     }
 

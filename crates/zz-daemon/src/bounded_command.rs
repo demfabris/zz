@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
 const MAX_STDERR_BYTES: usize = 256 * 1024;
 

@@ -7,14 +7,12 @@ use std::{
 
 use async_channel::{Receiver, Sender};
 use serde_json::{Value, json};
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 use zz_protocol::MAX_AGENT_RESULT_BYTES;
 
-use crate::{
-    agent::{
-        runtime::{StderrTail, validate_payload},
-        stream::{AgentPromptOutcome, AgentStreamPayload},
-    },
-    unmasked::SpawnUnmasked as _,
+use crate::agent::{
+    runtime::{StderrTail, validate_payload},
+    stream::{AgentPromptOutcome, AgentStreamPayload},
 };
 
 const REAP_GRACE: Duration = Duration::from_secs(2);

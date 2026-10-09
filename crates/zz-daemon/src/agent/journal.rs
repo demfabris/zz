@@ -13,7 +13,7 @@ use serde_json::Value;
 use thiserror::Error;
 use zz_protocol::AgentProvider;
 
-use crate::user_data::{restrict_directory_to_current_user, restrict_to_current_user};
+use zz_daemon_client::user_data::{restrict_directory_to_current_user, restrict_to_current_user};
 
 const JOURNAL_EXTENSION: &str = "jsonl";
 

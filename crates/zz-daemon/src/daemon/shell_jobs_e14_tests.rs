@@ -58,7 +58,7 @@ fn twenty_shell_jobs_add_no_workers_and_admission_is_capped_at_256() {
     }
     let shared = Arc::new(Shared::new(14));
     let mut event_loop = event_loop::EventLoop::empty(&shared).unwrap();
-    let before = crate::process_info::sample(std::process::id())
+    let before = zz_daemon_client::process_info::sample(std::process::id())
         .unwrap()
         .threads;
     let mut tasks = Vec::new();
@@ -86,7 +86,7 @@ fn twenty_shell_jobs_add_no_workers_and_admission_is_capped_at_256() {
     assert_eq!(shared.inner.lock().active_shell_jobs, 20);
     assert_eq!(shared.connection_threads.worker_count(), 0);
     assert!(
-        crate::process_info::sample(std::process::id())
+        zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads
             <= before

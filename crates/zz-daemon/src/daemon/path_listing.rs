@@ -662,7 +662,7 @@ fn agent_insert_style(pane: PaneId, pane_pid: Option<u32>, foreground: u32) -> O
         pane,
         pane_pid,
         foreground,
-        crate::process_info::process_group,
+        zz_daemon_client::process_info::process_group,
     ) {
         return Some(InsertStyle::Claude);
     }
@@ -978,7 +978,7 @@ fn resolve_path_list(
     } = input;
     let basename = foreground_basename(
         &foreground
-            .and_then(crate::process_info::command_name)
+            .and_then(zz_daemon_client::process_info::command_name)
             .unwrap_or_default(),
     );
     if REMOTE_FOREGROUND_COMMANDS.contains(&basename.as_str()) {
@@ -987,7 +987,7 @@ fn resolve_path_list(
         ));
     }
     let live = foreground
-        .and_then(crate::process_info::working_directory)
+        .and_then(zz_daemon_client::process_info::working_directory)
         .filter(|path| path.is_dir());
     let fallback = live
         .clone()
@@ -1914,7 +1914,7 @@ mod tests {
         assert_eq!(shell_style, InsertStyle::Shell(ShellKind::Posix));
         assert_eq!(prompt_style, InsertStyle::Shell(ShellKind::Posix));
         assert_eq!(
-            crate::process_info::process_group(std::process::id()),
+            zz_daemon_client::process_info::process_group(std::process::id()),
             u32::try_from(rustix::process::getpgrp().as_raw_nonzero().get()).ok()
         );
     }

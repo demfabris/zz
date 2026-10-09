@@ -22,7 +22,7 @@ use zz_client::{
         replace_retained_viewport,
     },
 };
-use zz_daemon::{
+use zz_daemon_client::{
     AskpassPrompt, AskpassReply, DaemonError, Endpoint, EndpointError, InteractiveClient,
     terminate_incompatible_daemon,
 };
@@ -327,7 +327,7 @@ pub(crate) struct SshPromptRequest {
 const AUTH_DECLINED_REASON: &str = "Authentication was cancelled.\nPick Reconnect when you are \
                                     ready to sign in again.";
 
-fn ssh_destination_label(endpoint: &zz_daemon::SshEndpoint) -> String {
+fn ssh_destination_label(endpoint: &zz_daemon_client::SshEndpoint) -> String {
     let mut label = String::new();
     if let Some(user) = &endpoint.user {
         label.push_str(user);
@@ -1009,7 +1009,6 @@ impl MuxClient {
         names
     }
 
-    #[cfg(not(target_os = "ios"))]
     pub(crate) fn local_server_id(&self) -> Option<u64> {
         self.connections
             .get(&HostId::LOCAL)?
@@ -1301,7 +1300,6 @@ impl MuxClient {
 
     /// The attached ssh host and the loopback SOCKS port its forward opened, or
     /// `None` when the attached host is local (or has no live port).
-    #[cfg_attr(target_os = "ios", allow(dead_code))]
     pub(crate) fn attached_ssh_egress(&self) -> Option<(String, u16)> {
         let entry = self.registry.get(self.attached_host)?;
         let Endpoint::Ssh(endpoint) = &entry.endpoint else {
@@ -1630,26 +1628,6 @@ impl MuxClient {
         .detach();
     }
 
-    /// Retry every host the backoff ladder has waiting. iOS calls this on
-    /// foregrounding, where suspension froze the ladder's timers.
-    #[cfg(target_os = "ios")]
-    pub fn retry_stalled_hosts(&mut self, cx: &mut Context<Self>) {
-        let stalled: Vec<HostId> = self
-            .connections
-            .iter()
-            .filter(|(_, connection)| {
-                matches!(
-                    connection.state,
-                    HostState::Reconnecting { .. } | HostState::Unreachable { .. }
-                )
-            })
-            .map(|(host, _)| *host)
-            .collect();
-        for host in stalled {
-            self.retry_host_now(host, cx);
-        }
-    }
-
     pub fn retry_host_now(&mut self, host: HostId, cx: &mut Context<Self>) {
         if let Some(connection) = self.connections.get_mut(&host) {
             connection.ssh_auth_declined = false;
@@ -1673,7 +1651,7 @@ impl MuxClient {
         host: HostId,
         endpoint: &Endpoint,
         cx: &mut Context<Self>,
-    ) -> Option<zz_daemon::SshPrompts> {
+    ) -> Option<zz_daemon_client::SshPrompts> {
         let Endpoint::Ssh(ssh) = endpoint else {
             return None;
         };
@@ -1704,7 +1682,7 @@ impl MuxClient {
         })
         .detach();
 
-        Some(zz_daemon::SshPrompts::new(
+        Some(zz_daemon_client::SshPrompts::new(
             helper,
             move |prompt: &AskpassPrompt| {
                 let (reply, answers) = async_channel::bounded(1);
@@ -2366,7 +2344,6 @@ impl MuxClient {
         cx.notify();
     }
 
-    #[cfg(not(target_os = "ios"))]
     pub(crate) fn restart_daemon_for_update(&mut self, cx: &mut Context<Self>) {
         self.stale_daemon
             .get_or_insert(StaleDaemonInfo { daemon: None });
@@ -4648,7 +4625,7 @@ mod tests {
     fn test_host(name: &str, endpoint: &str) -> crate::config::HostEntry {
         crate::config::HostEntry {
             name: name.to_owned(),
-            endpoint: zz_daemon::Endpoint::parse(endpoint).expect("test endpoint"),
+            endpoint: zz_daemon_client::Endpoint::parse(endpoint).expect("test endpoint"),
         }
     }
 
@@ -4733,7 +4710,7 @@ mod tests {
     #[cfg(unix)]
     struct RunningTestDaemon {
         socket: PathBuf,
-        command: Option<zz_daemon::CommandClient>,
+        command: Option<zz_daemon_client::CommandClient>,
         thread: Option<thread::JoinHandle<Result<(), DaemonError>>>,
     }
 
@@ -4750,7 +4727,7 @@ mod tests {
             let thread = thread::spawn(move || daemon.run_foreground());
             let deadline = Instant::now() + Duration::from_secs(30);
             let command = loop {
-                match zz_daemon::CommandClient::connect(&socket) {
+                match zz_daemon_client::CommandClient::connect(&socket) {
                     Ok(client) => break client,
                     Err(_) if thread.is_finished() => {
                         let result = thread.join().expect("join failed test daemon");
@@ -4859,7 +4836,7 @@ mod tests {
 
             let deadline = Instant::now() + Duration::from_secs(30);
             loop {
-                match zz_daemon::CommandClient::connect(&self.socket) {
+                match zz_daemon_client::CommandClient::connect(&self.socket) {
                     Ok(_) => return true,
                     Err(_) => {
                         if let Some(status) = self.child.as_mut().unwrap().try_wait().unwrap() {
@@ -4874,7 +4851,7 @@ mod tests {
                     }
                 }
                 if Instant::now() >= deadline {
-                    let Err(error) = zz_daemon::CommandClient::connect(&self.socket) else {
+                    let Err(error) = zz_daemon_client::CommandClient::connect(&self.socket) else {
                         return true;
                     };
                     panic!("process-backed test daemon did not start: {error}");
@@ -4986,7 +4963,7 @@ mod tests {
             resync
         });
         let client = InteractiveClient::connect_endpoint(
-            &zz_daemon::Endpoint::Local(socket),
+            &zz_daemon_client::Endpoint::Local(socket),
             TerminalColorScheme::Dark,
         )
         .expect("connect test client");
@@ -5001,7 +4978,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new_inner(
                     None,
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     TerminalColorScheme::Light,
                     cx,
                 )
@@ -5057,7 +5034,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new_inner(
                     None,
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     TerminalColorScheme::Dark,
                     cx,
                 )
@@ -5193,7 +5170,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5265,7 +5242,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("clipboard fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5380,7 +5357,7 @@ mod tests {
                         daemon: Some(41),
                         client: PROTOCOL_VERSION,
                     }),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5418,7 +5395,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5515,7 +5492,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local unavailable".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5565,7 +5542,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("initial error".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5634,7 +5611,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("focus test client".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -5671,7 +5648,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("focus attach failure".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -5730,7 +5707,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("focus session switch".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -5780,7 +5757,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("focus request error".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -5827,7 +5804,7 @@ mod tests {
                 Err(DaemonError::Thread(
                     "focus pending request error".to_owned(),
                 )),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -5893,7 +5870,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("sidebar target fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5940,7 +5917,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("focus test client".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -6004,7 +5981,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("focus reconnect".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -6061,7 +6038,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local unavailable".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6107,7 +6084,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local unavailable".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6200,7 +6177,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local unavailable".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6254,7 +6231,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local unavailable".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6308,7 +6285,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local unavailable".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6380,7 +6357,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6419,7 +6396,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6464,7 +6441,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("initial error".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6684,7 +6661,7 @@ mod tests {
             let _ = std::fs::remove_file(&server_socket);
         });
         let remote_client = InteractiveClient::connect_endpoint(
-            &zz_daemon::Endpoint::Local(socket),
+            &zz_daemon_client::Endpoint::Local(socket),
             TerminalColorScheme::Dark,
         )
         .expect("connect fake remote client");
@@ -6697,7 +6674,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local test transport".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6818,7 +6795,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("local unavailable".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6993,7 +6970,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("chooser close revision".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7080,7 +7057,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7180,7 +7157,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7223,7 +7200,7 @@ mod tests {
             cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             })
@@ -7268,7 +7245,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7349,7 +7326,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7418,7 +7395,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7497,7 +7474,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7556,7 +7533,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7595,7 +7572,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7632,7 +7609,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7671,7 +7648,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7717,7 +7694,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7753,7 +7730,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("initial error".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7795,7 +7772,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("initial error".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7875,7 +7852,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("initial error".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -8038,7 +8015,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -8075,7 +8052,7 @@ mod tests {
             let client = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -8113,7 +8090,7 @@ mod tests {
             let client = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -8147,7 +8124,7 @@ mod tests {
             let client = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -8283,7 +8260,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -8321,7 +8298,7 @@ mod tests {
             let client = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -8368,7 +8345,7 @@ mod tests {
                     let client = cx.new(|cx| {
                         MuxClient::new(
                             Err(DaemonError::Thread("test client".to_owned())),
-                            zz_daemon::default_socket_path(),
+                            zz_daemon_client::default_socket_path(),
                             cx,
                         )
                     });
@@ -8424,7 +8401,7 @@ mod tests {
         cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("test client".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         })
@@ -9484,7 +9461,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("fixture".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -9824,7 +9801,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -9971,7 +9948,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("fixture".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

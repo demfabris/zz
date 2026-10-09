@@ -185,6 +185,10 @@ so one of them may run beside the compiling lanes. On macOS there is no `systemd
   the measured 3.8 delta with its oracle tools). Never `/tmp`: it is RAM and a reboot empties it.
 - **Before stopping or switching machines**: every lane branch committed (a WIP commit is fine) and
   pushed, ledger notes saying where each lane stands, `main` pushed.
+- **main is shared**: fabrico and other sessions push to it while the campaign runs (two restructures on
+  2026-10-09). `git fetch` before every push; an unpushed ledger-only commit is rebased onto
+  `origin/main`, anything else is merged. After a restructure lands, tell every running lane to merge
+  `main` before its final commit.
 - **Before every push** (public repo): `python3 compat/evidence-secrets.py`, then
   `git diff origin/<branch>..HEAD | rg -n 'gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY'`
   must print nothing.
@@ -266,3 +270,6 @@ check `pgrep -af codex` on resume.
   cause: clipping a float rewrote its rect instead of cropping its surface). Because the float track is
   large and each item's reviews only saw its own slice, one whole-track Codex review
   (`git diff main...catchup/float.keys`) runs before the track merges to main.
+- 2026-10-09 orchestrator: a centred display-popup sits one row higher than 3.8's at an odd client
+  height, because the modal pane is placed in window cells; recorded with the title column and the `O`
+  flag as known drift under `display-popup.modal-pane` (fabrico's master-model ruling).

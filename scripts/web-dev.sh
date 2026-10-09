@@ -34,6 +34,11 @@ fi
 "$WEB_ROOT/target/debug/zz-web" "$@" &
 WEB_GATEWAY_PID=$!
 
+zpui_watch=()
+for dir in crates/zpui*/; do
+    zpui_watch+=(--watch "$dir")
+done
+
 cargo watch \
     --postpone \
     --delay 0.3 \
@@ -46,9 +51,7 @@ cargo watch \
     --watch crates/zz-protocol/src \
     --watch crates/zz-terminal/src \
     --watch crates/zz-ui/src \
-    --watch crates/zz-kit/src \
-    --watch crates/zz-kit/assets \
-    --watch zpui/crates \
+    "${zpui_watch[@]}" \
     --watch clients/web/assets/fonts \
     --watch scripts/build-web-wasm.sh \
     --shell "$WEB_ROOT/scripts/build-web-wasm.sh"

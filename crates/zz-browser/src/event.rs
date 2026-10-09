@@ -1,7 +1,5 @@
 use std::sync::Arc;
 
-pub const MAX_FAVICON_BYTES: usize = 8 * 1024;
-
 /// Identifies one immutable CEF browser generation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SessionId(pub u64);

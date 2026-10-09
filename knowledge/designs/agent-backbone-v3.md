@@ -221,7 +221,7 @@ arm `CoreEvent::BrowserCommand { command: BrowserCommand::Screenshot { .. } }`) 
 the GUI does in `BrowserView::screenshot` (`crates/zz/src/browser/view.rs:946`) and
 `drain_gui_requests` (`crates/zz/src/workspace/view.rs:1648`): encode the latest frame to PNG at
 the requested absolute path and answer through `send_gui_response`
-(`crates/zz-daemon/src/client.rs:924`). Keep the encoder in `crates/zz/src/browser/screenshot.rs`
+(`crates/zz-daemon-client/src/client.rs:924`). Keep the encoder in `crates/zz/src/browser/screenshot.rs`
 reachable from the TUI's provider path rather than copying it.
 
 **Acceptance.** From a pane in a second session, `env -u TMUX zz attach -t ai`; then

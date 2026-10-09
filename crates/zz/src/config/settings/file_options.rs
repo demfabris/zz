@@ -129,7 +129,7 @@ impl SettingsView {
                 ],
             };
             let donor_path = match kind {
-                ConfigFileKind::Mux => zz_daemon::discover_tmux_config(),
+                ConfigFileKind::Mux => zz_daemon_client::discover_tmux_config(),
                 ConfigFileKind::Terminal => discover_ghostty_config(),
             };
             let donor = text_value_input(
@@ -615,10 +615,7 @@ impl SettingsView {
         self.file_command_sequence += 1;
         let sequence = self.file_command_sequence;
         self.pending_file_command = Some((sequence, kind));
-        #[cfg(not(target_os = "ios"))]
         let server_id = self.mux.read(cx).local_server_id();
-        #[cfg(target_os = "ios")]
-        let server_id = None;
         let job = cx
             .background_executor()
             .spawn(async move { execute_file_command(command, expected, server_id) });
@@ -658,7 +655,6 @@ impl SettingsView {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn execute_file_command(
     command: CommandInvocation,
     expected: Option<(MuxOptionKey, String)>,
@@ -709,15 +705,6 @@ fn mux_confirmation_matches(key: MuxOptionKey, expected: &str, actual: &str) -> 
         }
         _ => false,
     }
-}
-
-#[cfg(target_os = "ios")]
-fn execute_file_command(
-    _: CommandInvocation,
-    _: Option<(MuxOptionKey, String)>,
-    _: Option<u64>,
-) -> Result<String, String> {
-    Err("Connect with the desktop client to import local multiplexer configuration.".to_owned())
 }
 
 fn select_value(key: FileKey, value: &str) -> String {
@@ -793,8 +780,10 @@ mod tests {
         let (_, cx) = cx.add_window_view(move |window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

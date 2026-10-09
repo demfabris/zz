@@ -275,7 +275,6 @@ pub(crate) mod tests {
 #[cfg(windows)]
 mod windows {
     use super::*;
-    use crate::unmasked::SpawnUnmasked as _;
     use std::{
         collections::BTreeMap,
         io::Read as _,
@@ -283,6 +282,7 @@ mod windows {
         process::{Child, ChildStdout, Stdio},
         time::{Duration, Instant},
     };
+    use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
     struct Job {
         child: Option<Child>,

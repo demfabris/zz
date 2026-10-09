@@ -65,6 +65,12 @@ mod terminal_requests;
 mod watchers;
 pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
+use zz_daemon_client::{
+    DaemonError, DaemonIdentityGuard, default_mux_config, diagnostic_elapsed_us, diagnostic_timer,
+    discover_tmux_config, home_directory, mux_config_write_path, terminal_colour_count,
+    terminal_feature_mask, terminal_features_list,
+    transport::{LocalTransport, Transport, TransportListener, TransportStream},
+};
 use zz_mux::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
@@ -136,24 +142,21 @@ use crate::agent::{
     stream::{AgentImage, AgentPrompt, AgentSessionSummary},
 };
 use crate::{
-    DaemonError, configure_shell_job_environment, diagnostic_elapsed_us, diagnostic_timer,
+    configure_shell_job_environment,
     keys::{
         ChooserPromptEdit, choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer,
         chooser_prompt_edit, client_key_inputs, input_key_name, send_tokens,
     },
-    lifecycle::DaemonIdentityGuard,
-    paths::{default_mux_config, discover_tmux_config, home_directory, mux_config_write_path},
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
         FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest, client_terminal_facts,
         host_names, live_status_context, status_context, warm_terminfo_entries,
     },
-    terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
-    transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
+    wake::AcceptWake,
 };
 #[cfg(not(unix))]
-use {crate::unmasked::SpawnUnmasked as _, std::process::Child};
+use {std::process::Child, zz_daemon_client::unmasked::SpawnUnmasked as _};
 
 #[cfg(windows)]
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(20);
@@ -442,7 +445,7 @@ fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn process_working_directory(pid: u32) -> Option<PathBuf> {
-    crate::process_info::working_directory(pid)
+    zz_daemon_client::process_info::working_directory(pid)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -465,7 +468,7 @@ fn terminal_foreground_facts(terminal: &TerminalSession) -> (String, Option<Stri
         || (String::new(), None),
         |pid| {
             (
-                crate::process_info::command_name(pid).unwrap_or_default(),
+                zz_daemon_client::process_info::command_name(pid).unwrap_or_default(),
                 process_working_directory(pid).map(|path| path.to_string_lossy().into_owned()),
             )
         },
@@ -488,7 +491,7 @@ fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
 
 fn terminal_current_command(terminal: &TerminalSession) -> String {
     terminal_foreground_process(terminal)
-        .and_then(crate::process_info::command_name)
+        .and_then(zz_daemon_client::process_info::command_name)
         .unwrap_or_default()
 }
 
@@ -1916,7 +1919,7 @@ fn accept_connections<T: Transport>(
                 }
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                listener.wait_for_incoming(ACCEPT_WAIT_TIMEOUT, &shared.accept_wake)?;
+                listener.wait_for_incoming(ACCEPT_WAIT_TIMEOUT)?;
             }
             Err(error) => return Err(error.into()),
         }
@@ -7522,7 +7525,8 @@ impl Shared {
         mut commands: Vec<CommandInvocation>,
     ) -> Vec<PreparedCommand> {
         let abort_server_id = commands.last().and_then(|command| {
-            (command.name == crate::COLD_START_PREPARE_ABORT_COMMAND && command.args.len() == 1)
+            (command.name == zz_daemon_client::COLD_START_PREPARE_ABORT_COMMAND
+                && command.args.len() == 1)
                 .then(|| command.args[0].parse::<u64>().ok())
                 .flatten()
         });
@@ -31759,7 +31763,7 @@ impl Shared {
             Err(error) => return Err(error),
         };
         let edited = replace_tmux_import(&existing, &source, &copied)?;
-        crate::fleet_hosts::atomic_write(&target, edited.as_bytes())?;
+        zz_daemon_client::atomic_write(&target, edited.as_bytes())?;
         let names = if unsupported.is_empty() || unsupported.len() > 5 {
             String::new()
         } else {
@@ -45710,7 +45714,10 @@ fn run_shell_job(
             Stdio::null()
         });
     if let Some(startup_reentry) = startup_reentry {
-        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
+        process.env(
+            zz_daemon_client::STARTUP_REENTRY_ENVIRONMENT_VARIABLE,
+            startup_reentry,
+        );
     }
     let mut child = process.spawn_unmasked().map_err(|_| ())?;
     drop(child.stdin.take());
@@ -50866,7 +50873,7 @@ fn write_paste_buffer_file(path: &Path, data: &[u8], append: bool) -> Result<(),
 /// strerror(cf->error), cf->path)` in both cmd-load-buffer.c and
 /// cmd-save-buffer.c: the reason, then the path it expanded.
 fn buffer_file_error(path: &Path, error: &std::io::Error) -> ServerError {
-    client_file_failure(&crate::strerror_text(error), path)
+    client_file_failure(&zz_daemon_client::strerror_text(error), path)
 }
 
 fn client_file_failure(reason: &str, path: &Path) -> ServerError {
@@ -52972,7 +52979,7 @@ fn handle_connection_message<S: TransportStream>(
     }
     let startup_reentry_capability = format!(
         "{}{}",
-        crate::STARTUP_REENTRY_CAPABILITY_PREFIX,
+        zz_daemon_client::STARTUP_REENTRY_CAPABILITY_PREFIX,
         shared.server_id
     );
     let startup_reentry = hello.kind == ClientKind::Command
@@ -53211,7 +53218,7 @@ fn handle_connection_message<S: TransportStream>(
             "message begin client={client} bytes={} frame_capacity={} message={:#?}",
             inbound_frame.len(),
             inbound_frame.capacity(),
-            crate::client::TracedMessage(&message),
+            zz_daemon_client::TracedMessage(&message),
         );
         if shared.shutdown_pending.load(Ordering::Acquire)
             && !(hello.kind == ClientKind::Command
@@ -54121,7 +54128,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{CommandClient, InteractiveClient};
+    use zz_daemon_client::{CommandClient, InteractiveClient};
 
     #[test]
     fn caller_stdin_request_waits_for_the_alias_reader() {
@@ -82468,7 +82475,7 @@ set-option -g @alias-mixed-next yes
         assert_eq!(client_features_fact(&["client-terminal-v1".to_owned()]), 0);
         assert_eq!(
             terminal_features_list(u32::MAX),
-            crate::terminal_features::TERMINAL_FEATURES.join(",")
+            zz_daemon_client::TERMINAL_FEATURES.join(",")
         );
         let client_cwd = std::env::temp_dir().join("client cwd");
         assert_eq!(
@@ -83417,7 +83424,7 @@ set-option -g @alias-mixed-next yes
                 assert!(TOOL_VERBS.contains(verb), "add `zz {verb}` to TOOL_VERBS");
             }
         }
-        assert!(catalog.contains(crate::transport::SOCKET_ENVIRONMENT_VARIABLE));
+        assert!(catalog.contains(zz_daemon_client::transport::SOCKET_ENVIRONMENT_VARIABLE));
     }
 
     #[test]
@@ -86340,7 +86347,10 @@ set-option -g @alias-mixed-next yes
             ("TERM_PROGRAM", "startup-program"),
             ("TERM_PROGRAM_VERSION", "startup-version"),
             ("COLORTERM", "startup-colorterm"),
-            (crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, "stale-reentry"),
+            (
+                zz_daemon_client::STARTUP_REENTRY_ENVIRONMENT_VARIABLE,
+                "stale-reentry",
+            ),
             (
                 crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE,
                 "stale-executable",
@@ -106045,7 +106055,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(base.0, Some(8));
         assert_eq!(base.1, "bpaste,ccolour,clipboard,cstyle,focus,title");
 
-        let learned = crate::terminal_features::terminal_default_features("tmux")
+        let learned = zz_daemon_client::terminal_default_features("tmux")
             .split(',')
             .map(str::to_owned)
             .collect::<Vec<_>>();
@@ -108163,7 +108173,7 @@ bind - split-window -v -c "#{pane_current_path}"
             vec![
                 CommandInvocation::new("frobnicate", [] as [&str; 0]),
                 CommandInvocation::new(
-                    crate::COLD_START_PREPARE_ABORT_COMMAND,
+                    zz_daemon_client::COLD_START_PREPARE_ABORT_COMMAND,
                     [server_id.to_string()],
                 ),
             ]
@@ -108239,7 +108249,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let owner = register(&valid, false);
         let commands = vec![
             CommandInvocation::new("list-sessions", [] as [&str; 0]),
-            CommandInvocation::new(crate::COLD_START_PREPARE_ABORT_COMMAND, ["74"]),
+            CommandInvocation::new(zz_daemon_client::COLD_START_PREPARE_ABORT_COMMAND, ["74"]),
         ];
         let _ = valid.prepare_command_list_for_request(owner, commands);
         assert_eq!(

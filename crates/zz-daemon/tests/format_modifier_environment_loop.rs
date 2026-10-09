@@ -6,7 +6,7 @@
 //! store it lands on it walks whole, in the name order environ.c keeps, hidden
 //! and removed entries included.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod clients;
 

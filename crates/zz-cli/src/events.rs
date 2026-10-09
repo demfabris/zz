@@ -12,7 +12,7 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use zz_daemon::InteractiveClient;
+use zz_daemon_client::InteractiveClient;
 use zz_protocol::{CommandInvocation, CommandResponse, EventPayload, ProtocolMessage, RawText};
 
 use super::{

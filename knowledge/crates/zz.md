@@ -13,7 +13,7 @@ timestamp: 2026-09-25T00:00:00Z
 [`zz-cli`](/crates/zz-cli.md) for CLI dispatch, daemon spawning, and terminal attach.
 The GUI uses `daemon_executable` to spawn the sibling `cli`; the headless binary spawns itself.
 It never owns mux state itself: it holds a socket/named-pipe connection to the daemon
-(`zz_daemon::InteractiveClient`, wrapped by `mux::client::MuxClient`), a set of local Chromium
+(`zz_daemon_client::InteractiveClient`, wrapped by `mux::client::MuxClient`), a set of local Chromium
 sessions (`zz_browser::BrowserRuntime`, wrapped by `browser::controller::BrowserController`), and
 and a viewport onto the daemon's ACP runtimes (`agent::AgentController`), then reconciles them against
 `zz_protocol::MuxSnapshot` on every render. It also owns
@@ -48,7 +48,7 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
    the same `zz` executable).
 2. **`daemon` command** . delegates to `zz-cli` to run `zz_daemon::Daemon::run_foreground()`.
    The GUI auto-starts the daemon from its sibling `cli`, the bundled headless binary.
-3. **`proxy` command** . `zz_daemon::run_socket_proxy`, the stdio socket proxy used by in-process
+3. **`proxy` command** . `zz_daemon_client::run_socket_proxy`, the stdio socket proxy used by in-process
    ssh (iOS russh, Windows-port shape).
 4. **`attach` command** . hands off to [`zz-tui`](/designs/tui-client.md): a raw-terminal client
    that speaks the same wire protocol (`zz attach [session]`).
@@ -56,7 +56,7 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
    Launch Services for a new macOS process or spawns the Linux desktop executable and returns.
    On a headless install it explains that the desktop app is not installed.
 6. **CLI command mode** . any other leading argument (`list-panes`, `split-window`, `kill-server`,
-   …) is sent through a short-lived `zz_daemon::CommandClient` to an existing or freshly spawned
+   …) is sent through a short-lived `zz_daemon_client::CommandClient` to an existing or freshly spawned
    daemon. A read-only command can leave a newly spawned daemon empty; the first explicit
    `new-session` then receives numeric name `0` and zero-based ids. Output prints to stdout and the
    process exits without opening GPUI. `--version`/`-V` is
@@ -71,7 +71,7 @@ the daemon spawns and owns the ACP child, and this crate reduces the stream it p
    effects.
 7. **GUI mode** . `app`, or no arguments when the platform starts the bundle executable directly:
    `run_app` connects (or spawns-and-connects)
-   `zz_daemon::InteractiveClient`; its default attach lazily creates session `0` if that daemon is
+   `zz_daemon_client::InteractiveClient`; its default attach lazily creates session `0` if that daemon is
    empty. It boots CEF (`zz_browser::bootstrap`), builds `MuxClient` +
    `BrowserController` + `AgentController`, opens the one native window (`AppShell` → `AppView`),
    restores its last usable bounds through `window/state.rs`, and wires window close / app-quit to
@@ -694,7 +694,7 @@ Process-wide `--verbose`/`--zz-verbose-log` wiring shared by every mode above: `
 with per-target filters (terse `NORMAL_FILTER` vs. exhaustive `VERBOSE_FILTER` covering
 `zz`/`zz_browser`/`zz_daemon`/`zz_terminal`/`zz_mux`/`cef`/`gpui`/`wgpu`), a panic hook that logs a
 captured backtrace before delegating to the previous hook, a background process/process-tree
-resource sampler (`zz_daemon::process_info`, every 2s), and a periodic app-state sampler that calls
+resource sampler (`zz_daemon_client::process_info`, every 2s), and a periodic app-state sampler that calls
 `log_diagnostic_snapshot` on both `MuxClient` and `BrowserController` (every 5s, plus on
 `"startup"`/`"shutdown"`). `process_role()` labels every log line by process kind
 (`app`/`daemon`/`command`/`cef-<type>`) so a single shared verbose log file can be filtered by

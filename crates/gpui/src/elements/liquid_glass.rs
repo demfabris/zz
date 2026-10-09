@@ -859,6 +859,19 @@ mod tests {
         assert_eq!(glass_center_x(cx), 40.);
     }
 
+    // Materials interpolate, so gpui's own springs can carry one into another.
+    #[test]
+    fn materials_ride_springs() {
+        use crate::{AnimationExt as _, SpringAnimation};
+        div().id("glass").with_spring(
+            "frost",
+            SpringAnimation::new(SpringConfig::new(300., 30., 1.)).to(true),
+            |element, phase| {
+                element.glass(phase.interpolate(GlassMaterial::clear(), GlassMaterial::frosted()))
+            },
+        );
+    }
+
     #[test]
     fn angles_turn_the_short_way_round() {
         use std::f32::consts::PI;

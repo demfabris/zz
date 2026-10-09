@@ -64,6 +64,11 @@ glass_group("toolbar", GlassMaterial::regular().merge(px(18.)))
     .gap(px(12.))
     .children(buttons)
 
+// Materials interpolate, so any spring or animation can carry one into another.
+div().with_spring("frost", SpringAnimation::new(spring).to(focused), |el, phase| {
+    el.glass(phase.interpolate(GlassMaterial::clear(), GlassMaterial::frosted()))
+})
+
 // Or paint it yourself, one body made of up to eight shapes.
 window.paint_glass_shapes(&shapes, &material);
 ```

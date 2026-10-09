@@ -2160,7 +2160,11 @@ pub fn copy_line_number_mode(line_numbers: u8, option: &str) -> u8 {
         "hybrid" => 4,
         _ => 0,
     };
-    if line_numbers == 2 && mode == 0 { 1 } else { mode }
+    if line_numbers == 2 && mode == 0 {
+        1
+    } else {
+        mode
+    }
 }
 
 /// `data->selx`, `sely`, `endselx` and `endsely`: grid rows counted from the

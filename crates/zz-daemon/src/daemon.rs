@@ -19287,8 +19287,7 @@ impl Shared {
                 overlay_style(&defaults.selected_style, parsed.selected_style.as_deref());
             let border_style =
                 overlay_style(&defaults.border_style, parsed.border_style.as_deref());
-            let (window_rows, window_top) =
-                menu_window_rows(&inner.engine, &target, geometry.rows);
+            let (window_rows, window_top) = menu_window_rows(&inner.engine, &target, geometry.rows);
             let mut variables = popup_position_variables(
                 &inner.engine,
                 &target,
@@ -43352,9 +43351,10 @@ fn mode_request_position(
             .map_or(0, |facts| facts.line_numbers)
     };
     let (shown, hide_position) = match viewport.mode {
-        TerminalMode::Copy { hide_position, .. } => {
-            (!view && (!hide_position || line_numbers != 0), hide_position)
-        }
+        TerminalMode::Copy { hide_position, .. } => (
+            !view && (!hide_position || line_numbers != 0),
+            hide_position,
+        ),
         TerminalMode::View { .. } => (view, false),
         TerminalMode::Live => (false, false),
     };

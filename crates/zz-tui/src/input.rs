@@ -1371,11 +1371,7 @@ fn bound_mouse_key(
     global_x: u32,
     global_y: u32,
 ) -> MouseKeyRoute {
-    let Some(latch) =
-        latched_mouse_location(model, event, global_column, global_row, global_x, global_y)
-    else {
-        return MouseKeyRoute::Native;
-    };
+    let latch = latched_mouse_location(model, event, global_column, global_row, global_x, global_y);
     let Some(key) = mouse_key_name(event, &latch.location, latch.dragging) else {
         return MouseKeyRoute::Native;
     };
@@ -1639,11 +1635,11 @@ fn latched_mouse_location(
     global_row: u16,
     global_x: u32,
     global_y: u32,
-) -> Option<crate::state::MouseDragLatch> {
+) -> crate::state::MouseDragLatch {
     let press = (global_column, global_row, global_x, global_y);
     match event.kind {
         MouseEventKind::Down(button) => {
-            let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
+            let (location, pane, window) = mouse_key_location(model, global_column, global_row);
             let latch = crate::state::MouseDragLatch {
                 button,
                 location,
@@ -1655,18 +1651,18 @@ fn latched_mouse_location(
                 press,
             };
             model.mouse_drag = Some(latch.clone());
-            Some(latch)
+            latch
         }
         MouseEventKind::Drag(button) => match model.mouse_drag.as_mut() {
             Some(latch) if latch.button == button => {
                 latch.dragging = true;
-                Some(latch.clone())
+                latch.clone()
             }
             _ => resolved_mouse_latch(model, global_column, global_row, press),
         },
         MouseEventKind::Up(button) => {
             let latch = match model.mouse_drag.as_ref() {
-                Some(latch) if latch.button == button => Some(latch.clone()),
+                Some(latch) if latch.button == button => latch.clone(),
                 _ => resolved_mouse_latch(model, global_column, global_row, press),
             };
             model.mouse_drag = None;
@@ -1681,9 +1677,9 @@ fn resolved_mouse_latch(
     global_column: u16,
     global_row: u16,
     press: (u16, u16, u32, u32),
-) -> Option<crate::state::MouseDragLatch> {
-    let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
-    Some(crate::state::MouseDragLatch {
+) -> crate::state::MouseDragLatch {
+    let (location, pane, window) = mouse_key_location(model, global_column, global_row);
+    crate::state::MouseDragLatch {
         button: MouseButton::Left,
         location,
         pane,
@@ -1692,7 +1688,7 @@ fn resolved_mouse_latch(
         dragging: false,
         bound: false,
         press,
-    })
+    }
 }
 
 /// The axis of the divider a cell belongs to, which is the axis
@@ -1725,11 +1721,11 @@ fn mouse_key_location(
     model: &Model,
     global_column: u16,
     global_row: u16,
-) -> Option<(
+) -> (
     String,
     Option<zz_protocol::PaneId>,
     Option<zz_protocol::WindowId>,
-)> {
+) {
     if let Some(index) = model.status_row_at(global_row) {
         let (status_x, _) = model.status_area();
         let target = global_column
@@ -1752,7 +1748,7 @@ fn mouse_key_location(
             Some(zz_protocol::TmuxRange::Window(window)) => model.window_id_at_index(window),
             _ => None,
         };
-        return Some((location, None, window));
+        return (location, None, window);
     }
     let window = model.window().map(|window| window.id);
     if let Some(entry) = model.pane_at(global_column, global_row) {
@@ -1761,12 +1757,12 @@ fn mouse_key_location(
         } else {
             "Border"
         };
-        return Some((location.to_owned(), Some(entry.pane), window));
+        return (location.to_owned(), Some(entry.pane), window);
     }
     let Some(entry) = divider_owner(model, global_column, global_row) else {
-        return Some(("Empty".to_owned(), None, window));
+        return ("Empty".to_owned(), None, window);
     };
-    Some(("Border".to_owned(), Some(entry), window))
+    ("Border".to_owned(), Some(entry), window)
 }
 
 /// A divider cell belongs to the pane it is the far edge of.

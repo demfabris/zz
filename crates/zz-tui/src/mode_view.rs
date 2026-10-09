@@ -18,7 +18,7 @@ pub(crate) fn presentation<'a>(
     let view = match viewport.mode {
         TerminalMode::Copy { .. } => false,
         TerminalMode::View { .. } => true,
-        _ => return None,
+        TerminalMode::Live => return None,
     };
     model
         .status

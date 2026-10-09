@@ -631,6 +631,7 @@ fn control_query_wakeup_excludes_hooks_and_pending_events() {
         context: context.clone(),
         variables: BTreeMap::new(),
         exclude_client: None,
+        control_notified: false,
     });
     assert!(!ctrl::control_query_can_defer_wakeup(
         &inner, &context, &query,

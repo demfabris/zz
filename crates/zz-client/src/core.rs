@@ -1681,23 +1681,23 @@ mod tests {
             session,
             snapshot: snapshot_with(&[]),
             read_only: false,
-            client_flags: "active-pane".to_owned(),
+            client_flags: "no-detach-on-destroy".to_owned(),
         });
         assert!(!core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "active-pane");
+        assert_eq!(core.attached_client_flags(), "no-detach-on-destroy");
 
         core.handle_message(ProtocolMessage::Attached {
             session,
             snapshot: snapshot_with(&[]),
             read_only: true,
-            client_flags: "ignore-size,active-pane".to_owned(),
+            client_flags: "ignore-size,no-detach-on-destroy".to_owned(),
         });
         assert!(core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "ignore-size,active-pane");
+        assert_eq!(core.attached_client_flags(), "ignore-size,no-detach-on-destroy");
 
         core.handle_message(event(EventPayload::detached_requested(session, None)));
         assert!(core.attached_read_only());
-        assert_eq!(core.attached_client_flags(), "ignore-size,active-pane");
+        assert_eq!(core.attached_client_flags(), "ignore-size,no-detach-on-destroy");
 
         core.clear_attachment();
         assert!(!core.attached_read_only());

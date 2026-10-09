@@ -18747,7 +18747,7 @@ fn command_template_replace(template: &str, input: &str, index: u8) -> String {
         }
 
         let next = bytes.get(offset + 1).copied();
-        let indexed = next == Some(b'0'.saturating_add(index));
+        let indexed = (1..=9).contains(&index) && next == Some(b'0' + index);
         let doubled = next == Some(b'%') && !replaced_double;
         if !indexed && !doubled {
             output.push(bytes[offset]);
@@ -18756,12 +18756,17 @@ fn command_template_replace(template: &str, input: &str, index: u8) -> String {
         }
         replaced_double |= doubled;
         offset += 2;
-        let quoted = bytes.get(offset) == Some(&b'%');
-        if quoted {
+        let double_quoted = bytes.get(offset) == Some(&b'%');
+        if double_quoted {
             offset += 1;
         }
+        let single_quoted = doubled && !double_quoted;
         for byte in input.bytes() {
-            if quoted && matches!(byte, b'"' | b'\\' | b'$' | b';' | b'~') {
+            if single_quoted && byte == b'\'' {
+                output.extend_from_slice(b"'\\''");
+                continue;
+            }
+            if double_quoted && matches!(byte, b'"' | b'\\' | b'$' | b';' | b'~') {
                 output.push(b'\\');
             }
             output.push(byte);
@@ -20508,7 +20513,7 @@ mod tests {
                 &mut context,
                 &command(
                     "attach-session",
-                    &["-t", "target", "-f", "ignore-size", "-f", "active-pane"],
+                    &["-t", "target", "-f", "ignore-size", "-f", "read-only"],
                 ),
             )
             .unwrap();
@@ -20519,7 +20524,7 @@ mod tests {
                 detach_others: false,
                 detach_others_hangup: false,
                 read_only: false,
-                flags: Some("active-pane".to_owned()),
+                flags: Some("read-only".to_owned()),
                 update_environment: true,
             }]
         );
@@ -42407,6 +42412,14 @@ mod tests {
         assert_eq!(
             MuxEngine::substitute_command_prompt_template("%%%|%1%", &["\"\\$;~"]),
             r#"\"\\\$\;\~|\"\\\$\;\~"#
+        );
+        assert_eq!(
+            MuxEngine::substitute_command_prompt_template("'%%'|%1|%1%|%%", &["it's \"x\""]),
+            r#"'it'\''s "x"'|it's "x"|it's \"x\"|%%"#
+        );
+        assert_eq!(
+            MuxEngine::substitute_command_prompt_template("%%%|%%", &["a'b"]),
+            "a'b|%%"
         );
 
         let engine = MuxEngine::default();

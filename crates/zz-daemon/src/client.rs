@@ -3330,11 +3330,11 @@ mod tests {
                 "work".to_owned(),
                 true,
                 true,
-                Some("ignore-size,!active-pane"),
+                Some("ignore-size,!no-detach-on-destroy"),
             ),
             zz_protocol::CommandInvocation::new(
                 "attach-session",
-                ["-d", "-r", "-f", "ignore-size,!active-pane", "-t", "work",],
+                ["-d", "-r", "-f", "ignore-size,!no-detach-on-destroy", "-t", "work",],
             )
         );
     }

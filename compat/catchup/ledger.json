@@ -284,7 +284,7 @@
       "id": "pin.contract-breaks",
       "track": "pin",
       "title": "3.8 contract breaks: active-pane flag, %% quoting, q: escaping, relative targets",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -303,7 +303,7 @@
         "q: escapes {, }, newline and tab (d57d75de).",
         "Invalid relative targets such as +foo and -0 are errors (00f3899a)."
       ],
-      "branch": null,
+      "branch": "catchup/pin.contract-breaks",
       "sha": null,
       "notes": [
         "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here.",

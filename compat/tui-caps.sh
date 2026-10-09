@@ -556,9 +556,6 @@ known_drift() {
     'sc/one-sided-'*' client_termfeatures')
     printf 'gap:pin.formats-options'
     ;;
-  'extended pane_key_mode' | 'extended-always pane_key_mode' | 'keys/on @extkey' | 'keys/always @extkey')
-    printf 'TUI-009'
-    ;;
   esac
 }
 
@@ -566,9 +563,6 @@ known_drift_reason() {
   case "$1" in
   gap:pin.formats-options)
     printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 asks the terminal for synchronized output with DECRQM ?2026 (tty.c, tty-keys.c tty_keys_sync) and adds sync to client_termfeatures when it answers; the zz client sends no such query"
-    ;;
-  TUI-009)
-    printf '%s' "REGRESSION, measured 2026-10-09 against both pins: the zz client no longer writes Eneks, neither when the outer terminal's reply names extkeys nor when -T names it, so the outer pane stays VT10x where the pin reaches Ext 2 and C-Enter never arrives"
     ;;
   esac
 }
@@ -1434,14 +1428,9 @@ side_command zz set-option -s extended-keys on >/dev/null
 side_command tmux set-option -s extended-keys on >/dev/null
 self_check_case 'control, extended keys on both over a terminal naming none' quiet \
   case_modes 'sc/silent-extended-control' xterm-256color '' ''
-if [ "$(known_drift 'extended pane_key_mode')" = TUI-009 ]; then
-  printf 'note  self-check -T extkeys named for zz alone on a silent terminal skipped: %s\n' \
-    "$(known_drift_reason TUI-009)"
-else
-  self_check_case '-T extkeys named for zz alone on a silent terminal' catches \
-    case_modes 'sc/silent-extkeys' xterm-256color '-T extkeys' '' \
-    "$(modes_except pane_key_mode)"
-fi
+self_check_case '-T extkeys named for zz alone on a silent terminal' catches \
+  case_modes 'sc/silent-extkeys' xterm-256color '-T extkeys' '' \
+  "$(modes_except pane_key_mode)"
 side_command zz set-option -s extended-keys off >/dev/null
 side_command tmux set-option -s extended-keys off >/dev/null
 SILENT_TERMINAL=0

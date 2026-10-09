@@ -362,6 +362,10 @@ impl EventLoop {
         self.buffered = true;
     }
 
+    pub fn set_user_keys(&mut self, keys: &[String]) {
+        self.parser.set_user_keys(keys);
+    }
+
     pub fn await_graphics_reply(&mut self) {
         self.parser
             .await_graphics_reply(Instant::now() + GRAPHICS_REPLY_WAIT);
@@ -774,6 +778,26 @@ mod tests {
             peer,
             signal_writer,
         )
+    }
+
+    #[test]
+    fn user_keys_set_on_the_loop_decode_daemon_relayed_bytes() {
+        let (mut event_loop, _input, _peer, _signals) = pipe_loop();
+        event_loop.set_user_keys(&[String::new(), "\x1b[99~".to_owned()]);
+        assert!(
+            event_loop
+                .take_tty_message(ProtocolMessage::TtyInputBytes {
+                    bytes: b"\x1b[99~".to_vec()
+                })
+                .is_none()
+        );
+        assert_eq!(
+            event_loop.terminal_events.drain(..).collect::<Vec<_>>(),
+            [TerminalEvent::Key(crate::terminal_event::KeyEvent::new(
+                crate::terminal_event::KeyCode::User(1),
+                crate::terminal_event::KeyModifiers::NONE,
+            ))]
+        );
     }
 
     #[test]

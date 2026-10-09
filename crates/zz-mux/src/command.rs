@@ -100,6 +100,9 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "remain-on-exit",
     "focus-events",
     "extended-keys",
+    "terminal-features",
+    "terminal-overrides",
+    "user-keys",
     "allow-passthrough",
     "allow-rename",
     "allow-set-title",
@@ -1251,6 +1254,7 @@ pub enum MuxEffect {
         window: Option<WindowId>,
         pane: Option<PaneId>,
     },
+    ClientTerminalChanged,
     /// `session` scopes a session-effective write; `None` is a global write.
     MuxOptionChanged {
         option: MuxOptionKey,
@@ -2053,7 +2057,13 @@ fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
     }
     if matches!(
         option.name,
-        "command-alias" | "pane-colours" | "status-format" | "update-environment"
+        "command-alias"
+            | "pane-colours"
+            | "status-format"
+            | "terminal-features"
+            | "terminal-overrides"
+            | "update-environment"
+            | "user-keys"
     ) {
         return Some((option, index));
     }
@@ -3035,7 +3045,13 @@ impl MuxEngine {
     fn format_option_array(&self, target: TmuxOptionTarget, name: &str) -> Option<&StringArray> {
         matches!(
             name,
-            "command-alias" | "pane-colours" | "status-format" | "update-environment"
+            "command-alias"
+                | "pane-colours"
+                | "status-format"
+                | "terminal-features"
+                | "terminal-overrides"
+                | "update-environment"
+                | "user-keys"
         )
         .then(|| {
             self.array_option_readback(target, name, true)
@@ -3182,7 +3198,13 @@ impl MuxEngine {
     ) -> bool {
         if let Some((array, _)) = matches!(
             option.name,
-            "command-alias" | "pane-colours" | "status-format" | "update-environment"
+            "command-alias"
+                | "pane-colours"
+                | "status-format"
+                | "terminal-features"
+                | "terminal-overrides"
+                | "update-environment"
+                | "user-keys"
         )
         .then(|| self.array_option_readback(target, option.name, inherited))
         .flatten()
@@ -11084,7 +11106,7 @@ impl MuxEngine {
                     whole.then_some(false),
                 ));
             }
-            return Ok(pane_colours_execution(name, stored));
+            return Ok(stored_array_execution(name, stored));
         }
         let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
         if let Some(index) = index {
@@ -11104,7 +11126,7 @@ impl MuxEngine {
             if let Some(before) = status_format_before {
                 return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
             }
-            return Ok(pane_colours_execution(name, true));
+            return Ok(stored_array_execution(name, true));
         }
         let append = options.has("-a");
         if !append {
@@ -11128,7 +11150,7 @@ impl MuxEngine {
         if let Some(before) = status_format_before {
             return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
         }
-        Ok(pane_colours_execution(name, true))
+        Ok(stored_array_execution(name, true))
     }
 
     fn status_format_execution(
@@ -12872,6 +12894,43 @@ impl MuxEngine {
             .collect()
     }
 
+    pub fn user_keys_option(&self) -> Vec<String> {
+        let Some(array) = self.stored_arrays.server.get("user-keys") else {
+            return Vec::new();
+        };
+        let mut keys = Vec::new();
+        for (index, value) in array {
+            let ArrayIndex::Numeric(index) = index else {
+                continue;
+            };
+            let Ok(index) = usize::try_from(*index) else {
+                continue;
+            };
+            if index > MAX_USER_KEY {
+                continue;
+            }
+            if keys.len() <= index {
+                keys.resize(index + 1, String::new());
+            }
+            keys[index].clone_from(value);
+        }
+        keys
+    }
+
+    #[must_use]
+    pub fn user_key_claims(&self, bytes: &[u8]) -> bool {
+        self.stored_arrays
+            .server
+            .get("user-keys")
+            .is_some_and(|array| {
+                array.values().any(|value| {
+                    let sequence = value.as_bytes();
+                    !sequence.is_empty()
+                        && (bytes.starts_with(sequence) || sequence.starts_with(bytes))
+                })
+            })
+    }
+
     pub fn terminal_overrides_option(&self) -> Vec<String> {
         self.array_option_readback(TmuxOptionTarget::Server, "terminal-overrides", true)
             .into_iter()
@@ -13693,13 +13752,7 @@ impl MuxEngine {
         }
         if unset {
             self.server_options.reset(option);
-            if option == ServerOption::Backspace {
-                return Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
-                    window: None,
-                    pane: None,
-                }));
-            }
-            return Ok(Execution::default());
+            return Ok(server_option_execution(option));
         }
         let normalized = match option {
             ServerOption::Backspace => value
@@ -13726,13 +13779,7 @@ impl MuxEngine {
         self.server_options
             .set_command(option, appended.as_deref().or(value))
             .map_err(ServerError::InvalidCommand)?;
-        if option == ServerOption::Backspace {
-            return Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
-                window: None,
-                pane: None,
-            }));
-        }
-        Ok(Execution::default())
+        Ok(server_option_execution(option))
     }
 
     fn set_session_option(
@@ -14899,12 +14946,37 @@ fn remove_option_override<K: Copy + Ord, O: Copy + Ord>(
 /// `options_push_changes` rebuilds every pane's default palette whenever
 /// `pane-colours` changes at any scope, and skips the push when an unset found
 /// nothing stored there.
-fn pane_colours_execution(name: &str, changed: bool) -> Execution {
+fn server_option_execution(option: ServerOption) -> Execution {
+    let mux_option = match option {
+        ServerOption::Backspace => {
+            return Execution::effect(MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: None,
+            });
+        }
+        ServerOption::ExtendedKeys => MuxOptionKey::ExtendedKeys,
+        ServerOption::FocusEvents => MuxOptionKey::FocusEvents,
+        _ => return Execution::default(),
+    };
+    Execution::effect(MuxEffect::MuxOptionChanged {
+        option: mux_option,
+        session: None,
+    })
+}
+
+fn stored_array_execution(name: &str, changed: bool) -> Execution {
     if name == "pane-colours" && changed {
         return Execution::effect(MuxEffect::TerminalKnobsChanged {
             window: None,
             pane: None,
         });
+    }
+    if matches!(
+        name,
+        "user-keys" | "terminal-features" | "terminal-overrides"
+    ) && changed
+    {
+        return Execution::effect(MuxEffect::ClientTerminalChanged);
     }
     Execution::default()
 }
@@ -16540,6 +16612,8 @@ fn canonical_named_key(value: &str) -> Option<&'static str> {
         .iter()
         .find_map(|(name, canonical)| value.eq_ignore_ascii_case(name).then_some(*canonical))
 }
+
+const MAX_USER_KEY: usize = 1000;
 
 fn parse_user_key(value: &str) -> Option<String> {
     let tail = value.strip_prefix("User")?;
@@ -36799,7 +36873,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 149);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 152);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

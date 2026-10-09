@@ -6735,7 +6735,10 @@ impl Shared {
             }
             return false;
         }
-        if !self.publish_effective_mux_options_to(client, outbound) || !outbound.is_open() {
+        if !self.publish_effective_mux_options_to(client, outbound)
+            || !self.publish_terminal_negotiation_to(client, outbound)
+            || !outbound.is_open()
+        {
             if let Some(output_id) = startup_delivery.command_output() {
                 self.retire_command_output_if_exact(client, output_id);
             }
@@ -9186,6 +9189,7 @@ impl Shared {
         let mut activity_requeues = Vec::new();
         let mut silence_schedules = Vec::new();
         let mut monitor_silence_changed = false;
+        let mut client_terminal_changed = false;
         let mut attach = None;
         let mut detach = None;
         let mut import_tmux_config = None;
@@ -11183,6 +11187,7 @@ impl Shared {
                         }
                     }
                     MuxEffect::MonitorSilenceChanged => monitor_silence_changed = true,
+                    MuxEffect::ClientTerminalChanged => client_terminal_changed = true,
                     MuxEffect::StatusFormatsChanged { session } => match session {
                         Some(session) => {
                             status_refresh_sessions.insert(*session);
@@ -11760,6 +11765,9 @@ impl Shared {
         for pane in removed_panes {
             self.cancel_pane_files(pane);
             self.publish(EventPayload::PaneRemoved(pane));
+        }
+        if client_terminal_changed {
+            self.publish_terminal_negotiation();
         }
         if mux_options_event {
             self.publish_effective_mux_options(None);
@@ -23589,9 +23597,10 @@ impl Shared {
         client: ClientId,
         pane: PaneId,
         input: &zz_terminal::KeyInput,
+        bytes: &[u8],
     ) -> Option<u64> {
         let inner = self.inner.lock();
-        if client_active_pane(&inner, client) != Some(pane) {
+        if client_active_pane(&inner, client) != Some(pane) || inner.engine.user_key_claims(bytes) {
             return None;
         }
         plain_key_generation_locked(&inner, client, pane, input)
@@ -29967,6 +29976,38 @@ impl Shared {
         true
     }
 
+    fn publish_terminal_negotiation(&self) {
+        let recipients = {
+            let mut inner = self.inner.lock();
+            let clients = inner
+                .clients
+                .iter()
+                .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| *id))
+                .collect::<Vec<_>>();
+            clients
+                .into_iter()
+                .filter_map(|client| {
+                    take_terminal_negotiation(&mut inner, client).map(|payload| (client, payload))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (client, payload) in recipients {
+            self.publish_to_client(client, payload);
+        }
+    }
+
+    fn publish_terminal_negotiation_to(
+        &self,
+        client: ClientId,
+        outbound: &Arc<OutboundMailbox>,
+    ) -> bool {
+        let mut inner = self.inner.lock();
+        let Some(payload) = take_terminal_negotiation(&mut inner, client) else {
+            return outbound.is_open();
+        };
+        outbound.enqueue_reliable(&Self::event(payload))
+    }
+
     fn refresh_published_appearance(&self) {
         let update = {
             let mut inner = self.inner.lock();
@@ -35209,6 +35250,7 @@ struct Client {
     terminal_preview: bool,
     visible_agents: Option<BTreeSet<PaneId>>,
     published_mux_options: Option<MuxOptions>,
+    published_terminal_negotiation: Option<TerminalNegotiation>,
     command_output: Option<CommandOutputSession>,
     command_streams: Option<CommandStreams>,
     subscriber: Option<Arc<OutboundMailbox>>,
@@ -40285,6 +40327,45 @@ fn client_feature_mask_from_source(inner: &ClientFormatSource<'_>, client: Clien
     features
 }
 
+type TerminalNegotiation = (Vec<String>, Vec<String>);
+
+fn client_terminal_negotiation(
+    inner: &ServerState,
+    client: ClientId,
+) -> Option<TerminalNegotiation> {
+    let source = ClientFormatSource::from_inner(inner);
+    client_colour_count_from_source(&source, client)?;
+    let features = terminal_features_list(client_feature_mask_from_source(&source, client));
+    Some((
+        features
+            .split(',')
+            .filter(|feature| !feature.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        inner.engine.user_keys_option(),
+    ))
+}
+
+fn take_terminal_negotiation(inner: &mut ServerState, client: ClientId) -> Option<EventPayload> {
+    let negotiation = client_terminal_negotiation(inner, client)?;
+    if inner
+        .client(client)
+        .and_then(|c| c.published_terminal_negotiation.as_ref())
+        == Some(&negotiation)
+    {
+        return None;
+    }
+    inner
+        .client_entry(client)
+        .published_terminal_negotiation
+        .replace(negotiation.clone());
+    let (features, user_keys) = negotiation;
+    Some(EventPayload::TerminalNegotiation {
+        features,
+        user_keys,
+    })
+}
+
 fn client_colour_count_with_from_source(
     inner: &ClientFormatSource<'_>,
     client: ClientId,
@@ -44384,7 +44465,8 @@ fn command_prompt_edit_key(
         | zz_terminal::KeyCode::PageUp
         | zz_terminal::KeyCode::PageDown
         | zz_terminal::KeyCode::Function(_)
-        | zz_terminal::KeyCode::Unidentified => PromptKeyAction::Handled,
+        | zz_terminal::KeyCode::Unidentified
+        | zz_terminal::KeyCode::User(_) => PromptKeyAction::Handled,
     }
 }
 

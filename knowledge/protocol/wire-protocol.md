@@ -808,6 +808,16 @@ capabilities set `verbs` (`zz_protocol::agent_stream::AGENT_VERBS`); every other
 the vendor. A zz command's reply carries `_meta.zz.reply`, the message id of the command's echoed
 prompt row, and a tool update may carry `_meta.zz.exitCode`.
 
+v108 also carries the raw TUI's terminal negotiation (2026-10-09). `EventPayload` appends
+`TerminalNegotiation { features: Vec<String>, user_keys: Vec<String> }` after
+`ControlCommandStarted`. The daemon sends it to an interactive client with a terminal at attach
+and again whenever `user-keys`, `terminal-features` or `terminal-overrides` changes: `features`
+is the roster behind `#{client_termfeatures}` (the client's `TERM`, `COLORTERM`, both arrays and
+what it reported), and `user_keys` is the `user-keys` array by index, empty for an unset slot.
+The TUI raises its colour depth and arms extended keys from `features` and decodes each sequence
+in `user_keys` before the built-in keys. `zz_terminal::KeyCode` appends `User(u16)`, which
+`input_key_name` spells `UserN`; a pane writes nothing for it.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

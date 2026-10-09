@@ -164,6 +164,14 @@ fn learn_terminal_features(features: &str) {
     arm_extended_keys();
 }
 
+pub(crate) fn adopt_negotiated_features(features: &[String]) {
+    zz_daemon::adopt_negotiated_terminal_features(features);
+    if terminal_colours().is_some() {
+        raise_terminal_colours(zz_daemon::client_terminal_colour_count());
+    }
+    arm_extended_keys();
+}
+
 static EXTENDED_KEYS_OPTION: AtomicBool = AtomicBool::new(false);
 static EXTENDED_KEYS_ARMED: AtomicBool = AtomicBool::new(false);
 

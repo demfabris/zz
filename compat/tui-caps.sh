@@ -108,9 +108,11 @@
 #                                  server option the same once. What each
 #                                  side then DOES with a focus report is
 #                                  driven by compat/tui-mouse.sh.
-#   user keys (User0..User9)       an option-store channel with no client named
-#                                  terminal behind it on zz; recorded on
-#                                  options.client-terminal-negotiation
+#   user keys                      a user-keys entry sent through the    driven
+#                                  outer decoder fires `bind -n User3`
+#   terminal-overrides Tc          the colour sample on a silent          driven
+#                                  xterm-256color terminal with
+#                                  `,*:Tc`: the RGB cell stays RGB
 #   Unicode widths                 the outer cursor column and the       driven
 #                                  decoded line after a wide CJK pair, a
 #                                  combining sequence and an emoji, with
@@ -127,13 +129,13 @@
 #                                  chrome that is is compared by
 #                                  compat/tui-screen-diff.sh under UTF-8
 #                                  clients only. Not driven.
-#   extkeys named by the           tty_term_create adds a feature the        named
-#     terminal-features array      `terminal-features` array names for the
-#                                  client's TERM, and the raw TUI knows only
-#                                  what its flags asked for and what its
-#                                  terminal answered, so an array entry
-#                                  granting extkeys arms the pin and not zz.
-#                                  The stock array grants none. Not driven.
+#   extkeys named by the           the daemon hands the raw TUI the       named
+#     terminal-features array      roster tty_term_create would build,
+#                                  extkeys included; the pin arms on its
+#                                  query timeout and this fixture has no
+#                                  settle for that. Proved by
+#                                  a_terminal_features_entry_hands_the_raw_tui_extkeys.
+#                                  Not driven.
 #   secondary and extended DA      the same colour sample on a terminal  driven
 #     replies                      that answers them and on one that
 #                                  answers nothing: the reply names the
@@ -1011,6 +1013,49 @@ case_silent_colours() {
   SILENT_TERMINAL="$previous"
 }
 
+case_silent_tc() {
+  local name="$1" zz_override="$2" pin_override="$3"
+  local previous="$SILENT_TERMINAL"
+  [ -z "$zz_override" ] || side_command zz set-option -sa terminal-overrides "$zz_override" >/dev/null
+  [ -z "$pin_override" ] || side_command tmux set-option -sa terminal-overrides "$pin_override" >/dev/null
+  SILENT_TERMINAL=1
+  open_case "$name" xterm-256color '' ''
+  colour_stage "${name//[^a-zA-Z0-9]/}" '' '' "$COLOUR_SAMPLE" "$COLOUR_SAMPLE"
+  SILENT_TERMINAL="$previous"
+  side_command zz set-option -su terminal-overrides >/dev/null
+  side_command tmux set-option -su terminal-overrides >/dev/null
+}
+
+USER_KEY_SEQUENCE=$'\033[99~'
+case_user_key() {
+  local name="$1" zz_key="$2" pin_key="$3" side
+  for side in zz tmux; do
+    side_command "$side" set-option -gu @userkey >/dev/null 2>&1 || true
+    side_command "$side" set-option -gu @extdone >/dev/null 2>&1 || true
+    side_command "$side" bind-key -n User3 set-option -g @userkey User3 >/dev/null
+    side_command "$side" bind-key -n F9 set-option -g @extdone 1 >/dev/null
+  done
+  [ -z "$zz_key" ] || side_command zz set-option -s 'user-keys[3]' "$zz_key" >/dev/null
+  [ -z "$pin_key" ] || side_command tmux set-option -s 'user-keys[3]' "$pin_key" >/dev/null
+  open_case "$name" xterm-256color '' ''
+  checkpoint "${name//[^a-zA-Z0-9]/}"
+  for side in zz tmux; do
+    tmux_outer_command send-keys -t "$(outer_window "$side")" -H 1b 5b 39 39 7e
+    tmux_outer_command send-keys -t "$(outer_window "$side")" F9
+  done
+  for side in zz tmux; do
+    wait_for "$side decoded F9 for $name" extended_done "$side"
+  done
+  assert_row "$name @userkey" \
+    "$(side_command zz show-options -gqv @userkey 2>/dev/null)" \
+    "$(side_command tmux show-options -gqv @userkey 2>/dev/null)"
+  for side in zz tmux; do
+    side_command "$side" unbind-key -n User3 >/dev/null 2>&1 || true
+    side_command "$side" unbind-key -n F9 >/dev/null 2>&1 || true
+    side_command "$side" set-option -su user-keys >/dev/null 2>&1 || true
+  done
+}
+
 case_silent() {
   SILENT_TERMINAL=1
   case_facts 'silent/bare' xterm '' '' '' baseline
@@ -1239,6 +1284,8 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-u -u -u
   case_colours
   case_silent
+  case_silent_tc 'silent/tc' ',*:Tc' ',*:Tc'
+  case_user_key 'keys/user' "$USER_KEY_SEQUENCE" "$USER_KEY_SEQUENCE"
   case_cli '' ''
 
   printf '%s asserted rows, %s recorded rows\n' "$CHECKS" "$RECORDED"
@@ -1357,6 +1404,14 @@ self_check_case 'a one-sided -2 on the pin only, silent terminal' catches \
   case_silent_colours 'sc/silent-colours-pin-2' sc-silent-pin-2 '' -2
 self_check_case 'a one-sided -2 on zz only, silent terminal' catches \
   case_silent_colours 'sc/silent-colours-zz-2' sc-silent-zz-2 -2 ''
+self_check_case 'control, a Tc override on both sides of a silent terminal' quiet \
+  case_silent_tc 'sc/silent-tc' ',*:Tc' ',*:Tc'
+self_check_case 'a Tc override on the pin only, silent terminal' catches \
+  case_silent_tc 'sc/silent-tc-pin' '' ',*:Tc'
+self_check_case 'control, a user key on both sides' quiet \
+  case_user_key 'sc/user-key' "$USER_KEY_SEQUENCE" "$USER_KEY_SEQUENCE"
+self_check_case 'user-keys set on the pin only' catches \
+  case_user_key 'sc/user-key-pin' '' "$USER_KEY_SEQUENCE"
 
 # THE MODE ROWS READ THE LIVE ATTACH. Autowrap is the one mode neither client
 # touches: tty.c tty_start_tty never writes DECAWM and neither does

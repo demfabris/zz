@@ -191,7 +191,9 @@ impl EventLoop {
                 let Some((key, width)) = zz_protocol::tty_input_key(&input[start..]) else {
                     break;
                 };
-                let Some(generation) = shared.tty_key_generation(client, pane, &key) else {
+                let Some(generation) =
+                    shared.tty_key_generation(client, pane, &key, &input[start..])
+                else {
                     break;
                 };
                 if let Err(error) = shared.input_plain_key(client, pane, key, generation) {

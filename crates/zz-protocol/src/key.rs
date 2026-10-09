@@ -2434,6 +2434,7 @@ pub fn input_key_name(input: &KeyInput) -> KeyName {
         KeyCode::ArrowRight => name.push_str("Right"),
         KeyCode::Function(number) => write!(&mut name, "F{number}").expect("writing key name"),
         KeyCode::Unidentified => name.push_str(input.text.as_deref().unwrap_or_default()),
+        KeyCode::User(number) => write!(&mut name, "User{number}").expect("writing key name"),
     }
     name
 }
@@ -5294,6 +5295,14 @@ mod tests {
             KeyDecision::Commands(_)
         ));
     }
+    #[test]
+    fn a_user_key_folds_to_the_name_bind_parses() {
+        assert_eq!(
+            input_key_name(&press(KeyCode::User(7), Modifiers::default(), None)).as_str(),
+            "User7"
+        );
+    }
+
     #[test]
     fn key_names_accept_only_spellings_a_press_can_produce() {
         for name in [

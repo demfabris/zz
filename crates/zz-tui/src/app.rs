@@ -720,6 +720,7 @@ pub(crate) fn run(
                                         | CoreEvent::KeyTablesChanged
                                 ) {
                                     refresh_terminal_options(&mut model, &core, &escape_time);
+                                    adopt_terminal_negotiation(&core, &mut event_loop);
                                 }
                                 let popup_lifecycle_changed = matches!(
                                     &*event,
@@ -1297,6 +1298,15 @@ fn escape_timeout_ms(options: &zz_protocol::MuxOptions) -> u64 {
         .and_then(|option| option.value.parse::<u64>().ok())
         .unwrap_or(10)
         .max(1)
+}
+
+fn adopt_terminal_negotiation(core: &Mutex<ClientCore>, event_loop: &mut EventLoop) {
+    let core = lock_core(core);
+    let Some((features, user_keys)) = core.terminal_negotiation() else {
+        return;
+    };
+    event_loop.set_user_keys(user_keys);
+    crate::tty::adopt_negotiated_features(features);
 }
 
 fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_time: &AtomicU64) {

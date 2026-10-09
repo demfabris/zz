@@ -3712,6 +3712,10 @@ pub enum EventPayload {
         canonical_name: Option<String>,
         guard: bool,
     },
+    TerminalNegotiation {
+        features: Vec<String>,
+        user_keys: Vec<String>,
+    },
 }
 
 impl EventPayload {

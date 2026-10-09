@@ -70,6 +70,7 @@ pub(crate) enum KeyCode {
     Char(char),
     Esc,
     Unidentified,
+    User(u16),
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -132,9 +133,46 @@ pub(crate) struct EventParser {
     paste: Vec<u8>,
     in_paste: bool,
     graphics_reply: Option<Instant>,
+    user_keys: Vec<(Box<[u8]>, u16)>,
+}
+
+enum UserKeyMatch {
+    Complete { consumed: usize, number: u16 },
+    Partial,
+    Absent,
 }
 
 impl EventParser {
+    pub fn set_user_keys(&mut self, keys: &[String]) {
+        self.user_keys = keys
+            .iter()
+            .enumerate()
+            .filter(|(_, sequence)| !sequence.is_empty())
+            .filter_map(|(number, sequence)| {
+                Some((sequence.as_bytes().into(), u16::try_from(number).ok()?))
+            })
+            .collect();
+    }
+
+    fn user_key(&self) -> UserKeyMatch {
+        let mut found: Option<(usize, u16)> = None;
+        let mut partial = false;
+        for (sequence, number) in &self.user_keys {
+            if self.bytes.starts_with(sequence) {
+                if found.is_none_or(|(consumed, _)| sequence.len() > consumed) {
+                    found = Some((sequence.len(), *number));
+                }
+            } else if sequence.starts_with(&self.bytes) {
+                partial = true;
+            }
+        }
+        match found {
+            Some((consumed, number)) => UserKeyMatch::Complete { consumed, number },
+            None if partial && self.bytes.first() == Some(&0x1b) => UserKeyMatch::Partial,
+            None => UserKeyMatch::Absent,
+        }
+    }
+
     pub fn push(&mut self, input: &[u8], output: &mut Vec<Event>) {
         let remaining = MAX_BUFFER_BYTES.saturating_sub(self.bytes.len());
         self.bytes
@@ -204,6 +242,18 @@ impl EventParser {
                 self.bytes.drain(..PASTE_START.len());
                 self.in_paste = true;
                 continue;
+            }
+            match self.user_key() {
+                UserKeyMatch::Complete { consumed, number } => {
+                    self.bytes.drain(..consumed);
+                    output.push(Event::Key(KeyEvent::new(
+                        KeyCode::User(number),
+                        KeyModifiers::NONE,
+                    )));
+                    continue;
+                }
+                UserKeyMatch::Partial => return,
+                UserKeyMatch::Absent => {}
             }
             let Some(parsed) = parse_one(&self.bytes, self.graphics_reply.is_some()) else {
                 return;
@@ -689,6 +739,50 @@ mod tests {
         let mut events = Vec::new();
         parser.push(bytes, &mut events);
         events
+    }
+
+    #[test]
+    fn user_keys_decode_to_the_user_key_their_index_names() {
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&[String::new(), "\x1b[99~".to_owned(), "\x1b[A".to_owned()]);
+        let user = |number| Event::Key(KeyEvent::new(KeyCode::User(number), KeyModifiers::NONE));
+        let mut events = Vec::new();
+        parser.push(b"\x1b[99~x\x1b[A\x1b[B", &mut events);
+        assert_eq!(
+            events,
+            [
+                user(1),
+                Event::Key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::NONE)),
+                user(2),
+                Event::Key(KeyEvent::new(KeyCode::Down, KeyModifiers::NONE)),
+            ]
+        );
+
+        events.clear();
+        parser.push(b"\x1b[9", &mut events);
+        assert!(events.is_empty());
+        parser.push(b"9~", &mut events);
+        assert_eq!(events, [user(1)]);
+
+        events.clear();
+        parser.push(b"\x1b[9", &mut events);
+        parser.flush_escape(&mut events);
+        assert_eq!(
+            events,
+            [
+                Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::NONE)),
+                Event::Key(KeyEvent::new(KeyCode::Char('9'), KeyModifiers::NONE)),
+            ]
+        );
+
+        parser.set_user_keys(&[]);
+        events.clear();
+        parser.push(b"\x1b[A", &mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))]
+        );
     }
 
     fn probing(bytes: &[u8]) -> Vec<Event> {

@@ -156,7 +156,7 @@ impl ZzInputKey {
             KeyCode::ArrowLeft => (13, 0, 0),
             KeyCode::ArrowRight => (14, 0, 0),
             KeyCode::Function(value) => (15, 0, value),
-            KeyCode::Unidentified => (16, 0, 0),
+            KeyCode::Unidentified | KeyCode::User(_) => (16, 0, 0),
         };
         Self {
             code,

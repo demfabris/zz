@@ -837,7 +837,7 @@ send-keys data flow (CLI → PTY):
 | `crates/zz-daemon/src/agent/journal.rs` | Per-ACP-session JSONL append/replay/prune, session-ID jailing, the 32 MiB cap |
 | `crates/zz-daemon/src/agent/git_summary.rs` | Bounded branch and current-worktree file/addition/deletion capture through a throwaway Git index |
 | `crates/zz-daemon/src/agent/environment.rs` | ACP child `PATH` repair (login shell + version-manager bins), `warm_adapter_cache`, workspace-identity injection |
-| `crates/zz-daemon/Cargo.toml` | `default = ["daemon", "agent"]`. The daemon feature uses `async-signal`, `async-channel`, and `futures-lite` only to give the Unix signal-listener thread cancellable blocking; the core server remains thread-per-connection with no shared async runtime. The `agent` feature adds `agent-client-protocol`, `serde`/`serde_json`, and `base64`, and runs its pane threads on `futures-lite`'s `block_on` rather than any shared runtime. Clients that never render a transcript (`zz-tui`, `zz-client-ffi`) depend on this crate with `default-features = false`. |
+| `crates/zz-daemon/Cargo.toml` | `default = ["daemon", "agent"]`. The daemon feature uses `async-signal`, `async-channel`, and `futures-lite` only to give the Unix signal-listener thread cancellable blocking; the core server remains thread-per-connection with no shared async runtime. The `agent` feature adds `agent-client-protocol`, `serde`/`serde_json`, and `base64`, and runs its pane threads on `futures-lite`'s `block_on` rather than any shared runtime. Clients that never render a transcript (`zz-tui`) depend on this crate with `default-features = false`. |
 
 # Related
 

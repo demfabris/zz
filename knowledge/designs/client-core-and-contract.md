@@ -2,7 +2,7 @@
 type: Design Plan
 title: Client core & contract - one brain, every face
 description: Decision record for the shared client contract - protocol-owned commands and keys, sans-IO reduction, typed Agent attention, and a native-shell C ABI.
-status: Shared client reduction, key tables, chrome bindings, and the C ABI are implemented. The C ABI exposes terminal viewports, Agent state, SSH prompts, mux snapshots, and tmux overlays. Terminal history, Kitty images, multi-host selection, and Editor viewports remain open. GPUI cross-surface rebinding still needs a restart.
+status: Shared client reduction, key tables, and chrome bindings are implemented. The C ABI (`zz-client-ffi`) shipped and was deleted on 2026-10-09, since no client used it after the native macOS client was archived; it remains in git history. GPUI cross-surface rebinding still needs a restart.
 tags:
 - client
 - ffi
@@ -176,6 +176,8 @@ editor's modal vim engine stay where they are — widget-internal editing behavi
 is not chrome and not part of the contract.
 
 ## Pillar 6 - zz-client-ffi target and shipped proof
+
+Deleted 2026-10-09 with no remaining consumer; the text below records what it covered.
 
 The shipped `#[no_mangle]` shim and hand-maintained header now cover interactive connection with
 typed SSH prompts and failures, pollable event wake/drain, attach, typed mux snapshots with full

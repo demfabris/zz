@@ -64,7 +64,6 @@ stream.
 | [zz-terminal](/crates/zz-terminal.md) | per-PTY child + libghostty on a worker thread; publishes terminal frames |
 | [zz-browser](/crates/zz-browser.md) | CEF init, subprocess dispatch, request context, input translation, frame mailboxes |
 | [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |
-| [zz-client-ffi](/crates/zz-client-ffi.md) | Unix C ABI proof surface over the shared client core |
 | [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal and CEF runtimes and the Agent pane's viewport |
 | `zpui`, `zpui-*` | zpui, our GPUI: Zed's gpui crates and the utility crates they need, plus the `zpui-ios` UIKit backend |
 | `zpui-kit` | widget kit on zpui: theme, primitives, widgets, icons; no zz dependencies |

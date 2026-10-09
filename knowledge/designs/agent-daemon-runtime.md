@@ -150,8 +150,8 @@ queue without accepting stale adapter state or output.
 
 # Daemon host (`zz-daemon/src/agent/`)
 
-Behind an `agent` cargo feature (`default = ["daemon", "agent"]`; `zz-tui`/`zz-client-ffi`
-depend on `zz-daemon` with `default-features = false` and never inherit
+Behind an `agent` cargo feature (`default = ["daemon", "agent"]`; `zz-tui`
+depends on `zz-daemon` with `default-features = false` and never inherit
 `agent-client-protocol`, while the desktop takes the default and consumes the stream vocabulary
 `zz-daemon`'s crate root re-exports).
 

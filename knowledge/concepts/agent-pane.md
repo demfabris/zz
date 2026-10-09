@@ -33,7 +33,7 @@ JSON blob with a byte cap, which the client deserializes into the shape its redu
 The daemon builds its agent runtime lazily, on the first agent pane it opens; that build also opens
 and prunes the journal and prewarms the adapter package cache and the login-shell `PATH` snapshot.
 The whole runtime sits behind `zz-daemon`'s `agent` cargo feature, which is on by default
-(`default = ["daemon", "agent"]`); `zz-tui` and `zz-client-ffi` link `zz-daemon` with
+(`default = ["daemon", "agent"]`); `zz-tui` links `zz-daemon` with
 `default-features = false` and never pull in `agent-client-protocol` at all.
 
 `split-window --kind picker` still creates a runtime-free picker first. Choosing **Agent**, or issuing

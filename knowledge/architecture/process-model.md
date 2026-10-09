@@ -123,7 +123,7 @@ ID and starts a fresh thread. Pane removal and **daemon** shutdown cancel active
 responders before that pane's child is reaped . a GUI quit does neither, which is the point.
 
 The desktop client keeps only the rendering half: the reducer, view, composer draft, permission
-wizard, and sticky selector preferences. `zz-tui` and `zz-client-ffi` link `zz-daemon` with
+wizard, and sticky selector preferences. `zz-tui` links `zz-daemon` with
 `default-features = false`, so a build that never renders a transcript does not pull
 `agent-client-protocol` in at all.
 

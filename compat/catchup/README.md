@@ -67,6 +67,10 @@ orchestrator never runs the full suite per item.
      ready. No worktree outlives its work.
 5. **Milestones**: at M1, M2 and M3 run the [full suite](#full-suite-milestones-only) once on `main`.
 
+Orchestrator shell habits: never `pkill -f <pattern>` (it matches the shell running it; list pids
+with `pgrep -f`, check `readlink /proc/<pid>/cwd`, then `kill` those pids), and chain a merge and
+its checks with `&&` only, so a failed merge never starts checks on the unmerged tree.
+
 Add a dated line to [Decisions](#decisions) for every call the orchestrator makes on fabrico's
 behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new lesson.
 
@@ -204,5 +208,9 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: pin.move merged (338aad43a); the pin is tmux 3.8. Any checkout's
   `compat/.cache` must be refetched (`compat/fetch-tmux.sh`) before `just compat check` passes there;
   `wt.sh add` copies the main checkout's cache, so refresh that one first.
+- 2026-10-09 orchestrator: fix.capture-links gets a third, final fix pass after two reviews (output
+  marks on resize, repeated alternate-on, IL/DL) and merges without a third review; IL/DL may be
+  recorded as an engine limit if it does not fit. Zz approximates tmux's per-row output flag with
+  tracked pins, so its edge cases are bounded by budget, not chased to the end.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

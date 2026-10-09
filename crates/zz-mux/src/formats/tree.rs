@@ -232,16 +232,17 @@ impl FormatTree<'_> {
             }
             FormatBacking::WindowLayout => Cow::Owned(
                 window
-                    .map(|window| window.layout.dump())
+                    .map(|window| {
+                        window.layout_string(LayoutFormat::V2, state.pane_base_index(window.id))
+                    })
                     .unwrap_or_default(),
             ),
             FormatBacking::WindowVisibleLayout => Cow::Owned(
                 window
                     .map(|window| {
-                        let (width, height) = window.layout.extent();
-                        window.zoomed_pane.map_or_else(
-                            || window.layout.dump(),
-                            |pane| CellLayout::new(pane, width, height).dump(),
+                        window.visible_layout_string(
+                            LayoutFormat::V2,
+                            state.pane_base_index(window.id),
                         )
                     })
                     .unwrap_or_default(),

@@ -227,6 +227,14 @@ last one first). The v1 string is the tiled copy (`layout_custom_create_compat`,
 tiled pane it is whatever 3.8's failed dump prints. The parser places `"z"` leaves as floats in place
 (`layout-custom.c:1056-1066`); v1 input keeps existing floats (`layout-custom.c:693-702`).
 
+pin.layout-v2 left the places to fill in (`crates/zz-mux/src/layout.rs`): the writer asks a
+`LeafState` per leaf and emits `"z"` before `"I"` when `z` is set, and the v1 writer already drops
+those leaves and collapses their parents, so floats need only `Window::leaf_state` to return the
+`layout_cell_zindex` port. The parser keeps each floating leaf's z-index and signed offsets in
+`ParsedLeaf::float`, trimming already removes a floating bottom-right cell without a gift, and the
+size checks skip floating cells; `MuxState::select_layout_string` refuses a layout that still has
+one (`floating panes are not supported`), which is the branch that places them.
+
 # Clients
 
 **Desktop** (`crates/zz/src/workspace/view.rs`). `render` (`:3656`) draws visible floats back to

@@ -4526,7 +4526,10 @@ mod tests {
         assert_eq!(context.pane_index, 2);
         assert_eq!(
             context.window_layout,
-            engine.state.windows[&window].layout.dump()
+            engine.state.windows[&window].layout_string(
+                zz_mux::LayoutFormat::V2,
+                engine.state.pane_base_index(window)
+            )
         );
     }
 

@@ -1250,6 +1250,11 @@ impl PaneActor {
             Command::CaptureCopySource { reply } => {
                 let _ = reply.send(
                     capture_copy_source(&mut self.terminal)
+                        .inspect(|source| {
+                            source.revision.stamp_output_rows(|| {
+                                self.engine_filter.output_rows(&self.terminal)
+                            });
+                        })
                         .map_err(|_| TerminalCaptureError::ActorStopped),
                 );
                 self.compression.rearm();
@@ -1423,6 +1428,7 @@ impl PaneActor {
                             &mut self.pane_search,
                         ))?
                     };
+                    stamp_copy_mode_marks(&self.terminal, &self.engine_filter, &self.active_views);
                     self.publisher
                         .publish_search_string(self.pane_search.as_ref());
                     let is_in_copy_mode = self
@@ -1510,7 +1516,9 @@ impl PaneActor {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                if let Some(capture) = CaptureWork::start(&self.terminal, mode, *request) {
+                if let Some(capture) =
+                    CaptureWork::start(&self.terminal, mode, &self.engine_filter, *request)
+                {
                     self.captures.push_back(capture);
                 }
                 self.compression.rearm();
@@ -2207,7 +2215,9 @@ impl DeadPane {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                if let Some(capture) = CaptureWork::start(&self.surface.terminal, mode, *request) {
+                if let Some(capture) =
+                    CaptureWork::start(&self.surface.terminal, mode, &self.engine_filter, *request)
+                {
                     self.surface.captures.push_back(capture);
                 }
                 complete_dead_notice_command(&self.slot);
@@ -2253,7 +2263,14 @@ impl DeadPane {
         {
             surface.pending_commands.push(Command::Wake);
         }
-        surface_actor::SurfaceActor::new(self.control_rx, self.slot, self.publisher, surface, false)
-            .map(Some)
+        surface_actor::SurfaceActor::new(
+            self.control_rx,
+            self.slot,
+            self.publisher,
+            surface,
+            self.engine_filter,
+            false,
+        )
+        .map(Some)
     }
 }

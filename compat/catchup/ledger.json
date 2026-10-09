@@ -464,7 +464,8 @@
       "sha": null,
       "notes": [
         "2026-10-09 from pin.contract-breaks: scenarios failing at 3.8 that look like this item's: daemon-command-item-format (#{command} inside an after-hook is set-buffer on 3.8), source-file-current-file (@cf-hook), smoke/args-parse-set-hook and smoke/config-chain-parse-abort (tmux-side only); show-options-hooks also diverges on display-panes options (pin.display-panes) and after-queue.",
-        "2026-10-09: lane done at aa3119b71: 25/30 closed; session-group hooks filed under sessions.linked-groups (never), accepted; leftovers in pin.hooks-events-2"
+        "2026-10-09: lane done at aa3119b71: 25/30 closed; session-group hooks filed under sessions.linked-groups (never), accepted; leftovers in pin.hooks-events-2",
+        "2026-10-09: codex review 2: 5 P1 (marks lost at exit, customize Quit, hook_client, ZoomCycled layout hooks, client-created origin pane); final fix pass sent, merges without a third review"
       ]
     },
     {
@@ -570,7 +571,7 @@
       "id": "pin.keys-copy",
       "track": "pin",
       "title": "3.8 default keys, menus and copy-mode commands",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -590,7 +591,9 @@
       ],
       "branch": "catchup/pin.keys-copy",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at dca3b35a0: 10/11 closed; menus stay per-client (menus.client-owned, native) with 3.8's window-relative placement adopted; accepted by orchestrator (consistent with copy mode per client, TUI-014). Left: goto-line absolute numbering with line numbers on; GUI line numbers native."
+      ]
     },
     {
       "id": "float.design",

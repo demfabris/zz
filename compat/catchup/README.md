@@ -229,5 +229,8 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: terminal.zoom-reflow (libghostty and tmux re-wrap history differently on
   a width change, seen through display-panes' zoom) is an engine limit under fabrico's 2026-09-18
   no-engine-patch ruling: recorded native, not chased.
+- 2026-10-09 orchestrator: menus stay per-client overlays (`menus.client-owned`, native) rather than
+  3.8's window-owned menus; 3.8's window-relative placement is adopted. Same reasoning as
+  fabrico's copy-mode-per-client ruling (TUI-014): zz's clients keep independent views.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

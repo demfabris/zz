@@ -1,4 +1,4 @@
-use std::{env, fs, io, path::PathBuf};
+use std::{fs, io, path::PathBuf};
 
 use thiserror::Error;
 use zz_protocol::{
@@ -118,56 +118,13 @@ fn hex_encode(bytes: &[u8]) -> String {
 
 /// Resolve the private zz CEF root and its immediate-child profile path.
 pub fn resolve_profile_paths() -> io::Result<BrowserProfilePaths> {
-    let root = browser_data_dir()?.join("root");
+    let root = zz_protocol::app_identity::browser_data_dir()?.join("root");
     Ok(BrowserProfilePaths {
         // CEF only accepts persistent profiles that are immediate children of
         // root_cache_path.
         profile: root.join("zz-default"),
         root,
     })
-}
-
-/// The file storing the recently visited page list, beside the CEF root.
-pub fn recent_pages_path() -> io::Result<PathBuf> {
-    Ok(browser_data_dir()?.join("recent-pages"))
-}
-
-fn browser_data_dir() -> io::Result<PathBuf> {
-    let data = platform_data_dir().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "could not resolve the current user's application-data directory",
-        )
-    })?;
-    Ok(data
-        .join(zz_protocol::app_identity::DIRECTORY)
-        .join("browser"))
-}
-
-#[cfg(target_os = "linux")]
-fn platform_data_dir() -> Option<PathBuf> {
-    env::var_os("XDG_DATA_HOME").map(PathBuf::from).or_else(|| {
-        env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|home| home.join(".local").join("share"))
-    })
-}
-
-#[cfg(target_os = "macos")]
-fn platform_data_dir() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .map(PathBuf::from)
-        .map(|home| home.join("Library").join("Application Support"))
-}
-
-#[cfg(target_os = "windows")]
-fn platform_data_dir() -> Option<PathBuf> {
-    env::var_os("LOCALAPPDATA").map(PathBuf::from)
-}
-
-#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn platform_data_dir() -> Option<PathBuf> {
-    None
 }
 
 #[cfg(unix)]
@@ -268,7 +225,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time is after the Unix epoch")
             .as_nanos();
-        let test_root = env::temp_dir().join(format!("zz-profile-{}-{unique}", std::process::id()));
+        let test_root =
+            std::env::temp_dir().join(format!("zz-profile-{}-{unique}", std::process::id()));
         let paths = BrowserProfilePaths {
             profile: test_root.join("zz-default"),
             root: test_root.clone(),

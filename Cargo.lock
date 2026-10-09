@@ -11739,7 +11739,7 @@ dependencies = [
  "url",
  "windows 0.62.2",
  "zeroize",
- "zz-browser",
+ "zz-protocol",
 ]
 
 [[package]]
@@ -11894,6 +11894,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.20",
  "unicode-width",
+ "url",
  "zz-terminal",
 ]
 

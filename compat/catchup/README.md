@@ -56,6 +56,8 @@ orchestrator never runs the full suite per item.
    sessions share it; never stash or reset their work).
    - `git merge-tree --write-tree main catchup/<id>` first: it predicts conflicts in one command.
    - `git merge --no-ff catchup/<id>`.
+   - A lane branched before a pin move merges `main` and re-verifies at the new pin first
+     (refresh its `compat/.cache` from the main checkout), then goes to review.
    - Merge checks, narrow: `compat/catchup/cargo.sh clippy -p <touched crates> --all-targets
      --all-features -- -D warnings`, the item's own filtered tests, and `just compat check` if the
      registry, oracle or manifest tests changed.
@@ -70,7 +72,8 @@ behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new le
 
 ## Priority order
 
-1. `pin.move`: unblocks the whole pin track and `float.core`.
+1. `pin.move`: unblocks the whole pin track and `float.core`. Then `pin.tui-fixtures`, because the
+   TUI fixtures are red at 3.8 until it lands and every lane that runs one sees the noise.
 2. `fix.tui-colour`: a real bug users hit over ssh.
 3. `float.design`: no compile, runs as a third agent beside two compiling lanes.
 4. The other `fix.*` items, in ledger order.

@@ -85,7 +85,8 @@
       "branch": "catchup/fix.capture-links",
       "sha": null,
       "notes": [
-        "2026-10-09: lane done at 6b4a587a8 (-H and -F match; link identity is by URI since libghostty exposes no OSC 8 id, recorded); integration pass merging main (3.8) sent"
+        "2026-10-09: lane done at 6b4a587a8 (-H and -F match; link identity is by URI since libghostty exposes no OSC 8 id, recorded); integration pass merging main (3.8) sent",
+        "2026-10-09: merged main at 7e0a35f4b; capture checks green at 3.8; tui-client-commands.sh red only from the pin move (see pin.tui-fixtures)"
       ]
     },
     {
@@ -192,7 +193,7 @@
     {
       "id": "fix.option-bytes",
       "track": "fix",
-      "title": "User option values keep their bytes",
+      "title": "Bytes survive option, environment, command-block and guard-output paths",
       "status": "todo",
       "deps": [],
       "zones": [
@@ -204,12 +205,16 @@
       "gaps": [],
       "accept": [
         "set -g @x a\\376b (argv or source-file -) stores the bytes; show-options -g @x prints a\\376b as the pin does, and #{@x} expands to the same bytes as the pin for UTF-8 and non-UTF-8 clients.",
-        "A registry item records the divergence first if the store change is split across commits, and closes with it."
+        "A registry item records the divergence first if the store change is split across commits, and closes with it.",
+        "Sourcing `if-shell -F 1 { set-buffer -b x a<fe>b }` stores 61 fe 62 as tmux 3.8 does (zz stores 61 ef bf bd 62: command blocks are reparsed through a lossy string view).",
+        "X=a<fd>b in one sourced file then set-buffer -b y \"$X\" in another stores 61 fd 62 as 3.8 does (the second file takes the text-only parse path and reads the lossy global_environment_variable accessor).",
+        "A UTF-8 control client gets raw bytes for an inserted or sourced show-buffer as 3.8 does (ControlCommandGuard.output is a String in the protocol today; changing it is a wire append under the unreleased version)."
       ],
       "branch": null,
       "sha": null,
       "notes": [
-        "2026-10-09: found by fix.streams: UserOptions is BTreeMap<String,String> in zz-mux, so non-UTF-8 values read back as U+FFFD; set-option and show-options pass values as String."
+        "2026-10-09: found by fix.streams: UserOptions is BTreeMap<String,String> in zz-mux, so non-UTF-8 values read back as U+FFFD; set-option and show-options pass values as String.",
+        "2026-10-09: fix.streams handed over its findings 3 and 4 and the guard-output String; measured cases are in protocol.binary-streams' close in compat/tmux-gaps.json."
       ]
     },
     {
@@ -243,6 +248,33 @@
         "Measured delta and a soft-assert oracle runner: ~/.cache/zz-catchup/ on alienware (delta.md, tools/, oracle-38.json); rebuild from the research doc elsewhere.",
         "2026-10-09: lane done at 6b8afcab3: just compat check green at 3.8; 7 new gaps keyed by ledger item; layout-v1.py added to the harness for v2 layouts",
         "2026-10-09: codex review: 2 P2 fixed at 856d0e9a1; merged; just compat check green on main; main checkout's compat/.cache now holds tmux 3.8 (old pin kept as tmux-src-d77c9dc6)"
+      ]
+    },
+    {
+      "id": "pin.tui-fixtures",
+      "track": "pin",
+      "title": "Re-baseline the TUI fixtures at the 3.8 pin",
+      "status": "todo",
+      "deps": [
+        "pin.move"
+      ],
+      "zones": [
+        "compat/tui-*.sh",
+        "compat/tui",
+        "compat/tmux-gaps.json",
+        "knowledge/tmux/tui-parity.md"
+      ],
+      "gaps": [],
+      "accept": [
+        "Every compat/tui-*.sh fixture runs on main against tmux 3.8 with zero unattributed differences: each 3.8 difference is either fixed, or recorded (not asserted) with an owner that is an open gap (pin.formats-options, pin.hooks-events, pin.keys-copy, pin.display-panes, pin.contract-breaks, pin.layout-v2, float.*), using the fixtures' existing record/owner mechanism.",
+        "Measured on fix.capture-links' merge with main: tui-client-commands.sh had 168 of 538 asserted comparisons differ (155 customize-mode, 4 switch-mode, 4 show-messages terminals/jobs, 4 lock list-windows, 1 show-hooks -g); all are explained in the report.",
+        "--self-check passes for each fixture touched.",
+        "The closed TUI campaign's ledger keeps its own pin (compat/tui/tracker.py) and stays green."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: pin.move ran check.sh only; the TUI fixtures went red at 3.8. Gates every later lane that runs a TUI fixture."
       ]
     },
     {

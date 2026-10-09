@@ -571,7 +571,7 @@
       "id": "pin.formats-options-2",
       "track": "pin",
       "title": "Rest of the 3.8 formats and options",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.formats-options",
         "pin.layout-v2"
@@ -594,14 +594,13 @@
         "clear-on-attach changes the raw TUI's attach the way 3.8 changes a terminal client's (no alternate screen, existing content scrolled into scrollback); the GUI's answer is recorded native if it has none.",
         "copy-mode-current-line-style styles the cursor line in the raw TUI's copy mode as 3.8 does.",
         "The A modifier animates in status and pane-border formats at 3.8's cadence without breaking the status render cache.",
-        "hook_fire_count and hook_fire_time resolve; the 3.8 mode context formats (copy_line_numbers, refresh_active, clipboard_invalid and the customize-mode rows) resolve.",
-        "The pin.formats-options gap closes except pane_modal_flag and window_modal_pane, which move to pane.floating-model.",
-        "semantic:customize-mode-3-8 (3.8's rebuilt customize tree, 132 recorded tui-client-commands cases) and semantic:terminal-features-3-8 (the DECRQM ?2026 Sync query and the show-messages Sync line) close, flipping their recorded TUI fixture cases to asserted."
+        "Split 2026-10-09: the customize-mode rows of the mode context formats, semantic:customize-mode-3-8 and the gap close moved to pin.customize-3-8."
       ],
       "branch": "catchup/pin.formats-options-2",
       "sha": null,
       "notes": [
-        "2026-10-09: leftovers of pin.formats-options; see its lane report in the ledger notes."
+        "2026-10-09: leftovers of pin.formats-options; see its lane report in the ledger notes.",
+        "2026-10-09: Session 1 done at 959a3fa27: display-message -j, history_* native (formats.history-counters), clear-on-attach, copy-mode-current-line-style, A modifier animation, hook_fire_*, clipboard_invalid, terminal-features-3-8 (tui-caps 408/408); wire appends under 108. Customize rebuild split to pin.customize-3-8. Review 1 running."
       ]
     },
     {
@@ -885,7 +884,39 @@
         "2026-10-09 (pin.control-3-8): zz accepts an unquoted #{ mid-word (display -p foo::#{window_name} in a sourced file, refresh-client -B on a control line); both pins answer syntax error. A control client that read a blank line still sizes windows; tmux ignores it for sizing.",
         "2026-10-09 (pin.hooks-events-2): zz pane prompts belong to the client (close on detach, a status prompt replaces them); in 3.8 the prompt stays on the pane.",
         "2026-10-09 (pin.display-panes): with -s naming another window the desktop overlay draws indicators on panes not on screen (desktop renderer).",
-        "2026-10-09 (pin.hooks-events-2): zz events still carry d77 payload keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events), visible in wait-for -E -v; needs a 3.8 payload table per event (PendingHookEvent::window/::pane back many events; a daemon test and control notifications read those keys). Control and attached clients' wait-for -E -v lines arrive at wake, not per event."
+        "2026-10-09 (pin.hooks-events-2): zz events still carry d77 payload keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events), visible in wait-for -E -v; needs a 3.8 payload table per event (PendingHookEvent::window/::pane back many events; a daemon test and control notifications read those keys). Control and attached clients' wait-for -E -v lines arrive at wake, not per event.",
+        "2026-10-09 (pin.formats-options-2): hook_fire_count: 3.8 counts an event even when its hook has no commands (the global entry always exists), zz counts only hooks that run commands; match 3.8 at the event sources. clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48."
+      ]
+    },
+    {
+      "id": "pin.customize-3-8",
+      "track": "pin",
+      "title": "3.8's rebuilt customize mode (window-customize.c)",
+      "status": "todo",
+      "deps": [
+        "float.keys",
+        "pin.formats-options-2"
+      ],
+      "zones": [
+        "crates/zz-mux/src/command/customize.rs",
+        "crates/zz-daemon/src/daemon/chooser_presentation.rs",
+        "crates/zz-tui/src/render.rs",
+        "compat/tui-client-commands.sh",
+        "compat/tui-mouse.sh"
+      ],
+      "gaps": [
+        "pin.formats-options"
+      ],
+      "accept": [
+        "hook_fire_count and hook_fire_time resolve; the 3.8 mode context formats (copy_line_numbers, refresh_active, clipboard_invalid and the customize-mode rows) resolve.",
+        "The pin.formats-options gap closes except pane_modal_flag and window_modal_pane, which move to pane.floating-model.",
+        "semantic:customize-mode-3-8 (3.8's rebuilt customize tree, 132 recorded tui-client-commands cases) and semantic:terminal-features-3-8 (the DECRQM ?2026 Sync query and the show-messages Sync line) close, flipping their recorded TUI fixture cases to asserted.",
+        "The customize-mode context formats (is_environment, environment_*, option_is_hook, option_is_monitor, option_monitor) resolve as 3.8."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs)."
       ]
     }
   ]

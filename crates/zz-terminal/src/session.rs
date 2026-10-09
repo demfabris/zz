@@ -329,7 +329,6 @@ const DEAD_NOTICE_WAIT: Duration = Duration::from_secs(5);
 const MAX_ENGINE_SEQUENCE_BYTES: usize = 256;
 const MAX_ENGINE_RENAME_BYTES: usize = 1024;
 const MAX_ENGINE_OSC_BYTES: usize = 64;
-const MAX_OUTPUT_MARKS: usize = 1024;
 const SHELL_INTEGRATION_TITLE_MARK: &[u8] = b"2626";
 
 /// `enum progress_bar_state`: what the `ConEmu` OSC 9;4 sequence's first argument
@@ -468,13 +467,72 @@ impl EngineFilter {
         })) else {
             return;
         };
-        if self.output_marks.len() >= MAX_OUTPUT_MARKS {
-            self.output_marks.retain(|(_, mark)| mark.has_value());
-            if self.output_marks.len() >= MAX_OUTPUT_MARKS {
-                self.output_marks.remove(0);
-            }
+        self.output_marks.retain(|(_, mark)| mark.has_value());
+        let row = mark.point(PointSpace::Screen).ok().flatten();
+        if self.output_marks.last().is_some_and(|(last, previous)| {
+            *last == screen && previous.point(PointSpace::Screen).ok().flatten() == row
+        }) {
+            return;
         }
         self.output_marks.push((screen, mark));
+    }
+
+    fn erased_rows(
+        parameters: &[u8],
+        final_byte: u8,
+        terminal: &Terminal<'_, '_>,
+    ) -> Option<(Screen, u32, u32)> {
+        if final_byte != b'J'
+            || parameters
+                .first()
+                .is_some_and(|byte| (0x3c..0x40).contains(byte))
+        {
+            return None;
+        }
+        let screen = terminal.active_screen().ok()?;
+        let rows = u32::from(terminal.rows().ok()?);
+        let columns = terminal.cols().ok()?;
+        let x = terminal.cursor_x().ok()?;
+        let y = u32::from(terminal.cursor_y().ok()?);
+        let first = parameters.split(|byte| *byte == b';').next().unwrap_or(&[]);
+        let (start, end) = match engine_parameter(first).unwrap_or(0) {
+            0 => (if x == 0 { y } else { y + 1 }, rows.checked_sub(1)?),
+            1 => {
+                let end = if x >= columns.saturating_sub(1) {
+                    y
+                } else {
+                    y.checked_sub(1)?
+                };
+                (0, end)
+            }
+            2 => (0, rows.checked_sub(1)?),
+            _ => return None,
+        };
+        (start <= end).then_some((screen, start, end))
+    }
+
+    fn drop_erased_marks(&mut self, erased: (Screen, u32, u32)) {
+        let (screen, start, end) = erased;
+        self.output_marks.retain(|(owner, mark)| {
+            *owner != screen
+                || mark
+                    .point(PointSpace::Active)
+                    .ok()
+                    .flatten()
+                    .is_none_or(|point| point.y < start || point.y > end)
+        });
+    }
+
+    fn drop_alternate_marks(&mut self, parameters: &[u8], final_byte: u8) {
+        if final_byte == b'h'
+            && parameters.first() == Some(&b'?')
+            && parameters[1..]
+                .split(|byte| *byte == b';')
+                .any(|parameter| matches!(engine_parameter(parameter), Some(47 | 1047 | 1049)))
+        {
+            self.output_marks
+                .retain(|(screen, _)| *screen != Screen::Alternate);
+        }
     }
 
     fn output_rows(&self, terminal: &Terminal<'_, '_>) -> Vec<u64> {
@@ -564,6 +622,8 @@ impl EngineFilter {
                     bytes = &bytes[1..];
                     if byte >= 0x40 {
                         self.metadata_hint |= csi_touches_metadata(&self.sequence, byte);
+                        let erased = Self::erased_rows(&self.sequence, byte, terminal);
+                        self.drop_alternate_marks(&self.sequence.clone(), byte);
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
                             write_engine_csi(
                                 &self.sequence,
@@ -578,6 +638,9 @@ impl EngineFilter {
                             raw.extend_from_slice(&self.sequence);
                             raw.push(byte);
                             terminal.vt_write(&raw);
+                        }
+                        if let Some(erased) = erased {
+                            self.drop_erased_marks(erased);
                         }
                         self.sequence.clear();
                         self.state = EngineState::Ground;
@@ -679,15 +742,25 @@ impl EngineFilter {
                     let final_byte = bytes[end];
                     let parameters = &bytes[escape + 2..end];
                     self.metadata_hint |= csi_touches_metadata(parameters, final_byte);
-                    if csi_needs_rewrite(parameters, final_byte, knobs) {
+                    self.drop_alternate_marks(parameters, final_byte);
+                    let clears_rows = final_byte == b'J' && !self.output_marks.is_empty();
+                    if clears_rows || csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);
-                        write_engine_csi(
-                            parameters,
-                            final_byte,
-                            knobs,
-                            terminal,
-                            &mut self.primary_history_size,
-                        );
+                        let erased = Self::erased_rows(parameters, final_byte, terminal);
+                        if csi_needs_rewrite(parameters, final_byte, knobs) {
+                            write_engine_csi(
+                                parameters,
+                                final_byte,
+                                knobs,
+                                terminal,
+                                &mut self.primary_history_size,
+                            );
+                        } else {
+                            terminal.vt_write(&bytes[escape..=end]);
+                        }
+                        if let Some(erased) = erased {
+                            self.drop_erased_marks(erased);
+                        }
                         start = end + 1;
                     }
                     cursor = end + 1;
@@ -6080,6 +6153,7 @@ fn new_output_view(
             pane_search: None,
             search: Some(SearchWorker::spawn(wake.clone())),
         },
+        EngineFilter::default(),
         frozen,
     )?;
     if !frozen {
@@ -8808,6 +8882,17 @@ fn step_capture_work(work: &mut VecDeque<CaptureWork>) {
     }
 }
 
+fn stamp_copy_mode_marks(
+    terminal: &Terminal<'_, '_>,
+    filter: &EngineFilter,
+    views: &ActiveTerminalViews,
+) {
+    for mode in views.values().filter_map(|view| view.copy_mode.as_deref()) {
+        mode.revision
+            .stamp_output_rows(|| filter.output_rows(terminal));
+    }
+}
+
 fn capture_terminal(
     terminal: &Terminal<'_, '_>,
     mode: Option<&CopyModeState>,
@@ -8823,11 +8908,13 @@ fn capture_terminal_marked(
     output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
     if options.mode
-        && !options.hyperlinks
         && let Some(mode) = mode
     {
         if options.alternate && mode.revision.screen != Screen::Alternate {
             return Err(TerminalCaptureError::AlternateUnavailable);
+        }
+        if options.hyperlinks {
+            return Ok(String::new());
         }
         return capture_mode_revision(mode, options);
     }
@@ -9675,10 +9762,14 @@ fn capture_revision(
             .collect::<Vec<_>>()
     });
     let flags = options.line_flags.then(|| {
+        let output_rows = revision.output_rows();
         (head..=tail)
             .map(|row| {
                 let meta = revision.row(row);
-                (u8::from(meta.prompt()) * LINE_FLAG_PROMPT)
+                (u8::from(revision.row_has_hyperlink(row)) * LINE_FLAG_HYPERLINK)
+                    | (u8::from(output_rows.binary_search(&u64::from(row)).is_ok())
+                        * LINE_FLAG_OUTPUT)
+                    | (u8::from(meta.prompt()) * LINE_FLAG_PROMPT)
                     | (u8::from(meta.wrapped()) * LINE_FLAG_WRAPPED)
             })
             .collect::<Vec<_>>()

@@ -274,3 +274,139 @@ fn output_marks_reset_with_the_terminal() {
     feed(&mut terminal, &mut filter, b"\x1bc");
     assert!(filter.output_rows(&terminal).is_empty());
 }
+
+fn frozen_screen() -> (Terminal<'static, 'static>, EngineFilter, CopyModeSlot) {
+    let mut terminal = new_terminal(20, 6, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    let before = format!("{}\r\n\x1b]133;C\x07out\r\n", osc8("http://old", "old"));
+    feed(&mut terminal, &mut filter, before.as_bytes());
+    let mut selection = None;
+    let mut copy_mode = None;
+    enter_copy_mode(
+        &mut terminal,
+        &mut selection,
+        &mut copy_mode,
+        false,
+        false,
+        None,
+        false,
+    )
+    .expect("copy mode");
+    let mode = copy_mode.as_deref().expect("frozen revision");
+    mode.revision
+        .stamp_output_rows(|| filter.output_rows(&terminal));
+    let after = format!(
+        "plain\r\n{}\r\n\x1b]133;C\x07later\r\n",
+        osc8("http://new", "new")
+    );
+    feed(&mut terminal, &mut filter, after.as_bytes());
+    (terminal, filter, copy_mode)
+}
+
+#[test]
+fn mode_capture_hyperlinks_print_nothing_like_the_pin_mode_screen() {
+    let (terminal, filter, copy_mode) = frozen_screen();
+    let options = CaptureOptions {
+        mode: true,
+        hyperlinks: true,
+        ..CaptureOptions::default()
+    };
+    assert_eq!(
+        capture_terminal_marked(
+            &terminal,
+            copy_mode.as_deref(),
+            options,
+            &filter.output_rows(&terminal)
+        )
+        .expect("mode capture"),
+        ""
+    );
+}
+
+#[test]
+fn mode_capture_line_flags_keep_the_frozen_link_and_output_marks() {
+    let (terminal, filter, copy_mode) = frozen_screen();
+    let options = CaptureOptions {
+        mode: true,
+        line_flags: true,
+        ..CaptureOptions::default()
+    };
+    assert_eq!(
+        capture_terminal_marked(
+            &terminal,
+            copy_mode.as_deref(),
+            options,
+            &filter.output_rows(&terminal)
+        )
+        .expect("mode capture"),
+        "H old\nO out\n- \n- \n- \n- "
+    );
+}
+
+#[test]
+fn a_full_row_erase_drops_the_output_mark_like_the_pin() {
+    let mut terminal = new_terminal(20, 6, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    filter.write(
+        b"\x1b]133;C\x07out\r\nmore\r\n\x1b[H\x1b[2Jafter\r\n\x1b]133;C\x07keep\r\nxy\x1b[1;3H\x1b[J\r\n",
+        EngineKnobs {
+            scroll_on_clear: false,
+            ..EngineKnobs::default()
+        },
+        &mut terminal,
+        &mut Vec::new(),
+        &mut None,
+        &mut None,
+    );
+    assert_eq!(
+        capture(
+            &terminal,
+            &filter,
+            CaptureOptions {
+                line_flags: true,
+                ..CaptureOptions::default()
+            }
+        ),
+        "- af\n- \n- \n- \n- \n- "
+    );
+}
+
+#[test]
+fn entering_the_alternate_screen_drops_its_old_output_marks() {
+    let mut terminal = new_terminal(20, 4, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    feed(
+        &mut terminal,
+        &mut filter,
+        b"\x1b[?1049h\x1b]133;C\x07alt\x1b[?1049l\x1b[?1049h",
+    );
+    assert!(filter.output_rows(&terminal).is_empty());
+}
+
+#[test]
+fn output_marks_last_as_long_as_their_rows_are_retained() {
+    let mut terminal = new_terminal(20, 6, 5000).expect("terminal");
+    let mut filter = EngineFilter::default();
+    let mut bytes = String::new();
+    for row in 0..1030 {
+        bytes.push_str("\x1b]133;C\x07row");
+        bytes.push_str(&row.to_string());
+        bytes.push_str("\r\n");
+    }
+    feed(&mut terminal, &mut filter, bytes.as_bytes());
+    assert_eq!(filter.output_rows(&terminal).len(), 1030);
+    let flags = capture(
+        &terminal,
+        &filter,
+        CaptureOptions {
+            line_flags: true,
+            start: CaptureBoundary::HistoryStart,
+            ..CaptureOptions::default()
+        },
+    );
+    assert!(flags.starts_with("O row0\nO row1\n"), "{flags:.40}");
+    assert_eq!(
+        flags.lines().filter(|line| line.starts_with("O ")).count(),
+        1030
+    );
+}

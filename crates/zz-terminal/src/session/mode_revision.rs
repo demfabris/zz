@@ -83,6 +83,7 @@ pub(super) struct ModeRevision {
     pub(super) search: Arc<HistorySearchSnapshot>,
     grid: Mutex<CopyGrid>,
     total: u32,
+    output_rows: std::sync::OnceLock<Vec<u64>>,
 }
 
 struct ModeReaderRow {
@@ -229,7 +230,28 @@ impl ModeRevision {
             search,
             grid: Mutex::new(grid),
             total,
+            output_rows: std::sync::OnceLock::new(),
         }))
+    }
+
+    pub(super) fn stamp_output_rows(&self, rows: impl FnOnce() -> Vec<u64>) {
+        let _ = self.output_rows.get_or_init(rows);
+    }
+
+    pub(super) fn output_rows(&self) -> &[u64] {
+        self.output_rows.get().map_or(&[], Vec::as_slice)
+    }
+
+    pub(super) fn row_has_hyperlink(&self, row: u32) -> bool {
+        let terminal = Arc::clone(&self.grid.lock().terminal);
+        let snapshot = terminal.lock();
+        libghostty_vt::terminal::GridRead::grid_ref(
+            &*snapshot,
+            libghostty_vt::terminal::Point::Screen(PointCoordinate { x: 0, y: row }),
+        )
+        .and_then(|grid| grid.row())
+        .and_then(libghostty_vt::screen::Row::has_hyperlink)
+        .unwrap_or(false)
     }
 
     pub(super) fn viewport_cells(&self, offset: u32) -> Arc<[PackedCell]> {

@@ -37,6 +37,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
         slot: Arc<Mutex<ControlSlot>>,
         publisher: Publisher,
         surface: SurfaceTerminal<'a, 'b>,
+        engine_filter: EngineFilter,
         frozen: bool,
     ) -> Result<Self, WorkerError> {
         let SurfaceTerminal {
@@ -79,7 +80,7 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
             control_rx,
             slot,
             publisher,
-            engine_filter: EngineFilter::default(),
+            engine_filter,
             mouse_encoder: mouse::Encoder::new()?,
             mouse_event: mouse::Event::new()?,
             input_bytes: Vec::with_capacity(LINK_URI_SCRATCH_BYTES),
@@ -431,6 +432,11 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                     &mut self.pending_copy_source,
                     &mut self.pane_search,
                 ))?;
+                stamp_copy_mode_marks(&self.terminal, &self.engine_filter, &self.active_views);
+                let state = self
+                    .active_views
+                    .get_mut(&view)
+                    .expect("active view was checked above");
                 self.publisher
                     .publish_search_string(self.pane_search.as_ref());
                 let closed = self.frozen && state.copy_mode.is_none();
@@ -577,6 +583,11 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
             Command::CaptureCopySource { reply } => {
                 let _ = reply.send(
                     capture_copy_source(&mut self.terminal)
+                        .inspect(|source| {
+                            source.revision.stamp_output_rows(|| {
+                                self.engine_filter.output_rows(&self.terminal)
+                            });
+                        })
                         .map_err(|_| TerminalCaptureError::ActorStopped),
                 );
             }

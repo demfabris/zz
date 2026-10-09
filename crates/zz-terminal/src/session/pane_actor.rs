@@ -1250,6 +1250,11 @@ impl PaneActor {
             Command::CaptureCopySource { reply } => {
                 let _ = reply.send(
                     capture_copy_source(&mut self.terminal)
+                        .inspect(|source| {
+                            source.revision.stamp_output_rows(|| {
+                                self.engine_filter.output_rows(&self.terminal)
+                            });
+                        })
                         .map_err(|_| TerminalCaptureError::ActorStopped),
                 );
                 self.compression.rearm();
@@ -1423,6 +1428,7 @@ impl PaneActor {
                             &mut self.pane_search,
                         ))?
                     };
+                    stamp_copy_mode_marks(&self.terminal, &self.engine_filter, &self.active_views);
                     self.publisher
                         .publish_search_string(self.pane_search.as_ref());
                     let is_in_copy_mode = self
@@ -2257,7 +2263,14 @@ impl DeadPane {
         {
             surface.pending_commands.push(Command::Wake);
         }
-        surface_actor::SurfaceActor::new(self.control_rx, self.slot, self.publisher, surface, false)
-            .map(Some)
+        surface_actor::SurfaceActor::new(
+            self.control_rx,
+            self.slot,
+            self.publisher,
+            surface,
+            self.engine_filter,
+            false,
+        )
+        .map(Some)
     }
 }

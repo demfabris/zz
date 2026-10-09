@@ -45,7 +45,7 @@
       "id": "fix.tui-regressions",
       "track": "fix",
       "title": "Regressions the 3.8 fixture rebaseline found on main",
-      "status": "review",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-tui/src",
@@ -73,7 +73,8 @@
         "2026-10-09 from pin.display-panes: one manual repro (outer tmux status bar on at attach) left the zz window at 78x23 for an 80x24 client after two resize-pane -Z; likely the same bug as TUI-014.",
         "2026-10-09: lane done at 5e9ab7774: clauses 1,3,4,5,6 fixed (TUI-014 from 095151f19/d9a36e312 stale size write-back; TUI-018 from e43308848; TUI-005 fixture timing; TUI-012 fixture wrong; chain attach bug found via launch-diff); integration pass merging main + fixing zz-cli test broken by 82dca06a9",
         "PAUSED 2026-10-09: integration done at aad92d4b7 (all fixtures, verify-claims TUI-014/TUI-003, zz-daemon/zz-cli, clippy, fmt, compat check green); needs its Codex review, then merge.",
-        "2026-10-09: RESUMED: main merged at ce1ebd317 (both sides deleted a fixed known_drift case); Codex review running."
+        "2026-10-09: RESUMED: main merged at ce1ebd317 (both sides deleted a fixed known_drift case); Codex review running.",
+        "2026-10-09: Codex review 1 (fix.tui-regressions-1.md): 1 P1, the stale-report guard in write_back_terminal_geometries drops control-client geometry too; fix pass launched in slot d."
       ]
     },
     {
@@ -577,7 +578,7 @@
       "id": "pin.keys-copy",
       "track": "pin",
       "title": "3.8 default keys, menus and copy-mode commands",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -600,7 +601,8 @@
       "notes": [
         "2026-10-09: lane done at dca3b35a0: 10/11 closed; menus stay per-client (menus.client-owned, native) with 3.8's window-relative placement adopted; accepted by orchestrator (consistent with copy mode per client, TUI-014). Left: goto-line absolute numbering with line numbers on; GUI line numbers native.",
         "PAUSED 2026-10-09: fix pass 8eafea12a + merge of main cb3b3f244 committed; the post-merge checks (smoke/copy-mode-line-numbers vs 3.8, tui-overlays/tui-mouse --self-check, tui-copy-mode, zz-daemon lib, clippy, fmt, just compat check) did not run: run them, then a second review, then merge.",
-        "2026-10-09: RESUMED: main merged clean at 5195f9272; lane relaunched for the post-merge checks; then review 2."
+        "2026-10-09: RESUMED: main merged clean at 5195f9272; lane relaunched for the post-merge checks; then review 2.",
+        "2026-10-09: Post-merge checks green at 2fef77246 (copy-mode-line-numbers 10 clean vs 3.8, tui-overlays 44/44, tui-mouse 51/51, zz-daemon 1687, zz-terminal 453, clippy, fmt, compat check); review 2 running."
       ]
     },
     {
@@ -675,7 +677,8 @@
         "2026-10-09: session 1 at b4d83d69a: step 1 done, step 2 half (floating-panes scenario 75 steps clean vs 3.8; 21 pane.floating-model items closed). Resume: resize-pane on floats, swap-pane modal/float errors and -U/-D skipping floats, missing scenario lines, directional select-pane/compass hit order for floats, then steps 3-6",
         "2026-10-09: session 2 done at df33a71e8: steps A-E committed; floating-panes 154 + floating-zoom 55 steps clean vs 3.8; popup machinery deleted; wire appends under 108. Left: popup kill exit code 129, remain-on-exit timing, resize-pane -y border-status adjustment; 9 display-popup smoke scenarios now differ from 3.8 by the master-model ruling (to register as known differentials).",
         "PAUSED 2026-10-09: first Codex review was stopped before it reported: rerun review.sh c float.core. Also open: register the 9 display-popup smoke scenarios as known differences (master modal-pane model), popup kill exit code 129, remain-on-exit timing at spawn, resize-pane -y border-status adjustment.",
-        "2026-10-09: RESUMED: main merged at 04ed1a96d (registry, wire doc, gaps.md by hand); session 3 relaunched (compile, exit code 129, remain-on-exit timing, resize-pane -y, register the 9 display-popup smoke diffs); Codex review 1 running on 04ed1a96d."
+        "2026-10-09: RESUMED: main merged at 04ed1a96d (registry, wire doc, gaps.md by hand); session 3 relaunched (compile, exit code 129, remain-on-exit timing, resize-pane -y, register the 9 display-popup smoke diffs); Codex review 1 running on 04ed1a96d.",
+        "2026-10-09: Codex review 1 (float.core-1.md): 9 P1 + 1 P2 (preset split-id panic, popup retention before spawn, float split validates late, new-pane -I stdin, popup kill 129, resize/move on zoomed floats, after-split-window hook, border-status -y, new-pane -M closed early); sent to the session 3 lane."
       ]
     },
     {

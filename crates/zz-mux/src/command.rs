@@ -46507,7 +46507,7 @@ mod tests {
         assert!(rows.contains(
             &"run-shell (run) [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]"
         ));
-        assert!(rows.contains(&"wait-for (wait) [-L|-S|-U] channel"));
+        assert!(rows.contains(&"wait-for (wait) [-L|-S|-U] [-l] [-w waiter] channel"));
         assert!(rows.contains(&"pipe-pane (pipep) [-IOo] [-t target-pane] [shell-command]"));
         assert_eq!(
             engine
@@ -46540,7 +46540,7 @@ mod tests {
                     .execute(&mut context, &command("list-commands", &[name]))
                     .unwrap()
                     .output,
-                "wait-for (wait) [-L|-S|-U] channel"
+                "wait-for (wait) [-L|-S|-U] [-l] [-w waiter] channel"
             );
         }
         for name in ["pipe-pane", "pipep"] {

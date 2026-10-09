@@ -677,10 +677,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
     (
-        "set-hook",
-        "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]",
-    ),
-    (
         "show-options",
         "[-AgHpqsvw] [-F format] [-t target-pane] [option]",
     ),
@@ -1330,7 +1326,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "wait-for",
         aliases: &["wait"],
         description: "Block or wake a client on a named channel",
-        usage: "[-L|-S|-U] channel",
+        usage: "[-L|-S|-U] [-l] [-w waiter] channel",
         options: &[
             CommandOptionSpec::flag("-L", "lock the channel"),
             CommandOptionSpec::flag("-S", "signal the channel"),
@@ -3257,8 +3253,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 309), ("optional", 8), ("required", 234)])
         );
-        assert_eq!((supported, unsupported), (519, 33));
-        assert_eq!(usage_overrides.len(), 27);
+        assert_eq!((supported, unsupported), (523, 29));
+        assert_eq!(usage_overrides.len(), 26);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

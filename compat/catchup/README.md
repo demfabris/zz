@@ -126,7 +126,9 @@ Each rule cost a campaign real time. The source is in brackets
    your turn waiting on a background task. [A reviewer that did was dropped, LOG.]
 9. **Fixtures that start tmux or zz**: scrub HOME and the XDG dirs only (not `env -i`), start tmux
    with `-L zzprobe-$$ -f /dev/null`, put sockets directly under `/tmp` with short names.
-   [A shared HOME made a fixture compare the pin with itself, LOG.]
+   [A shared HOME made a fixture compare the pin with itself, LOG.] Run every `compat/tui-*.sh` and
+   `compat/run.sh` with `LANG=en_US.UTF-8`: agent shells have `LANG` empty, and tmux then draws ACS
+   borders where zz draws Unicode, so whole fixtures go red (pin.keys-copy, 2026-10-09).
 10. **Proofs at tip**: every result in your report comes from your final commit.
 11. **Zones are a hint, not a fence.** If a clause needs a file outside your item's zones, edit it
     and say so. [Three cycles left items open because the last fix sat in "someone else's" crate.]

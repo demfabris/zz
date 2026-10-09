@@ -1,12 +1,13 @@
 [workspace]
 members = [
+    "clients/app",
+    "clients/ios",
     "crates/zz",
     "crates/zz-browser",
     "crates/zz-chrome-import",
     "crates/zz-cli",
     "crates/zz-client",
     "crates/zz-config",
-    "crates/zz-gpui-ios",
     "crates/zz-hotreload",
     "crates/zz-kit",
     "crates/zz-client-ffi",

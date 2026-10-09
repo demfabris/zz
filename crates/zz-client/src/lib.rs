@@ -14,6 +14,8 @@ pub mod agent_transcript;
 mod chrome;
 pub mod completion;
 mod core;
+#[cfg(not(target_family = "wasm"))]
+pub mod element_picker;
 mod input;
 mod layout;
 pub mod local_scroll;

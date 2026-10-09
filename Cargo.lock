@@ -11391,6 +11391,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "zpui_ios"
+version = "0.1.0"
+dependencies = [
+ "accesskit_ios",
+ "anyhow",
+ "async-task",
+ "block2 0.6.2",
+ "dispatch2",
+ "futures",
+ "image",
+ "log",
+ "memmap2",
+ "objc",
+ "parking_lot",
+ "raw-window-handle",
+ "uuid",
+ "zpui",
+ "zpui_wgpu",
+]
+
+[[package]]
 name = "zpui_linux"
 version = "0.1.0"
 dependencies = [
@@ -11738,6 +11759,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "zz-app"
+version = "0.16.0"
+dependencies = [
+ "async-channel",
+ "base64 0.23.1",
+ "block2 0.6.2",
+ "chrono",
+ "futures",
+ "image",
+ "js-sys",
+ "log",
+ "objc",
+ "percent-encoding",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "zpui",
+ "zpui_ios",
+ "zz-client",
+ "zz-daemon",
+ "zz-protocol",
+ "zz-terminal",
+ "zz-ui",
+]
+
+[[package]]
 name = "zz-browser"
 version = "0.16.0"
 dependencies = [
@@ -11820,8 +11870,10 @@ dependencies = [
  "agent-client-protocol-schema",
  "base64 0.23.1",
  "foldhash",
+ "getrandom 0.4.3",
  "log",
  "neo_frizbee",
+ "parking_lot",
  "serde",
  "serde_json",
  "tempfile",
@@ -11906,46 +11958,28 @@ dependencies = [
 ]
 
 [[package]]
-name = "zz-gpui-ios"
-version = "0.16.0"
-dependencies = [
- "accesskit_ios",
- "anyhow",
- "async-channel",
- "async-task",
- "base64 0.23.1",
- "block2 0.6.2",
- "chrono",
- "dispatch2",
- "env_logger",
- "futures",
- "getrandom 0.4.3",
- "image",
- "log",
- "memmap2",
- "objc",
- "parking_lot",
- "percent-encoding",
- "raw-window-handle",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "uuid",
- "zpui",
- "zpui_wgpu",
- "zz-client",
- "zz-daemon",
- "zz-protocol",
- "zz-terminal",
- "zz-ui",
-]
-
-[[package]]
 name = "zz-hotreload"
 version = "0.16.0"
 dependencies = [
  "mimalloc",
  "zz",
+ "zz-ui",
+]
+
+[[package]]
+name = "zz-ios"
+version = "0.16.0"
+dependencies = [
+ "env_logger",
+ "futures",
+ "image",
+ "zpui",
+ "zpui_ios",
+ "zz-app",
+ "zz-client",
+ "zz-daemon",
+ "zz-protocol",
+ "zz-terminal",
  "zz-ui",
 ]
 

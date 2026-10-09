@@ -4,6 +4,7 @@ members = [
     "crates/collections",
     "crates/zpui",
     "crates/zpui_apple",
+    "crates/zpui_ios",
     "crates/zpui_linux",
     "crates/zpui_macos",
     "crates/zpui_macros",
@@ -41,6 +42,7 @@ zpui_platform = { path = "crates/zpui_platform", default-features = false }
 zpui_shared_string = { path = "crates/zpui_shared_string" }
 zpui_util = { path = "crates/zpui_util" }
 zpui_web = { path = "crates/zpui_web" }
+zpui_ios = { path = "crates/zpui_ios" }
 zpui_wgpu = { path = "crates/zpui_wgpu" }
 zpui_windows = { path = "crates/zpui_windows", default-features = false }
 http_client = { path = "crates/http_client" }

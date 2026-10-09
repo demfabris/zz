@@ -1,19 +1,5 @@
-#[path = "../../gpui-shared/src/app.rs"]
-mod app;
-#[path = "../../gpui-shared/src/attachments.rs"]
-mod attachments;
-#[path = "../../gpui-shared/src/command_palette.rs"]
-mod command_palette;
-#[path = "../../gpui-shared/src/connection.rs"]
-mod connection;
-#[path = "../../gpui-shared/src/preferences.rs"]
-mod preferences;
-#[path = "../../gpui-shared/src/terminal.rs"]
-mod terminal;
-#[path = "../../gpui-shared/src/terminal_images.rs"]
-mod terminal_images;
-
 use std::borrow::Cow;
+use zz_app::app;
 
 use zpui::{App, AppContext as _, Bounds, WindowBounds, WindowOptions, point, px, size};
 use zz_ui::{Root, Theme, UiZoom};

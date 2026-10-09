@@ -648,6 +648,120 @@ impl HookView for BeforeView<'_> {
     }
 }
 
+const CLIENT_PAYLOAD: &[&str] = &["client", "session", "window", "window_index", "pane"];
+const SESSION_PAYLOAD: &[&str] = &["session"];
+const WINDOW_PAYLOAD: &[&str] = &["window"];
+const WINLINK_PAYLOAD: &[&str] = &["session", "window", "window_index"];
+const PANE_PAYLOAD: &[&str] = &["pane", "window"];
+const PANE_EXIT_PAYLOAD: &[&str] = &[
+    "pane",
+    "window",
+    "exit_status",
+    "exit_signal",
+    "exit_success",
+];
+const PANE_MODE_PAYLOAD: &[&str] = &[
+    "pane",
+    "window",
+    "current_mode",
+    "previous_mode",
+    "mode_entered",
+];
+const PANE_PROMPT_PAYLOAD: &[&str] = &["pane", "window", "prompt_type"];
+const PANE_COMMAND_PAYLOAD: &[&str] = &[
+    "session",
+    "window",
+    "window_index",
+    "pane",
+    "command_status",
+    "command_start_time",
+    "command_end_time",
+    "command_duration",
+];
+const RESIZED_PAYLOAD: &[&str] = &["width", "height", "old_width", "old_height"];
+
+pub(super) fn payload_keys(
+    event: &str,
+) -> Option<(&'static [&'static str], &'static [&'static str])> {
+    let none: &[&str] = &[];
+    Some(match event {
+        "client-attached" | "client-detached" | "client-closed" | "client-active"
+        | "client-created" | "client-focus-in" | "client-focus-out" | "client-light-theme"
+        | "client-dark-theme" => (CLIENT_PAYLOAD, none),
+        "client-session-changed" => (CLIENT_PAYLOAD, &["new_session", "old_session"]),
+        "client-resized" => (CLIENT_PAYLOAD, RESIZED_PAYLOAD),
+        "session-created" | "session-closed" => (SESSION_PAYLOAD, none),
+        "session-renamed" => (SESSION_PAYLOAD, &["old_name", "new_name"]),
+        "session-added-to-group" | "session-removed-from-group" => {
+            (SESSION_PAYLOAD, &["group", "group_size"])
+        }
+        "session-window-changed" => (
+            WINLINK_PAYLOAD,
+            &[
+                "new_window",
+                "new_window_index",
+                "old_window",
+                "old_window_index",
+            ],
+        ),
+        "window-created"
+        | "window-closed"
+        | "window-zoomed"
+        | "window-unzoomed"
+        | "window-layout-changed" => (WINDOW_PAYLOAD, none),
+        "window-renamed" => (WINDOW_PAYLOAD, &["old_name", "new_name"]),
+        "window-pane-changed" => (WINDOW_PAYLOAD, &["pane", "new_pane", "old_pane"]),
+        "window-resized" => (WINDOW_PAYLOAD, RESIZED_PAYLOAD),
+        "window-linked" | "window-unlinked" | "alert-bell" | "alert-activity" | "alert-silence" => {
+            (WINLINK_PAYLOAD, none)
+        }
+        "pane-focus-in" | "pane-focus-out" | "pane-set-clipboard" | "pane-activity"
+        | "pane-bell" | "pane-shell-prompt" => (PANE_PAYLOAD, none),
+        "pane-title-changed" => (PANE_PAYLOAD, &["new_title"]),
+        "pane-exited" | "pane-died" => (PANE_EXIT_PAYLOAD, none),
+        "pane-mode-entered" | "pane-mode-exited" | "pane-mode-changed" => (PANE_MODE_PAYLOAD, none),
+        "pane-prompt-opened" | "pane-prompt-closed" => (PANE_PROMPT_PAYLOAD, none),
+        "pane-resized" => (PANE_PAYLOAD, RESIZED_PAYLOAD),
+        "pane-moved" => (
+            PANE_PAYLOAD,
+            &[
+                "window_index",
+                "old_window",
+                "new_window",
+                "old_window_index",
+                "new_window_index",
+            ],
+        ),
+        "pane-created" => (
+            WINLINK_PAYLOAD,
+            &[
+                "pane",
+                "pane_command",
+                "pane_current_path",
+                "created_empty",
+                "created_respawn",
+            ],
+        ),
+        "pane-command-started" | "pane-command-finished" => (PANE_COMMAND_PAYLOAD, none),
+        "marked-pane-changed" => (PANE_PAYLOAD, &["new_pane", "old_pane", "marked"]),
+        "paste-buffer-changed" | "paste-buffer-deleted" => (&["paste_buffer"], none),
+        _ => return None,
+    })
+}
+
+pub(super) fn fit_payload(name: &str, variables: &mut BTreeMap<String, String>) {
+    let Some((base, extra)) = payload_keys(name) else {
+        return;
+    };
+    let allowed = |key: &str| key == "event" || base.contains(&key) || extra.contains(&key);
+    variables.retain(|key, _| {
+        let Some(key) = key.strip_prefix("hook_") else {
+            return true;
+        };
+        allowed(key) || key.strip_suffix("_name").is_some_and(allowed)
+    });
+}
+
 pub(super) fn session_context(view: &impl HookView, session: SessionId) -> ExecutionContext {
     let Some((_, active_window)) = view.session(session) else {
         return ExecutionContext::new(Some(session), None, None);
@@ -688,32 +802,44 @@ pub(super) fn session_event(
 pub(super) fn window_event(
     name: &'static str,
     window: WindowId,
-    session: SessionId,
-    window_name: &str,
-    active_pane: PaneId,
     view: &impl HookView,
 ) -> PendingHookEvent {
-    let session_name = view
-        .session(session)
-        .map(|(name, _)| name.to_owned())
-        .unwrap_or_default();
-    PendingHookEvent {
-        name,
-        context: window_context(view, window),
-        exclude_client: None,
-        control_notified: false,
-        variables: BTreeMap::from([
-            (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-            (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
-            (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
-            (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
-            (
-                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
-                window_name.to_owned(),
-            ),
-            (HOOK_PANE_CONTEXT_FORMAT.to_owned(), active_pane.to_string()),
-        ]),
+    let mut variables = hook_variables(name);
+    put_window(&mut variables, "window", window, view);
+    payload_event(name, window_context(view, window), variables)
+}
+
+fn window_pane_changed_event(
+    window: WindowId,
+    pane: PaneId,
+    old: PaneId,
+    view: &impl HookView,
+) -> PendingHookEvent {
+    let mut event = window_event("window-pane-changed", window, view);
+    for (key, pane) in [("pane", pane), ("new_pane", pane), ("old_pane", old)] {
+        event
+            .variables
+            .insert(format!("hook_{key}"), pane.to_string());
     }
+    event
+}
+
+fn window_resized_event(
+    window: WindowId,
+    size: (u16, u16),
+    old: (u16, u16),
+    view: &impl HookView,
+) -> PendingHookEvent {
+    let mut event = window_event("window-resized", window, view);
+    put_size(&mut event.variables, size, old);
+    event
+}
+
+fn put_size(variables: &mut BTreeMap<String, String>, size: (u16, u16), old: (u16, u16)) {
+    variables.insert("hook_width".to_owned(), size.0.to_string());
+    variables.insert("hook_height".to_owned(), size.1.to_string());
+    variables.insert("hook_old_width".to_owned(), old.0.to_string());
+    variables.insert("hook_old_height".to_owned(), old.1.to_string());
 }
 
 pub(super) fn winlink_event(
@@ -741,7 +867,13 @@ pub(super) fn winlink_event(
                 HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
                 window_name.to_owned(),
             ),
-        ]),
+        ])
+        .into_iter()
+        .chain(
+            view.window(window)
+                .map(|state| ("hook_window_index".to_owned(), state.index.to_string())),
+        )
+        .collect(),
     }
 }
 
@@ -756,11 +888,7 @@ pub(super) fn pane_event(
         .window(window)
         .map(|window| window.name.to_owned())
         .unwrap_or_default();
-    let session_name = view
-        .session(session)
-        .map(|(name, _)| name.to_owned())
-        .unwrap_or_default();
-    PendingHookEvent::pane_named(name, pane, session, window, session_name, window_name)
+    PendingHookEvent::pane_named(name, pane, session, window, window_name)
 }
 
 fn put_session(
@@ -851,10 +979,7 @@ fn pane_resized_event(
     view: &impl HookView,
 ) -> PendingHookEvent {
     let mut variables = pane_payload("pane-resized", pane, window, view);
-    variables.insert("hook_width".to_owned(), size.0.to_string());
-    variables.insert("hook_height".to_owned(), size.1.to_string());
-    variables.insert("hook_old_width".to_owned(), old.0.to_string());
-    variables.insert("hook_old_height".to_owned(), old.1.to_string());
+    put_size(&mut variables, size, old);
     payload_event("pane-resized", pane_context(view, pane, window), variables)
 }
 
@@ -971,19 +1096,29 @@ pub(super) fn mux_hook_events_in(
         let Some((name, active_window)) = after.session(session) else {
             continue;
         };
-        if before
-            .session(session)
-            .is_some_and(|(_, previous)| previous != active_window)
+        if let Some((_, previous)) = before.session(session)
+            && previous != active_window
             && let Some(window) = after.window(active_window)
         {
-            events.push(winlink_event(
+            let mut event = winlink_event(
                 "session-window-changed",
                 session,
                 name,
                 active_window,
                 window.name,
                 after,
-            ));
+            );
+            put_window(&mut event.variables, "new_window", active_window, after);
+            event
+                .variables
+                .insert("hook_new_window_index".to_owned(), window.index.to_string());
+            put_window(&mut event.variables, "old_window", previous, before);
+            if let Some(old) = before.window(previous) {
+                event
+                    .variables
+                    .insert("hook_old_window_index".to_owned(), old.index.to_string());
+            }
+            events.push(event);
         }
     }
     for window in after.listed_windows() {
@@ -1035,14 +1170,7 @@ pub(super) fn mux_hook_events_in(
             continue;
         };
         if previous.name != state.name {
-            let mut event = window_event(
-                "window-renamed",
-                window,
-                state.session,
-                state.name,
-                state.active_pane,
-                after,
-            );
+            let mut event = window_event("window-renamed", window, after);
             event
                 .variables
                 .insert("hook_old_name".to_owned(), previous.name.to_owned());
@@ -1052,12 +1180,10 @@ pub(super) fn mux_hook_events_in(
             events.push(event);
         }
         if previous.active_pane != state.active_pane {
-            events.push(window_event(
-                "window-pane-changed",
+            events.push(window_pane_changed_event(
                 window,
-                state.session,
-                state.name,
                 state.active_pane,
+                previous.active_pane,
                 after,
             ));
         }
@@ -1070,21 +1196,12 @@ pub(super) fn mux_hook_events_in(
             }
         }
         if previous.layout != state.layout || previous.zoomed_pane != state.zoomed_pane {
-            events.push(window_event(
-                "window-layout-changed",
-                window,
-                state.session,
-                state.name,
-                state.active_pane,
-                after,
-            ));
+            events.push(window_event("window-layout-changed", window, after));
             if previous.extent != state.extent {
-                events.push(window_event(
-                    "window-resized",
+                events.push(window_resized_event(
                     window,
-                    state.session,
-                    state.name,
-                    state.active_pane,
+                    state.extent,
+                    previous.extent,
                     after,
                 ));
             }
@@ -1152,16 +1269,7 @@ fn zoom_cycle_events(
     let Some(state) = view.window(window) else {
         return Vec::new();
     };
-    let layout_changed = || {
-        window_event(
-            "window-layout-changed",
-            window,
-            state.session,
-            state.name,
-            state.active_pane,
-            view,
-        )
-    };
+    let layout_changed = || window_event("window-layout-changed", window, view);
     let border = engine.pane_border_status(window);
     let resized = state.zoomed_pane.and_then(|pane| {
         let zoomed = state.layout.displayed_pane_size(pane, Some(pane), border)?;
@@ -1184,7 +1292,7 @@ fn zoom_cycle_events(
 
 pub(super) const UNZOOMED_LAYOUT_VARIABLE: &str = zz_protocol::UNZOOMED_LAYOUT_VARIABLE;
 
-pub(super) fn is_window_resize_event(event: &PendingHookEvent, windows: &[WindowId]) -> bool {
+fn is_window_resize_event(event: &PendingHookEvent, windows: &[WindowId]) -> bool {
     matches!(
         event.name,
         "window-layout-changed" | "window-resized" | "window-zoomed" | "window-unzoomed"
@@ -1193,16 +1301,31 @@ pub(super) fn is_window_resize_event(event: &PendingHookEvent, windows: &[Window
         .any(|window| event.variables.get(HOOK_WINDOW_CONTEXT_FORMAT) == Some(&window.to_string()))
 }
 
-pub(super) fn window_resize_events(
+pub(super) fn replace_window_resize_events(
+    events: &mut Vec<PendingHookEvent>,
     engine: &MuxEngine,
     windows: &[WindowId],
     unzoomed_layouts: &BTreeMap<WindowId, String>,
-) -> Vec<PendingHookEvent> {
+) {
     if windows.is_empty() {
-        return Vec::new();
+        return;
     }
+    let size = |event: &PendingHookEvent, width: &str, height: &str| {
+        let value = |key: &str| event.variables.get(key)?.parse::<u16>().ok();
+        Some((value(width)?, value(height)?))
+    };
+    let old_sizes = events
+        .iter()
+        .filter(|event| event.name == "window-resized")
+        .filter_map(|event| {
+            Some((
+                event.variables.get(HOOK_WINDOW_CONTEXT_FORMAT)?.clone(),
+                size(event, "hook_old_width", "hook_old_height")?,
+            ))
+        })
+        .collect::<BTreeMap<_, _>>();
+    events.retain(|event| !is_window_resize_event(event, windows));
     let view = MuxHookSnapshot::capture(engine);
-    let mut events = Vec::new();
     for window in windows {
         let Some(state) = view.window(*window) else {
             continue;
@@ -1220,18 +1343,13 @@ pub(super) fn window_resize_events(
             }
             events.extend(cycle);
         }
-        for name in ["window-layout-changed", "window-resized"] {
-            events.push(window_event(
-                name,
-                *window,
-                state.session,
-                state.name,
-                state.active_pane,
-                &view,
-            ));
-        }
+        let old = old_sizes
+            .get(&window.to_string())
+            .copied()
+            .unwrap_or(state.extent);
+        events.push(window_event("window-layout-changed", *window, &view));
+        events.push(window_resized_event(*window, state.extent, old, &view));
     }
-    events
 }
 
 pub(super) fn apply_operation_events(
@@ -1421,18 +1539,11 @@ impl PendingHookEvent {
     pub(super) fn live_pane(name: &'static str, pane: PaneId, engine: &MuxEngine) -> Option<Self> {
         let window = engine.state.window_for_pane(pane)?;
         let window_state = engine.state.windows.get(&window)?;
-        let session_name = engine
-            .state
-            .sessions
-            .get(&window_state.session)
-            .map(|session| session.name.clone())
-            .unwrap_or_default();
         Some(Self::pane_named(
             name,
             pane,
             window_state.session,
             window,
-            session_name,
             window_state.name.clone(),
         ))
     }
@@ -1656,8 +1767,6 @@ pub(super) fn pane_prompt_hook_events(inner: &mut ServerState) -> Vec<PendingHoo
     let previous = std::mem::replace(&mut inner.open_pane_prompts, current);
     let event = |name: &'static str, pane: PaneId, prompt_type: CommandPromptType| {
         PendingHookEvent::live_pane(name, pane, &inner.engine).map(|mut event| {
-            event.variables.remove(HOOK_SESSION_CONTEXT_FORMAT);
-            event.variables.remove(HOOK_SESSION_NAME_CONTEXT_FORMAT);
             event.variables.insert(
                 "hook_prompt_type".to_owned(),
                 prompt_type_name(prompt_type).to_owned(),

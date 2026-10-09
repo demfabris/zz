@@ -647,16 +647,13 @@ fn add_command_payload(
     pane: PaneId,
     facts: &zz_terminal::PaneOutputFacts,
 ) {
-    if let Some(index) = inner
+    if let Some(window) = inner
         .engine
         .state
         .window_for_pane(pane)
         .and_then(|window| inner.engine.state.windows.get(&window))
-        .map(|window| window.index)
     {
-        event
-            .variables
-            .insert("hook_window_index".to_owned(), index.to_string());
+        add_winlink_payload(inner, event, window.session, window.index);
     }
     if let Some(status) = facts.command_status {
         event
@@ -680,6 +677,26 @@ fn add_command_payload(
             .variables
             .insert("hook_command_duration".to_owned(), duration.to_string());
     }
+}
+
+fn add_winlink_payload(
+    inner: &ServerState,
+    event: &mut PendingHookEvent,
+    session: SessionId,
+    index: u32,
+) {
+    event
+        .variables
+        .insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
+    if let Some(state) = inner.engine.state.sessions.get(&session) {
+        event.variables.insert(
+            HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+            state.name.clone(),
+        );
+    }
+    event
+        .variables
+        .insert("hook_window_index".to_owned(), index.to_string());
 }
 
 fn pane_event_if_hooked(
@@ -712,7 +729,12 @@ fn window_alert_notifications(
     let applies = action.applies(session_current);
     let hook = applies
         .then(|| PendingHookEvent::live_pane(hook_name, pane, &inner.engine))
-        .flatten();
+        .flatten()
+        .map(|mut event| {
+            add_winlink_payload(inner, &mut event, session, window_index);
+            event.variables.remove(HOOK_PANE_CONTEXT_FORMAT);
+            event
+        });
     let duration_ms = inner.engine.display_time_for_session(session);
     let clients = if applies {
         inner
@@ -4831,20 +4853,8 @@ impl PendingHookEvent {
     }
 
     #[cfg(test)]
-    fn window(
-        name: &'static str,
-        window: WindowId,
-        state: &HookWindowState,
-        snapshot: &MuxHookSnapshot,
-    ) -> Self {
-        hook_events::window_event(
-            name,
-            window,
-            state.session,
-            &state.name,
-            state.active_pane,
-            snapshot,
-        )
+    fn window(name: &'static str, window: WindowId, snapshot: &MuxHookSnapshot) -> Self {
+        hook_events::window_event(name, window, snapshot)
     }
 
     fn winlink(
@@ -4880,7 +4890,6 @@ impl PendingHookEvent {
         pane: PaneId,
         session: SessionId,
         window: WindowId,
-        session_name: String,
         window_name: String,
     ) -> Self {
         Self {
@@ -4890,8 +4899,6 @@ impl PendingHookEvent {
             control_notified: false,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
-                (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
-                (HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(), session_name),
                 (HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string()),
                 (HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(), window_name),
                 (HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string()),
@@ -9150,6 +9157,7 @@ impl Shared {
         state: &mut EventQueueFrame,
         mut event: PendingHookEvent,
     ) -> Option<InsertedQueueChild> {
+        hook_events::fit_payload(event.name, &mut event.variables);
         if state.publish_control && !event.control_notified {
             state
                 .notifications
@@ -9213,6 +9221,7 @@ impl Shared {
                 | "client-session-changed"
         );
         let mut control_variables = event.variables.clone();
+        hook_events::fit_payload(event.name, &mut control_variables);
         if event.name == "client-session-changed"
             && let Some(session) = event.context.session
         {
@@ -18515,12 +18524,12 @@ impl Shared {
             let resizes = terminal_resizes_for_panes(&inner, &affected);
             let sized = client_sized_windows(&inner);
             let mut events = scope.finish(&inner.engine, "refresh-client").events;
-            events.retain(|event| !hook_events::is_window_resize_event(event, &sized));
-            events.extend(hook_events::window_resize_events(
+            hook_events::replace_window_resize_events(
+                &mut events,
                 &inner.engine,
                 &sized,
                 &unzoomed_layouts,
-            ));
+            );
             (changed, resizes, events)
         };
         apply_terminal_resizes(resizes);
@@ -64975,19 +64984,22 @@ mod tests {
         let window_state = &snapshot.windows[&window];
         let pane_state = &snapshot.panes[&pane];
         let require = |event: PendingHookEvent, keys: &[&str]| {
-            for key in keys {
-                assert!(
-                    event.variables.contains_key(*key),
-                    "{} lacks {key}",
-                    event.name
-                );
-            }
+            let mut variables = event.variables.clone();
+            hook_events::fit_payload(event.name, &mut variables);
+            let mut payload = variables
+                .keys()
+                .filter_map(|key| key.strip_prefix("hook_"))
+                .collect::<Vec<_>>();
+            payload.sort_unstable();
+            let mut expected = keys.to_vec();
+            expected.sort_unstable();
+            assert_eq!(payload, expected, "{}", event.name);
         };
 
         for name in ["session-created", "session-closed", "session-renamed"] {
             require(
                 PendingHookEvent::session(name, session, session_state, &snapshot),
-                &["hook_session", "hook_session_name"],
+                &["session", "session_name"],
             );
         }
         for name in ["window-linked", "window-unlinked", "session-window-changed"] {
@@ -65001,28 +65013,18 @@ mod tests {
                     &snapshot,
                 ),
                 &[
-                    "hook_session",
-                    "hook_session_name",
-                    "hook_window",
-                    "hook_window_name",
+                    "session",
+                    "session_name",
+                    "window",
+                    "window_name",
+                    "window_index",
                 ],
             );
         }
-        for name in [
-            "window-renamed",
-            "window-layout-changed",
-            "window-resized",
-            "window-pane-changed",
-        ] {
+        for name in ["window-renamed", "window-layout-changed", "window-resized"] {
             require(
-                PendingHookEvent::window(name, window, window_state, &snapshot),
-                &[
-                    "hook_session",
-                    "hook_session_name",
-                    "hook_window",
-                    "hook_window_name",
-                    "hook_pane",
-                ],
+                PendingHookEvent::window(name, window, &snapshot),
+                &["window", "window_name"],
             );
         }
         for name in [
@@ -65030,17 +65032,10 @@ mod tests {
             "pane-mode-changed",
             "pane-died",
             "pane-exited",
-            "alert-bell",
         ] {
             require(
                 PendingHookEvent::pane(name, pane, pane_state, &snapshot),
-                &[
-                    "hook_session",
-                    "hook_session_name",
-                    "hook_window",
-                    "hook_window_name",
-                    "hook_pane",
-                ],
+                &["pane", "window", "window_name"],
             );
         }
         for name in [
@@ -65048,22 +65043,63 @@ mod tests {
             "client-session-changed",
             "client-detached",
         ] {
-            let event = PendingHookEvent::client(
-                name,
-                snapshot.session_context(session),
-                ClientId(7),
-                None,
+            require(
+                PendingHookEvent::client(
+                    name,
+                    snapshot.session_context(session),
+                    ClientId(7),
+                    None,
+                ),
+                &["client"],
             );
-            require(event.clone(), &["hook_client"]);
-            assert!(!event.variables.contains_key("hook_session"));
-            assert!(!event.variables.contains_key("hook_session_name"));
         }
         for name in ["paste-buffer-changed", "paste-buffer-deleted"] {
             require(
                 PendingHookEvent::paste_buffer(name, "named".to_owned()),
-                &["hook_paste_buffer"],
+                &["paste_buffer"],
             );
         }
+    }
+
+    #[test]
+    fn hook_payloads_drop_the_keys_3_8_does_not_fire() {
+        let full = BTreeMap::from(
+            [
+                "hook",
+                "hook_event",
+                "hook_client",
+                "hook_session",
+                "hook_session_name",
+                "hook_window",
+                "hook_window_name",
+                "hook_window_index",
+                "hook_pane",
+                "hook_old_name",
+                "hook_new_name",
+                "hook_exit_status",
+                "unzoomed_layout",
+            ]
+            .map(|key| (key.to_owned(), "x".to_owned())),
+        );
+        let fit = |name: &str| {
+            let mut variables = full.clone();
+            hook_events::fit_payload(name, &mut variables);
+            variables.into_keys().collect::<Vec<_>>().join(" ")
+        };
+        assert_eq!(
+            fit("window-renamed"),
+            "hook hook_event hook_new_name hook_old_name hook_window hook_window_name unzoomed_layout"
+        );
+        assert_eq!(
+            fit("pane-exited"),
+            "hook hook_event hook_exit_status hook_pane hook_window hook_window_name unzoomed_layout"
+        );
+        assert_eq!(
+            fit("alert-bell"),
+            "hook hook_event hook_session hook_session_name hook_window hook_window_index hook_window_name unzoomed_layout"
+        );
+        assert_eq!(fit("agent-state-changed"), fit("@user"));
+        assert_eq!(fit("@user").split(' ').count(), full.len());
     }
 
     fn install_client_event_log_hooks(
@@ -114773,7 +114809,10 @@ bind - split-window -v -c "#{pane_current_path}"
                 "pane-title-changed",
                 "display-message 'title=#{hook_pane}:#{hook_window}'",
             ),
-            ("alert-bell", "display-message 'bell=#{hook_pane}'"),
+            (
+                "alert-bell",
+                "display-message 'bell=#{hook_window}/#{hook_pane}'",
+            ),
         ] {
             shared
                 .execute(
@@ -114846,8 +114885,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 "renamed=fish",
                 "renamed=manual",
                 &format!("title={pane}:{window}"),
-                &format!("bell={pane}"),
-                &format!("bell={pane}"),
+                &format!("bell={window}/"),
+                &format!("bell={window}/"),
             ]
         );
     }

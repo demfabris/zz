@@ -9035,7 +9035,7 @@ impl CaptureWork {
             Ok((
                 u64::from(mode.revision.total_rows()),
                 u64::from(mode.revision.viewport_rows),
-                u64::from(mode.viewport_offset),
+                u64::from(mode.revision.maximum_offset()),
             ))
         } else {
             terminal
@@ -10077,7 +10077,7 @@ fn capture_mode_revision(
     mode: &CopyModeState,
     options: CaptureOptions,
 ) -> Result<String, TerminalCaptureError> {
-    capture_revision(&mode.revision, mode.viewport_offset, options)
+    capture_revision(&mode.revision, mode.revision.maximum_offset(), options)
 }
 
 /// Resolves `capture-pane` boundaries against a captured grid, whose visible

@@ -207,4 +207,22 @@ seen="$seen changed=$(main_client show-options -gqv @hev-changed)"
 main_client set-hook -gu client-session-changed
 main_client kill-session -t hevother
 
+payload() {
+    name=$1
+    shift
+    main_client wait-for -E -v "$name" >"$work/payload-$name" 2>&1 &
+    pid=$!
+    wait_waiters "$name" 1
+    main_client "$@"
+    finish_wait "$pid" "$name"
+    seen="$seen $name=[$(lines "$work/payload-$name")]"
+}
+
+main_client rename-window -t w:0 hevwin
+payload window-renamed rename-window -t w:0 hevwin2
+payload pane-exited split-window -d -t w:0 'exit 3'
+payload pane-title-changed select-pane -t w:0.0 -T hevtitle
+payload window-linked new-window -d -t w:5
+main_client kill-window -t w:5
+
 main_client set-environment -g HOOKS_EVENTS_SINK "$(echo $seen)"

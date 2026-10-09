@@ -529,9 +529,9 @@ Sources:
 - `crates/zz-terminal/src/appearance.rs`
 - `crates/zz-protocol/src/terminal_codec.rs`
 - `crates/zz-protocol/src/message.rs`
-- `crates/zz-daemon/src/client.rs`
+- `crates/zz-daemon-client/src/client.rs`
 - `crates/zz-daemon/src/daemon.rs`
-- `crates/zz-daemon/src/terminal_features.rs`
+- `crates/zz-daemon-client/src/terminal_features.rs`
 - `crates/zz-tui/src/terminal_event.rs`
 - `crates/zz-tui/src/app.rs`
 - `compat/tui-caps.sh`
@@ -806,7 +806,6 @@ Sources:
 - `crates/zz-tui/src/render/chooser.rs`
 - `crates/zz-tui/src/render/pane_mode.rs`
 - `compat/scenarios/smoke/fixtures/config-discovery-import.sh`
-- `crates/zz-client-ffi/src/ffi.rs`
 - `crates/zz-client/src/completion.rs`
 - `crates/zz-client/src/status_bar.rs`
 - `crates/zz-mux/src/lib.rs`
@@ -845,7 +844,7 @@ Sources:
 - `crates/zz/src/tray/facts.rs`
 - `knowledge/designs/tui-parity.md`
 - `compat/scenarios/census-hooks.txt`
-- `crates/zz-daemon/src/client.rs`
+- `crates/zz-daemon-client/src/client.rs`
 - `crates/zz-mux/src/command/mode_prompt.rs`
 - `crates/zz-mux/src/command/switch_mode.rs`
 - `crates/zz-mux/src/formats.rs`
@@ -1194,7 +1193,7 @@ Sources:
 - `crates/zz-cli/src/lib.rs`
 - `crates/zz-cli/tests/cli_binary.rs`
 - `crates/zz-client/src/core.rs`
-- `crates/zz-daemon/src/client.rs`
+- `crates/zz-daemon-client/src/client.rs`
 - `crates/zz-daemon/src/daemon.rs`
 - `crates/zz-daemon/src/lib.rs`
 - `crates/zz-mux/src/command.rs`

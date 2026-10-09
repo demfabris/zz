@@ -296,6 +296,7 @@ const MAX_CLIPBOARD_WRITE_BYTES: usize = 8 * 1024 * 1024;
 const CLIPBOARD_TEXT_MIME: &str = "text/plain";
 const MAX_PENDING_ACTOR_COMMANDS: usize = 1;
 const MAX_PENDING_RELIABLE_EVENTS: usize = 4;
+const MAX_PENDING_SHELL_MARKS: usize = 65_536;
 const MAX_PENDING_RELIABLE_EVENT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PENDING_TERMINAL_EVENTS: usize = MAX_PENDING_RELIABLE_EVENTS + 1;
 const RETAINED_CELL_PLANES: usize = 2;
@@ -454,6 +455,7 @@ struct EngineFilter {
     program_status_changed: bool,
     replies: Option<Rc<RefCell<PtyEffects>>>,
     output: PaneOutputFacts,
+    shell_marks: Vec<ShellMark>,
     cursor_blink_set: bool,
     mouse_mode: Option<usize>,
     output_marks: Vec<(Screen, TrackedGridRef)>,
@@ -514,6 +516,21 @@ fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Which OSC 133 mark `input_osc_133` fires an event for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellMarkKind {
+    Prompt,
+    CommandStarted,
+    CommandFinished,
+}
+
+/// One OSC 133 event, with the pane's command facts as the mark left them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShellMark {
+    pub kind: ShellMarkKind,
+    pub facts: PaneOutputFacts,
 }
 
 /// What `input_parse_pane`, `input_parse_buffer` and `input_osc_133` keep on
@@ -1030,6 +1047,18 @@ impl EngineFilter {
         }
         if !overflowed && let Some(mark) = osc.strip_prefix(b"133;") {
             self.output.osc_133(mark, unix_now());
+            let kind = match mark.first() {
+                Some(b'A' | b'N') => Some(ShellMarkKind::Prompt),
+                Some(b'C') => Some(ShellMarkKind::CommandStarted),
+                Some(b'D') => Some(ShellMarkKind::CommandFinished),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                self.shell_marks.push(ShellMark {
+                    kind,
+                    facts: self.output,
+                });
+            }
         }
         if is_prompt_start(&osc) {
             self.program_status_changed |= self.program_status.program_left();
@@ -1081,6 +1110,10 @@ impl EngineFilter {
         self.mouse_mode = None;
         self.output_marks.clear();
         self.program_status_changed |= self.program_status.reset();
+    }
+
+    fn take_shell_marks(&mut self) -> Vec<ShellMark> {
+        std::mem::take(&mut self.shell_marks)
     }
 
     fn take_program_status(&mut self) -> Option<ProgramStatus> {
@@ -2091,6 +2124,8 @@ struct PublishedViewports {
     search_string: String,
     sunk: Vec<TerminalViewId>,
     size: (u16, u16),
+    shell_marks: VecDeque<ShellMark>,
+    shell_marks_dropped: u64,
 }
 
 impl PublishedViewports {
@@ -2108,6 +2143,8 @@ impl PublishedViewports {
             facts: TerminalFacts::default(),
             search_string: String::new(),
             sunk: Vec::new(),
+            shell_marks: VecDeque::new(),
+            shell_marks_dropped: 0,
         }
     }
 }
@@ -2841,6 +2878,23 @@ impl TerminalSession {
     #[must_use]
     pub fn last_command_status(&self) -> Option<i32> {
         self.latest.read().last_command_status
+    }
+
+    /// The OSC 133 marks the pane wrote since the last call, oldest first.
+    #[must_use]
+    pub fn take_shell_marks(&self) -> Vec<ShellMark> {
+        let mut latest = self.latest.write();
+        if latest.shell_marks.is_empty() {
+            return Vec::new();
+        }
+        latest.shell_marks.drain(..).collect()
+    }
+
+    /// How many OSC 133 marks were dropped because the daemon fell
+    /// `MAX_PENDING_SHELL_MARKS` behind.
+    #[must_use]
+    pub fn shell_marks_dropped(&self) -> u64 {
+        self.latest.read().shell_marks_dropped
     }
 
     #[must_use]
@@ -5731,6 +5785,20 @@ impl Publisher {
 
     fn set_last_command_status(&self, status: Option<i32>) {
         self.latest.write().last_command_status = status;
+    }
+
+    fn push_shell_marks(&self, marks: Vec<ShellMark>) {
+        if marks.is_empty() {
+            return;
+        }
+        let mut latest = self.latest.write();
+        for mark in marks {
+            if latest.shell_marks.len() == MAX_PENDING_SHELL_MARKS {
+                latest.shell_marks.pop_front();
+                latest.shell_marks_dropped += 1;
+            }
+            latest.shell_marks.push_back(mark);
+        }
     }
 
     fn set_program_status(&self, status: ProgramStatus) {

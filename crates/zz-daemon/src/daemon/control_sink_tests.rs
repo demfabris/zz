@@ -559,7 +559,8 @@ fn guard_and_rename_order(message: ProtocolMessage, order: &mut Vec<&'static str
             }
         }
         ProtocolMessage::Event(Event { payload, .. }) => match payload {
-            EventPayload::ControlCommandGuard { .. } | EventPayload::ControlCommandGuardRaw { .. } => {
+            EventPayload::ControlCommandGuard { .. }
+            | EventPayload::ControlCommandGuardRaw { .. } => {
                 order.push("guard");
             }
             EventPayload::HookEvent { name, .. } if name == "window-renamed" => {
@@ -638,13 +639,12 @@ fn a_pause_inside_nested_inserted_commands_follows_the_earlier_notification() {
     let inner = format!(
         "run-shell -C {{ rename-window -t nested-order:0 renamed ; refresh-client -A '{pane}:pause' }}"
     );
-    let command = CommandInvocation::new("run-shell", ["-C", inner.as_str()]).with_source(
-        SourceSpan {
+    let command =
+        CommandInvocation::new("run-shell", ["-C", inner.as_str()]).with_source(SourceSpan {
             source: "<control>".to_owned(),
             line: 1,
             column: 1,
-        },
-    );
+        });
     shared.execute_command_request(client, ClientKind::Control, &mut context, 1, &command);
     let mut order = Vec::new();
     for message in take_reliable_messages(&mailbox) {

@@ -1527,7 +1527,7 @@
     },
     {
       "id": "pin.hooks-events",
-      "title": "Fire the 3.8 hooks and event payloads",
+      "title": "Finish the 3.8 event waits, prompt events and payload keys",
       "decision": "adopt",
       "status": "open",
       "priority": "next",
@@ -1537,35 +1537,11 @@
       ],
       "owner": "daemon",
       "items": [
-        "flag:set-hook:-E",
-        "flag:set-hook:-T",
         "flag:wait-for:-E",
         "flag:wait-for:-F",
-        "flag:wait-for:-l",
         "flag:wait-for:-v",
-        "flag:wait-for:-w",
-        "hook:client-closed",
-        "hook:client-created",
-        "hook:marked-pane-changed",
-        "hook:pane-activity",
-        "hook:pane-bell",
-        "hook:pane-command-finished",
-        "hook:pane-command-started",
-        "hook:pane-created",
-        "hook:pane-mode-entered",
-        "hook:pane-mode-exited",
-        "hook:pane-moved",
         "hook:pane-prompt-closed",
         "hook:pane-prompt-opened",
-        "hook:pane-resized",
-        "hook:pane-shell-prompt",
-        "hook:session-added-to-group",
-        "hook:session-removed-from-group",
-        "hook:window-closed",
-        "hook:window-created",
-        "hook:window-unzoomed",
-        "hook:window-zoomed",
-        "native-hook:after-queue",
         "semantic:hook-event-payload-formats"
       ],
       "evidence": [
@@ -1575,13 +1551,12 @@
         "resource:crates/zz-daemon/src/daemon.rs"
       ],
       "acceptance": [
-        "The 21 hooks 3.8 adds fire where the pin fires them; pane-command-started, pane-command-finished and pane-shell-prompt come from OSC 133. zz accepts the names today and never fires them.",
-        "after-queue is gone from 3.8 and zz still has it, recorded as a zz-only hook until it is removed.",
-        "Every hook_<key> name the oracle's event_payload section lists resolves in a hook context; the old names keep resolving.",
-        "set-hook -E fires a user event, set-hook -T gates a -B monitor, and wait-for -E, -v, -l, -w and -F behave as 3.8."
+        "pane-prompt-opened and pane-prompt-closed fire when a command-prompt -P pane prompt opens and closes, with prompt_type in the payload.",
+        "Every hook_<key> name the oracle's event_payload section lists resolves in a hook context; twelve still do not: the pane-exited exit_status, exit_signal and exit_success, client-session-changed's old_session and new_session with their _name forms, pane-created's pane_command and pane_current_path, pane prompts' prompt_type, and the group pair zz will never produce.",
+        "wait-for -E waits for a hook, notification or user event, -v prints the payload keys to the waiting client, and -F filters on a format over the payload, as 3.8 does."
       ],
       "depends_on": [],
-      "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.hooks-events. 3.8 replaced notify with events: hook formats are now built from event payload keys (events-payload.c, hooks.c), so the oracle records the payload vocabulary instead of literal hook formats."
+      "reason": "Registered 2026-10-09 by catch-up item pin.move when the pin moved to the tmux 3.8 tag. Catch-up item pin.hooks-events fired 17 of the 21 new hooks with 3.8's payload keys, removed after-queue, added set-hook -E and -T and wait-for -l and -w (scenarios hooks-events-structure, hooks-events-output and hooks-events-user). Left here: the two pane prompt events wait on zz's command-prompt -P pane prompt raising an open/close signal the daemon can see; wait-for -E, -v and -F need an event sink every producer feeds whether or not a hook is set, plus a parked waiter that prints payload lines; and the twelve payload keys listed in the acceptance. session-added-to-group and session-removed-from-group moved to sessions.linked-groups."
     },
     {
       "id": "presentation.native-status",
@@ -1702,6 +1677,8 @@
         "format:session_group_size",
         "format:session_grouped",
         "format:window_linked",
+        "hook:session-added-to-group",
+        "hook:session-removed-from-group",
         "semantic:control-notify-window-add",
         "semantic:control-notify-window-close",
         "semantic:session-groups"
@@ -1718,7 +1695,7 @@
         "A control client watching a session where the pin would link or unlink a window sees zz answer unsupported command: link-window or unsupported command: unlink-window inside its %begin/%error guard, never a %window-add or %window-close for a window the session never gained or lost."
       ],
       "depends_on": [],
-      "reason": "One window belongs to one session in zz. Received 2026-09-06 from control-mode.notifications: semantic:control-notify-window-add and semantic:control-notify-window-close. That group's clause \"Match the pin notification kinds, bytes and ordering in each recorded divergent phase; the fixture must assert each side explicitly until that difference closes\" cannot be met for those two notifications, because the pin only emits them when one window is linked into a second session. Measured on pinned d77c9dc6 with smoke/control-notify on a fresh isolated -f /dev/null server: link-window -s notify-main:0 -t notify-other:1 emits %window-add @0 then %session-window-changed $1 @0 while the window stays in the observer session, and unlink-window -t notify-other:1 emits %session-window-changed $1 @2 then %window-close @0. zz answers unsupported command: link-window and unsupported command: unlink-window inside %begin/%error, which is this group's accepted stance rather than a defect, so the notifications are unreachable by construction. This closes them under the existing never decision; it does not revise or reopen that stance. compat/scenarios/smoke/fixtures/control-notify.py keeps the linked-window-add and linked-window-close phases and control-notify.json keeps both sides' recorded bytes, so a future engine that grew linked sessions would fail the fixture rather than pass it silently. Hint added 2026-10-09 by the catch-up lane fix.small-semantics, from the 2026-10-09 revisit (knowledge/research/2026-10-09-tmux-compat-revisit.md): the plain new-session -t refusal now reads `unsupported command: new-session -t (zz has no session groups; use attach -t <session>, every client keeps its own current window)`, because what a session group gives a tmux user, a second client on the same windows with its own current window, is what every zz client attached to one session already has. The nested new-session preflight and its pin-matching errors are unchanged."
+      "reason": "One window belongs to one session in zz. Received 2026-09-06 from control-mode.notifications: semantic:control-notify-window-add and semantic:control-notify-window-close. That group's clause \"Match the pin notification kinds, bytes and ordering in each recorded divergent phase; the fixture must assert each side explicitly until that difference closes\" cannot be met for those two notifications, because the pin only emits them when one window is linked into a second session. Measured on pinned d77c9dc6 with smoke/control-notify on a fresh isolated -f /dev/null server: link-window -s notify-main:0 -t notify-other:1 emits %window-add @0 then %session-window-changed $1 @0 while the window stays in the observer session, and unlink-window -t notify-other:1 emits %session-window-changed $1 @2 then %window-close @0. zz answers unsupported command: link-window and unsupported command: unlink-window inside %begin/%error, which is this group's accepted stance rather than a defect, so the notifications are unreachable by construction. This closes them under the existing never decision; it does not revise or reopen that stance. compat/scenarios/smoke/fixtures/control-notify.py keeps the linked-window-add and linked-window-close phases and control-notify.json keeps both sides' recorded bytes, so a future engine that grew linked sessions would fail the fixture rather than pass it silently. Hint added 2026-10-09 by the catch-up lane fix.small-semantics, from the 2026-10-09 revisit (knowledge/research/2026-10-09-tmux-compat-revisit.md): the plain new-session -t refusal now reads `unsupported command: new-session -t (zz has no session groups; use attach -t <session>, every client keeps its own current window)`, because what a session group gives a tmux user, a second client on the same windows with its own current window, is what every zz client attached to one session already has. The nested new-session preflight and its pin-matching errors are unchanged. The 3.8 hooks session-added-to-group and session-removed-from-group fire only from session_group_add and session_group_remove, so with no session groups zz has nothing to fire them from; pin.hooks-events registered them here on 2026-10-09."
     },
     {
       "id": "terminal.resize-pane-trim",
@@ -4282,6 +4259,21 @@
         "resource:crates/zz-daemon/src/daemon/control_sink_tests.rs"
       ],
       "resolution": "Closed by catch-up item pin.contract-breaks against the tmux 3.8 tag; all five items proved on a live 3.8 build. semantic:client-flag-active-pane-removed: the daemon's ClientFlagState loses active_pane, so attach-session -f, new-session -f and refresh-client -f skip the name like server_client_set_flags (no error) and #{client_flags} and the reconnect flags never list it; smoke/client-flags-active-pane attaches a control client with -f active-pane,ignore-size, sets it again and clears it, and both sides print attached,focused,control-mode,ignore-size then attached,focused,control-mode,no-detach-on-destroy with no %error. clients.read-only-and-focus drops semantic:per-client-active-pane for the same reason. semantic:percent-template-quote-escaping: cmd_template_replace writes ' as '\\'' for %% (not %%%), %N and %N% are unchanged and only digits 1 to 9 name an answer; smoke/command-prompt-target answers it's into 'q-%%' and \"d-%%%\" and both sides store q-it's and d-it's (the old rule left an unterminated quote). semantic:format-q-escapes-braces: format_quote_shell's list gains {, }, newline and tab; contract-breaks-3-8 prints a\\{b\\}\\ c\\=d on both sides and the zz-mux unit test covers newline and tab. semantic:relative-target-validation: an offset that strtonum refuses (+foo, -0, +0, +x1) is an error for windows and panes, and a +/- target no longer falls back to the window index, which used to make w:+0 and w:0.+0 select index 0; contract-breaks-3-8 matches every error line and the valid +1, -, 0.+1 and 0.- moves. semantic:control-notifications-outside-command-blocks: a command's hook-event notifications are published when the command finishes instead of when the queue drains, the per-request deferral no longer holds them behind the after- hooks, and a notification raised inside an inserted command (run-shell -C, a hook, a sourced line) joins that command's guard capture and goes out after its block, %pause and %continue from refresh-client -A included so nested run-shell -C keeps the 3.8 order, and the control client defers %pause and %continue past an open guard like every other notification; smoke/control-notify now records the 3.8 order on both sides (%pause and %continue after %end, %window-renamed before the after-rename-window hook's block, and after the inner block of run-shell -C 'rename-window ...'), the link-window rows staying the accepted unsupported-command difference. The layout-v2 lane's z-order note is closed too: select_layout_string no longer rebuilds z_order from the tree, as 3.8's layout_parse_apply_ctx reorders only floating panes; smoke/select-layout-z-order re-applies a window's own layout under pane-border-lines number and both attached screens stay byte-for-byte unchanged. No wire change."
+    },
+    {
+      "id": "pin.hooks-events.fired",
+      "title": "Fire the 3.8 window, pane, client and OSC 133 events",
+      "closed_on": "2026-10-09",
+      "evidence": [
+        "resource:crates/zz-daemon/src/daemon/hook_events.rs",
+        "resource:crates/zz-daemon/src/daemon.rs",
+        "resource:crates/zz-terminal/src/session.rs",
+        "resource:crates/zz-mux/src/command.rs",
+        "scenario:compat/scenarios/hooks-events-structure.txt",
+        "scenario:compat/scenarios/hooks-events-output.txt",
+        "scenario:compat/scenarios/hooks-events-user.txt"
+      ],
+      "resolution": "window-created, window-closed, window-zoomed, window-unzoomed, pane-created, pane-resized and pane-moved come from the hook diff with 3.8's payload keys (hook_window, hook_old_window, hook_width, hook_old_width and the rest); pane-mode-entered and pane-mode-exited ride with pane-mode-changed with current_mode, previous_mode and mode_entered; pane-bell and pane-activity fire from pane output; client-created and client-closed from control and terminal client registration; marked-pane-changed from select-pane -m and -M with marked, new_pane and old_pane; and pane-shell-prompt, pane-command-started and pane-command-finished from OSC 133 marks the engine filter queues, with command_status and the command times. Every event carries hook_event, renames carry old_name and new_name, pane-title-changed carries new_title, and after-hooks inherit the queue item's command and current_file as 3.8's hooks_insert_event does. after-queue is gone, as in 3.8. set-hook -E fires a user event through its @ hook, set-hook -T gates a -B monitor on a true value, and wait-for -l and -w list and wake a channel's waiters. Closed items: flag:set-hook:-E, flag:set-hook:-T, flag:wait-for:-l, flag:wait-for:-w, hook:client-closed, hook:client-created, hook:marked-pane-changed, hook:pane-activity, hook:pane-bell, hook:pane-command-finished, hook:pane-command-started, hook:pane-created, hook:pane-mode-entered, hook:pane-mode-exited, hook:pane-moved, hook:pane-resized, hook:pane-shell-prompt, hook:window-closed, hook:window-created, hook:window-unzoomed, hook:window-zoomed, native-hook:after-queue. hooks-events-structure, hooks-events-output and hooks-events-user pass against 3.8 under --strict-geometry."
     },
     {
       "id": "pin.keys-copy",

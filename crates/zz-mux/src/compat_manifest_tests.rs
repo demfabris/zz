@@ -895,7 +895,26 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         .difference(&zz_hook_names)
         .cloned()
         .collect::<BTreeSet<_>>();
-    assert_eq!(missing_hook_names.len(), 39);
+    assert_eq!(
+        missing_hook_names,
+        [
+            "hook_exit_signal",
+            "hook_exit_status",
+            "hook_exit_success",
+            "hook_group",
+            "hook_group_size",
+            "hook_new_session",
+            "hook_new_session_name",
+            "hook_old_session",
+            "hook_old_session_name",
+            "hook_pane_command",
+            "hook_pane_current_path",
+            "hook_prompt_type",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>()
+    );
     let missing_hook_item = "semantic:hook-event-payload-formats";
     let mut owned_items = missing_literal_items
         .values()

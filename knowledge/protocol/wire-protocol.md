@@ -861,6 +861,15 @@ the same way, so a UTF-8 guard's frame is unchanged; one holding other bytes now
   `Hello` and `Welcome` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - v108 requires updated clients and daemon together, including the daemon on every ssh host.
+  It appends `PaneMode::Panes { areas, borders, border_style, copy, format }`, the pin's
+  `window_panes_mode` (`display-panes` as a pane mode). Each `PanesModeArea` is one pane of the
+  source window laid out on the mode pane the way `window_panes_get_geometry` maps it, with its
+  `number`, its resolved `display-panes-colour` or `display-panes-active-colour`, its expanded
+  `display-panes-format` `label` and the `viewport` the daemon froze when the mode opened.
+  `PanesModeBorder { x, y, cell }` names a `CELL_*` border glyph drawn in `border_style`
+  (`display-panes-border-style`); `copy` is false when the window is larger than the pane and the
+  client draws each viewport through `screen_write_preview` instead of a top-left copy. The raw TUI
+  draws it; the GPUI, iOS and web clients ignore it and keep their native `DisplayPanes` overlay.
 - v107 requires updated clients and daemon together, including the daemon on every ssh host.
 - v106 requires updated clients and daemon together. A v105 daemon retains the old
   placement limit even after the GUI is rebuilt; restarting only the GUI cannot fix

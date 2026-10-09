@@ -313,3 +313,86 @@ fn search_text_typed_after_the_prefix_runs_the_prefix_binding() {
     scene.search_append("d");
     assert!(!scene.attached());
 }
+
+impl Scene {
+    fn presentation_sizes(&self) -> Vec<(ChooserPreviewSize, bool)> {
+        take_reliable_messages(&self.outbound)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooserPresentation {
+                            presentation: Some(presentation),
+                        },
+                    ..
+                }) => Some((presentation.preview_size, presentation.preview.is_some())),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+#[test]
+fn preview_flags_open_each_chooser_off_or_big_and_v_cycles_from_there() {
+    for (command, flags, opened, cycled) in [
+        (
+            "choose-tree",
+            &[][..],
+            ChooserPreviewSize::Normal,
+            ChooserPreviewSize::Off,
+        ),
+        (
+            "choose-tree",
+            &["-N"][..],
+            ChooserPreviewSize::Off,
+            ChooserPreviewSize::Big,
+        ),
+        (
+            "choose-tree",
+            &["-NN"][..],
+            ChooserPreviewSize::Big,
+            ChooserPreviewSize::Normal,
+        ),
+        (
+            "choose-client",
+            &["-N"][..],
+            ChooserPreviewSize::Off,
+            ChooserPreviewSize::Big,
+        ),
+        (
+            "choose-client",
+            &["-NN"][..],
+            ChooserPreviewSize::Big,
+            ChooserPreviewSize::Normal,
+        ),
+        (
+            "choose-buffer",
+            &["-N"][..],
+            ChooserPreviewSize::Off,
+            ChooserPreviewSize::Big,
+        ),
+        (
+            "choose-buffer",
+            &["-NN"][..],
+            ChooserPreviewSize::Big,
+            ChooserPreviewSize::Normal,
+        ),
+    ] {
+        let mut scene = attached_scene();
+        scene.open("set-buffer", &["-b", "alpha", "alpha"]);
+        scene.presentation_sizes();
+        let buffer = command == "choose-buffer";
+        scene.open(command, flags);
+        let (size, preview) = *scene.presentation_sizes().last().expect("opened");
+        assert_eq!(size, opened, "{command} {flags:?} opens");
+        assert_eq!(
+            preview,
+            opened != ChooserPreviewSize::Off,
+            "{command} {flags:?} builds a preview only when it draws one"
+        );
+        scene.press(key('v', Modifiers::default()), buffer);
+        let (size, preview) = *scene.presentation_sizes().last().expect("cycled");
+        assert_eq!(size, cycled, "{command} {flags:?} then v");
+        assert_eq!(preview, cycled != ChooserPreviewSize::Off);
+    }
+}

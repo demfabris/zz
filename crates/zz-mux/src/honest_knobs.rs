@@ -423,7 +423,6 @@ pub(crate) enum SessionOption {
     AssumePasteTime,
     BellAction,
     DefaultSize,
-    DisplayPanesTime,
     KeyTable,
     MessageCommandStyle,
     MessageFormat,
@@ -444,7 +443,6 @@ impl SessionOption {
             "assume-paste-time" => Self::AssumePasteTime,
             "bell-action" => Self::BellAction,
             "default-size" => Self::DefaultSize,
-            "display-panes-time" => Self::DisplayPanesTime,
             "key-table" => Self::KeyTable,
             "message-command-style" => Self::MessageCommandStyle,
             "message-format" => Self::MessageFormat,
@@ -466,7 +464,6 @@ impl SessionOption {
             Self::AssumePasteTime => "assume-paste-time",
             Self::BellAction => "bell-action",
             Self::DefaultSize => "default-size",
-            Self::DisplayPanesTime => "display-panes-time",
             Self::KeyTable => "key-table",
             Self::MessageCommandStyle => "message-command-style",
             Self::MessageFormat => "message-format",
@@ -509,7 +506,6 @@ pub(crate) struct SessionOptions {
     pub(crate) assume_paste_time_ms: u32,
     pub(crate) bell_action: BellAction,
     pub(crate) default_size: String,
-    pub(crate) display_panes_time_ms: u32,
     pub(crate) key_table: String,
     pub(crate) message_command_style: String,
     pub(crate) message_format: String,
@@ -530,7 +526,6 @@ impl Default for SessionOptions {
             assume_paste_time_ms: 1,
             bell_action: BellAction::Any,
             default_size: "80x24".to_owned(),
-            display_panes_time_ms: 1000,
             key_table: "root".to_owned(),
             message_command_style: crate::tmux_options::MESSAGE_COMMAND_STYLE_DEFAULT.to_owned(),
             message_format: crate::tmux_options::MESSAGE_FORMAT_DEFAULT.to_owned(),
@@ -553,7 +548,6 @@ impl SessionOptions {
             SessionOption::AssumePasteTime => self.assume_paste_time_ms.to_string(),
             SessionOption::BellAction => self.bell_action.as_str().to_owned(),
             SessionOption::DefaultSize => self.default_size.clone(),
-            SessionOption::DisplayPanesTime => self.display_panes_time_ms.to_string(),
             SessionOption::KeyTable => self.key_table.clone(),
             SessionOption::MessageCommandStyle => self.message_command_style.clone(),
             SessionOption::MessageFormat => self.message_format.clone(),
@@ -580,10 +574,6 @@ impl SessionOptions {
             ),
             SessionOption::BellAction => replace(&mut self.bell_action, defaults.bell_action),
             SessionOption::DefaultSize => replace(&mut self.default_size, defaults.default_size),
-            SessionOption::DisplayPanesTime => replace(
-                &mut self.display_panes_time_ms,
-                defaults.display_panes_time_ms,
-            ),
             SessionOption::KeyTable => replace(&mut self.key_table, defaults.key_table),
             SessionOption::MessageCommandStyle => replace(
                 &mut self.message_command_style,
@@ -645,13 +635,6 @@ impl SessionOptions {
                 }
                 Ok(replace(&mut self.default_size, next))
             }
-            SessionOption::DisplayPanesTime => {
-                let next = parse_number(value, 1, i32::MAX as u64)?;
-                Ok(replace(
-                    &mut self.display_panes_time_ms,
-                    u32::try_from(next).expect("display panes time is bounded"),
-                ))
-            }
             SessionOption::KeyTable => {
                 let next = required_string(value)?;
                 Ok(replace(&mut self.key_table, next))
@@ -693,6 +676,7 @@ impl SessionOptions {
 pub(crate) enum WindowOption {
     ClockModeColour,
     ClockModeStyle,
+    DisplayPanesTime,
     FillCharacter,
     MainPaneHeight,
     MainPaneWidth,
@@ -716,6 +700,7 @@ impl WindowOption {
         Some(match name {
             "clock-mode-colour" => Self::ClockModeColour,
             "clock-mode-style" => Self::ClockModeStyle,
+            "display-panes-time" => Self::DisplayPanesTime,
             "fill-character" => Self::FillCharacter,
             "main-pane-height" => Self::MainPaneHeight,
             "main-pane-width" => Self::MainPaneWidth,
@@ -740,6 +725,7 @@ impl WindowOption {
         match self {
             Self::ClockModeColour => "clock-mode-colour",
             Self::ClockModeStyle => "clock-mode-style",
+            Self::DisplayPanesTime => "display-panes-time",
             Self::FillCharacter => "fill-character",
             Self::MainPaneHeight => "main-pane-height",
             Self::MainPaneWidth => "main-pane-width",
@@ -780,6 +766,7 @@ impl WindowOption {
 pub(crate) struct WindowOptions {
     pub(crate) clock_mode_colour: String,
     pub(crate) clock_mode_style: String,
+    pub(crate) display_panes_time_ms: u32,
     pub(crate) fill_character: String,
     pub(crate) monitor_activity: bool,
     pub(crate) monitor_bell: bool,
@@ -799,6 +786,7 @@ impl Default for WindowOptions {
         Self {
             clock_mode_colour: "themeblue".to_owned(),
             clock_mode_style: "24".to_owned(),
+            display_panes_time_ms: 1000,
             fill_character: crate::tmux_options::FILL_CHARACTER_DEFAULT.to_owned(),
             monitor_activity: false,
             monitor_bell: true,
@@ -820,6 +808,7 @@ impl WindowOptions {
         match option {
             WindowOption::ClockModeColour => self.clock_mode_colour.clone(),
             WindowOption::ClockModeStyle => self.clock_mode_style.clone(),
+            WindowOption::DisplayPanesTime => self.display_panes_time_ms.to_string(),
             WindowOption::FillCharacter => self.fill_character.clone(),
             WindowOption::MainPaneHeight => self.preset.main_pane_height.clone(),
             WindowOption::MainPaneWidth => self.preset.main_pane_width.clone(),
@@ -848,6 +837,10 @@ impl WindowOptions {
             WindowOption::ClockModeStyle => {
                 replace(&mut self.clock_mode_style, defaults.clock_mode_style)
             }
+            WindowOption::DisplayPanesTime => replace(
+                &mut self.display_panes_time_ms,
+                defaults.display_panes_time_ms,
+            ),
             WindowOption::FillCharacter => {
                 replace(&mut self.fill_character, defaults.fill_character)
             }
@@ -912,6 +905,13 @@ impl WindowOptions {
                 value,
                 &["12", "24", "12-with-seconds", "24-with-seconds"],
             ),
+            WindowOption::DisplayPanesTime => {
+                let next = parse_number(value, 1, i32::MAX as u64)?;
+                Ok(replace(
+                    &mut self.display_panes_time_ms,
+                    u32::try_from(next).expect("display panes time is bounded"),
+                ))
+            }
             WindowOption::FillCharacter => replace_string(&mut self.fill_character, value),
             WindowOption::MainPaneHeight => {
                 replace_string(&mut self.preset.main_pane_height, value)

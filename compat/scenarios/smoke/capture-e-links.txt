@@ -1,0 +1,20 @@
+# capture-pane -e wraps linked text in OSC 8 the way the pin does: the open
+# follows the cell's SGR codes, a new link opens without a close, the close
+# lands on the first unlinked cell or at the row's end (after a repeat of the
+# last cell's codes under -J and -T), and a wrapped row's continuation is not
+# reopened. Links opened with id= are left out: zz reads no link id
+# (capture.terminal-engine-limits).
+corpus: none
+stage: fixtures/capture-e-links.sh ~/capture-e-links.sh
+new-session -d -s elinks -x 80 -y 20 'sh ~/capture-e-links.sh'
+run-shell "sleep 0.5"
+out: capture-pane -p -e -t elinks
+out: capture-pane -p -e -J -t elinks
+out: capture-pane -p -e -T -t elinks
+out: capture-pane -p -e -N -t elinks
+out: capture-pane -p -e -C -t elinks
+out: capture-pane -p -e -J -N -t elinks
+out: capture-pane -p -e -L -S 5 -E 9 -t elinks
+capture-pane -e -b elinks -t elinks
+out: show-buffer -b elinks
+kill-session -t elinks

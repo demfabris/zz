@@ -162,7 +162,7 @@
       "id": "fix.chooser-preview",
       "track": "fix",
       "title": "choose-tree/choose-client/choose-buffer -N and -NN",
-      "status": "review",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/command.rs",
@@ -175,9 +175,10 @@
         "The stale 'choosers have no preview pane' text in divergences.md:710-713 is removed."
       ],
       "branch": "catchup/fix.chooser-preview",
-      "sha": null,
+      "sha": "57ecd9d25",
       "notes": [
-        "2026-10-09: Lane done at 572ce8e3d: -N off, -NN big for choose-tree/client/buffer and customize-mode; tui-choosers 96/96 incl. 18 preview-flag checkpoints vs 3.8; zz-daemon 1693; clippy; fmt. Desktop chooser has no preview pane (documented). Review 1 running."
+        "2026-10-09: Lane done at 572ce8e3d: -N off, -NN big for choose-tree/client/buffer and customize-mode; tui-choosers 96/96 incl. 18 preview-flag checkpoints vs 3.8; zz-daemon 1693; clippy; fmt. Desktop chooser has no preview pane (documented). Review 1 running.",
+        "2026-10-09: Codex review 1 LGTM; merge checks green (clippy, zz-protocol 283, zz-mux 679 + integration, daemon chooser tests 28)."
       ]
     },
     {
@@ -649,7 +650,7 @@
       "id": "float.core",
       "track": "float",
       "title": "Floating panes in the mux and daemon",
-      "status": "active",
+      "status": "review",
       "deps": [
         "float.design",
         "pin.layout-v2",
@@ -690,7 +691,8 @@
         "2026-10-09: session 2 done at df33a71e8: steps A-E committed; floating-panes 154 + floating-zoom 55 steps clean vs 3.8; popup machinery deleted; wire appends under 108. Left: popup kill exit code 129, remain-on-exit timing, resize-pane -y border-status adjustment; 9 display-popup smoke scenarios now differ from 3.8 by the master-model ruling (to register as known differentials).",
         "PAUSED 2026-10-09: first Codex review was stopped before it reported: rerun review.sh c float.core. Also open: register the 9 display-popup smoke scenarios as known differences (master modal-pane model), popup kill exit code 129, remain-on-exit timing at spawn, resize-pane -y border-status adjustment.",
         "2026-10-09: RESUMED: main merged at 04ed1a96d (registry, wire doc, gaps.md by hand); session 3 relaunched (compile, exit code 129, remain-on-exit timing, resize-pane -y, register the 9 display-popup smoke diffs); Codex review 1 running on 04ed1a96d.",
-        "2026-10-09: Codex review 1 (float.core-1.md): 9 P1 + 1 P2 (preset split-id panic, popup retention before spawn, float split validates late, new-pane -I stdin, popup kill 129, resize/move on zoomed floats, after-split-window hook, border-status -y, new-pane -M closed early); sent to the session 3 lane."
+        "2026-10-09: Codex review 1 (float.core-1.md): 9 P1 + 1 P2 (preset split-id panic, popup retention before spawn, float split validates late, new-pane -I stdin, popup kill 129, resize/move on zoomed floats, after-split-window hook, border-status -y, new-pane -M closed early); sent to the session 3 lane.",
+        "2026-10-09: Session 3 done at 8c786438c: review 1's 10 findings fixed (new-pane -M reopened into float.keys); display-popup.modal-pane gap + 9 known differentials (34cd5da4); floating-panes 182 + floating-zoom 55 + floating-events 39 steps clean vs 3.8; 5 crates' full tests, clippy, fmt, compat check. Review 2 running."
       ]
     },
     {

@@ -495,6 +495,7 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
             prompt_cursor,
             matches,
             match_style,
+            ..
         } => switch_surface(
             &SwitchView {
                 rows,
@@ -633,6 +634,7 @@ mod tests {
             prompt_cursor: 9,
             matches: Vec::new(),
             match_style: String::new(),
+            prompt_shape: zz_protocol::PromptCursor::default(),
         };
         let rect = Rect {
             x: 0,

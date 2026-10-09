@@ -926,6 +926,7 @@ impl MuxEngine {
                     Preview::Big => ChooserPreviewSize::Big,
                 },
                 preview,
+                prompt_cursor: zz_protocol::PromptCursor::default(),
             },
             prompt,
         )

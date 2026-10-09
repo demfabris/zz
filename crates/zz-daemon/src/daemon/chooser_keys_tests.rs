@@ -440,3 +440,49 @@ fn snapshot_publishes_resend_a_chooser_only_when_it_changed() {
         assert!(chooser_events(&scene) > 0, "{command} moved");
     }
 }
+
+#[test]
+fn chooser_prompts_take_the_session_message_style_and_prompt_cursor() {
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &[]);
+    let presentation = |scene: &Scene| {
+        take_reliable_messages(&scene.outbound)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooserPresentation {
+                            presentation: Some(presentation),
+                        },
+                    ..
+                }) => Some(presentation),
+                _ => None,
+            })
+            .last()
+            .expect("a presentation")
+    };
+    let default = presentation(&scene);
+    assert!(
+        default
+            .prompt_style
+            .starts_with("bg=themeyellow,fg=themeblack")
+    );
+    assert!(!default.prompt_style.contains("fill="));
+    assert_eq!(default.prompt_cursor, zz_protocol::PromptCursor::default());
+    scene.press(key('q', Modifiers::default()), false);
+    for (name, value) in [
+        ("message-style", "bg=blue,fg=white"),
+        ("prompt-cursor-style", "bar"),
+        ("prompt-cursor-colour", "red"),
+    ] {
+        scene.open("set-option", &["-t", "keys", name, value]);
+    }
+    scene.open("choose-tree", &[]);
+    let styled = presentation(&scene);
+    assert_eq!(styled.prompt_style, "bg=blue,fg=white");
+    assert_eq!(styled.prompt_cursor.style, 6);
+    assert_eq!(
+        styled.prompt_cursor.colour,
+        zz_protocol::parse_tmux_colour("red")
+    );
+}

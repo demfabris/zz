@@ -2,6 +2,7 @@ use super::*;
 use zz_mux::TmuxSortOrder;
 use zz_protocol::{
     ChooserPresentation, ChooserPreview, ChooserPreviewSize, ChooserPreviewTile, ChooserRow,
+    PromptCursor,
 };
 
 const WINDOW_TREE_DEFAULT_FORMAT: &str = concat!(
@@ -184,8 +185,6 @@ const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
 const TREE_MODE_PREVIEW_FORMAT: &str = "#{E:tree-mode-preview-format}";
 const TREE_MODE_PREVIEW_STYLE: &str = "#{E:tree-mode-preview-style}";
 const TREE_MODE_BORDER_STYLE: &str = "#{E:tree-mode-border-style}";
-const MESSAGE_STYLE: &str = "bg=themeyellow,fg=themeblack";
-const MESSAGE_COMMAND_STYLE: &str = "bg=themeblack,fg=themeyellow";
 const PREVIEW_TEXT_LINES: usize = 256;
 
 fn scope_variables(session: bool, window: bool, pane: bool) -> BTreeMap<String, String> {
@@ -697,12 +696,42 @@ pub(super) fn border_style_for_pane(inner: &ServerState, pane: PaneId) -> String
     Styles { inner }.border(pane)
 }
 
-pub(super) fn prompt_style(command_mode: bool) -> String {
-    if command_mode {
-        MESSAGE_COMMAND_STYLE.to_owned()
+pub(super) fn mode_prompt_look(
+    inner: &ServerState,
+    session: Option<SessionId>,
+    command_mode: bool,
+) -> (String, PromptCursor) {
+    let (style, command_style) = inner.engine.message_styles_for_session(session);
+    let style = if command_mode { command_style } else { style };
+    let engine = &inner.engine;
+    let context = server_format_context(engine, &inner.config_files, None, None, None);
+    let flags = if command_mode {
+        "COMMANDMODE,ISMODE"
     } else {
-        MESSAGE_STYLE.to_owned()
-    }
+        "ISMODE"
+    };
+    let mut hooks = ScopedHooks {
+        engine,
+        variables: BTreeMap::from([
+            ("prompt_flags".to_owned(), flags.to_owned()),
+            (
+                "command_prompt".to_owned(),
+                u8::from(command_mode).to_string(),
+            ),
+        ]),
+    };
+    (
+        expand_format_values(&style, &context, &mut hooks),
+        super::prompt_cursors(inner, session)[usize::from(command_mode)],
+    )
+}
+
+pub(super) fn pane_session(inner: &ServerState, pane: PaneId) -> Option<SessionId> {
+    let state = &inner.engine.state;
+    state
+        .window_for_pane(pane)
+        .and_then(|window| state.windows.get(&window))
+        .map(|window| window.session)
 }
 
 fn pane_viewport(inner: &ServerState, pane: PaneId) -> Option<TerminalViewport> {
@@ -720,6 +749,8 @@ pub(super) fn chooser_presentation(
         return None;
     }
     let styles = Styles { inner };
+    let (prompt_style, prompt_cursor) =
+        mode_prompt_look(inner, super::client_attached_session(inner, client), false);
     if let Some(chooser) = inner.client(client).and_then(|c| c.choose_tree.as_ref()) {
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
         let preview = chooser
@@ -740,9 +771,10 @@ pub(super) fn chooser_presentation(
             filter: chooser.filter.is_some(),
             selection_style: styles.selection(chooser.source_pane),
             border_style: styles.border(chooser.source_pane),
-            prompt_style: MESSAGE_STYLE.to_owned(),
+            prompt_style,
             preview_size: chooser.preview_size,
             preview,
+            prompt_cursor,
         });
     }
     let chooser = inner
@@ -775,9 +807,10 @@ pub(super) fn chooser_presentation(
         filter: chooser.filter.is_some(),
         selection_style: styles.selection(chooser.source_pane),
         border_style: styles.border(chooser.source_pane),
-        prompt_style: MESSAGE_STYLE.to_owned(),
+        prompt_style,
         preview_size: chooser.preview_size,
         preview,
+        prompt_cursor,
     })
 }
 

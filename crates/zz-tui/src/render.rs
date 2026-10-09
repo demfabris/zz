@@ -2929,12 +2929,41 @@ fn prompt_cursor(model: &Model) -> zz_protocol::PromptCursor {
     if let Some(confirm) = &model.confirm {
         return confirm.prompt_cursor;
     }
-    model
+    if let Some(prompt) = model
         .command_prompt
         .as_ref()
         .filter(|prompt| prompt.pane.is_none())
-        .map(|prompt| prompt.prompt_cursor)
-        .unwrap_or_default()
+    {
+        return prompt.prompt_cursor;
+    }
+    mode_prompt_cursor(model).unwrap_or_default()
+}
+
+/// `mode_tree_draw_prompt` and the switch mode's prompt: `prompt_draw` gives
+/// the mode screen the prompt's cursor style and colour while it is open.
+fn mode_prompt_cursor(model: &Model) -> Option<zz_protocol::PromptCursor> {
+    let chooser_prompt = |prompt: &str, search: bool| !prompt.is_empty() || search;
+    if let Some(state) = &model.choose_tree {
+        return chooser_prompt(&state.prompt, state.search.is_some())
+            .then(|| model.chooser_presentation.as_ref())
+            .flatten()
+            .map(|presentation| presentation.prompt_cursor);
+    }
+    if let Some(state) = &model.choose_buffer {
+        return chooser_prompt(&state.prompt, state.search.is_some())
+            .then(|| model.chooser_presentation.as_ref())
+            .flatten()
+            .map(|presentation| presentation.prompt_cursor);
+    }
+    match model.pane_snapshot(model.active_pane()?)?.mode.as_ref()? {
+        zz_protocol::PaneMode::Customize {
+            presentation,
+            prompt,
+            ..
+        } if !prompt.is_empty() => Some(presentation.prompt_cursor),
+        zz_protocol::PaneMode::Switch { prompt_shape, .. } => Some(*prompt_shape),
+        _ => None,
+    }
 }
 
 fn cursor_colour_rgb(colour: TmuxColour, theme: &zz_protocol::ThemeColours) -> Option<u32> {
@@ -5930,6 +5959,7 @@ mod tests {
             prompt_style: String::new(),
             preview_size: zz_protocol::ChooserPreviewSize::Off,
             preview: None,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
         let (send, receive) = std::sync::mpsc::channel();
         let mut renderer = Renderer::with_sink(Box::new(move |bytes| {

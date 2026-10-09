@@ -44573,8 +44573,12 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::tree_selection_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
-                            presentation.prompt_style =
-                                chooser_presentation::prompt_style(mode.prompt_command_mode());
+                            (presentation.prompt_style, presentation.prompt_cursor) =
+                                chooser_presentation::mode_prompt_look(
+                                    inner,
+                                    chooser_presentation::pane_session(inner, *pane),
+                                    mode.prompt_command_mode(),
+                                );
                             let (prompt, prompt_cursor, prompt_top) = prompt.unwrap_or_default();
                             PaneMode::Customize {
                                 state,
@@ -44606,6 +44610,12 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 }
                             }
                             let (prompt, prompt_cursor) = mode.prompt.draw(columns);
+                            let (prompt_style, prompt_shape) =
+                                chooser_presentation::mode_prompt_look(
+                                    inner,
+                                    chooser_presentation::pane_session(inner, *pane),
+                                    mode.prompt.command_mode(),
+                                );
                             let matches = entries
                                 .iter()
                                 .map(|entry| {
@@ -44624,12 +44634,11 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                     inner, *pane,
                                 ),
                                 prompt,
-                                prompt_style: chooser_presentation::prompt_style(
-                                    mode.prompt.command_mode(),
-                                ),
+                                prompt_style,
                                 prompt_cursor,
                                 matches,
                                 match_style: chooser_presentation::switch_match_style(inner, *pane),
+                                prompt_shape,
                             }
                         }
                     });

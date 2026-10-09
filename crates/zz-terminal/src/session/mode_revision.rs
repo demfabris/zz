@@ -289,7 +289,9 @@ impl ModeRevision {
         let snapshot = self.grid.lock().terminal.lock().clone_screen()?;
         let mut snapshot = snapshot;
         snapshot.set_colors_from(terminal)?;
-        Self::from_snapshot(snapshot)
+        let revision = Self::from_snapshot(snapshot)?;
+        revision.stamp_output_rows(|| self.output_rows().to_vec());
+        Ok(revision)
     }
 
     pub(super) fn resized(
@@ -299,10 +301,13 @@ impl ModeRevision {
         cursor: PointCoordinate,
     ) -> Result<(Arc<Self>, PointCoordinate), WorkerError> {
         let mut snapshot = self.grid.lock().terminal.lock().clone_screen()?;
+        let marks = logical_marks(&snapshot, self.output_rows());
         let cursor = snapshot
             .resize_anchored(columns, rows, self.clamp_point(cursor))?
             .unwrap_or(cursor);
+        let output_rows = place_logical_marks(&snapshot, &marks);
         let revision = Self::from_snapshot(snapshot)?;
+        revision.stamp_output_rows(|| output_rows);
         Ok((revision, cursor))
     }
 
@@ -728,4 +733,69 @@ fn ordered_points(
     } else {
         (second, first)
     }
+}
+
+fn continuation_rows(snapshot: &libghostty_vt::terminal::ScreenSnapshot) -> Vec<bool> {
+    let total = u32::try_from(snapshot.total_rows().unwrap_or(0)).unwrap_or(u32::MAX);
+    (0..total)
+        .map(|row| {
+            libghostty_vt::terminal::GridRead::grid_ref(
+                snapshot,
+                libghostty_vt::terminal::Point::Screen(PointCoordinate { x: 0, y: row }),
+            )
+            .and_then(|grid| grid.row())
+            .and_then(libghostty_vt::screen::Row::is_wrap_continuation)
+            .unwrap_or(false)
+        })
+        .collect()
+}
+
+fn logical_marks(
+    snapshot: &libghostty_vt::terminal::ScreenSnapshot,
+    rows: &[u64],
+) -> Vec<(usize, usize)> {
+    if rows.is_empty() {
+        return Vec::new();
+    }
+    let mut line = 0;
+    let mut offset = 0;
+    let mut marks = Vec::with_capacity(rows.len());
+    for (row, continuation) in continuation_rows(snapshot).into_iter().enumerate() {
+        if row > 0 && !continuation {
+            line += 1;
+            offset = 0;
+        } else if row > 0 {
+            offset += 1;
+        }
+        if rows.binary_search(&(row as u64)).is_ok() {
+            marks.push((line, offset));
+        }
+    }
+    marks
+}
+
+fn place_logical_marks(
+    snapshot: &libghostty_vt::terminal::ScreenSnapshot,
+    marks: &[(usize, usize)],
+) -> Vec<u64> {
+    if marks.is_empty() {
+        return Vec::new();
+    }
+    let mut starts = Vec::new();
+    let continuations = continuation_rows(snapshot);
+    for (row, continuation) in continuations.iter().enumerate() {
+        if row == 0 || !continuation {
+            starts.push(row);
+        }
+    }
+    let mut rows = marks
+        .iter()
+        .filter_map(|(line, offset)| {
+            let start = *starts.get(*line)?;
+            let end = starts.get(line + 1).copied().unwrap_or(continuations.len());
+            Some((start + offset).min(end.saturating_sub(1)) as u64)
+        })
+        .collect::<Vec<_>>();
+    rows.dedup();
+    rows
 }

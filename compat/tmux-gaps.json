@@ -90,7 +90,7 @@
     },
     {
       "id": "capture.terminal-engine-limits",
-      "title": "Tell OSC 8 links and OSC 133 prompt kinds apart the way tmux's grid does",
+      "title": "Tell OSC 8 links, OSC 133 prompt kinds and moved output lines apart the way tmux's grid does",
       "decision": "native",
       "status": "accepted",
       "priority": "none",
@@ -101,7 +101,8 @@
       "owner": "terminal",
       "items": [
         "semantic:capture-pane-continuation-prompt-flag",
-        "semantic:capture-pane-hyperlink-id-identity"
+        "semantic:capture-pane-hyperlink-id-identity",
+        "semantic:capture-pane-output-mark-line-moves"
       ],
       "evidence": [
         "resource:crates/zz-terminal/src/session.rs",
@@ -109,10 +110,10 @@
         "scenario:compat/scenarios/smoke/capture-links.txt"
       ],
       "acceptance": [
-        "`capture-pane -H` prints a link once per run of cells carrying one URI, continued across a wrapped row, and `-F` prints P only on a row libghostty classifies as a primary prompt."
+        "`capture-pane -H` prints a link once per run of cells carrying one URI, continued across a wrapped row, and `-F` prints P only on a row libghostty classifies as a primary prompt. An O mark stays on the row it was set on when lines are inserted or deleted above it."
       ],
       "depends_on": [],
-      "reason": "The pin owns its terminal, so two capture facts come from its grid there and from the engine here. Measured against the pins d77c9dc6 and tmux 3.8 (7f2a35ad) on 2026-10-09. Links: hyperlinks_put gives every OSC 8 open an inner id, anonymous opens never share one and opens with the same `id=` and URI do, and cmd_capture_pane_hyperlinks dedupes on that id; libghostty publishes a cell's URI through ghostty_grid_ref_hyperlink_uri and no link id, so zz cannot tell two links with one URI apart. On a 20x6 pane, `\\033]8;id=x;http://a\\007one` on one row and the same open on the next print http://a once on the pin and once per row here; two anonymous links with the same URI written back to back print twice on the pin and once here; an `id=` link split by a gap on one row prints once there and per piece here. Prompt kinds: input_osc_133 sets GRID_LINE_START_PROMPT for 133;A, 133;N and 133;P except k=s, which sets GRID_LINE_SECOND_PROMPT; libghostty records 133;P;k=c as a continuation row, the same RowSemanticPrompt it gives k=s, so on the same pane `\\033]133;P;k=c\\007cont` prints `P cont` on the pin and `- cont` here, while k=s (`- second`) and a bare 133;P (`P plainp`) agree. Both need an engine API zz does not patch in (fabrico, 2026-09-18)."
+      "reason": "The pin owns its terminal, so two capture facts come from its grid there and from the engine here. Measured against the pins d77c9dc6 and tmux 3.8 (7f2a35ad) on 2026-10-09. Links: hyperlinks_put gives every OSC 8 open an inner id, anonymous opens never share one and opens with the same `id=` and URI do, and cmd_capture_pane_hyperlinks dedupes on that id; libghostty publishes a cell's URI through ghostty_grid_ref_hyperlink_uri and no link id, so zz cannot tell two links with one URI apart. On a 20x6 pane, `\\033]8;id=x;http://a\\007one` on one row and the same open on the next print http://a once on the pin and once per row here; two anonymous links with the same URI written back to back print twice on the pin and once here; an `id=` link split by a gap on one row prints once there and per piece here. Prompt kinds: input_osc_133 sets GRID_LINE_START_PROMPT for 133;A, 133;N and 133;P except k=s, which sets GRID_LINE_SECOND_PROMPT; libghostty records 133;P;k=c as a continuation row, the same RowSemanticPrompt it gives k=s, so on the same pane `\\033]133;P;k=c\\007cont` prints `P cont` on the pin and `- cont` here, while k=s (`- second`) and a bare 133;P (`P plainp`) agree. Moved lines: the pin keeps GRID_LINE_START_OUTPUT in the grid line, so insert-line, delete-line and scroll-region scrolls carry O with the text; libghostty records no per-row output mark, so zz keeps O as a tracked grid reference, and tracked references keep their row when IL, DL or a region scroll moves cell contents between rows. On a 20x6 pane, `top\\r\\n\\033]133;C\\007out\\r\\nnext\\033[H\\033[M` gives `O out` then `- next` on the pin and `- out` then `O next` here, measured 2026-10-09 on 3.8. Following those moves in the engine filter would need the scroll region, which libghostty does not publish. All three need an engine API zz does not patch in (fabrico, 2026-09-18)."
     },
     {
       "id": "clients.interactive-refresh",

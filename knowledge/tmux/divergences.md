@@ -700,7 +700,8 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   H, O, P and W letters (2026-10-09). The pin keys a link on the id each OSC 8 open gets, zz
   on a run of cells sharing one URI, so back-to-back anonymous links with the same URI print
   once here, and an `id=` link repeated on another row or split by a gap prints per piece;
-  `133;P;k=c` gets no P here (`capture.terminal-engine-limits`). D and X are tmux grid storage
+  `133;P;k=c` gets no P here, and an O mark stays on its row when lines are inserted or
+  deleted above it (`capture.terminal-engine-limits`). D and X are tmux grid storage
   letters zz never prints (`capture.grid-storage-line-flags`). In copy mode `-M -H` prints
   nothing, as the pin's mode screen resolves no link, and `-M -F` keeps the frozen H and O.
   Capture has no retained saved-alternate grid, pending raw-byte stream or raw-grid dump, so

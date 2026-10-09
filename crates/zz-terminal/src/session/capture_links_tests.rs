@@ -410,3 +410,73 @@ fn output_marks_last_as_long_as_their_rows_are_retained() {
         1030
     );
 }
+
+#[test]
+fn a_repeated_alternate_enable_keeps_its_output_marks() {
+    let mut terminal = new_terminal(20, 6, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    feed(
+        &mut terminal,
+        &mut filter,
+        b"\x1b[?47h\x1b]133;C\x07alt\r\n\x1b[?47hsecond\r\n",
+    );
+    assert_eq!(
+        capture(
+            &terminal,
+            &filter,
+            CaptureOptions {
+                line_flags: true,
+                ..CaptureOptions::default()
+            }
+        ),
+        "O alt\n- second\n- \n- \n- \n- "
+    );
+}
+
+#[test]
+fn a_resized_or_recoloured_frozen_revision_keeps_its_output_marks() {
+    let mut terminal = new_terminal(20, 6, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    feed(
+        &mut terminal,
+        &mut filter,
+        b"top\r\n\x1b]133;C\x07out\r\nnext\r\n",
+    );
+    let revision = ModeRevision::capture(&terminal).expect("revision");
+    revision.stamp_output_rows(|| filter.output_rows(&terminal));
+    assert_eq!(revision.output_rows(), [1]);
+    let (resized, _) = revision
+        .resized(12, 5, PointCoordinate { x: 0, y: 0 })
+        .expect("resized revision");
+    assert_eq!(resized.output_rows(), [1]);
+    let flags = capture_revision(
+        &resized,
+        0,
+        CaptureOptions {
+            start: CaptureBoundary::HistoryStart,
+            line_flags: true,
+            ..CaptureOptions::default()
+        },
+    )
+    .expect("frozen capture");
+    assert!(flags.lines().any(|line| line == "O out"), "{flags:?}");
+    let recoloured = resized
+        .with_appearance(&mut terminal)
+        .expect("recoloured revision");
+    assert_eq!(recoloured.output_rows(), [1]);
+
+    let mut narrow = new_terminal(10, 4, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    feed(
+        &mut narrow,
+        &mut filter,
+        b"aaaaaaaaaaaaaaa\r\n\x1b]133;C\x07out\r\n",
+    );
+    let revision = ModeRevision::capture(&narrow).expect("revision");
+    revision.stamp_output_rows(|| filter.output_rows(&narrow));
+    assert_eq!(revision.output_rows(), [2]);
+    let (wide, _) = revision
+        .resized(20, 4, PointCoordinate { x: 0, y: 0 })
+        .expect("reflowed revision");
+    assert_eq!(wide.output_rows(), [1]);
+}

@@ -523,8 +523,14 @@ impl EngineFilter {
         });
     }
 
-    fn drop_alternate_marks(&mut self, parameters: &[u8], final_byte: u8) {
+    fn drop_alternate_marks(
+        &mut self,
+        parameters: &[u8],
+        final_byte: u8,
+        terminal: &Terminal<'_, '_>,
+    ) {
         if final_byte == b'h'
+            && terminal.active_screen().ok() == Some(Screen::Primary)
             && parameters.first() == Some(&b'?')
             && parameters[1..]
                 .split(|byte| *byte == b';')
@@ -623,7 +629,7 @@ impl EngineFilter {
                     if byte >= 0x40 {
                         self.metadata_hint |= csi_touches_metadata(&self.sequence, byte);
                         let erased = Self::erased_rows(&self.sequence, byte, terminal);
-                        self.drop_alternate_marks(&self.sequence.clone(), byte);
+                        self.drop_alternate_marks(&self.sequence.clone(), byte, terminal);
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
                             write_engine_csi(
                                 &self.sequence,
@@ -742,7 +748,7 @@ impl EngineFilter {
                     let final_byte = bytes[end];
                     let parameters = &bytes[escape + 2..end];
                     self.metadata_hint |= csi_touches_metadata(parameters, final_byte);
-                    self.drop_alternate_marks(parameters, final_byte);
+                    self.drop_alternate_marks(parameters, final_byte, terminal);
                     let clears_rows = final_byte == b'J' && !self.output_marks.is_empty();
                     if clears_rows || csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);

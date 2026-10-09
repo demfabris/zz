@@ -931,10 +931,8 @@
       "id": "fix.followups-2",
       "track": "fix",
       "title": "Follow-ups, second batch",
-      "status": "todo",
-      "deps": [
-        "fix.followups"
-      ],
+      "status": "active",
+      "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon/hook_events.rs",
         "crates/zz-daemon/src/daemon.rs",
@@ -945,7 +943,7 @@
       "accept": [
         "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
       ],
-      "branch": null,
+      "branch": "catchup/fix.followups-2",
       "sha": null,
       "notes": [
         "3.8 hook payload table per event: zz events still carry d77 keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events and pane-exited), visible in wait-for -E -v; PendingHookEvent::window/::pane back many events, a daemon test and control notifications read those keys.",

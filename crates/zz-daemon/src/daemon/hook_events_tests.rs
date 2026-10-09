@@ -905,3 +905,87 @@ fn a_run_shell_job_sleeps_until_its_output_or_its_exit() {
     assert!(elapsed < Duration::from_secs(2), "{elapsed:?}");
     assert!(woke < 10, "the job thread woke {woke} times in {elapsed:?}");
 }
+
+#[test]
+fn wait_for_payload_lines_are_sorted_and_skip_the_derived_names() {
+    let variables = BTreeMap::from([
+        ("hook".to_owned(), "session-renamed".to_owned()),
+        ("hook_session".to_owned(), "$0".to_owned()),
+        ("hook_session_name".to_owned(), "w".to_owned()),
+        ("hook_old_name".to_owned(), "a".to_owned()),
+        ("hook_new_name".to_owned(), "b".to_owned()),
+    ]);
+    let payload = hook_events::event_payload("session-renamed", &variables);
+    assert_eq!(payload.get("session_name").map(String::as_str), Some("w"));
+    assert_eq!(
+        hook_events::event_payload_lines(&payload),
+        "event=session-renamed\nnew_name=b\nold_name=a\nsession=$0\n"
+    );
+}
+
+#[test]
+fn a_stale_mode_transition_fires_with_the_next_command() {
+    let (shared, mut context) = pane_fixture("stale-mode-transition");
+    let pane = context.pane.expect("pane");
+    run(
+        &shared,
+        &mut context,
+        &[
+            "set-hook",
+            "-g",
+            "pane-mode-exited",
+            "display-message 'exited #{hook_previous_mode}'",
+        ],
+    )
+    .expect("set-hook");
+    run(
+        &shared,
+        &mut context,
+        &["clock-mode", "-t", &pane.to_string()],
+    )
+    .expect("clock-mode");
+    {
+        let mut inner = shared.inner.lock();
+        assert!(pop_pane_mode(&mut inner, pane));
+        assert!(!inner.pane_mode_transitions.is_empty());
+    }
+    shared.inner.lock().message_log.clear();
+    let mut quiet = context.clone();
+    quiet.no_hooks = true;
+    run(
+        &shared,
+        &mut quiet,
+        &["set-hook", "-gu", "pane-mode-entered"],
+    )
+    .expect("unrelated");
+    assert!(shared.inner.lock().pane_mode_transitions.is_empty());
+    assert_eq!(messages(&shared), ["exited clock-mode"]);
+}
+
+#[test]
+fn an_interactive_client_parks_on_an_event_wait() {
+    let (shared, mut context) = pane_fixture("interactive-event-wait");
+    let client = ClientId(41);
+    shared.inner.lock().client_entry(client).instance_id = Some(ClientInstanceId(41));
+    let waiter = {
+        let shared = Arc::clone(&shared);
+        let mut context = context.clone();
+        std::thread::spawn(move || {
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("wait-for", ["-E", "@done"]),
+            )
+        })
+    };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while shared.inner.lock().event_waiters.is_empty() {
+        assert!(!waiter.is_finished(), "the wait returned without parking");
+        assert!(Instant::now() < deadline, "the wait never parked");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    run(&shared, &mut context, &["set-hook", "-E", "@done"]).expect("fire @done");
+    waiter.join().expect("waiter thread").expect("wait-for -E");
+    assert!(shared.inner.lock().event_waiters.is_empty());
+}

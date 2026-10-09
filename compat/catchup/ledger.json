@@ -226,7 +226,7 @@
       "id": "pin.layout-v2",
       "track": "pin",
       "title": "JSON v2 layout strings",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -245,7 +245,7 @@
         "Control clients get v1 unless they set the new-layouts flag.",
         "The v2 writer has a place for floating panes so float.core only fills it in."
       ],
-      "branch": null,
+      "branch": "catchup/pin.layout-v2",
       "sha": null,
       "notes": []
     },

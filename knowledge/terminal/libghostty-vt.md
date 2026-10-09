@@ -10,15 +10,15 @@ timestamp: 2026-10-04T23:00:00-03:00
 # Overview
 
 `libghostty-vt` is the VT engine inside [`zz-terminal`](/crates/zz-terminal.md). The
-workspace consumes published `demfabris/libghostty-rs` commit
-`0db98a206681fd60c2b1a1719daf14049eda8c30` on new branch `zz-2026-10-04`, with
-`default-features = false`. Its parents `f5f826018e290e776c8bc4e5969c562efe530846`
+workspace vendors the safe wrapper from `demfabris/libghostty-rs` commit
+`0db98a206681fd60c2b1a1719daf14049eda8c30` (`zz-2026-10-04`) in
+`third_party/rust/libghostty-vt`, with `default-features = false`. Its parents `f5f826018e290e776c8bc4e5969c562efe530846`
 (`zz-2026-10-02`, row copies) and `8e40135fb20e9ed91c37c374fe1d14570c386d06`
 (`zz-2026-09-30`, copy snapshots) stay published, and the base
 `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on `zz-2026-09-25`. That base
 contains the stacked render-hold and resize-scrollback APIs needed by the current C ABI.
-The safe wrapper lives in its dependency fork. zz replaces only `libghostty-vt-sys` with
-the local snapshot documented in `third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
+Both crates are path dependencies: the wrapper next to the sys snapshot documented in
+`third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
 The published native pin is `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on branch
 `zz-2026-10-04`, upstream base `6301810a48aaa3426887a4316668f18833a40138`. It carries eight
 changes: the C ABI signal-stack option, spare-page reuse, the history-erase trim fix

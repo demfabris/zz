@@ -4887,7 +4887,6 @@ dependencies = [
 [[package]]
 name = "libghostty-vt"
 version = "0.2.1"
-source = "git+https://github.com/demfabris/libghostty-rs?rev=0db98a206681fd60c2b1a1719daf14049eda8c30#0db98a206681fd60c2b1a1719daf14049eda8c30"
 dependencies = [
  "bitflags 2.13.2",
  "int-enum",

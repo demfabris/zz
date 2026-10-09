@@ -20,7 +20,7 @@ copy on top of `f5f826018e290e776c8bc4e5969c562efe530846`, which stays on `zz-20
 row copies `d975339f` and the iteration lifetime fix; `8e40135fb20e9ed91c37c374fe1d14570c386d06`
 stays on `zz-2026-09-30`); its parent `359ef751c189540eafb9110b2de89ad95ce48fc3` remains on
 `zz-2026-09-25`.
-zz vendors only this sys snapshot.
+zz vendors the wrapper too, next to this crate in `../libghostty-vt`.
 No build-time source rewriting remains. See [UPSTREAM.md](UPSTREAM.md).
 
 - Fetches and builds `libghostty-vt.a` from ghostty sources via Zig by default.

@@ -67,11 +67,11 @@ pub use session::release_held_wakes;
 pub use session::{
     CaptureBoundary, CaptureOptions, CapturedCopySource, CopyModeFacts, CopyModeSelectionFacts,
     DeferredTerminalEvent, EngineKnobs, KittyImage, KittyImageRequestError, LastCommandCapture,
-    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, OutputWake, PointerContext, ProgressBar,
-    ProgressBarState, RoundTripGuard, TerminalCaptureError, TerminalCopyReady, TerminalEvent,
-    TerminalEvents, TerminalFacts, TerminalFrameSink, TerminalProcessExit, TerminalRequest,
-    TerminalRequestError, TerminalSession, TerminalSessionDiagnostics, TerminalSize, TerminalSpawn,
-    ViewFrame, ViewStream, WakeHold, allow_actor_round_trips, forbid_actor_round_trips,
-    hold_actor_wakes, run_pty_exec_mode,
+    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, OutputWake, PRIVATE_MODE_NUMBERS,
+    PaneOutputFacts, PointerContext, ProgressBar, ProgressBarState, RoundTripGuard,
+    TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents, TerminalFacts,
+    TerminalFrameSink, TerminalProcessExit, TerminalRequest, TerminalRequestError, TerminalSession,
+    TerminalSessionDiagnostics, TerminalSize, TerminalSpawn, ViewFrame, ViewStream, WakeHold,
+    allow_actor_round_trips, forbid_actor_round_trips, hold_actor_wakes, run_pty_exec_mode,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

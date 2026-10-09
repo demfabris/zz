@@ -459,6 +459,20 @@ impl FormatTree<'_> {
                     Cow::Borrowed("")
                 }
             }
+            FormatBacking::PaneUnzoomedHeight | FormatBacking::PaneUnzoomedWidth => {
+                let Some(cell) = window.zip(self.pane).and_then(|(window, pane)| {
+                    window
+                        .layout
+                        .pane_geometry_with_border(pane, engine.pane_border_status(window.id))
+                }) else {
+                    return Cow::Borrowed("");
+                };
+                optional_display(Some(if backing == FormatBacking::PaneUnzoomedWidth {
+                    cell.sx
+                } else {
+                    cell.sy
+                }))
+            }
             FormatBacking::PaneAtBottom
             | FormatBacking::PaneAtLeft
             | FormatBacking::PaneAtRight

@@ -815,7 +815,7 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
         ),
         "fill-character" => (
             TmuxOptionKind::String,
-            "Character used to fill unused parts of window.",
+            "Format used to fill unused parts of window.",
             "",
             &[],
         ),
@@ -964,9 +964,9 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
         ),
         "remain-on-exit" => (
             TmuxOptionKind::Choice,
-            "Whether panes should remain ('on'), remain until a key is pressed ('key') or be automatically killed ('off' or 'failed') when the program inside exits.",
+            "Whether panes should remain ('on'), remain until a key is pressed after any exit ('key') or after a failure ('failed-key'), or be automatically killed ('off' or 'failed') when the program inside exits.",
             "",
-            &["off", "on", "failed", "key"],
+            &["off", "on", "failed", "key", "failed-key"],
         ),
         "remain-on-exit-format" => (
             TmuxOptionKind::String,

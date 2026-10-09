@@ -163,7 +163,7 @@
       "id": "fix.small-semantics",
       "track": "fix",
       "title": "pane_current_command fallback, refresh-client -l, new-session -t hint, registry hygiene",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -190,7 +190,8 @@
       "branch": "catchup/fix.small-semantics",
       "sha": null,
       "notes": [
-        "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'."
+        "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'.",
+        "2026-10-09: lane done at ecc91729e: 6 clauses + source-file dir note met; wire: EventPayload::ClipboardQuery and InputMessage::ClipboardReply under 108; lost lookup now renames to the fallback (rename-timing.sh not rerun)"
       ]
     },
     {
@@ -284,7 +285,7 @@
       "id": "pin.contract-breaks",
       "track": "pin",
       "title": "3.8 contract breaks: active-pane flag, %% quoting, q: escaping, relative targets",
-      "status": "todo",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -303,12 +304,39 @@
         "q: escapes {, }, newline and tab (d57d75de).",
         "Invalid relative targets such as +foo and -0 are errors (00f3899a)."
       ],
-      "branch": null,
+      "branch": "catchup/pin.contract-breaks",
       "sha": null,
       "notes": [
         "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here.",
         "2026-10-09 from pin.layout-v2: smoke/control-notify fails tmux-side-only at 3.8 (%pause, %continue and hook %window-renamed now queued outside %begin/%end).",
-        "2026-10-09 from pin.layout-v2: 3.8 layout_parse no longer rebuilds tiled pane z-order from the tree; zz still sets window.z_order = panes_in_order() in select_layout_string; measure and align."
+        "2026-10-09 from pin.layout-v2: 3.8 layout_parse no longer rebuilds tiled pane z-order from the tree; zz still sets window.z_order = panes_in_order() in select_layout_string; measure and align.",
+        "2026-10-09: lane done at be130e32d: all 5 items + 2 notes closed against 3.8; compat/attached-client.sh edited (active-pane flag) but not run"
+      ]
+    },
+    {
+      "id": "pin.control-3-8",
+      "track": "pin",
+      "title": "Control-mode drift in 3.8",
+      "status": "todo",
+      "deps": [
+        "pin.contract-breaks"
+      ],
+      "zones": [
+        "crates/zz-cli/src/control_mode.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "crates/zz-daemon/src/daemon",
+        "compat/scenarios"
+      ],
+      "gaps": [],
+      "accept": [
+        "refresh-client -C sends %layout-change after every call as 3.8 does, even when the size is unchanged (smoke/control-eof-drain size-reports row agrees); zz's drop when client input already ended is checked against 3.8 and matched.",
+        "A read-only control client's commands are handled as 3.8 handles them (3.8 still runs them; zz refuses with 'client is read-only'): measure which commands 3.8 allows and match, or record with a reason if zz's refusal is the safer native choice and fabrico agrees.",
+        "Any further 3.8 control-mode change found while doing the above (bounded replies, output discard flags) is either matched or registered."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by pin.contract-breaks."
       ]
     },
     {
@@ -391,13 +419,15 @@
       ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09 from pin.contract-breaks: scenarios failing at 3.8 that look like this item's: daemon-command-item-format (#{command} inside an after-hook is set-buffer on 3.8), source-file-current-file (@cf-hook), smoke/args-parse-set-hook and smoke/config-chain-parse-abort (tmux-side only); show-options-hooks also diverges on display-panes options (pin.display-panes) and after-queue."
+      ]
     },
     {
       "id": "pin.formats-options",
       "track": "pin",
       "title": "3.8 formats, modifiers, options and show -F",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -417,9 +447,10 @@
         "show-options, show-window-options and show-hooks accept -F; display-message -j works; capture-pane -I is adopted or registered native (libghostty keeps no per-row time)."
       ],
       "branch": "catchup/pin.formats-options",
-      "sha": null,
+      "sha": "beb67803b",
       "notes": [
-        "2026-10-09: lane done at 3f09fc58a: 21/32 registry items closed (failed-key, 3.8 defaults, show -F, split-window -B, 11 formats, 2 native); the rest moved to pin.formats-options-2"
+        "2026-10-09: lane done at 3f09fc58a: 21/32 registry items closed (failed-key, 3.8 defaults, show -F, split-window -B, 11 formats, 2 native); the rest moved to pin.formats-options-2",
+        "2026-10-09: 2 reviews + final fix; 21/32 registry items closed; rest in pin.formats-options-2; merged"
       ]
     },
     {
@@ -516,7 +547,7 @@
       "id": "float.core",
       "track": "float",
       "title": "Floating panes in the mux and daemon",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "float.design",
         "pin.layout-v2",
@@ -549,7 +580,7 @@
         "A round-trip test pins the appended snapshot, delta, LayoutNode::Empty and MouseKey.press encodings; one move-pane -X emits exactly one TreeOp::WindowLayout.",
         "choose-tree -O z lists panes in pane_z order; pane.floating-model turns adopted with each item closing as proved (option:editor in float.keys, nested-attach-in-popup keeps its fixture requirement); just compat check passes."
       ],
-      "branch": null,
+      "branch": "catchup/float.core",
       "sha": null,
       "notes": [
         "2026-10-09: pin.move moved semantic:move-pane-tiled-extension into adopted pane.floating-model; decide whether it closes or goes back to native."

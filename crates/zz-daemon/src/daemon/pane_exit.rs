@@ -9,6 +9,7 @@ struct Subscriber {
 #[derive(Default)]
 struct State {
     completed: bool,
+    killed: bool,
     subscribers: Vec<Subscriber>,
 }
 
@@ -40,15 +41,19 @@ impl Completion {
         };
         let mut state = self.state.lock();
         if state.completed {
-            Self::resolve(subscriber, self.exit_code.load(Ordering::Acquire));
+            Self::resolve(
+                subscriber,
+                self.exit_code.load(Ordering::Acquire),
+                state.killed,
+            );
         } else {
             state.subscribers.push(subscriber);
         }
     }
 
-    fn resolve(subscriber: Subscriber, exit_code: u8) {
+    fn resolve(subscriber: Subscriber, exit_code: u8, killed: bool) {
         if let Some(status) = subscriber.split {
-            status.store(exit_code, Ordering::Release);
+            status.store(if killed { 129 } else { exit_code }, Ordering::Release);
             subscriber.state.complete();
         } else {
             subscriber.state.resolve(if exit_code == 0 {
@@ -63,14 +68,25 @@ impl Completion {
     }
 
     pub(super) fn complete(&self, exit_code: u8) {
+        self.finish(exit_code, false);
+    }
+
+    /// `window_pane_wait_finish` on a pane destroyed before its status was
+    /// ready: a `-W` waiter answers `128 + SIGHUP`, a `wait-pane --exit` 0.
+    pub(super) fn kill(&self) {
+        self.finish(0, true);
+    }
+
+    fn finish(&self, exit_code: u8, killed: bool) {
         let mut state = self.state.lock();
         if state.completed {
             return;
         }
         state.completed = true;
+        state.killed = killed;
         self.exit_code.store(exit_code, Ordering::Release);
         for subscriber in state.subscribers.drain(..) {
-            Self::resolve(subscriber, exit_code);
+            Self::resolve(subscriber, exit_code, killed);
         }
     }
 

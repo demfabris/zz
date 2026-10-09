@@ -2191,11 +2191,12 @@ impl MuxState {
             .pane_order
             .clone();
         debug_assert!(!panes.is_empty(), "validated windows are never empty");
-        let split_ids = (0..panes.len().saturating_sub(1))
-            .map(|_| self.allocate_split_id())
-            .collect::<Vec<_>>();
-        let mut split_ids = split_ids.into_iter();
-        let mut ids = || split_ids.next().expect("preset has one split ID per edge");
+        let next_split_id = &mut self.next_split_id;
+        let mut ids = || {
+            let id = SplitId(*next_split_id);
+            *next_split_id = (*next_split_id).saturating_add(1);
+            id
+        };
 
         let window = self
             .windows
@@ -2205,8 +2206,6 @@ impl MuxState {
         window
             .layout
             .apply_preset(preset, &panes, options, &mut ids);
-        let split_ids_exhausted = split_ids.next().is_none();
-        debug_assert!(split_ids_exhausted, "preset consumes one split ID per edge");
         window.previous_layout = Some(Box::new(previous));
         window.last_layout = Some(preset);
         self.bump_generation();

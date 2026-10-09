@@ -180,6 +180,11 @@ six resize, style, context-menu, border-drag, popup-to-pane, and Kitty-image con
 `display-popup.behavior-fidelity`; real mouse and status formats remain under
 `formats.mouse-context`.
 
+Since 2026-10-09 `display-popup` is a modal floating pane as in tmux master 34cd5da4 (fabrico's
+ruling, built by float.core), so the client-drawn popup above is gone. The nine popup scenarios that
+measured it against tmux 3.8 are known differentials under `display-popup.modal-pane` in
+`compat/scenarios/known/`, each pinned to its measured tuple.
+
 | Command | What it does in tmux |
 | --- | --- |
 | `customize-mode` | Interactive options browser. |

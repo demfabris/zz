@@ -378,3 +378,104 @@ fn one_move_pane_emits_one_window_layout_op() {
         Some(modal)
     );
 }
+
+#[test]
+fn a_preset_over_one_tile_and_a_float_leaves_the_window_alone() {
+    let mut state = MuxState::default();
+    let (_, window, first) = state.create_session_with_extent("s", (80, 24)).unwrap();
+    let floated = float(&mut state, first, geometry(10, 5, 3, 3));
+    let before = layout(&state, LayoutFormat::V2);
+    state
+        .select_layout(
+            window,
+            crate::model::LayoutPreset::EvenHorizontal,
+            &crate::PresetOptions::default(),
+        )
+        .unwrap();
+    assert!(state.validate().is_ok());
+    assert_eq!(layout(&state, LayoutFormat::V2), before);
+    assert!(state.windows[&window].is_floating(floated));
+}
+
+#[test]
+fn new_pane_sets_spawn_options_before_it_returns_and_only_once() {
+    use crate::{ExecutionContext, MuxEngine};
+    use zz_protocol::CommandInvocation;
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "s", "-x", "80", "-y", "24"]),
+        )
+        .unwrap();
+    context.set_spawn_pane_options(vec![
+        ("remain-on-exit".to_owned(), "failed".to_owned()),
+        ("remain-on-exit-format".to_owned(), String::new()),
+    ]);
+    engine
+        .execute(&mut context, &CommandInvocation::new("new-pane", ["-O"]))
+        .unwrap();
+    let modal = context.pane.unwrap().to_string();
+    let shown = |engine: &mut MuxEngine, context: &mut ExecutionContext, pane: &str| {
+        let output = engine
+            .execute(
+                context,
+                &CommandInvocation::new("show-options", ["-pv", "-t", pane, "remain-on-exit"]),
+            )
+            .unwrap()
+            .output;
+        String::from_utf8_lossy(output.as_bytes()).trim().to_owned()
+    };
+    assert_eq!(shown(&mut engine, &mut context, &modal), "failed");
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-pane", ["-t", "%0"]),
+        )
+        .unwrap();
+    let plain = context.pane.unwrap().to_string();
+    assert_eq!(shown(&mut engine, &mut context, &plain), "");
+}
+
+#[test]
+fn a_refused_float_split_leaves_the_float_its_size() {
+    use crate::{ExecutionContext, MuxEngine};
+    use zz_protocol::CommandInvocation;
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "s", "-x", "80", "-y", "24"]),
+        )
+        .unwrap();
+    engine
+        .execute(&mut context, &CommandInvocation::new("new-pane", ["-d"]))
+        .unwrap();
+    let window = *engine.state.windows.keys().next().unwrap();
+    let float = engine.state.windows[&window]
+        .panes
+        .keys()
+        .copied()
+        .find(|pane| engine.state.windows[&window].is_floating(*pane))
+        .unwrap();
+    let before = engine.state.windows[&window].layout.pane_geometry(float);
+    for args in [
+        &["-h", "-E", "-t", "%1", "echo hi"][..],
+        &["-h", "-B", "sideways", "-t", "%1"][..],
+    ] {
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("split-window", args.iter().copied()),
+            )
+            .unwrap_err();
+        assert_eq!(
+            engine.state.windows[&window].layout.pane_geometry(float),
+            before
+        );
+    }
+}

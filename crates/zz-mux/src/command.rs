@@ -872,6 +872,7 @@ pub struct ExecutionContext {
     refuse_new_session_attach: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
+    spawn_pane_options: Vec<(String, String)>,
 }
 
 /// `struct mouse_event` as much of it as a bound mouse key carries: the pane
@@ -978,6 +979,7 @@ impl fmt::Debug for ExecutionContext {
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
             .field("no_hooks", &self.no_hooks)
             .field("format_variables", &self.format_variables)
+            .field("spawn_pane_options", &self.spawn_pane_options)
             .finish()
     }
 }
@@ -1012,6 +1014,7 @@ impl Default for ExecutionContext {
             refuse_new_session_attach: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
+            spawn_pane_options: Vec::new(),
         }
     }
 }
@@ -1219,6 +1222,12 @@ impl ExecutionContext {
 
     pub fn set_refuse_new_session_attach(&mut self, refuse: bool) {
         self.refuse_new_session_attach = refuse;
+    }
+
+    /// Pane options `new-pane` sets on the pane it creates before the daemon
+    /// spawns its process, so a command that exits at once already sees them.
+    pub fn set_spawn_pane_options(&mut self, options: Vec<(String, String)>) {
+        self.spawn_pane_options = options;
     }
 
     pub fn retarget_to_pane(&mut self, state: &MuxState, pane: PaneId) -> bool {
@@ -2924,6 +2933,11 @@ impl Default for MuxEngine {
 impl MuxEngine {
     #[must_use]
     pub fn after_command_hook(command: &str) -> Option<&'static str> {
+        let command = if command == "new-pane" {
+            "split-window"
+        } else {
+            command
+        };
         HOOK_NAMES
             .binary_search_by(|hook| {
                 hook.strip_prefix("after-")
@@ -7286,19 +7300,21 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-window", args)?;
-        let floating = match self.split_floating_target(context, &options)? {
-            Some(Err(cause)) => return Err(ServerError::InvalidCommand(cause)),
-            Some(Ok((target, old, spawn))) => Some((target, old, spawn)),
-            None => None,
-        };
+        self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let kind = self.spawn_pane_kind("split-window", context, &options, &positional, hooks)?;
-        let floating = floating.map(|(target, old, spawn)| {
-            let _ = self.state.set_float_geometry(target, old);
-            spawn
-        });
         let command = matches!(kind, PaneKind::Terminal)
             .then(|| shell_command_positional(&positional))
             .flatten();
+        pane_spawn_empty(&options, command.as_deref())?;
+        check_spawn_border_lines(&options)?;
+        let floating = match self.split_floating_target(context, &options)? {
+            Some(Err(cause)) => return Err(ServerError::InvalidCommand(cause)),
+            Some(Ok((target, old, spawn))) => {
+                let _ = self.state.set_float_geometry(target, old);
+                Some(spawn)
+            }
+            None => None,
+        };
         let mut execution = self.split_window_with_options(
             context,
             &options,
@@ -7353,9 +7369,12 @@ impl MuxEngine {
                 ));
             }
         }
-        if options.has("-M") && floating {
-            return Ok(Execution::default());
-        }
+        let kind = self.spawn_pane_kind("new-pane", context, &options, &positional, hooks)?;
+        let command = matches!(kind, PaneKind::Terminal)
+            .then(|| shell_command_positional(&positional))
+            .flatten();
+        pane_spawn_empty(&options, command.as_deref())?;
+        check_spawn_border_lines(&options)?;
         let spawn = if floating {
             let lines = match options.value("-B") {
                 Some(lines) => PaneBorderLines::parse(lines),
@@ -7382,10 +7401,7 @@ impl MuxEngine {
         } else {
             None
         };
-        let kind = self.spawn_pane_kind("new-pane", context, &options, &positional, hooks)?;
-        let command = matches!(kind, PaneKind::Terminal)
-            .then(|| shell_command_positional(&positional))
-            .flatten();
+        let spawn_options = std::mem::take(&mut context.spawn_pane_options);
         let mut execution = self.split_window_with_options(
             context,
             &options,
@@ -7396,12 +7412,26 @@ impl MuxEngine {
             spawn,
             hooks,
         )?;
+        let created = execution.effects.iter().find_map(|effect| match effect {
+            MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+            _ => None,
+        });
+        if let Some(pane) = created {
+            for (name, value) in spawn_options {
+                if let Some(mut option_context) = ExecutionContext::for_pane(&self.state, pane) {
+                    let _ = self.execute(
+                        &mut option_context,
+                        &CommandInvocation::new(
+                            "set-option",
+                            ["-p", "-t", &pane.to_string(), &name, &value],
+                        ),
+                    );
+                }
+            }
+        }
         if options.has("-I")
             && let Some(bytes) = stdin
-            && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
-                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
-                _ => None,
-            })
+            && let Some(pane) = created
         {
             execution.effects.push(MuxEffect::PaneStreamInput {
                 pane,
@@ -7860,7 +7890,7 @@ impl MuxEngine {
             .window_for_pane(target)
             .expect("resolved pane has a window");
         let window_state = &self.state.windows[&window];
-        if !window_state.is_floating(target) {
+        if !window_state.shows_floating(target) {
             return Err(ServerError::InvalidCommand(
                 "pane is not floating".to_owned(),
             ));
@@ -8337,15 +8367,7 @@ impl MuxEngine {
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let empty = pane_spawn_empty(options, command.as_deref())?;
         let environment = spawn_environment(options);
-        if let Some(lines) = options.value("-B")
-            && !crate::tmux_option_metadata::tmux_option_metadata("pane-border-lines")
-                .choices
-                .contains(&lines)
-        {
-            return Err(ServerError::InvalidCommand(format!(
-                "pane-border-lines unknown value: {lines}"
-            )));
-        }
+        check_spawn_border_lines(options)?;
         let axis = if options.has("-h") {
             Axis::Horizontal
         } else {
@@ -9017,16 +9039,18 @@ impl MuxEngine {
             .state
             .window_for_pane(pane)
             .expect("resolved pane has a window");
-        if self.state.windows[&window].is_floating(pane) {
-            return self.resize_floating_pane(&options, &positional, window, pane);
-        }
-        if self.state.windows[&window].zoomed_pane.is_some() {
+        if !self.state.windows[&window].shows_floating(pane)
+            && self.state.windows[&window].zoomed_pane.is_some()
+        {
             self.state
                 .windows
                 .get_mut(&mut self.state.journal, &window)
                 .unwrap()
-                .zoomed_pane = None;
+                .unzoom();
             self.state.bump_generation();
+        }
+        if self.state.windows[&window].is_floating(pane) {
+            return self.resize_floating_pane(&options, &positional, window, pane);
         }
         let mut absolute = Vec::new();
         for (option, axis, dimension) in [
@@ -9100,6 +9124,21 @@ impl MuxEngine {
                 .window_extent(window, axis)
                 .expect("resolved window has a cell extent");
             let mut size = i64::from(parse_resize_size(value, extent, dimension)?);
+            let mut cell = self.state.windows[&window]
+                .layout
+                .pane_geometry(pane)
+                .expect("floating pane has a cell");
+            if axis == Axis::Vertical
+                && match self.pane_border_status(window) {
+                    PaneBorderStatus::Top => cell.yoff == 1,
+                    PaneBorderStatus::Bottom => {
+                        cell.yoff + i32::from(cell.sy) == i32::from(extent) - 1
+                    }
+                    PaneBorderStatus::Off => false,
+                }
+            {
+                size += 1;
+            }
             if border && size >= minimum + 2 {
                 size -= 2;
             }
@@ -9108,10 +9147,6 @@ impl MuxEngine {
                     "size size is too big or too small".to_owned(),
                 ));
             }
-            let mut cell = self.state.windows[&window]
-                .layout
-                .pane_geometry(pane)
-                .expect("floating pane has a cell");
             let size = u16::try_from(size).expect("pane size is bounded");
             match axis {
                 Axis::Horizontal => cell.sx = size,
@@ -18110,6 +18145,21 @@ fn apply_client_environment_update(
                 );
             }
         }
+    }
+}
+
+fn check_spawn_border_lines(options: &Options) -> Result<(), ServerError> {
+    match options.value("-B") {
+        Some(lines)
+            if !crate::tmux_option_metadata::tmux_option_metadata("pane-border-lines")
+                .choices
+                .contains(&lines) =>
+        {
+            Err(ServerError::InvalidCommand(format!(
+                "pane-border-lines unknown value: {lines}"
+            )))
+        }
+        _ => Ok(()),
     }
 }
 
@@ -32947,6 +32997,10 @@ mod tests {
         ] {
             assert_eq!(MuxEngine::after_command_hook(name), None);
         }
+        assert_eq!(
+            MuxEngine::after_command_hook("new-pane"),
+            Some("after-split-window")
+        );
     }
 
     #[test]
@@ -47139,7 +47193,7 @@ mod tests {
         assert!(rows.contains(
             &"run-shell (run) [-bCE] [-c start-directory] [-d delay] [-t target-pane] [shell-command [argument ...]]"
         ));
-        assert!(rows.contains(&"wait-for (wait) [-L|-S|-U] channel"));
+        assert!(rows.contains(&"wait-for (wait) [-L|-S|-U] [-l] [-w waiter] channel"));
         assert!(rows.contains(&"pipe-pane (pipep) [-IOo] [-t target-pane] [shell-command]"));
         assert_eq!(
             engine
@@ -47172,7 +47226,7 @@ mod tests {
                     .execute(&mut context, &command("list-commands", &[name]))
                     .unwrap()
                     .output,
-                "wait-for (wait) [-L|-S|-U] channel"
+                "wait-for (wait) [-L|-S|-U] [-l] [-w waiter] channel"
             );
         }
         for name in ["pipe-pane", "pipep"] {

@@ -660,10 +660,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
     (
-        "set-hook",
-        "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]",
-    ),
-    (
         "show-options",
         "[-AgHpqsvw] [-F format] [-t target-pane] [option]",
     ),
@@ -1267,7 +1263,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "wait-for",
         aliases: &["wait"],
         description: "Block or wake a client on a named channel",
-        usage: "[-L|-S|-U] channel",
+        usage: "[-L|-S|-U] [-l] [-w waiter] channel",
         options: &[
             CommandOptionSpec::flag("-L", "lock the channel"),
             CommandOptionSpec::flag("-S", "signal the channel"),
@@ -1778,7 +1774,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "new-pane",
         aliases: &["newp"],
         description: "Create a floating pane",
-        usage: "[-AbCDdEfhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
+        usage: "[-AbCDdEfhIkKLOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("--kind", PaneKind, "pane kind").native(),
             CommandOptionSpec::value("--profile", FreeForm, "browser profile").native(),
@@ -1789,7 +1785,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-D", "kill the modal pane on Escape or C-c"),
             CommandOptionSpec::flag("-K", "send every key to the modal pane"),
             CommandOptionSpec::flag("-L", "split instead of floating"),
-            CommandOptionSpec::flag("-M", "size the pane from the invoking mouse drag"),
+            CommandOptionSpec::unsupported_flag("-M"),
             CommandOptionSpec::flag("-O", "make the pane modal"),
             CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),
             CommandOptionSpec::value("-y", FreeForm, "height in cells or percent"),
@@ -3244,8 +3240,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 327), ("optional", 8), ("required", 250)])
         );
-        assert_eq!((supported, unsupported), (566, 20));
-        assert_eq!(usage_overrides.len(), 27);
+        assert_eq!((supported, unsupported), (569, 17));
+        assert_eq!(usage_overrides.len(), 26);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

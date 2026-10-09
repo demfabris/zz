@@ -7454,6 +7454,23 @@ impl Shared {
         }
     }
 
+    fn release_removed_pane_wait(inner: &mut ServerState, pane: PaneId) {
+        let exit_code = inner
+            .terminals
+            .get(&pane)
+            .filter(|terminal| terminal.completion().is_some())
+            .map(|terminal| pane_wait_exit_code(terminal, &terminal.latest_viewport().status));
+        if let Some(exit_code) = exit_code {
+            Self::wake_pane_exit_wait(inner, pane, exit_code);
+            return;
+        }
+        if let Some(entry) = inner.pane_exit_waits.get(&pane) {
+            entry.current.kill();
+        }
+        pane_exit::remove_unused(inner, pane);
+        terminal_reads::pane_changed(inner, pane);
+    }
+
     fn wake_pane_exit_wait(inner: &mut ServerState, pane: PaneId, exit_code: u8) {
         if let Some(entry) = inner.pane_exit_waits.get(&pane) {
             entry.current.complete(exit_code);
@@ -7798,9 +7815,8 @@ impl Shared {
             return handed_off;
         }
         hook_events::release_input_change_window(self);
-        let split_input = canonical == "split-window"
-            && command_stdin_sink("split-window", &command.args)
-                == Some(CommandStdinSink::PaneInput);
+        let split_input = matches!(canonical, "split-window" | "new-pane")
+            && command_stdin_sink(canonical, &command.args) == Some(CommandStdinSink::PaneInput);
         let streamed_command = if split_input {
             let mut command = command.clone();
             command.set_stdin_spent();
@@ -8797,12 +8813,13 @@ impl Shared {
         context: &ExecutionContext,
     ) -> ExecutionContext {
         let mut hook_context = context.clone();
-        if matches!(name, "new-session" | "new-window" | "split-window")
-            && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
-                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
-                _ => None,
-            })
-        {
+        if matches!(
+            name,
+            "new-session" | "new-window" | "split-window" | "new-pane"
+        ) && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
+            MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+            _ => None,
+        }) {
             let inner = self.inner.lock();
             hook_context.retarget_to_pane(&inner.engine.state, pane);
         }
@@ -9306,7 +9323,7 @@ impl Shared {
             self.ensure_prompt_history();
         }
         let read_only = hook_events::command_is_read_only(command_name, &command.args);
-        let split_caller_stream = command_name == "split-window"
+        let split_caller_stream = matches!(command_name, "split-window" | "new-pane")
             && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
@@ -10210,7 +10227,7 @@ impl Shared {
                             if let Some(pipe) = inner.pane_pipes.remove(pane) {
                                 pipes_to_close.push(pipe);
                             }
-                            Self::wake_pane_exit_wait(&mut inner, *pane, 0);
+                            Self::release_removed_pane_wait(&mut inner, *pane);
                             if let Some(terminal) = inner.terminals_mut().remove(pane) {
                                 retire_terminal(&terminal);
                             }
@@ -18769,7 +18786,23 @@ impl Shared {
                 remain_on_exit,
             )
         };
+        let mut spawn_options = vec![
+            ("remain-on-exit", remain_on_exit),
+            ("remain-on-exit-format", ""),
+        ];
+        if parsed.title.is_some() {
+            spawn_options.extend([
+                ("pane-border-status", "top"),
+                ("pane-border-format", "#{pane_title}"),
+            ]);
+        }
         let mut new_context = target.clone();
+        new_context.set_spawn_pane_options(
+            spawn_options
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
+        );
         let execution = self.execute_with_mux_source_inner(
             client,
             kind,
@@ -18780,36 +18813,6 @@ impl Shared {
             queue_execution,
             format_facts_unread,
         )?;
-        let created = execution.effects.iter().find_map(|effect| match effect {
-            MuxEffect::PaneCreated { pane, .. } => Some(*pane),
-            _ => None,
-        });
-        if let Some(pane) = created {
-            let mut inner = self.inner.lock();
-            let mut options = vec![
-                ("remain-on-exit", remain_on_exit),
-                ("remain-on-exit-format", ""),
-            ];
-            if parsed.title.is_some() {
-                options.extend([
-                    ("pane-border-status", "top"),
-                    ("pane-border-format", "#{pane_title}"),
-                ]);
-            }
-            for (name, value) in options {
-                if let Some(mut option_context) =
-                    ExecutionContext::for_pane(&inner.engine.state, pane)
-                {
-                    let _ = inner.engine.execute(
-                        &mut option_context,
-                        &CommandInvocation::new(
-                            "set-option",
-                            ["-p", "-t", &pane.to_string(), name, value],
-                        ),
-                    );
-                }
-            }
-        }
         self.publish_snapshot();
         Ok(execution)
     }
@@ -48666,7 +48669,7 @@ pub fn command_stdin_sink(canonical_name: &str, args: &[RawText]) -> Option<Comm
         } else {
             CommandStdinSink::ConfigReplay
         }),
-        "display-message" | "split-window" => (args
+        "display-message" | "split-window" | "new-pane" => (args
             .iter()
             .any(|argument| argument.as_bytes().contains(&b'I'))
             && command_has_flag(canonical_name, args, "-I"))
@@ -52487,6 +52490,12 @@ mod tests {
                 Some(CommandStdinSink::PaneInput),
             ),
             ("split-window", &["-h"][..], None),
+            (
+                "new-pane",
+                &["-I", "-t", "%1"][..],
+                Some(CommandStdinSink::PaneInput),
+            ),
+            ("new-pane", &["-d"][..], None),
             ("list-sessions", &[][..], None),
         ] {
             assert_eq!(
@@ -117765,6 +117774,96 @@ bind - split-window -v -c "#{pane_current_path}"
                 .terminals
                 .get(&modal)
                 .is_some_and(|terminal| terminal.completion().is_none())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn display_popup_keeps_a_failed_command_that_exits_at_once() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-failed");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-EE", "exit 3"]),
+            )
+            .expect("open a popup whose command fails at once");
+        let modal = modal_pane(&shared, &context).expect("display-popup made a modal pane");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let dead = shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(modal)
+                .is_some_and(|pane| pane.dead);
+            if dead {
+                break;
+            }
+            assert!(
+                modal_pane(&shared, &context) == Some(modal),
+                "the -EE popup closed on a failed exit"
+            );
+            assert!(Instant::now() < deadline, "the failed popup never died");
+            thread::sleep(Duration::from_millis(20));
+        }
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(modal_pane(&shared, &context), Some(modal));
+        let shown = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "show-options",
+                    ["-pv", "-t", &modal.to_string(), "remain-on-exit"],
+                ),
+            )
+            .expect("show the popup's remain-on-exit");
+        assert_eq!(
+            String::from_utf8_lossy(shown.output.as_bytes()).trim(),
+            "failed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_waited_popup_killed_before_its_command_exits_answers_129() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-killed");
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            let mut context = context.clone();
+            thread::spawn(move || {
+                shared.execute(
+                    ClientId(7_001),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("display-popup", ["-E", "sleep 30"]),
+                )
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while modal_pane(&shared, &context).is_none() {
+            assert!(Instant::now() < deadline, "the waited popup never opened");
+            thread::sleep(Duration::from_millis(20));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-C"]),
+            )
+            .expect("display-popup -C kills the waited popup");
+        let error = waiter
+            .join()
+            .expect("popup waiter")
+            .expect_err("a killed popup fails its command client");
+        assert!(
+            matches!(error, DaemonError::CommandExit { exit_code: 129, .. }),
+            "{error:?}"
         );
     }
 

@@ -3338,6 +3338,23 @@ mod tests {
         let plain_attach = prepared("attach", "attach-session", false, &[]);
         assert!(prepared_native_attach("attach", &plain_attach));
         assert!(!prepared_attach_uses_tui("attach", &plain_attach));
+
+        let chained_attach = [
+            prepared(
+                "set-environment",
+                "set-environment",
+                false,
+                &["-g", "A", "1"],
+            ),
+            prepared("attach-session", "attach-session", false, &["-t", "live"]),
+        ];
+        assert!(prepared_command_chain_uses_tui(
+            &[
+                CommandInvocation::new("set-environment", ["-g", "A", "1"]),
+                CommandInvocation::new("attach-session", ["-t", "live"]),
+            ],
+            &chained_attach
+        ));
     }
 
     #[test]

@@ -80,6 +80,7 @@ pub(super) fn presize_client_terminals(
     else {
         return seeded;
     };
+    let extent = (columns, rows);
     let panes = inner
         .client(client)
         .and_then(|c| c.visible_terminals.as_ref())
@@ -111,6 +112,7 @@ pub(super) fn presize_client_terminals(
                 cell_height_px,
             },
         );
+        record_report_place(inner, client, pane, Some(extent));
         seeded.insert(pane);
     }
     seeded

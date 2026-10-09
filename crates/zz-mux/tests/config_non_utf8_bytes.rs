@@ -190,13 +190,9 @@ fn tracks_command_block_token_boundaries() {
         "attached-open.conf",
         "if-shell -F 1 { display-message -p a{b}c }\n",
     );
-    assert!(attached_open.diagnostics.is_empty());
-    assert_eq!(attached_open.commands.len(), 1);
-    assert_eq!(
-        attached_open.commands[0].args,
-        ["-F", "1", "{ display-message -p a{b}", "c", "}"]
-    );
-    assert!(attached_open.commands[0].argument_is_command_block(2));
+    assert!(attached_open.commands.is_empty());
+    assert_eq!(attached_open.diagnostics.len(), 1);
+    assert_eq!(attached_open.diagnostics[0].message, "syntax error");
 
     let literal_open = ParsedConfig::parse_buffer_bytes(
         "literal-open.conf",

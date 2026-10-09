@@ -1,0 +1,7 @@
+corpus: none
+# An unquoted } ends a token and, outside a command block, is the pin's
+# syntax error, so an unquoted #{...} written mid-word fails a sourced file
+# or a control line; quoted and escaped braces still parse.
+stage: fixtures/parse-close-brace.sh ~/parse-close-brace.sh
+run-shell 'sh ~/parse-close-brace.sh'
+out: show-environment -g PARSE_CLOSE_BRACE

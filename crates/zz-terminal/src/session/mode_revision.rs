@@ -242,8 +242,12 @@ impl ModeRevision {
         self.output_rows.get().map_or(&[], Vec::as_slice)
     }
 
+    pub(super) fn screen(&self) -> Arc<Mutex<libghostty_vt::terminal::ScreenSnapshot>> {
+        Arc::clone(&self.grid.lock().terminal)
+    }
+
     pub(super) fn row_has_hyperlink(&self, row: u32) -> bool {
-        let terminal = Arc::clone(&self.grid.lock().terminal);
+        let terminal = self.screen();
         let snapshot = terminal.lock();
         libghostty_vt::terminal::GridRead::grid_ref(
             &*snapshot,
@@ -556,11 +560,7 @@ impl ModeRevision {
         end: u32,
         join_wrapped: bool,
         preserve_trailing: bool,
-        escape_sequences: bool,
     ) -> String {
-        if escape_sequences {
-            return self.capture_rows_vt(start, end, join_wrapped, preserve_trailing);
-        }
         let mut output = String::new();
         let reader = self.reader();
         for row in start..=end {
@@ -574,49 +574,6 @@ impl ModeRevision {
                 if !preserve_trailing {
                     let trimmed_length = output[line_start..].trim_end().len();
                     output.truncate(line_start + trimmed_length);
-                }
-                if row < end && !(join_wrapped && meta.wrapped()) {
-                    output.push('\n');
-                }
-            });
-        }
-        output
-    }
-
-    fn capture_rows_vt(
-        &self,
-        start: u32,
-        end: u32,
-        join_wrapped: bool,
-        preserve_trailing: bool,
-    ) -> String {
-        let mut output = String::new();
-        let reader = self.reader();
-        for row in start..=end {
-            reader.with_cells(row, |cells, meta, dictionary| {
-                let mut active_style = None;
-                let last_column = if preserve_trailing {
-                    cells.len().checked_sub(1)
-                } else {
-                    cells.iter().rposition(|cell| {
-                        cell_first_char(*cell, dictionary)
-                            .is_some_and(|character| !character.is_whitespace())
-                    })
-                };
-                for cell in cells.iter().take(last_column.unwrap_or(0) + 1) {
-                    let Some(text) = emitting_cell_text(*cell, dictionary) else {
-                        continue;
-                    };
-                    if active_style != Some(cell.style_id()) {
-                        if let Some(style) = dictionary.styles.get(usize::from(cell.style_id())) {
-                            push_sgr(&mut output, *style);
-                        }
-                        active_style = Some(cell.style_id());
-                    }
-                    text.push(&mut output);
-                }
-                if active_style.is_some() {
-                    output.push_str("\x1b[0m");
                 }
                 if row < end && !(join_wrapped && meta.wrapped()) {
                     output.push('\n');

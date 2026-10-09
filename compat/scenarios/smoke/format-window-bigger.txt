@@ -3,8 +3,9 @@ corpus: none
 # format_cb_window_bigger answers null without a client in the format tree,
 # tty_window_offset1 compares the client's own tty minus its status lines with
 # the client's current window, and the offsets centre on the active pane's
-# cursor. A list-windows or list-panes row is built with a null client, so all
-# three answer null on a row even while a client is attached.
+# cursor. Since tmux 3.8 a list-windows or list-panes row is built with the
+# invoking command client, which is unattached, so a row answers 0 with null
+# offsets; the d77c9dc6 pin built it with a null client and answered null.
 stage: fixtures/format-window-bigger.sh ~/format-window-bigger.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
 out: set-environment -gu FORMAT_WINDOW_BIGGER

@@ -457,6 +457,7 @@ fn a_resized_or_recoloured_frozen_revision_keeps_its_output_marks() {
             line_flags: true,
             ..CaptureOptions::default()
         },
+        &mut CaptureCarry::default(),
     )
     .expect("frozen capture");
     assert!(flags.lines().any(|line| line == "O out"), "{flags:?}");
@@ -663,5 +664,79 @@ fn escaped_capture_wraps_links_in_osc_8_like_the_pin() {
             "\\033[7mNEXT\\033[0m",
         ]
         .join("\n")
+    );
+}
+
+#[test]
+fn mode_escaped_capture_keeps_the_pin_codes_and_drops_links_like_its_mode_screen() {
+    let mut terminal = e_links_screen();
+    let mut selection = None;
+    let mut copy_mode = None;
+    enter_copy_mode(
+        &mut terminal,
+        &mut selection,
+        &mut copy_mode,
+        false,
+        false,
+        None,
+        false,
+    )
+    .expect("copy mode");
+    let rows = CaptureOptions {
+        mode: true,
+        escape_sequences: true,
+        start: CaptureBoundary::Relative(0),
+        end: CaptureBoundary::Relative(14),
+        ..CaptureOptions::default()
+    };
+    let captured = |options| {
+        capture_terminal_marked(&terminal, copy_mode.as_deref(), options, &[])
+            .expect("mode capture")
+    };
+    let zeros = "0".repeat(76);
+    assert_eq!(
+        captured(rows),
+        [
+            "aa bb",
+            "againcc",
+            "\x1b[1m\x1b[31mred\x1b[0m tail",
+            "x\x1b[4my\x1b[0mz\x1b[32mgreen\x1b[39m",
+            "a\x1b[1mb\x1b[0m",
+            "ab cd",
+            &format!("pre {zeros}"),
+            "00000000000000 post",
+            "ab",
+            "xy",
+            "一二z",
+            "one",
+            "two three",
+            "\x1b[7mrev\x1b[0m",
+            "\x1b[7mNEXT\x1b[0m",
+        ]
+        .join("\n")
+    );
+    assert_eq!(
+        captured(CaptureOptions {
+            escape_nonprintable: true,
+            start: CaptureBoundary::Relative(2),
+            end: CaptureBoundary::Relative(2),
+            ..rows
+        }),
+        "\\033[1m\\033[31mred\\033[0m tail"
+    );
+    let live = capture_terminal_marked(
+        &terminal,
+        None,
+        CaptureOptions {
+            start: CaptureBoundary::Relative(0),
+            end: CaptureBoundary::Relative(0),
+            ..rows
+        },
+        &[],
+    )
+    .expect("live capture");
+    assert_eq!(
+        live,
+        "\x1b]8;;http://a\x1b\\aa\x1b]8;;\x1b\\ \x1b]8;;http://b\x1b\\bb\x1b]8;;\x1b\\"
     );
 }

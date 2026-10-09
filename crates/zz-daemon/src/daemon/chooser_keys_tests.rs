@@ -396,3 +396,161 @@ fn preview_flags_open_each_chooser_off_or_big_and_v_cycles_from_there() {
         assert_eq!(preview, cycled != ChooserPreviewSize::Off);
     }
 }
+
+#[test]
+fn snapshot_publishes_resend_a_chooser_only_when_it_changed() {
+    let chooser_events = |scene: &Scene| {
+        take_reliable_messages(&scene.outbound)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ChooseTree { .. }
+                            | EventPayload::ChooseTreeUpdate { .. }
+                            | EventPayload::ChooseBuffer { .. }
+                            | EventPayload::ChooseBufferUpdate { .. }
+                            | EventPayload::ChooserPresentation { .. },
+                        ..
+                    })
+                )
+            })
+            .count()
+    };
+    for (command, buffer) in [("choose-tree", false), ("choose-buffer", true)] {
+        let mut scene = attached_scene();
+        scene.open("set-buffer", &["-b", "alpha", "alpha"]);
+        scene.open(command, &[]);
+        scene.shared.publish_snapshot();
+        chooser_events(&scene);
+        for _ in 0..3 {
+            scene.shared.publish_snapshot();
+        }
+        assert_eq!(chooser_events(&scene), 0, "{command} unchanged");
+        if buffer {
+            scene.open("set-buffer", &["-b", "beta", "beta"]);
+        } else {
+            scene.open("rename-window", &["-t", "two", "renamed"]);
+        }
+        scene.shared.publish_snapshot();
+        assert!(chooser_events(&scene) > 0, "{command} changed");
+        scene.shared.publish_snapshot();
+        assert_eq!(chooser_events(&scene), 0, "{command} settled");
+        scene.press(key('j', Modifiers::default()), buffer);
+        assert!(chooser_events(&scene) > 0, "{command} moved");
+    }
+}
+
+#[test]
+fn chooser_prompts_take_the_session_message_style_and_prompt_cursor() {
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &[]);
+    let presentation = |scene: &Scene| {
+        take_reliable_messages(&scene.outbound)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooserPresentation {
+                            presentation: Some(presentation),
+                        },
+                    ..
+                }) => Some(presentation),
+                _ => None,
+            })
+            .last()
+            .expect("a presentation")
+    };
+    let default = presentation(&scene);
+    assert!(
+        default
+            .prompt_style
+            .starts_with("bg=themeyellow,fg=themeblack")
+    );
+    assert!(!default.prompt_style.contains("fill="));
+    assert_eq!(default.prompt_cursor, zz_protocol::PromptCursor::default());
+    scene.press(key('q', Modifiers::default()), false);
+    for (name, value) in [
+        ("message-style", "bg=blue,fg=white"),
+        ("prompt-cursor-style", "bar"),
+        ("prompt-cursor-colour", "red"),
+    ] {
+        scene.open("set-option", &["-t", "keys", name, value]);
+    }
+    scene.open("choose-tree", &[]);
+    let styled = presentation(&scene);
+    assert_eq!(styled.prompt_style, "bg=blue,fg=white");
+    assert_eq!(styled.prompt_cursor.style, 6);
+    assert_eq!(
+        styled.prompt_cursor.colour,
+        zz_protocol::parse_tmux_colour("red")
+    );
+}
+
+#[test]
+fn a_full_chooser_state_is_always_followed_by_its_presentation() {
+    for (command, buffer) in [("choose-tree", false), ("choose-buffer", true)] {
+        let mut scene = attached_scene();
+        scene.open("set-buffer", &["-b", "alpha", "alpha"]);
+        scene.open(command, &["-N"]);
+        take_reliable_messages(&scene.outbound);
+        scene.press(key('f', Modifiers::default()), buffer);
+        let mut cleared = false;
+        let mut full = false;
+        for message in take_reliable_messages(&scene.outbound) {
+            match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooseTree { state: Some(_) }
+                        | EventPayload::ChooseBuffer { state: Some(_) },
+                    ..
+                }) => {
+                    cleared = true;
+                    full = true;
+                }
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooserPresentation {
+                            presentation: Some(_),
+                        },
+                    ..
+                }) => cleared = false,
+                _ => {}
+            }
+        }
+        assert!(full, "{command} f sends the full state");
+        assert!(!cleared, "{command} f leaves the client a presentation");
+    }
+}
+
+#[test]
+fn chooser_prompt_styles_see_the_prompt_type_and_input() {
+    for (typed, style) in [('x', "bg=blue"), ('/', "bg=red")] {
+        let mut scene = attached_scene();
+        scene.open(
+            "set-option",
+            &[
+                "-t",
+                "keys",
+                "message-style",
+                "bg=#{?#{==:#{prompt_type},search},red,blue}",
+            ],
+        );
+        scene.open("choose-tree", &[]);
+        scene.press(key(typed, Modifiers::default()), false);
+        let last = take_reliable_messages(&scene.outbound)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooserPresentation {
+                            presentation: Some(presentation),
+                        },
+                    ..
+                }) => Some(presentation.prompt_style),
+                _ => None,
+            })
+            .last();
+        assert_eq!(last.as_deref(), Some(style), "{typed}");
+    }
+}

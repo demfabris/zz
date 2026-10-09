@@ -2041,6 +2041,7 @@ mod tests {
             prompt_style: String::new(),
             preview_size: zz_protocol::ChooserPreviewSize::Normal,
             preview: None,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
 
         let mut core = ClientCore::new();

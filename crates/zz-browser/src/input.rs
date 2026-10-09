@@ -293,7 +293,7 @@ pub fn terminal_key_input(input: &zz_terminal::KeyInput) -> KeyInput {
             Key::ArrowLeft => BrowserKey::ArrowLeft,
             Key::ArrowRight => BrowserKey::ArrowRight,
             Key::Function(value) => BrowserKey::Function(value),
-            Key::Unidentified => BrowserKey::Unidentified,
+            Key::Unidentified | Key::User(_) => BrowserKey::Unidentified,
         },
         modifiers: Modifiers::new(
             input.modifiers.shift(),

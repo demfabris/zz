@@ -308,9 +308,11 @@ Recorded by float.clients (2026-10-09).
 - `compat/tui-floating.sh` compares the decoded glyphs of every cell, the cursor and the pane list
   against tmux 3.8; it does not compare colours. While `display-popup` is up it compares the screen
   only, because 3.8's popup is a client overlay and zz's is a modal pane.
-- The drag commit `resize-pane -x -y ; move-pane -X -Y` is two `CommandInvocation`s sent in order
-  on one connection (`zz_client::floating::float_drag_commands`), which is how a GUI client sends a
-  command list.
+- The drag commit `resize-pane -x -y ; move-pane -X -Y` is one request,
+  `run-shell -C "resize-pane ... ; move-pane ..."`, which zz parses as a tmux command list
+  (`zz_client::floating::float_drag_command`); the daemon still publishes a snapshot after each
+  command of the list. The height it sends takes back the row `resize-pane -y` adds for a float on
+  the row under a top pane status or above a bottom one.
 - `EventPayload::Popup` and `InputMessage::Popup` are renamed `RetiredPopup` in Rust with their serde
   names kept, so clients match the retired tag without naming the popup.
 - The raw TUI fills a window with no tiled pane with the default `fill-character` inside cell

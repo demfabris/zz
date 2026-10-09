@@ -24,7 +24,7 @@ flow that consumes CMake/Ninja.
 | --- | --- | --- | --- |
 | just | `1.52` or newer | `scripts/just/settings.just` (`default-list`), `Justfile` (`mod`) | Lists command groups and runs their recipes |
 | Rust | `1.97.0`, minimal profile, `clippy` + `rustfmt` components | `rust-toolchain.toml`; `workspace.package.rust-version = "1.97"` in `Cargo.toml` | Toolchain auto-selected by `rustup` when present |
-| Zig | `0.16.0` | `mise.toml`, mirrored in `.zigversion`; `mlugg/setup-zig@v2.2.1` with `version: 0.16.0` in CI | Builds `libghostty-vt` with the local sys crate and a native fork removing unused C-host signal-stack storage |
+| Zig | `0.16.0` | `mise.toml`, mirrored in `.zigversion`; `mlugg/setup-zig@v2.2.1` with `version: 0.16.0` in CI | Builds `libghostty-vt` from the vendored Ghostty in `third_party/ghostty`, whose zz commits include removing unused C-host signal-stack storage |
 | CMake | `3.21` or newer | `cmake_minimum_required(VERSION 3.21)` in the CEF distribution's own `CMakeLists.txt`; `cmake` in the CI apt list | Configures the CEF C++ wrapper build invoked by `xtask`/`cef::build_util` |
 | Ninja | any recent | `ninja-build` in the CI apt list | Build backend for the CEF C++ wrapper |
 | Linux system libs | see the apt line below | CI `apt-get install` list | Font discovery plus GPUI's dual Wayland/X11 backend (`gpui_platform` features `["wayland", "x11"]`) |
@@ -80,7 +80,7 @@ components = ["clippy", "rustfmt"]
 | `mise.toml` | Selects Zig 0.16.0 for raw local Cargo commands when mise is active |
 | `.zigversion` | Mirrors the Zig pin for compatible Zig-specific tooling |
 | `Cargo.toml` | `workspace.package.rust-version = "1.97"`; `libghostty-vt` as a path dependency on the vendored wrapper in `third_party/rust/libghostty-vt`, which uses the adjacent `libghostty-vt-sys` snapshot |
-| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, Ghostty `e482b036` fork pin (`zz-2026-10-04`) and upstream base, its eight commits (signal stack, spare pages, history-erase trim, copy snapshots, used-size active page copies, row cell copies, render state clip, trimmed row copies), generated bindings, and removal condition |
+| `third_party/rust/libghostty-vt-sys/UPSTREAM.md` | Records the wrapper commit, the vendored Ghostty's upstream base and the former `e482b036` fork pin (`zz-2026-10-04`), its eight commits (signal stack, spare pages, history-erase trim, copy snapshots, used-size active page copies, row cell copies, render state clip, trimmed row copies), generated bindings, and removal condition |
 | `.github/workflows/ci.yml` | Authoritative list of Linux system packages and the Zig setup action, run across `ubuntu-24.04`, `macos-15`, `windows-2025` |
 | `packaging/arch/PKGBUILD` | Native Arch package metadata and filesystem layout for the validated Linux bundle |
 

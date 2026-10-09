@@ -19,14 +19,15 @@ workspace vendors the safe wrapper from `demfabris/libghostty-rs` commit
 contains the stacked render-hold and resize-scrollback APIs needed by the current C ABI.
 Both crates are path dependencies: the wrapper next to the sys snapshot documented in
 `third_party/rust/libghostty-vt-sys/UPSTREAM.md`.
-The published native pin is `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on branch
-`zz-2026-10-04`, upstream base `6301810a48aaa3426887a4316668f18833a40138`. It carries eight
-changes: the C ABI signal-stack option, spare-page reuse, the history-erase trim fix
+Ghostty itself is vendored in `third_party/ghostty`: upstream
+`6301810a48aaa3426887a4316668f18833a40138` trimmed to what the libghostty-vt build reads, plus
+eight zz commits (formerly `e482b03688ccc9eebd6304176aa85bd5d81f0bfa` on `demfabris/ghostty`
+`zz-2026-10-04`): the C ABI signal-stack option, spare-page reuse, the history-erase trim fix
 (`c3941417`), owned copy snapshots (`7823f65d`), copied active pages at their used size
 (`67351380`), one-call row cell copies (`189df4a1`), the render state clip (`0ab7941c`) and
 trimmed row copies. The branch fast-forwards retain the earlier pins in their history;
-`zz-2026-09-29` keeps the spare-page pin `713374af`. zz pins both published commits for
-ordinary fetched-source builds without source rewriting or a safe-wrapper path patch.
+`zz-2026-09-29` keeps the spare-page pin `713374af`. Builds read the vendored tree without
+source rewriting; `just vendor ghostty <rev>` merges a newer upstream over the zz commits.
 Spare-page reuse keeps a pruned pool page resident for the next grow. The trim fix preserves
 live cell blocks after history erase. The signal-stack option removes unused Zig TLS storage
 from ReleaseSafe dev and test builds. Copy snapshots share immutable history backing,

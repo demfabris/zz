@@ -31,7 +31,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `scripts/` — build, packaging, and profiling scripts
 - `bench/` — terminal throughput benchmark harness
 - `site/` — zzmux.sh landing page and docs (Astro)
-- `third_party/` — vendored crates and pinned reference material
+- `third_party/` — vendored code (`ghostty/`, a trimmed Ghostty synced with `just vendor ghostty <rev>`; the libghostty-vt and CEF crates under `rust/`) and pinned reference material
 - `packaging/` — Arch package, AUR/cask templates
 
 ## Knowledge bundle
@@ -80,7 +80,7 @@ Multiple agent sessions often share this checkout in parallel. Never `git stash`
 - `gpui`, `gpui_platform`, and `gpui_wgpu` live in `gpui/`, our own copy of the 22 GPUI crates split out of Zed. It is not a patch branch: there is nothing to rebase, and upstream Zed fixes come in by hand. Change gpui in the same commit as the zz code that needs it.
 - `gpui/` is its own Cargo workspace, excluded from the root one and consumed by path, so the root clippy and test runs skip it. Run `cargo check --workspace` and the touched crates' tests from inside `gpui/`. `cargo fmt --all` from the root does format it.
 - `clients/web` consumes gpui's WASM renderer in an excluded workspace; check `just web build` after a gpui change.
-- `knowledge/references/gpui-revision.md` has the full recipe; the `fork-rebase` skill covers pulling upstream Zed fixes and the native Ghostty fork.
+- `knowledge/references/gpui-revision.md` has the full recipe; the `fork-rebase` skill covers pulling upstream Zed fixes and syncing the vendored Ghostty.
 </important>
 
 <important if="a test fails under cargo test --workspace">

@@ -4466,6 +4466,8 @@ mod tests {
             mode: zz_protocol::CommandPromptMode::Text,
             no_freeze: false,
             pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         }
     }
 
@@ -5537,6 +5539,7 @@ mod tests {
                         prompt: "Confirm? (y/n) ".to_owned(),
                         confirm_key: b'y',
                         default_yes: false,
+                        prompt_cursor: zz_protocol::PromptCursor::default(),
                     }),
                 },
                 retire: zz_protocol::EventPayload::Confirm { state: None },
@@ -6217,6 +6220,7 @@ mod tests {
                             prompt: "Confirm? (y/n) ".to_owned(),
                             confirm_key: b'y',
                             default_yes: false,
+                            prompt_cursor: zz_protocol::PromptCursor::default(),
                         }),
                     },
                 }),

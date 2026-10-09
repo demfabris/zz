@@ -195,7 +195,17 @@ fn arm_extended_keys() {
 }
 
 fn terminal_carries_extended_keys() -> bool {
-    terminal_feature_mask(["extkeys"]) & zz_daemon::client_terminal_feature_mask() != 0
+    terminal_carries("extkeys")
+}
+
+pub(crate) fn terminal_carries(feature: &str) -> bool {
+    terminal_feature_mask([feature]) & zz_daemon::client_terminal_feature_mask() != 0
+}
+
+static CURSOR_STYLE_SET: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn note_cursor_style(set: bool) {
+    CURSOR_STYLE_SET.store(set, Ordering::Relaxed);
 }
 /// `smkx` and `rmkx` on every vt100-like terminal: `tty_start_tty` puts the
 /// keypad and the cursor keys into application mode for the whole attach and
@@ -387,6 +397,9 @@ impl TerminalGuard {
         cleanup_frame_slot_files();
         let mut output = Vec::new();
         let _ = output.write_all(b"\x1b[?2026l\x1b[0m\x1b]112\x07");
+        if CURSOR_STYLE_SET.swap(false, Ordering::Relaxed) {
+            let _ = output.write_all(b"\x1b[2 q");
+        }
         if self.kitty_graphics {
             let _ = output.write_all(b"\x1b_Ga=d,d=A,q=2\x1b\\");
         }

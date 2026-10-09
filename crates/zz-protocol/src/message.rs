@@ -2660,6 +2660,14 @@ pub struct CommandPromptState {
     /// row - its first under `status-position top` - leaving the status row
     /// alone. `None` is the client prompt `status_prompt_set` raises.
     pub pane: Option<PaneId>,
+    pub command_mode: bool,
+    pub prompt_cursor: PromptCursor,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptCursor {
+    pub style: u8,
+    pub colour: Option<crate::TmuxColour>,
 }
 
 #[repr(u8)]
@@ -3230,6 +3238,7 @@ pub struct ConfirmState {
     pub prompt: String,
     pub confirm_key: u8,
     pub default_yes: bool,
+    pub prompt_cursor: PromptCursor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -5360,23 +5369,41 @@ mod tests {
             mode: super::CommandPromptMode::Incremental,
             no_freeze: true,
             pane: None,
+            command_mode: false,
+            prompt_cursor: crate::PromptCursor::default(),
         };
         let bytes = postcard::to_stdvec(&state).expect("prompt state");
         assert_eq!(
             postcard::from_bytes::<super::CommandPromptState>(&bytes).expect("state decodes"),
             state
         );
-        assert_eq!(bytes.last().copied(), Some(0));
+        assert_eq!(bytes[bytes.len() - 4..], [0, 0, 0, 0]);
         let on_pane = super::CommandPromptState {
             pane: Some(crate::PaneId(7)),
             ..state.clone()
         };
         let pane_bytes = postcard::to_stdvec(&on_pane).expect("pane prompt state");
-        assert_eq!(pane_bytes[..bytes.len() - 1], bytes[..bytes.len() - 1]);
-        assert_eq!(pane_bytes[bytes.len() - 1..], [1, 7]);
+        assert_eq!(pane_bytes[..bytes.len() - 4], bytes[..bytes.len() - 4]);
+        assert_eq!(pane_bytes[bytes.len() - 4..], [1, 7, 0, 0, 0]);
         assert_eq!(
             postcard::from_bytes::<super::CommandPromptState>(&pane_bytes).expect("pane decodes"),
             on_pane
+        );
+        let command = super::CommandPromptState {
+            command_mode: true,
+            prompt_cursor: super::PromptCursor {
+                style: 6,
+                colour: Some(crate::TmuxColour::Basic(1)),
+            },
+            ..state.clone()
+        };
+        let command_bytes = postcard::to_stdvec(&command).expect("command mode state");
+        assert_eq!(command_bytes[..bytes.len() - 3], bytes[..bytes.len() - 3]);
+        assert_eq!(command_bytes[bytes.len() - 3..], [1, 6, 1, 0, 1]);
+        assert_eq!(
+            postcard::from_bytes::<super::CommandPromptState>(&command_bytes)
+                .expect("command mode decodes"),
+            command
         );
     }
 

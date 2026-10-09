@@ -268,6 +268,7 @@ pub(crate) struct Renderer {
     default_blank: PaneMap<Rect>,
     tty: Option<(TtyState, usize)>,
     settled: Option<TtyState>,
+    terminal_cursor: (u8, Option<u32>),
 }
 
 impl Renderer {
@@ -319,6 +320,7 @@ impl Renderer {
             default_blank: PaneMap::default(),
             tty: None,
             settled: None,
+            terminal_cursor: (0, None),
         }
     }
 
@@ -522,6 +524,7 @@ impl Renderer {
             self.place_confirm_cursor(model);
         }
 
+        self.update_terminal_cursor(model);
         self.output.extend_from_slice(b"\x1b[?2026l");
         self.flush_output()
     }
@@ -544,6 +547,7 @@ impl Renderer {
             self.paint_popup(model, false);
             self.reconcile_popup_kitty_images(model);
             self.place_popup_cursor(model);
+            self.update_terminal_cursor(model);
             self.output.extend_from_slice(b"\x1b[?2026l");
             return self.flush_output();
         }
@@ -573,6 +577,7 @@ impl Renderer {
                 self.restore_mode_tree_cursor(model);
             }
         }
+        self.update_terminal_cursor(model);
         self.output.extend_from_slice(b"\x1b[?2026l");
         self.flush_output()
     }
@@ -700,6 +705,47 @@ impl Renderer {
         self.output.clear();
         self.writer.borrow_mut().pause(paused);
         self.invalidate();
+        self.terminal_cursor = (0, None);
+    }
+
+    fn update_terminal_cursor(&mut self, model: &Model) {
+        self.write_terminal_cursor(
+            model,
+            crate::tty::terminal_carries("cstyle"),
+            crate::tty::terminal_carries("ccolour"),
+        );
+    }
+
+    fn write_terminal_cursor(&mut self, model: &Model, writes_style: bool, writes_colour: bool) {
+        let wanted = prompt_cursor(model);
+        let colour = wanted
+            .colour
+            .and_then(|colour| cursor_colour_rgb(colour, &model.status.theme));
+        if colour != self.terminal_cursor.1 {
+            if writes_colour {
+                match colour {
+                    Some(rgb) => {
+                        let _ = write!(
+                            self.output,
+                            "\x1b]12;rgb:{:02x}/{:02x}/{:02x}\x07",
+                            rgb >> 16 & 0xff,
+                            rgb >> 8 & 0xff,
+                            rgb & 0xff
+                        );
+                    }
+                    None => self.output.extend_from_slice(b"\x1b]112\x07"),
+                }
+            }
+            self.terminal_cursor.1 = colour;
+        }
+        let style = wanted.style.min(6);
+        if style != self.terminal_cursor.0 {
+            if writes_style {
+                let _ = write!(self.output, "\x1b[{} q", if style == 0 { 2 } else { style });
+                crate::tty::note_cursor_style(style != 0);
+            }
+            self.terminal_cursor.0 = style;
+        }
     }
 
     /// Throws away whatever the writer has not painted yet.
@@ -2857,10 +2903,41 @@ fn pane_prompt_row_y(model: &Model, content: Rect) -> u16 {
     }
 }
 
+fn prompt_cursor(model: &Model) -> zz_protocol::PromptCursor {
+    if model.popup.is_some() || model.menu.is_some() {
+        return zz_protocol::PromptCursor::default();
+    }
+    if let Some(confirm) = &model.confirm {
+        return confirm.prompt_cursor;
+    }
+    model
+        .command_prompt
+        .as_ref()
+        .filter(|prompt| prompt.pane.is_none())
+        .map(|prompt| prompt.prompt_cursor)
+        .unwrap_or_default()
+}
+
+fn cursor_colour_rgb(colour: TmuxColour, theme: &zz_protocol::ThemeColours) -> Option<u32> {
+    match colour {
+        TmuxColour::Basic(index) | TmuxColour::Indexed(index) => {
+            Some(zz_protocol::indexed_colour_rgb(index))
+        }
+        TmuxColour::Rgb(rgb) => Some(rgb),
+        TmuxColour::Theme(index) => theme
+            .0
+            .get(usize::from(index))
+            .copied()
+            .filter(|slot| !matches!(slot, TmuxColour::Theme(_)))
+            .and_then(|slot| cursor_colour_rgb(slot, theme)),
+        TmuxColour::Default | TmuxColour::Terminal => None,
+    }
+}
+
 fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
     let filled = model.status_block_rows() > 0;
-    let message = |text: &str| {
-        let message_style = crate::mode_view::message_style(model, false);
+    let message = |text: &str, command: bool| {
+        let message_style = crate::mode_view::message_style(model, command);
         StatusOverlay {
             front: StyledLine::from_segments(crate::mode_view::message_front(
                 if filled {
@@ -2879,15 +2956,18 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
             return None;
         }
         let view = crate::overlay::prompt_view(&confirm.prompt, "", 0, width);
-        return Some(message(&view.text));
+        return Some(message(&view.text, false));
     }
     if model.command_output_focus().is_some()
         && let Some(query) = &model.command_output_search
     {
-        return Some(message(&truncate(
-            &command_output_search_prompt(query),
-            width.saturating_sub(1),
-        )));
+        return Some(message(
+            &truncate(
+                &command_output_search_prompt(query),
+                width.saturating_sub(1),
+            ),
+            false,
+        ));
     }
     if model.sidebar_visible() {
         return None;
@@ -2896,12 +2976,12 @@ fn status_overlay(model: &Model, width: u16) -> Option<StatusOverlay> {
         && pane_prompt_target(model).is_none()
     {
         let view = crate::overlay::prompt_view(&prompt.prompt, &prompt.input, prompt.cursor, width);
-        return Some(message(&view.text));
+        return Some(message(&view.text, prompt.command_mode));
     }
     model
         .client_message
         .as_ref()
-        .map(|client_message| message(&client_message.text))
+        .map(|client_message| message(&client_message.text, false))
 }
 
 #[derive(Clone, Copy)]
@@ -5164,6 +5244,7 @@ mod tests {
             prompt: "Go on?  ".to_owned(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
         let Some(StatusOverlay { front, .. }) = status_overlay(&model, 40) else {
             panic!("confirm is a message-area overlay");
@@ -5187,6 +5268,7 @@ mod tests {
             prompt: "Go on?  ".to_owned(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
         let Some(StatusOverlay { front, .. }) = status_overlay(&model, 40) else {
             panic!("confirm is a message-area overlay");
@@ -5212,6 +5294,7 @@ mod tests {
             prompt: "Confirm attached? (y/n) ".to_owned(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
         let mut renderer = Renderer::new();
         renderer.paint_status_block(&model, true);
@@ -5468,11 +5551,95 @@ mod tests {
             mode: zz_protocol::CommandPromptMode::Text,
             no_freeze: false,
             pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
         let mut renderer = Renderer::new();
         renderer.place_active_cursor(&model);
         let output = String::from_utf8(renderer.output).unwrap();
         assert!(output.ends_with("\x1b[?25h"), "{output:?}");
+    }
+
+    #[test]
+    fn a_client_prompt_sends_its_cursor_and_takes_it_back_when_it_closes() {
+        let mut model = block_model(40, 10);
+        model.set_status(block_status(vec!["ROW"], false));
+        let prompt = zz_protocol::CommandPromptState {
+            prompt: ":".to_owned(),
+            input: "abc".to_owned(),
+            cursor: 3,
+            kind: zz_protocol::CommandPromptKind::Command,
+            history: Vec::new(),
+            prompt_type: zz_protocol::CommandPromptType::Command,
+            mode: zz_protocol::CommandPromptMode::Text,
+            no_freeze: false,
+            pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor {
+                style: 6,
+                colour: Some(TmuxColour::Basic(1)),
+            },
+        };
+        let mut renderer = Renderer::new();
+        let written = |renderer: &mut Renderer, model: &Model| {
+            renderer.write_terminal_cursor(model, true, true);
+            String::from_utf8(std::mem::take(&mut renderer.output)).unwrap()
+        };
+        assert_eq!(written(&mut renderer, &model), "");
+
+        model.command_prompt = Some(prompt.clone());
+        assert_eq!(
+            written(&mut renderer, &model),
+            "\x1b]12;rgb:80/00/00\x07\x1b[6 q"
+        );
+        assert_eq!(written(&mut renderer, &model), "");
+
+        model.command_prompt = Some(zz_protocol::CommandPromptState {
+            command_mode: true,
+            prompt_cursor: zz_protocol::PromptCursor {
+                style: 3,
+                colour: Some(TmuxColour::Theme(6)),
+            },
+            ..prompt.clone()
+        });
+        let theme = model.status.theme.0[6];
+        let TmuxColour::Rgb(rgb) = theme else {
+            panic!("the default theme slot is rgb: {theme:?}");
+        };
+        assert_eq!(
+            written(&mut renderer, &model),
+            format!(
+                "\x1b]12;rgb:{:02x}/{:02x}/{:02x}\x07\x1b[3 q",
+                rgb >> 16 & 0xff,
+                rgb >> 8 & 0xff,
+                rgb & 0xff
+            )
+        );
+
+        model.command_prompt = Some(zz_protocol::CommandPromptState {
+            pane: Some(PaneId(1)),
+            ..prompt.clone()
+        });
+        assert_eq!(written(&mut renderer, &model), "\x1b]112\x07\x1b[2 q");
+
+        model.command_prompt = None;
+        model.confirm = Some(zz_protocol::ConfirmState {
+            prompt: "sure? ".to_owned(),
+            confirm_key: b'y',
+            default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor {
+                style: 1,
+                colour: None,
+            },
+        });
+        assert_eq!(written(&mut renderer, &model), "\x1b[1 q");
+        model.confirm = None;
+        assert_eq!(written(&mut renderer, &model), "\x1b[2 q");
+
+        model.command_prompt = Some(prompt);
+        renderer.write_terminal_cursor(&model, false, false);
+        assert!(renderer.output.is_empty());
+        assert_eq!(renderer.terminal_cursor, (6, Some(0x80_00_00)));
     }
 
     #[test]
@@ -5490,6 +5657,8 @@ mod tests {
             mode: zz_protocol::CommandPromptMode::Incremental,
             no_freeze: false,
             pane: Some(PaneId(1)),
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
 
         let (_, content) = pane_prompt_target(&model).expect("the pane carries the prompt");

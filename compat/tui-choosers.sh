@@ -1099,6 +1099,64 @@ zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-
 ZZ_PID=$!
 wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 
+# TREE-MODE STYLES, at 100x40 so the help box fits. mode_tree_draw takes the
+# selected row from tree-mode-selection-style and the preview box and help box
+# from tree-mode-border-style, both read from the window's options with no
+# format context (mode-tree.c:849-851, :1477). The session and window previews
+# draw each tile's label box in tree-mode-border-style, its text in
+# tree-mode-preview-style over the border's ground, and the text itself from
+# tree-mode-preview-format, all three expanded in the tile's own format tree
+# (window-tree.c:510-520, :618-640, :766-790). The client tree's info view
+# draws its rule down column 14 and across the box in tree-mode-border-style
+# (window-client.c:295, :349). Every one of the four is set to a value unlike
+# its default on both sides, the session tree shows the attached session's two
+# window tiles, the window tree on window 1 shows its two pane tiles, the
+# client tree's info view is compared back at 80x24 (at 100x40 it also shows the
+# client feature rows, which are not this case's), and the options go back to
+# their defaults after.
+STYLED_TREE_OPTIONS=(
+  tree-mode-selection-style 'bg=red,fg=white,bold'
+  tree-mode-border-style 'bg=blue,fg=yellow'
+  tree-mode-preview-style 'fg=#{?pane_format,green,magenta},underscore'
+  tree-mode-preview-format '#{?pane_format,P#{pane_index},W#{window_index}}-#{window_name}'
+)
+styles_case() {
+  CASE_LABEL=styles
+  local index
+  for ((index = 0; index < ${#STYLED_TREE_OPTIONS[@]}; index += 2)); do
+    set_on_both "${STYLED_TREE_OPTIONS[index]}" "${STYLED_TREE_OPTIONS[index + 1]}"
+  done
+  mark_both styles
+  prefix_step "┌ $INNER_SESSION (sort: index)" s
+  verdict styles-session-tree same
+  step '┌ many (sort: index)' j
+  verdict styles-session-tree-next same
+  step 'MARK-styles' q
+  prefix_step '┌ 0 (sort: index)' w
+  verdict styles-window-tree same
+  step 'P1-two' j
+  verdict styles-window-tree-panes same
+  step 'Exit mode' F1
+  verdict styles-help same
+  step '┌ 1 (sort: index)' j
+  step 'MARK-styles' q
+  attach_both_at 80 24
+  mark_both styledclients
+  ROW_MASK=client_row_mask
+  prefix_step 'session cho' D
+  verdict styles-client-tree same
+  ROW_MASK=client_info_mask
+  step '(view: info)' i
+  verdict styles-client-info same
+  ROW_MASK=client_row_mask
+  step 'MARK-styledclients' q
+  ROW_MASK=
+  for ((index = 0; index < ${#STYLED_TREE_OPTIONS[@]}; index += 2)); do
+    run_on_both set-option -gu "${STYLED_TREE_OPTIONS[index]}"
+  done
+  verdict styles-closed same
+}
+
 run_cases() {
   printf 'chooser and command-output differential at %sx%s (pin %s)\n' \
     "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$(basename -- "$TMUX_BIN")"
@@ -1117,6 +1175,7 @@ run_cases() {
   client_case
   zoom_case
   tall_case
+  styles_case
 
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded (%s for a sibling lane)\n' \

@@ -1014,6 +1014,70 @@ if ! tmux_inner_command -f /dev/null start-server \; list-commands display-panes
   DISPLAY_PANES_MODE=record
 fi
 
+# THE PROMPT CURSOR. prompt_set_options reads prompt-cursor-style and
+# prompt-cursor-colour, and the prompt-command-cursor-* pair for vi command
+# mode, from the session as the prompt opens (prompt.c:131-155); prompt_draw
+# hangs them on the status screen (prompt.c:613-621), so tty_update_cursor
+# sends Ss and Cs while the prompt is up and Se and Cr once it is gone
+# (tty.c:788-880). The outer tmux reads them back as cursor_shape,
+# cursor_blinking and cursor_colour, which the cursor tuple asserts. With
+# status-keys vi, Escape puts the prompt in command mode, which swaps the pair
+# and paints the row in message-command-style. confirm-before raises a prompt
+# through the same status_prompt_set, so it carries the first pair too. The
+# case runs on a fresh outer server and puts every option back after.
+PROMPT_CURSOR_OPTIONS=(
+  prompt-cursor-style bar
+  prompt-cursor-colour red
+  prompt-command-cursor-style blinking-underline
+  prompt-command-cursor-colour '#00ff00'
+  status-keys vi
+)
+cursor_shape_is() {
+  [ "$(tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" '#{cursor_shape}' 2>/dev/null)" = "$2" ]
+}
+both_cursor_shape_is() {
+  wait_for "$2 cursor on zz" cursor_shape_is zz "$1"
+  wait_for "$2 cursor on tmux" cursor_shape_is tmux "$1"
+}
+prompt_cursor_case() {
+  CASE_LABEL=prompt-cursor
+  local index
+  attach_both_at 80 24
+  for ((index = 0; index < ${#PROMPT_CURSOR_OPTIONS[@]}; index += 2)); do
+    set_on_both "${PROMPT_CURSOR_OPTIONS[index]}" "${PROMPT_CURSOR_OPTIONS[index + 1]}"
+  done
+  mark_both pcursor
+  press_on_both ':'
+  type_on_both -l 'abc'
+  both_last_row_has ':abc' 'the typed prompt'
+  both_cursor_shape_is bar 'the prompt'
+  settle_both MARK-pcursor 'the prompt with its cursor style'
+  verdict prompt-cursor-styled same
+  type_on_both Escape
+  both_cursor_shape_is underline 'the command-mode prompt'
+  settle_both MARK-pcursor 'the command-mode prompt'
+  verdict prompt-command-cursor-styled same
+  type_on_both C-c
+  both_last_row_starts_with 'L' 'the cancelled prompt'
+  both_cursor_shape_is block 'the restored'
+  settle_both MARK-pcursor 'the cancelled prompt'
+  verdict prompt-cursor-restored same
+  client_on_both confirm-before -b -t CLIENT -p 'CURSOR-CONFIRM? ' \
+    'set-option -g @overlay_confirm yes'
+  both_last_row_has 'CURSOR-CONFIRM?' 'the confirm prompt'
+  both_cursor_shape_is bar 'the confirm prompt'
+  settle_both MARK-pcursor 'the confirm prompt with its cursor style'
+  verdict confirm-cursor-styled same
+  type_on_both n
+  both_last_row_lacks 'CURSOR-CONFIRM?' 'the refused confirm prompt'
+  both_cursor_shape_is block 'the refused confirm'
+  settle_both MARK-pcursor 'the refused confirm prompt'
+  verdict confirm-cursor-restored same
+  for ((index = 0; index < ${#PROMPT_CURSOR_OPTIONS[@]}; index += 2)); do
+    run_on_both set-option -gu "${PROMPT_CURSOR_OPTIONS[index]}"
+  done
+}
+
 run_cases() {
   printf 'overlay differential at %sx%s (pin %s)\n' \
     "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$(basename -- "$TMUX_BIN")"
@@ -1027,6 +1091,7 @@ run_cases() {
   popup_case
   display_panes_case
   odd_size_case
+  prompt_cursor_case
 
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded (%s)\n' "$FAILURES" "$CHECKS" "$RECORDS" "$(owner_tally)"

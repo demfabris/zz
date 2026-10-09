@@ -100,12 +100,12 @@ use zz_protocol::{
     MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
     PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PaneStatus, PaneStatusKind, PaneStatusState,
     PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction, PopupBorderLines, PopupPointer,
-    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
-    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
-    canonical_key, encode_protocol_message_into, encode_terminal_patch_event_into,
-    encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
-    menu_row_width, resolve_command,
+    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, PromptCursor,
+    ProtocolError, ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS,
+    ServerError, ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine,
+    StdoutClaim, WindowId, canonical_key, encode_protocol_message_into,
+    encode_terminal_patch_event_into, encode_terminal_viewport_event_into, is_key_name,
+    layout_menu_row, menu_row_cells, menu_row_width, resolve_command,
 };
 use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
@@ -10813,7 +10813,11 @@ impl Shared {
                                 *no_freeze,
                                 *pane,
                             )
-                            .with_key_options(vi_keys, word_separators);
+                            .with_key_options(vi_keys, word_separators)
+                            .with_cursors(prompt_cursors(
+                                &inner,
+                                client_attached_session(&inner, client),
+                            ));
                             prompt.waiter = self
                                 .command_item
                                 .as_ref()
@@ -19705,10 +19709,15 @@ impl Shared {
             &prompt,
             None,
         );
+        let prompt_cursors = {
+            let inner = self.inner.lock();
+            prompt_cursors(&inner, client_attached_session(&inner, target_client))
+        };
         let state = ConfirmState {
             prompt,
             confirm_key: bytes[0],
             default_yes: parsed.default_yes,
+            prompt_cursor: prompt_cursors[0],
         };
         let blocking_commands = commands.clone();
         let waiter = (!parsed.background
@@ -38853,6 +38862,22 @@ struct CommandPrompt {
     vi_keys: bool,
     command_mode: bool,
     word_separators: String,
+    cursors: [PromptCursor; 2],
+}
+
+fn prompt_cursors(inner: &ServerState, session: Option<SessionId>) -> [PromptCursor; 2] {
+    inner
+        .engine
+        .prompt_cursor_options(session)
+        .map(|(style, colour)| PromptCursor {
+            style,
+            colour: zz_protocol::parse_tmux_colour(&colour).filter(|colour| {
+                !matches!(
+                    colour,
+                    zz_protocol::TmuxColour::Default | zz_protocol::TmuxColour::Terminal
+                )
+            }),
+        })
 }
 
 impl CommandPrompt {
@@ -38895,7 +38920,13 @@ impl CommandPrompt {
             vi_keys: false,
             command_mode: false,
             word_separators: String::new(),
+            cursors: [PromptCursor::default(); 2],
         }
+    }
+
+    const fn with_cursors(mut self, cursors: [PromptCursor; 2]) -> Self {
+        self.cursors = cursors;
+        self
     }
 
     /// `prompt_set_options`: the prompt keeps the session's `status-keys` and
@@ -38968,6 +38999,8 @@ impl CommandPrompt {
             mode: self.mode,
             no_freeze: self.no_freeze,
             pane: self.pane,
+            command_mode: self.command_mode,
+            prompt_cursor: self.cursors[usize::from(self.command_mode)],
         }
     }
 
@@ -44302,7 +44335,7 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                             let (state, mut presentation, prompt) =
                                 engine.customize_presentation(*pane, mode, &mut expand);
                             presentation.selection_style =
-                                chooser_presentation::mode_style_for_pane(inner, *pane);
+                                chooser_presentation::tree_selection_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
                             presentation.prompt_style =
@@ -44877,9 +44910,13 @@ fn command_prompt_key(
     {
         return PromptKeyAction::Close;
     }
+    let before = (prompt.command_mode, prompt.cursor);
     let translated = prompt.vi_keys.then(|| prompt_translate_key(prompt, input));
     let action = match translated {
         None => command_prompt_edit_key(prompt, input, text_follows, history),
+        Some(PromptViKey::Handled) if (prompt.command_mode, prompt.cursor) != before => {
+            return PromptKeyAction::Updated;
+        }
         Some(PromptViKey::Handled) => PromptKeyAction::Handled,
         Some(PromptViKey::Motion(motion)) => {
             if motion.apply(prompt) {
@@ -115336,6 +115373,148 @@ bind - split-window -v -c "#{pane_current_path}"
             }) if snapshot.sessions[0].name == "primary"
                 && snapshot.sessions[0].windows[0].name == "editor"
         )));
+    }
+
+    #[test]
+    fn prompts_carry_the_prompt_cursor_options_and_their_command_mode_pair() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        for (name, value) in [
+            ("prompt-cursor-style", "bar"),
+            ("prompt-cursor-colour", "red"),
+            ("prompt-command-cursor-style", "blinking-underline"),
+            ("prompt-command-cursor-colour", "#00ff00"),
+            ("status-keys", "vi"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", name, value]),
+                )
+                .unwrap_or_else(|error| panic!("set {name}: {error}"));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "cursor"]),
+            )
+            .expect("new session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        shared.attach(client, session).expect("attach session");
+        let key = |context: &mut ExecutionContext, code: KeyCode, ctrl: bool| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::Key {
+                        pane,
+                        input: test_key(code, Modifiers::new(false, ctrl, false, false), None),
+                        text_follows: false,
+                    },
+                )
+                .expect("prompt key");
+        };
+        key(&mut context, KeyCode::Character('b'), true);
+        for text in [":", "abc"] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::Text {
+                        pane,
+                        text: text.to_owned(),
+                    },
+                )
+                .expect("open and type the prompt");
+        }
+        let state = |shared: &Shared| {
+            command_prompt_state(&shared.inner.lock(), client).expect("an open prompt")
+        };
+        let typed = state(&shared);
+        assert_eq!(typed.input, "abc");
+        assert!(!typed.command_mode);
+        assert_eq!(
+            typed.prompt_cursor,
+            PromptCursor {
+                style: 6,
+                colour: Some(zz_protocol::TmuxColour::Basic(1)),
+            }
+        );
+        take_reliable_messages(&mailbox);
+        key(&mut context, KeyCode::Escape, false);
+        let command = state(&shared);
+        assert!(command.command_mode);
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::CommandPrompt {
+                            state: Some(published),
+                        },
+                        ..
+                    }) if published.command_mode && published.cursor == 2
+                )),
+            "entering command mode republishes the prompt"
+        );
+        assert_eq!(
+            command.prompt_cursor,
+            PromptCursor {
+                style: 3,
+                colour: Some(zz_protocol::TmuxColour::Rgb(0x00_ff_00)),
+            }
+        );
+        shared
+            .inner
+            .lock()
+            .client_entry(client)
+            .command_prompt
+            .take();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-gu", "prompt-cursor-colour"]),
+            )
+            .expect("unset the colour");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    ["-b", "-p", "sure? ", "set-option -g @confirmed yes"],
+                ),
+            )
+            .expect("confirm-before");
+        let confirm = shared
+            .inner
+            .lock()
+            .client(client)
+            .and_then(|c| c.confirm.as_ref())
+            .map(|confirm| confirm.state.clone())
+            .expect("an open confirm prompt");
+        assert_eq!(
+            confirm.prompt_cursor,
+            PromptCursor {
+                style: 6,
+                colour: None,
+            }
+        );
     }
 
     #[test]

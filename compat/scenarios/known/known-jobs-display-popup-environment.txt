@@ -1,0 +1,9 @@
+# gap: display-popup.modal-pane
+# display-popup is a modal floating pane as in tmux master 34cd5da4 (fabrico's
+# ruling), so this tmux 3.8 popup contract differs by the registered tuple.
+shim:
+stage: ../smoke/fixtures/jobs-display-popup-environment.sh ~/jobs-display-popup-environment.sh
+stage: ../smoke/fixtures/pty-drive.py ~/pty-drive.py
+out: set-environment -gu JOBS_DISPLAY_POPUP_ENVIRONMENT
+run-shell 'sh ~/jobs-display-popup-environment.sh'
+out: show-environment -g JOBS_DISPLAY_POPUP_ENVIRONMENT

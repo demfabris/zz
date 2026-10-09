@@ -1,4 +1,7 @@
-corpus: none
+# gap: display-popup.modal-pane
+# display-popup is a modal floating pane as in tmux master 34cd5da4 (fabrico's
+# ruling), so this tmux 3.8 popup contract differs by the registered tuple.
+shim:
 # The same popup image contract as display-popup-kitty with no client resize
 # anywhere: a user prints an image inside a popup and never touches the window,
 # which is the ordinary flow. The popup's images have to reach the client on the
@@ -8,8 +11,8 @@ corpus: none
 # about whether the popup replaced anything. The pinned tree at d77c9dc6 has no
 # image protocol at all, so the pin draws the popup's text and emits no graphics
 # escape, and its side asserts exactly that.
-stage: fixtures/display-popup-kitty-noresize.sh ~/display-popup-kitty-noresize.sh
-stage: fixtures/graphics-drive.py ~/graphics-drive.py
+stage: ../smoke/fixtures/display-popup-kitty-noresize.sh ~/display-popup-kitty-noresize.sh
+stage: ../smoke/fixtures/graphics-drive.py ~/graphics-drive.py
 out: set-environment -gu DISPLAY_POPUP_KITTY_NORESIZE
 run-shell 'sh ~/display-popup-kitty-noresize.sh'
 out: show-environment -g DISPLAY_POPUP_KITTY_NORESIZE

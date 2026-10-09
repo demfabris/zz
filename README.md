@@ -43,6 +43,14 @@ div().size(px(64.)).rounded_full().glass(GlassMaterial::regular())
 // Glass that swells and glows where it is pressed, and lenses in and out.
 liquid_glass("play", GlassMaterial::regular()).size(px(44.)).rounded_full().child("▶")
 
+// A tab bar pill that slides to the selected tab like a drop, lifting as it goes.
+liquid_glass("pill", GlassMaterial::regular())
+    .morph(SpringConfig::new(380., 30., 1.))
+    .lift_material(GlassMaterial::bubble())
+    .lift_scale(1.25)
+    .absolute()
+    .left(selected.origin.x)
+
 // Buttons that melt into their neighbors when a press swells them.
 glass_group("toolbar", GlassMaterial::regular().merge(px(18.)))
     .flex()

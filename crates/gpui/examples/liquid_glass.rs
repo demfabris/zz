@@ -10,10 +10,10 @@ mod example_support;
 use std::{cell::RefCell, f32::consts::PI, rc::Rc, time::Duration};
 
 use gpui::{
-    AnimationPhase, App, Bounds, Context, GlassMaterial, GlassShape, LiquidRect, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, SpringConfig,
-    SpringState, Window, WindowBounds, WindowOptions, canvas, div, glass_group, hsla,
-    linear_color_stop, linear_gradient, liquid_glass, point, prelude::*, px, rgb, size,
+    App, Bounds, Context, GlassMaterial, GlassShape, MouseButton, MouseDownEvent, MouseMoveEvent,
+    MouseUpEvent, Pixels, Point, SharedString, SpringConfig, Window, WindowBounds, WindowOptions,
+    canvas, div, glass_group, hsla, linear_color_stop, linear_gradient, liquid_glass, point,
+    prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use web_time::Instant;
@@ -148,34 +148,6 @@ const PRESETS: [(&str, fn() -> GlassMaterial); 5] = [
     ("smoked", GlassMaterial::smoked),
 ];
 
-/// A press that springs in and out, remembering where it landed.
-#[derive(Default)]
-struct Press {
-    spring: SpringState,
-    down: bool,
-}
-
-impl Press {
-    const SPRING: SpringConfig = SpringConfig::new(300., 18., 1.);
-
-    fn step(&mut self, delta: f32) -> bool {
-        let target = if self.down { 1. } else { 0. };
-        self.spring = Self::SPRING.step(self.spring, target, delta);
-        let settled = Self::SPRING.is_settled(self.spring, target, 0.001);
-        if settled {
-            self.spring = SpringState {
-                position: target,
-                velocity: 0.,
-            };
-        }
-        !settled
-    }
-
-    fn phase(&self) -> f32 {
-        self.spring.position
-    }
-}
-
 struct LiquidGlassDemo {
     material: GlassMaterial,
     preset: usize,
@@ -183,11 +155,9 @@ struct LiquidGlassDemo {
     started: Instant,
     last_frame: Instant,
     frame_times: Vec<f32>,
-    lens: LiquidRect,
+    lens: Bounds<Pixels>,
     lens_grab: Option<Point<Pixels>>,
     tab: usize,
-    pill: LiquidRect,
-    pill_lift: Press,
     card_shown: bool,
     knob_drag: Option<usize>,
     knob_tracks: Rc<RefCell<Vec<Bounds<Pixels>>>>,
@@ -205,11 +175,9 @@ impl LiquidGlassDemo {
             started: now,
             last_frame: now,
             frame_times: Vec::new(),
-            lens: LiquidRect::new(lens, SpringConfig::new(260., 22., 1.)),
+            lens,
             lens_grab: None,
             tab: 0,
-            pill: LiquidRect::new(Bounds::default(), SpringConfig::new(380., 30., 1.)),
-            pill_lift: Press::default(),
             card_shown: true,
             knob_drag: None,
             knob_tracks: Rc::new(RefCell::new(vec![Bounds::default(); KNOBS.len()])),
@@ -284,12 +252,7 @@ impl LiquidGlassDemo {
             self.frame_times.remove(0);
         }
 
-        let mut moving = self.lens.step(delta);
-        moving |= self.pill.step(delta);
-        moving |= self.pill_lift.step(delta.as_secs_f32());
-        let speed = self.pill.velocity().x.as_f32().abs();
-        self.pill_lift.down = speed > 120.;
-        moving || self.animate_background
+        self.animate_background
     }
 
     fn fps(&self) -> f32 {
@@ -302,9 +265,7 @@ impl LiquidGlassDemo {
 
     fn on_mouse_move(&mut self, event: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
         if let Some(grab) = self.lens_grab {
-            let size = self.lens.target().size;
-            self.lens
-                .set_target(Bounds::new(event.position - grab, size));
+            self.lens.origin = event.position - grab;
             cx.notify();
         }
         if let Some(knob) = self.knob_drag {
@@ -594,11 +555,6 @@ impl LiquidGlassDemo {
 impl Render for LiquidGlassDemo {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.viewport = Bounds::new(point(px(0.), px(0.)), window.viewport_size());
-        let slot = self.tab_slot(self.tab);
-        if self.pill.target().size != slot.size {
-            self.pill.snap(slot);
-        }
-        self.pill.set_target(slot);
         if self.tick() {
             window.request_animation_frame();
         }
@@ -719,16 +675,11 @@ impl Render for LiquidGlassDemo {
             ),
         );
 
-        // Tab bar: the bar and the pill riding in it. The pill stretches as it
-        // slides and lifts into a stronger lens until it settles.
+        // Tab bar: the bar and the pill riding in it. The pill morphs to the
+        // selected tab, stretching as it slides and lifting into a stronger
+        // lens until it settles.
         let bar = self.tab_bar();
-        let lift = self.pill_lift.phase();
-        let pill = self.pill.stretched(0.12, 0.35);
-        let pill = centered(pill.center(), pill.size, 1. + 0.25 * lift);
-        let pill_material = AnimationPhase(lift).interpolate(
-            material.tint(hsla(0., 0., 1., 0.14)).blur(px(0.)),
-            GlassMaterial::bubble().merge(material.merge),
-        );
+        let pill = self.tab_slot(self.tab);
         layer = layer
             .child(
                 div()
@@ -748,18 +699,18 @@ impl Render for LiquidGlassDemo {
                     }]),
             )
             .child(
-                canvas(
-                    |_, _, _| {},
-                    move |_, _, window, _| {
-                        window.paint_glass(
-                            pill,
-                            gpui::Corners::all(pill.size.height / 2.),
-                            &pill_material,
-                        );
-                    },
-                )
-                .absolute()
-                .size_full(),
+                liquid_glass("pill", material.tint(hsla(0., 0., 1., 0.14)).blur(px(0.)))
+                    .appear(false)
+                    .morph(SpringConfig::new(380., 30., 1.))
+                    .lift_material(GlassMaterial::bubble())
+                    .lift_scale(1.25)
+                    .press_scale(1.)
+                    .absolute()
+                    .left(pill.origin.x)
+                    .top(pill.origin.y)
+                    .w(pill.size.width)
+                    .h(pill.size.height)
+                    .rounded_full(),
             );
         for (index, label) in TABS.iter().enumerate() {
             let slot = self.tab_slot(index);
@@ -786,8 +737,6 @@ impl Render for LiquidGlassDemo {
                         MouseButton::Left,
                         cx.listener(move |this, _, _, cx| {
                             this.tab = index;
-                            let slot = this.tab_slot(index);
-                            this.pill.set_target(slot);
                             cx.notify();
                         }),
                     ),
@@ -817,31 +766,25 @@ impl Render for LiquidGlassDemo {
             .size_full(),
         );
 
-        // The lens, dragged with a spring and stretched by its own speed.
-        let lens = self.lens.stretched(0.1, 0.3);
+        // The lens, dragged by its element; the glass follows on a spring and
+        // stretches with its own speed.
+        let lens = self.lens;
         layer = layer.child(
-            div()
-                .id("lens")
+            liquid_glass("lens", material)
+                .appear(false)
+                .morph(SpringConfig::new(260., 22., 1.))
+                .press_scale(1.06)
                 .absolute()
                 .left(lens.origin.x)
                 .top(lens.origin.y)
                 .w(lens.size.width)
                 .h(lens.size.height)
                 .rounded_full()
-                .glass(material)
-                .shadow(vec![gpui::BoxShadow {
-                    color: hsla(0., 0., 0., 0.22),
-                    offset: point(px(0.), px(12.)),
-                    blur_radius: px(30.),
-                    spread_radius: px(0.),
-                    inset: false,
-                }])
                 .cursor_grab()
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(|this, event: &MouseDownEvent, _, cx| {
-                        let bounds = this.lens.bounds();
-                        this.lens_grab = Some(event.position - bounds.origin);
+                        this.lens_grab = Some(event.position - this.lens.origin);
                         cx.notify();
                     }),
                 ),

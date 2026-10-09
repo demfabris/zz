@@ -1,10 +1,10 @@
 use scheduler::Instant;
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use crate::{
     AbsoluteLength, AnyElement, App, Bounds, Corners, DispatchPhase, Div, Element, ElementId,
     GlassMaterial, GlassShape, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
-    InteractiveElement, Interactivity, Interpolate, IntoElement, LayoutId, MouseButton,
+    InteractiveElement, Interactivity, Interpolate, IntoElement, LayoutId, LiquidRect, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SpringConfig,
     SpringState, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, point,
     size,
@@ -29,6 +29,9 @@ pub fn liquid_glass(id: impl Into<ElementId>, material: GlassMaterial) -> Liquid
         spring: SpringConfig::new(320., 20., 1.),
         appear: true,
         shown: true,
+        morph: None,
+        lift: None,
+        lift_scale: 1.0,
         corner_radii: Corners::default(),
     }
 }
@@ -45,6 +48,9 @@ pub struct LiquidGlass {
     spring: SpringConfig,
     appear: bool,
     shown: bool,
+    morph: Option<SpringConfig>,
+    lift: Option<GlassMaterial>,
+    lift_scale: f32,
     corner_radii: Corners<AbsoluteLength>,
 }
 
@@ -92,6 +98,27 @@ impl LiquidGlass {
     /// content; showing it again lenses it back in.
     pub fn shown(mut self, shown: bool) -> Self {
         self.shown = shown;
+        self
+    }
+
+    /// Makes the glass follow its element on springs when layout moves or
+    /// resizes it, stretching along its motion like a drop, instead of
+    /// jumping there.
+    pub fn morph(mut self, spring: SpringConfig) -> Self {
+        self.morph = Some(spring);
+        self
+    }
+
+    /// What morphing glass turns into while it travels, as a tab bar's pill
+    /// lifts into a stronger lens when it slides to another tab.
+    pub fn lift_material(mut self, material: GlassMaterial) -> Self {
+        self.lift = Some(material);
+        self
+    }
+
+    /// How much morphing glass swells while it travels; 1 keeps its size.
+    pub fn lift_scale(mut self, scale: f32) -> Self {
+        self.lift_scale = scale;
         self
     }
 
@@ -164,6 +191,9 @@ struct LiquidGlassState {
     presence: Toggle,
     /// Where the press landed, as a fraction of the glass's bounds.
     touch: Point<f32>,
+    /// Where morphing glass is on its way to the element's bounds.
+    body: Option<LiquidRect>,
+    lift: Toggle,
     updated_at: Instant,
 }
 
@@ -236,6 +266,8 @@ impl Element for LiquidGlass {
                             on: true,
                         },
                         touch: point(0.5, 0.5),
+                        body: None,
+                        lift: Toggle::default(),
                         updated_at: cx.background_executor().now(),
                     }))
                 });
@@ -243,7 +275,7 @@ impl Element for LiquidGlass {
             },
         );
 
-        let (press, hover, presence, touch) = {
+        let (press, hover, presence, touch, lift, body) = {
             let mut state = state.borrow_mut();
             let now = cx.background_executor().now();
             let delta = now.duration_since(state.updated_at).as_secs_f32().min(0.1);
@@ -255,6 +287,30 @@ impl Element for LiquidGlass {
             let mut moving = state.press.step(config, delta, snap);
             moving |= state.hover.step(config, delta, snap);
             moving |= state.presence.step(config, delta, snap);
+            let body = match self.morph {
+                Some(spring) => {
+                    let body = state
+                        .body
+                        .get_or_insert_with(|| LiquidRect::new(bounds, spring));
+                    body.config = spring;
+                    body.set_target(bounds);
+                    if snap {
+                        body.snap(bounds);
+                    } else {
+                        moving |= body.step(Duration::from_secs_f32(delta));
+                    }
+                    let velocity = body.velocity();
+                    let speed = velocity.x.as_f32().hypot(velocity.y.as_f32());
+                    let stretched = body.stretched(0.12, 0.35);
+                    state.lift.on = speed > 120.;
+                    moving |= state.lift.step(config, delta, snap);
+                    stretched
+                }
+                None => {
+                    state.body = None;
+                    bounds
+                }
+            };
             if moving {
                 window.request_animation_frame();
             }
@@ -263,6 +319,8 @@ impl Element for LiquidGlass {
                 state.hover.phase(),
                 state.presence.phase(),
                 state.touch,
+                state.lift.phase(),
+                body,
             )
         };
 
@@ -278,22 +336,26 @@ impl Element for LiquidGlass {
                 .refraction(rest.refraction * 1.2)
         });
         let pressed = pressed.glow_center(touch);
-        let material = Interpolate::interpolate(
+        let mut material = Interpolate::interpolate(
             Interpolate::interpolate(rest, hovered, hover),
             pressed,
             press,
         );
+        if let Some(lifted) = self.lift {
+            material = Interpolate::interpolate(material, lifted, lift);
+        }
 
         let scale = (1. + (self.hover_scale - 1.) * hover + (self.press_scale - 1.) * press)
+            * (1. + (self.lift_scale - 1.) * lift)
             * (0.92 + 0.08 * presence);
-        let grown = size(bounds.size.width * scale, bounds.size.height * scale);
+        let grown = size(body.size.width * scale, body.size.height * scale);
         let radii = self
             .corner_radii
             .to_pixels(window.rem_size())
             .clamp_radii_for_quad_size(bounds.size);
         let shape = GlassShape {
             bounds: Bounds::new(
-                bounds.center() - point(grown.width / 2., grown.height / 2.),
+                body.center() - point(grown.width / 2., grown.height / 2.),
                 grown,
             ),
             corner_radii: Corners {

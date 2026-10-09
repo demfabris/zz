@@ -222,5 +222,8 @@ check `pgrep -af codex` on resume.
   (model, commands, zoom/focus, daemon and display-popup, wire, formats/registry), each step its
   own commit; a relaunch continues from the branch and the last session's report. It is reviewed
   once all six steps are in.
+- 2026-10-09 orchestrator: terminal.zoom-reflow (libghostty and tmux re-wrap history differently on
+  a width change, seen through display-panes' zoom) is an engine limit under fabrico's 2026-09-18
+  no-engine-patch ruling: recorded native, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

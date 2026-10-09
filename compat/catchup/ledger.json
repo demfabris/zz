@@ -69,7 +69,8 @@
         "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello",
         "2026-10-09: TUI-009 extended-keys rows pass on catchup/fix.tui-colour (set -s extended-keys now published to the TUI); clause 2 closes when fix.tui-colour merges.",
         "2026-10-09: fix.tui-colour merged (8c952fd16); clause 2 (TUI-009 extended keys) should now pass on main: confirm with tui-caps and drop its 4 TUI-009 records when pin.tui-fixtures lands.",
-        "2026-10-09: pin.tui-fixtures merged: TUI-009's 4 tui-caps records are closed on main (clause 2 done by fix.tui-colour); TUI-014's 4 tui-client-commands records remain and must be deleted when clause 1 lands."
+        "2026-10-09: pin.tui-fixtures merged: TUI-009's 4 tui-caps records are closed on main (clause 2 done by fix.tui-colour); TUI-014's 4 tui-client-commands records remain and must be deleted when clause 1 lands.",
+        "2026-10-09 from pin.display-panes: one manual repro (outer tmux status bar on at attach) left the zz window at 78x23 for an 80x24 client after two resize-pane -Z; likely the same bug as TUI-014."
       ]
     },
     {
@@ -412,7 +413,7 @@
       "id": "pin.display-panes",
       "track": "pin",
       "title": "display-panes as a pane mode",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -433,7 +434,9 @@
       ],
       "branch": "catchup/pin.display-panes",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at 123fd791c: all 11 items closed; tui-overlays mode screen asserted; terminal.zoom-reflow ruled an engine limit (native) by the orchestrator under the no-engine-patch ruling; integration merge sent"
+      ]
     },
     {
       "id": "pin.hooks-events",
@@ -486,7 +489,8 @@
         "The 12 missing hook_* payload keys resolve (pane-exited exit keys, old_session/new_session and _name forms, pane_command, pane_current_path, prompt_type, group/group_size where zz has the fact; group keys register native with sessions.linked-groups).",
         "after-select-pane is skipped when the target pane is already active, as 3.8.",
         "set-hook -E @x runs nothing when @x was set with set-option rather than set-hook, as 3.8 (zz needs to remember how a user hook was set).",
-        "The pin.hooks-events gap closes."
+        "The pin.hooks-events gap closes.",
+        "compat/attached-client.sh's probe_client_event_hooks passes at 3.8: client-active fills #{hook_session} and #{hook_session_name} (3.8 prints |$0|attached,)."
       ],
       "branch": null,
       "sha": null,

@@ -8,39 +8,31 @@
 
 #[cfg(not(windows))]
 extern crate mimalloc;
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(test)]
 use zz_daemon::{CommandStdinSink, append_stdin_payload};
 mod control_mode;
 pub mod diagnostics;
 mod events;
 mod fleet;
 
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(test)]
 use std::borrow::Cow;
-#[cfg(not(target_os = "ios"))]
 use std::{
     cell::RefCell,
     io::{self, ErrorKind, IsTerminal as _, Write as _},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Command, ExitCode, Stdio},
     sync::atomic::{AtomicU64, Ordering},
-    time::{SystemTime, UNIX_EPOCH},
-};
-use std::{
-    path::Path,
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-#[cfg(not(target_os = "ios"))]
 use zz_daemon::{
-    CommandClient, CommandOutcome, Daemon, Endpoint, ExecChain, ExecChainEnd, ExecClassifier,
-    classify_local_connect_error, terminate_incompatible_daemon, unmasked::SpawnUnmasked as _,
+    CommandClient, CommandOutcome, Daemon, DaemonError, Endpoint, ExecChain, ExecChainEnd,
+    ExecClassifier, InteractiveClient, classify_local_connect_error, terminate_incompatible_daemon,
+    unmasked::SpawnUnmasked as _,
 };
-use zz_daemon::{DaemonError, InteractiveClient};
-#[cfg(not(target_os = "ios"))]
 use zz_mux::MuxEngine;
-#[cfg(not(target_os = "ios"))]
 use zz_protocol::{
     CommandInvocation, ExecResume, ExecResumeKind, MAX_CLIENT_WORKING_DIRECTORY_BYTES,
     PROTOCOL_VERSION, PreparedCommand, RawText, ServerError, ServerHello, StdoutClaim,
@@ -48,20 +40,14 @@ use zz_protocol::{
 };
 use zz_terminal::TerminalColorScheme;
 
-#[cfg(not(target_os = "ios"))]
 const TMUX_VERSION_OUTPUT: &str = zz_protocol::CommandSpec::TMUX_VERSION_OUTPUT;
-#[cfg(not(target_os = "ios"))]
 const TMUX_USAGE: &str = concat!(
     "usage: zz [-2CDhlNuVv] [-c shell-command] [-f file] [-L socket-name]\n",
     "            [-S socket-path] [-T features] [command [flags]]"
 );
-#[cfg(not(target_os = "ios"))]
 const NATIVE_ATTACH_USAGE: &str = "zz: usage: zz [--host <name>] attach [--restart-daemon] [-dEr] [-c working-directory] [-f flags] [session]";
-#[cfg(not(target_os = "ios"))]
 const NATIVE_APP_USAGE: &str = "zz: usage: zz app";
-#[cfg(not(target_os = "ios"))]
 const FOREIGN_TMUX_ERROR: &str = "zz: TMUX is set but ZZ_SOCKET is not; refusing to treat a tmux server as zz\nUse `zz app` to open the GUI, or pass `-S` / set `ZZ_SOCKET` to target a zz daemon.";
-#[cfg(not(target_os = "ios"))]
 pub const APP_STARTUP_DIRECTORY_ENV: &str = "ZZ_APP_STARTUP_DIRECTORY";
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CommandLineOrigin {
@@ -78,22 +64,16 @@ pub struct StartupOptions {
 }
 
 const DAEMON_BOOTSTRAP_SERVER_ID_ARGUMENT: &str = "--bootstrap-server-id";
-#[cfg(not(target_os = "ios"))]
 const DAEMON_BOOTSTRAP_READY_FD_ARGUMENT: &str = "--bootstrap-ready-fd";
-#[cfg(not(target_os = "ios"))]
 const DAEMON_BOOTSTRAP_CLIENT_CWD_ARGUMENT: &str = "--bootstrap-client-cwd";
-#[cfg(not(target_os = "ios"))]
 const DAEMON_READY_DEADLINE: Duration = Duration::from_secs(6);
-#[cfg(not(target_os = "ios"))]
 static DAEMON_SPAWN_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
-#[cfg(not(target_os = "ios"))]
 pub enum Startup {
     Application(PathBuf),
     Exit(ExitCode),
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Debug, Default, PartialEq, Eq)]
 struct DaemonBootstrapArguments {
     server_id: Option<u64>,
@@ -101,7 +81,6 @@ struct DaemonBootstrapArguments {
     client_working_directory: Option<PathBuf>,
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Debug, PartialEq, Eq)]
 enum DaemonBootstrapArgumentError {
     ServerId,
@@ -109,7 +88,6 @@ enum DaemonBootstrapArgumentError {
     ClientWorkingDirectory,
 }
 
-#[cfg(not(target_os = "ios"))]
 impl DaemonBootstrapArgumentError {
     fn message(&self) -> &'static str {
         match self {
@@ -120,13 +98,11 @@ impl DaemonBootstrapArgumentError {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn validated_bootstrap_client_working_directory(path: PathBuf) -> Option<PathBuf> {
     let value = path.to_str()?;
     (path.is_absolute() && value.len() <= MAX_CLIENT_WORKING_DIRECTORY_BYTES).then_some(path)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn parse_daemon_bootstrap_arguments(
     arguments: &[RawText],
 ) -> Result<DaemonBootstrapArguments, DaemonBootstrapArgumentError> {
@@ -172,7 +148,6 @@ fn parse_daemon_bootstrap_arguments(
     })
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Debug, PartialEq, Eq)]
 struct NativeAttachArguments {
     restart_daemon: bool,
@@ -185,7 +160,6 @@ struct NativeAttachArguments {
     session: Option<String>,
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Debug, PartialEq, Eq)]
 enum NativeAttachArgumentError {
     Usage,
@@ -193,13 +167,11 @@ enum NativeAttachArgumentError {
     Command(ServerError),
 }
 
-#[cfg(not(target_os = "ios"))]
 struct TmuxLabelCreationError {
     message: String,
     kind: ErrorKind,
 }
 
-#[cfg(not(target_os = "ios"))]
 #[must_use]
 pub fn run_startup(socket_path: &Path, options: StartupOptions) -> Startup {
     diagnostics::init(bare_command_line_opens_application(
@@ -292,7 +264,6 @@ pub fn run_startup(socket_path: &Path, options: StartupOptions) -> Startup {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn application_working_directory(
     launched: Option<&Path>,
     current: Option<&Path>,
@@ -311,7 +282,6 @@ fn application_working_directory(
         .map(Path::to_owned)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn configure_application_working_directory() {
     let launched = std::env::var_os(APP_STARTUP_DIRECTORY_ENV).map(PathBuf::from);
     let current = std::env::current_dir().ok();
@@ -387,7 +357,7 @@ pub fn attach_parent_console() {
 ///
 /// Runs before everything else and must start nothing: any process that outlives
 /// it holds ssh's answer pipe open forever.
-#[cfg(all(any(unix, windows), not(target_os = "ios")))]
+#[cfg(any(unix, windows))]
 #[must_use]
 pub fn run_askpass_mode() -> Option<ExitCode> {
     let socket = std::env::var_os(zz_daemon::ASKPASS_SOCKET_ENV)?;
@@ -398,7 +368,6 @@ pub fn run_askpass_mode() -> Option<ExitCode> {
     ))
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Debug, PartialEq, Eq)]
 pub struct ApplicationArguments {
     pub socket_path: PathBuf,
@@ -415,7 +384,6 @@ pub struct ApplicationArguments {
     client_features: Vec<String>,
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Debug, PartialEq, Eq)]
 pub enum ApplicationArgumentError {
     Message(String),
@@ -423,13 +391,11 @@ pub enum ApplicationArgumentError {
     Usage,
 }
 
-#[cfg(not(target_os = "ios"))]
 enum SocketSelection {
     Path(PathBuf),
     Label(String),
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SocketSelectionSource {
     Default,
@@ -437,14 +403,12 @@ enum SocketSelectionSource {
     Label,
 }
 
-#[cfg(not(target_os = "ios"))]
 impl SocketSelectionSource {
     fn is_overridden(self) -> bool {
         self != Self::Default
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 pub fn application_arguments(
     arguments: impl IntoIterator<Item = RawText>,
     default_path: PathBuf,
@@ -644,7 +608,6 @@ pub fn application_arguments(
     })
 }
 
-#[cfg(not(target_os = "ios"))]
 fn implicit_tmux_endpoint_conflict(
     socket_source: SocketSelectionSource,
     zz_socket: Option<&std::ffi::OsStr>,
@@ -655,7 +618,6 @@ fn implicit_tmux_endpoint_conflict(
         && tmux.is_some_and(|value| !value.is_empty())
 }
 
-#[cfg(not(target_os = "ios"))]
 #[cfg(unix)]
 fn tmux_label_socket_path(
     label: &str,
@@ -690,7 +652,6 @@ fn tmux_label_socket_path(
     Ok(base.join(label))
 }
 
-#[cfg(not(target_os = "ios"))]
 #[cfg(unix)]
 fn tmux_socket_root(tmux_tmpdir: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
     tmux_tmpdir
@@ -699,7 +660,6 @@ fn tmux_socket_root(tmux_tmpdir: Option<&std::ffi::OsStr>) -> Option<PathBuf> {
         .or_else(|| std::fs::canonicalize("/tmp").ok())
 }
 
-#[cfg(not(target_os = "ios"))]
 #[cfg(not(unix))]
 fn tmux_label_socket_path(
     label: &str,
@@ -715,7 +675,6 @@ fn tmux_label_socket_path(
     Ok(base.join(label))
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_command_mode(
     arguments: &[RawText],
     socket_path: &Path,
@@ -1083,7 +1042,6 @@ fn run_command_mode(
     Some(exit_code_for(CliFailure::Runtime))
 }
 
-#[cfg(not(target_os = "ios"))]
 struct ChainRouting<'a> {
     socket_path: &'a Path,
     host: Option<&'a str>,
@@ -1093,28 +1051,24 @@ struct ChainRouting<'a> {
     start_server: bool,
 }
 
-#[cfg(not(target_os = "ios"))]
 enum LocalChain {
     Done(ExitCode),
     Resume(ExecResume, Box<CommandClient>),
     Unanswered(DaemonError),
 }
 
-#[cfg(not(target_os = "ios"))]
 fn prepare_command_client(client: &mut CommandClient) {
     client.enable_stdin();
     client.set_stderr_handler(print_command_error);
     client.set_stdout_handler(print_released_command_output);
 }
 
-#[cfg(not(target_os = "ios"))]
 fn emit_chain_outcome(outcome: &CommandOutcome) -> u8 {
     let status = print_chain_output(&outcome.stdout, raw_command_output(outcome.stdout_claim));
     print_command_error(&outcome.stderr);
     status
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_local_command_chain(
     routing: &ChainRouting<'_>,
     mut client: CommandClient,
@@ -1163,7 +1117,6 @@ fn run_local_command_chain(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn print_chain_failure(error: DaemonError) -> ExitCode {
     match error {
         DaemonError::CommandFailed { output, error } => {
@@ -1178,7 +1131,6 @@ fn print_chain_failure(error: DaemonError) -> ExitCode {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_host_command_chain(
     routing: &ChainRouting<'_>,
     host: &str,
@@ -1228,7 +1180,6 @@ fn run_host_command_chain(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn tui_request<'a>(
     routing: &ChainRouting<'a>,
     options: &'a zz_tui::RunOptions,
@@ -1245,7 +1196,6 @@ fn tui_request<'a>(
     .with_local_reconnect(reconnect)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_tui_chain(
     routing: &ChainRouting<'_>,
     prepared: Option<Vec<PreparedCommand>>,
@@ -1295,7 +1245,6 @@ fn run_tui_chain(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_native_attach(
     routing: &ChainRouting<'_>,
     prepared: Option<Vec<PreparedCommand>>,
@@ -1374,7 +1323,6 @@ fn run_native_attach(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn top_level_help() -> String {
     use std::fmt::Write as _;
 
@@ -1400,7 +1348,6 @@ fn top_level_help() -> String {
     help
 }
 
-#[cfg(not(target_os = "ios"))]
 fn help_aliases(spec: &zz_protocol::CommandSpec) -> String {
     if spec.aliases.is_empty() {
         String::new()
@@ -1409,7 +1356,6 @@ fn help_aliases(spec: &zz_protocol::CommandSpec) -> String {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn help_value(kind: zz_protocol::CommandValueKind) -> &'static str {
     use zz_protocol::CommandValueKind;
 
@@ -1426,7 +1372,6 @@ fn help_value(kind: zz_protocol::CommandValueKind) -> &'static str {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn command_help(command: &str) -> Result<String, ServerError> {
     use std::fmt::Write as _;
 
@@ -1506,7 +1451,7 @@ fn usage_positional_names(usage: &str) -> Option<Vec<&str>> {
     (!names.is_empty()).then_some(names)
 }
 
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(test)]
 fn prepared_command_invocations(command: &PreparedCommand) -> Option<Cow<'_, [CommandInvocation]>> {
     if command.result != zz_protocol::PreparedCommandResult::Ready {
         return None;
@@ -1520,7 +1465,7 @@ fn prepared_command_invocations(command: &PreparedCommand) -> Option<Cow<'_, [Co
         .map(Cow::Owned)
 }
 
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(test)]
 fn prepared_command_reads_stdin(command: &PreparedCommand) -> Option<CommandStdinSink> {
     prepared_command_invocations(command)?
         .iter()
@@ -1533,7 +1478,7 @@ fn prepared_command_reads_stdin(command: &PreparedCommand) -> Option<CommandStdi
         })
 }
 
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(test)]
 fn append_prepared_command_stdin_payload(
     command: &mut PreparedCommand,
     payload: impl Into<RawText>,
@@ -1545,7 +1490,6 @@ fn append_prepared_command_stdin_payload(
     command.invocation.set_stdin(payload);
 }
 
-#[cfg(not(target_os = "ios"))]
 fn daemon_transport_failure(error: &DaemonError) -> bool {
     match error {
         DaemonError::Io(_) | DaemonError::Protocol(_) | DaemonError::IncompatibleDaemon { .. } => {
@@ -1561,29 +1505,25 @@ fn daemon_transport_failure(error: &DaemonError) -> bool {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn new_session_uses_tui(invocation: &CommandInvocation) -> bool {
     canonical_command(&invocation.name) == "new-session"
         && MuxEngine::new_session_attaches(&invocation.args).unwrap_or(false)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn attach_prefix_uses_tui(command: &str) -> bool {
     canonical_command(command) == "attach-session"
         && !matches!(command, "attach" | "attach-session")
 }
 
-#[cfg(all(test, not(target_os = "ios")))]
+#[cfg(test)]
 fn command_reads_stdin(invocation: &CommandInvocation) -> Option<CommandStdinSink> {
     zz_daemon::command_stdin_sink(canonical_command(&invocation.name), &invocation.args)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn command_chain_uses_tui(invocations: &[CommandInvocation]) -> bool {
     invocations.iter().any(new_session_uses_tui)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn split_command_chain(arguments: &[RawText]) -> Vec<CommandInvocation> {
     zz_protocol::split_command_words(arguments.iter().cloned())
         .into_iter()
@@ -1595,7 +1535,6 @@ fn split_command_chain(arguments: &[RawText]) -> Vec<CommandInvocation> {
         .collect()
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_tmux_shell_command(
     socket_path: &Path,
     socket_source: SocketSelectionSource,
@@ -1667,12 +1606,10 @@ fn run_tmux_shell_command(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn is_version_command(command: &str) -> bool {
     command == "--version"
 }
 
-#[cfg(not(target_os = "ios"))]
 fn tmux_command_starts_server(command: &str) -> bool {
     matches!(
         canonical_command(command),
@@ -1680,7 +1617,6 @@ fn tmux_command_starts_server(command: &str) -> bool {
     )
 }
 
-#[cfg(not(target_os = "ios"))]
 fn parse_native_attach_arguments(
     arguments: impl IntoIterator<Item = RawText>,
 ) -> Result<NativeAttachArguments, NativeAttachArgumentError> {
@@ -1793,7 +1729,6 @@ fn parse_native_attach_arguments(
     })
 }
 
-#[cfg(not(target_os = "ios"))]
 fn print_native_attach_argument_error(error: NativeAttachArgumentError) -> ExitCode {
     let status = match &error {
         NativeAttachArgumentError::Usage => exit_code_for(CliFailure::TmuxUsage),
@@ -1811,7 +1746,6 @@ fn print_native_attach_argument_error(error: NativeAttachArgumentError) -> ExitC
     status
 }
 
-#[cfg(not(target_os = "ios"))]
 fn native_attach_command(options: &NativeAttachArguments) -> CommandInvocation {
     let mut args = Vec::new();
     if options.detach_others {
@@ -1838,7 +1772,6 @@ fn native_attach_command(options: &NativeAttachArguments) -> CommandInvocation {
     CommandInvocation::new("attach-session", args)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn tmux_label_creation_error(
     path: &Path,
     socket_source: SocketSelectionSource,
@@ -1865,7 +1798,6 @@ fn tmux_label_creation_error(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn os_error_text(error: &io::Error) -> String {
     let message = error.to_string();
     error.raw_os_error().map_or(message.clone(), |code| {
@@ -1876,7 +1808,6 @@ fn os_error_text(error: &io::Error) -> String {
     })
 }
 
-#[cfg(not(target_os = "ios"))]
 fn protocol_version_output(
     mut args: impl Iterator<Item = String>,
     host: Option<&str>,
@@ -1888,7 +1819,6 @@ fn protocol_version_output(
     Ok(PROTOCOL_VERSION.to_string())
 }
 
-#[cfg(not(target_os = "ios"))]
 fn format_local_daemon_error(error: DaemonError) -> String {
     match error {
         error @ DaemonError::IncompatibleDaemon { .. } => {
@@ -1898,7 +1828,6 @@ fn format_local_daemon_error(error: DaemonError) -> String {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn format_local_command_error(path: &Path, error: DaemonError) -> String {
     match error {
         DaemonError::Server(ServerError::InvalidCommand(message))
@@ -1922,18 +1851,15 @@ fn format_local_command_error(path: &Path, error: DaemonError) -> String {
 /// for the run that produced these bytes. The pin's claim is a property of the
 /// writer: `show-buffer` on a buffer whose own last byte is a newline is still
 /// a raw write, and reading the claim off the bytes turned that into a print.
-#[cfg(not(target_os = "ios"))]
 const fn raw_command_output(claim: StdoutClaim) -> bool {
     matches!(claim, StdoutClaim::Raw)
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Default)]
 struct CommandOutputWriter {
     raw_owner: Option<bool>,
 }
 
-#[cfg(not(target_os = "ios"))]
 impl CommandOutputWriter {
     #[cfg(unix)]
     const OWNED_STREAM_ERROR: i32 = libc::EBADF;
@@ -1976,29 +1902,24 @@ impl CommandOutputWriter {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 thread_local! {
     static CHAIN_OUTPUT_WRITER: RefCell<CommandOutputWriter> =
         const { RefCell::new(CommandOutputWriter { raw_owner: None }) };
 }
 
-#[cfg(not(target_os = "ios"))]
 fn print_chain_output(output: &RawText, raw: bool) -> u8 {
     CHAIN_OUTPUT_WRITER.with(|writer| writer.borrow_mut().print(output, raw))
 }
 
 /// The daemon released a `cmdq_print` line while the command was still running.
-#[cfg(not(target_os = "ios"))]
 fn print_released_command_output(output: &RawText) {
     let _ = print_chain_output(output, false);
 }
 
-#[cfg(not(target_os = "ios"))]
 fn print_command_output(output: &RawText) {
     CommandOutputWriter::default().print(output, false);
 }
 
-#[cfg(not(target_os = "ios"))]
 fn print_command_error(output: &str) {
     if output.is_empty() {
         return;
@@ -2011,7 +1932,6 @@ fn print_command_error(output: &str) {
     let _ = stderr.flush();
 }
 
-#[cfg(not(target_os = "ios"))]
 #[derive(Clone, Copy)]
 enum CliFailure<'a> {
     Usage,
@@ -2021,7 +1941,6 @@ enum CliFailure<'a> {
     Daemon(&'a DaemonError),
 }
 
-#[cfg(not(target_os = "ios"))]
 fn exit_code_for(error: CliFailure<'_>) -> ExitCode {
     ExitCode::from(match error {
         CliFailure::Usage => 2,
@@ -2036,7 +1955,6 @@ fn exit_code_for(error: CliFailure<'_>) -> ExitCode {
     })
 }
 
-#[cfg(not(target_os = "ios"))]
 fn command_error_message(error: &DaemonError) -> String {
     match error {
         DaemonError::CommandFailed { error, .. } => command_error_message(error),
@@ -2045,12 +1963,10 @@ fn command_error_message(error: &DaemonError) -> String {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn server_error_message(error: &ServerError) -> String {
     error.tmux_message()
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_kill_server(path: &Path, args: impl IntoIterator<Item = RawText>) -> ExitCode {
     let invocation = CommandInvocation::new("kill-server", args);
     let failure = match CommandClient::connect(path) {
@@ -2076,7 +1992,6 @@ fn run_kill_server(path: &Path, args: impl IntoIterator<Item = RawText>) -> Exit
     recover_kill_server_failure(path, &failure)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_host_kill_server(host: &str, args: impl IntoIterator<Item = RawText>) -> ExitCode {
     let mut client = match connect_host_command_client(host) {
         Ok(client) => client,
@@ -2103,7 +2018,6 @@ fn run_host_kill_server(host: &str, args: impl IntoIterator<Item = RawText>) -> 
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn recover_kill_server_failure(path: &Path, failure: &DaemonError) -> ExitCode {
     log::warn!(
         target: "zz::diagnostics::process",
@@ -2122,7 +2036,6 @@ fn recover_kill_server_failure(path: &Path, failure: &DaemonError) -> ExitCode {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn daemon_is_missing(error: &DaemonError) -> bool {
     matches!(
         error,
@@ -2131,7 +2044,6 @@ fn daemon_is_missing(error: &DaemonError) -> bool {
     )
 }
 
-#[cfg(not(target_os = "ios"))]
 fn daemon_is_spawnable(error: &DaemonError) -> bool {
     matches!(
         error,
@@ -2143,7 +2055,6 @@ fn daemon_is_spawnable(error: &DaemonError) -> bool {
     )
 }
 
-#[cfg(not(target_os = "ios"))]
 fn next_spawn_server_id() -> u64 {
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -2155,7 +2066,6 @@ fn next_spawn_server_id() -> u64 {
         ^ DAEMON_SPAWN_SEQUENCE.fetch_add(1, Ordering::Relaxed)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn tmux_import_hint(interactive: bool, mux_exists: bool, donor: Option<&Path>) -> Option<String> {
     if !interactive || mux_exists {
         return None;
@@ -2168,7 +2078,6 @@ fn tmux_import_hint(interactive: bool, mux_exists: bool, donor: Option<&Path>) -
     })
 }
 
-#[cfg(not(target_os = "ios"))]
 fn spawn_daemon(
     path: &Path,
     color_scheme: Option<TerminalColorScheme>,
@@ -2231,14 +2140,13 @@ fn spawn_daemon(
     Ok(server_id)
 }
 
-#[cfg(not(target_os = "ios"))]
 fn reap_when_exited(mut child: std::process::Child) {
     let _ = thread::Builder::new()
         .name("zz-daemon-reaper".to_owned())
         .spawn(move || child.wait());
 }
 
-#[cfg(all(unix, not(target_os = "ios")))]
+#[cfg(unix)]
 mod readiness {
     use std::{
         io,
@@ -2425,7 +2333,6 @@ impl InheritedDescriptors {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 pub fn connect_or_spawn_daemon<T>(
     path: &Path,
     color_scheme: Option<TerminalColorScheme>,
@@ -2443,7 +2350,6 @@ pub fn connect_or_spawn_daemon<T>(
     .map(|(client, _)| client)
 }
 
-#[cfg(not(target_os = "ios"))]
 pub fn connect_or_spawn_daemon_with_provenance<T>(
     path: &Path,
     color_scheme: Option<TerminalColorScheme>,
@@ -2474,7 +2380,6 @@ pub fn connect_or_spawn_daemon_with_provenance<T>(
     Ok((client, provenance))
 }
 
-#[cfg(not(target_os = "ios"))]
 fn connect_spawned<T>(
     path: &Path,
     connect: impl Fn() -> Result<T, DaemonError>,
@@ -2492,7 +2397,6 @@ fn connect_spawned<T>(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn connect_command_client(
     path: &Path,
     mux_config_files: &[PathBuf],
@@ -2508,7 +2412,6 @@ fn connect_command_client(
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn spawn_and_connect_command_client(
     path: &Path,
     mux_config_files: &[PathBuf],
@@ -2523,7 +2426,6 @@ fn spawn_and_connect_command_client(
 /// a command list. `new-session` alone is the option's own default, and zz's
 /// launcher keeps answering that one with the create-or-attach `new-session -A`
 /// it has always used.
-#[cfg(not(target_os = "ios"))]
 fn default_client_command_chain(
     socket_path: &Path,
     mux_config_files: &[PathBuf],
@@ -2537,8 +2439,6 @@ fn default_client_command_chain(
         .unwrap_or_else(|| vec![CommandInvocation::new("new-session", ["-A"])])
 }
 
-#[cfg(not(target_os = "ios"))]
-#[cfg(not(target_os = "ios"))]
 fn bare_command_line_opens_application(
     origin: CommandLineOrigin,
     launched_by_launch_services: bool,
@@ -2551,7 +2451,7 @@ fn launched_by_launch_services() -> bool {
     std::os::unix::process::parent_id() == 1
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 fn launched_by_launch_services() -> bool {
     false
 }
@@ -2560,7 +2460,6 @@ fn is_launcher_default_client_command(commands: &[CommandInvocation]) -> bool {
     matches!(commands, [command] if command.name == "new-session" && command.args.is_empty())
 }
 
-#[cfg(not(target_os = "ios"))]
 fn stored_default_client_command(
     socket_path: &Path,
     mux_config_files: &[PathBuf],
@@ -2577,13 +2476,11 @@ fn stored_default_client_command(
     Some(output.trim_end_matches('\n').to_owned())
 }
 
-#[cfg(not(target_os = "ios"))]
 fn connect_host_command_client(name: &str) -> Result<CommandClient, String> {
     let endpoint = configured_host_endpoint(name)?;
     CommandClient::connect_endpoint(&endpoint).map_err(|error| error.to_string())
 }
 
-#[cfg(not(target_os = "ios"))]
 fn configured_host_endpoint(name: &str) -> Result<Endpoint, String> {
     let (hosts, _) = zz_daemon::configured_fleet_hosts()
         .map_err(|error| format!("could not read zz/config: {error}"))?;
@@ -2602,7 +2499,6 @@ fn configured_host_endpoint(name: &str) -> Result<Endpoint, String> {
     Err(format!("unknown fleet host `{name}`; known hosts: {known}"))
 }
 
-#[cfg(not(target_os = "ios"))]
 pub fn connect_interactive_client_with_config(
     path: &Path,
     color_scheme: TerminalColorScheme,
@@ -2628,7 +2524,6 @@ pub fn connect_interactive_client_with_config(
     )
 }
 
-#[cfg(not(target_os = "ios"))]
 pub fn connect_interactive_client_with_config_and_terminal(
     path: &Path,
     color_scheme: TerminalColorScheme,
@@ -2650,7 +2545,6 @@ pub fn connect_interactive_client_with_config_and_terminal(
     )
 }
 
-#[cfg(not(target_os = "ios"))]
 pub fn connect_terminal_surface_client_with_config(
     path: &Path,
     color_scheme: TerminalColorScheme,

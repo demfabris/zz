@@ -1009,7 +1009,6 @@ impl MuxClient {
         names
     }
 
-    #[cfg(not(target_os = "ios"))]
     pub(crate) fn local_server_id(&self) -> Option<u64> {
         self.connections
             .get(&HostId::LOCAL)?
@@ -1301,7 +1300,6 @@ impl MuxClient {
 
     /// The attached ssh host and the loopback SOCKS port its forward opened, or
     /// `None` when the attached host is local (or has no live port).
-    #[cfg_attr(target_os = "ios", allow(dead_code))]
     pub(crate) fn attached_ssh_egress(&self) -> Option<(String, u16)> {
         let entry = self.registry.get(self.attached_host)?;
         let Endpoint::Ssh(endpoint) = &entry.endpoint else {
@@ -1628,26 +1626,6 @@ impl MuxClient {
             });
         })
         .detach();
-    }
-
-    /// Retry every host the backoff ladder has waiting. iOS calls this on
-    /// foregrounding, where suspension froze the ladder's timers.
-    #[cfg(target_os = "ios")]
-    pub fn retry_stalled_hosts(&mut self, cx: &mut Context<Self>) {
-        let stalled: Vec<HostId> = self
-            .connections
-            .iter()
-            .filter(|(_, connection)| {
-                matches!(
-                    connection.state,
-                    HostState::Reconnecting { .. } | HostState::Unreachable { .. }
-                )
-            })
-            .map(|(host, _)| *host)
-            .collect();
-        for host in stalled {
-            self.retry_host_now(host, cx);
-        }
     }
 
     pub fn retry_host_now(&mut self, host: HostId, cx: &mut Context<Self>) {
@@ -2366,7 +2344,6 @@ impl MuxClient {
         cx.notify();
     }
 
-    #[cfg(not(target_os = "ios"))]
     pub(crate) fn restart_daemon_for_update(&mut self, cx: &mut Context<Self>) {
         self.stale_daemon
             .get_or_insert(StaleDaemonInfo { daemon: None });

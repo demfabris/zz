@@ -30,52 +30,33 @@ mod quit_signal;
 mod status_bar;
 mod terminal;
 mod theme;
-/// A desktop menu bar / notification area; the iPad has neither.
-#[cfg(not(target_os = "ios"))]
 mod tray;
 mod ui_scale;
-#[cfg(not(target_os = "ios"))]
 mod update;
 mod user_data;
 mod window;
 mod workspace;
 
-use std::path::Path;
-#[cfg(not(target_os = "ios"))]
-use std::{path::PathBuf, process::ExitCode};
-#[cfg(target_os = "ios")]
 use std::{
-    thread,
-    time::{Duration, Instant},
+    path::{Path, PathBuf},
+    process::ExitCode,
 };
 
 use zpui::Styled as _;
-use zpui::{AnyView, App, Context, Entity, Window, WindowAppearance};
-#[cfg(not(target_os = "ios"))]
-use zpui::{AppContext, WindowOptions, px, size};
-#[cfg(not(target_os = "ios"))]
+use zpui::{
+    AnyView, App, AppContext, Context, Entity, Window, WindowAppearance, WindowOptions, px, size,
+};
 use zz_browser::{BrowserBootstrap, BrowserError, BrowserRuntime};
-#[cfg(not(target_os = "ios"))]
 pub(crate) use zz_cli::application_arguments;
-#[cfg(not(target_os = "ios"))]
 use zz_cli::{CommandLineOrigin, Startup, StartupOptions};
-#[cfg(not(target_os = "ios"))]
-use zz_daemon::default_socket_path;
-use zz_daemon::{DaemonError, InteractiveClient};
-#[cfg(not(target_os = "ios"))]
+use zz_daemon::{DaemonError, InteractiveClient, default_socket_path};
 use zz_protocol::CommandInvocation;
 use zz_terminal::TerminalColorScheme;
-#[cfg(not(target_os = "ios"))]
-use zz_ui::Assets;
-use zz_ui::Root;
+use zz_ui::{Assets, Root};
 
-use agent::AgentController;
-#[cfg(not(target_os = "ios"))]
-use agent::AgentPreferences;
-#[cfg(not(target_os = "ios"))]
+use agent::{AgentController, AgentPreferences};
 use app_shell::AppShell;
 use browser::controller::BrowserController;
-#[cfg(not(target_os = "ios"))]
 use workspace::AppView;
 
 pub use profile::{AppProfile, LocalHostPolicy, SettingsSection};
@@ -86,7 +67,7 @@ pub use profile::{AppProfile, LocalHostPolicy, SettingsSection};
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 /// Start the native executable on Linux and macOS.
-#[cfg(not(any(target_os = "windows", target_os = "ios")))]
+#[cfg(not(target_os = "windows"))]
 #[must_use]
 pub fn run() -> ExitCode {
     #[cfg(unix)]
@@ -185,7 +166,6 @@ pub extern "C" fn RunWinMain(
     i32::from(finish_bootstrap(result, socket_path, AppProfile::desktop()))
 }
 
-#[cfg(not(target_os = "ios"))]
 fn is_cef_subprocess() -> bool {
     std::env::args_os()
         .skip(1)
@@ -205,7 +185,6 @@ fn macos_cef_framework_is_available() -> bool {
         })
 }
 
-#[cfg(not(target_os = "ios"))]
 fn finish_bootstrap(
     bootstrap: Result<BrowserBootstrap, BrowserError>,
     socket_path: PathBuf,
@@ -243,7 +222,6 @@ fn start_heap_trim(cx: &mut App) {
     .detach();
 }
 
-#[cfg(not(target_os = "ios"))]
 fn run_app(
     runtime: Result<BrowserRuntime, BrowserError>,
     socket_path: PathBuf,
@@ -269,12 +247,7 @@ fn run_app(
             diagnostics::start_main_thread_watchdog(cx);
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             quit_signal::init(cx);
-            #[cfg(all(
-                feature = "hotreload",
-                debug_assertions,
-                not(target_family = "wasm"),
-                not(target_os = "ios")
-            ))]
+            #[cfg(all(feature = "hotreload", debug_assertions, not(target_family = "wasm")))]
             hotreload::init(cx);
             #[cfg(all(target_os = "linux", target_env = "gnu"))]
             start_heap_trim(cx);
@@ -469,7 +442,6 @@ fn run_app(
         });
 }
 
-#[cfg(not(target_os = "ios"))]
 fn toggle_from_tray(main_window: zpui::AnyWindowHandle, cx: &mut App) {
     let (visible, active) = main_window
         .update(cx, |_, window, _| {
@@ -548,7 +520,6 @@ fn mark_macos_app_as_background_only() {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
 fn connect_interactive_client(
     path: &Path,
     color_scheme: TerminalColorScheme,
@@ -561,30 +532,8 @@ fn connect_interactive_client(
         Some(&zz_protocol::AttachOperation::Session(String::new())),
     )
 }
-#[cfg(target_os = "ios")]
-fn connect_interactive_client(
-    path: &Path,
-    color_scheme: TerminalColorScheme,
-) -> Result<InteractiveClient, DaemonError> {
-    let deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        match InteractiveClient::connect_with_color_scheme(path, color_scheme) {
-            Ok(client) => {
-                log::info!(
-                    target: "zz::diagnostics::process",
-                    "connected to daemon path={} server_hello={:#?}",
-                    path.display(),
-                    client.server_hello(),
-                );
-                return Ok(client);
-            }
-            Err(error) if Instant::now() >= deadline => return Err(error),
-            Err(_) => thread::sleep(Duration::from_millis(50)),
-        }
-    }
-}
 
-#[cfg(all(not(target_os = "ios"), not(target_os = "windows")))]
+#[cfg(not(target_os = "windows"))]
 fn tui_browser_provider() -> Option<Box<dyn zz_tui::browser::BrowserFrameProvider>> {
     #[cfg(target_os = "macos")]
     if !macos_cef_framework_is_available() {

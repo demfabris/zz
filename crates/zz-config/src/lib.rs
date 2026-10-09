@@ -57,9 +57,9 @@ pub const DEFAULT_TRAY: bool = true;
 pub const DEFAULT_QUIT_DAEMON_ON_EXIT: bool = false;
 pub const DEFAULT_AUTO_RESTART_STALE_DAEMON: bool = false;
 pub const DEFAULT_CHECK_FOR_UPDATES: bool = true;
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 pub const DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY: &str = "cmd-shift-c";
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 pub const DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY: &str = "ctrl-shift-c";
 /// Repeatable chrome binding overrides: `<table>:<key>=<action>` and
 /// `<table>:<key>`.

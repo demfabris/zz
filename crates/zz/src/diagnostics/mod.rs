@@ -16,11 +16,9 @@ use zz_ui::ROOT_KEY_CONTEXT;
 use crate::{browser::controller::BrowserController, mux::client::MuxClient};
 
 pub(crate) use zz_cli::diagnostics::{
-    VERBOSE_LOG, capture_stall_sample, elapsed_us, elapsed_us_from, enabled, platform_log_dir,
-    timer,
+    VERBOSE_LOG, application_args, capture_stall_sample, cef_log_file, elapsed_us, elapsed_us_from,
+    enabled, platform_log_dir, timer,
 };
-#[cfg(not(target_os = "ios"))]
-pub(crate) use zz_cli::diagnostics::{application_args, cef_log_file};
 
 const APP_STATE_SAMPLE_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -46,9 +44,9 @@ pub fn start_app_state_sampler(
 
 zpui::actions!(zz, [DebugMark]);
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 const DEBUG_MARK_KEYSTROKE: &str = "cmd-shift-m";
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 const DEBUG_MARK_KEYSTROKE: &str = "ctrl-shift-m";
 
 static DEBUG_MARK_SEQ: AtomicU64 = AtomicU64::new(0);

@@ -17,7 +17,7 @@ hygiene . it is the sole owner of `rusqlite` (bundled `SQLite` C build), `aes`, 
 `objc2-foundation` on macOS, `oo7`/`smol` Secret Service on Linux) . none of which the `zz` app
 crate names anymore.
 
-The crate is gpui-free and store-agnostic. `history::import_history` takes an
+The crate is gpui-free and CEF-free (it takes the cookie format and browser paths from `zz-protocol`, not `zz-browser`) and store-agnostic. `history::import_history` takes an
 [`ImportLimits`](/crates/zz-chrome-import/src/history.rs) (entry/URL/title byte caps supplied by the
 caller from its own store's bounds) and returns `ImportedPage` rows; the app maps them onto its
 `recent_pages::RecentPage`. Small filesystem helpers (`atomic_write`,

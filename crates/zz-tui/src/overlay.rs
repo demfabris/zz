@@ -1,5 +1,5 @@
 use unicode_width::UnicodeWidthChar as _;
-use zz_daemon::InteractiveClient;
+use zz_daemon_client::InteractiveClient;
 use zz_protocol::{
     DisplayPanesAction, DisplayPanesState, InputMessage, PaneIndicator, StyledSegment, TmuxColour,
     TmuxStyle,

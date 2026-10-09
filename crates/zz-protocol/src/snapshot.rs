@@ -170,6 +170,7 @@ impl LayoutNode {
 }
 
 pub const DEFAULT_BROWSER_PROFILE: &str = "default";
+pub const MAX_FAVICON_BYTES: usize = 8 * 1024;
 pub const MAX_BROWSER_PROFILE_NAME_BYTES: usize = 64;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
@@ -531,6 +532,13 @@ pub enum PaneMode {
         #[serde(default)]
         prompt_top: bool,
     },
+    Panes {
+        areas: Vec<PanesModeArea>,
+        borders: Vec<PanesModeBorder>,
+        border_style: String,
+        copy: bool,
+        format: bool,
+    },
 }
 
 impl PaneMode {
@@ -540,8 +548,30 @@ impl PaneMode {
             Self::Clock { .. } => "clock-mode",
             Self::Customize { .. } => "options-mode",
             Self::Switch { .. } => "switch-mode",
+            Self::Panes { .. } => "panes-mode",
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PanesModeArea {
+    pub pane: PaneId,
+    pub number: u32,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+    pub colour: String,
+    pub label: String,
+    #[serde(with = "crate::pane_frame::optional_viewport_bytes")]
+    pub viewport: Option<zz_terminal::TerminalViewport>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PanesModeBorder {
+    pub x: u16,
+    pub y: u16,
+    pub cell: u8,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -619,10 +619,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
     ),
     (
-        "display-panes",
-        "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]",
-    ),
-    (
         "join-pane",
         "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
     ),
@@ -2265,7 +2261,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-h", "hide the pane the chooser was opened from"),
             CommandOptionSpec::value("-K", FreeForm, "per-row shortcut key format"),
             CommandOptionSpec::flag("-k", "kill the source pane when the chooser exits"),
-            CommandOptionSpec::flag("-N", "disable the preview, already zz's only layout"),
+            CommandOptionSpec::flag("-N", "no preview; repeat for the large preview"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
             CommandOptionSpec::flag("-r", "reverse sort order"),
             CommandOptionSpec::flag("-y", "answer the kill prompt for x and X"),
@@ -2287,7 +2283,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-i", "open on the info view"),
             CommandOptionSpec::value("-K", FreeForm, "per-row shortcut key format"),
             CommandOptionSpec::flag("-k", "kill the source pane when the chooser exits"),
-            CommandOptionSpec::flag("-N", "disable the preview, already zz's only layout"),
+            CommandOptionSpec::flag("-N", "no preview; repeat for the large preview"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
             CommandOptionSpec::flag("-r", "reverse sort order"),
             CommandOptionSpec::flag("-y", "answer the kill prompt for x and X"),
@@ -2328,7 +2324,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-f", FreeForm, "filter"),
             CommandOptionSpec::value("-K", FreeForm, "per-row shortcut key format"),
             CommandOptionSpec::flag("-k", "kill the source pane when the chooser exits"),
-            CommandOptionSpec::flag("-N", "disable the preview, already zz's only layout"),
+            CommandOptionSpec::flag("-N", "no preview; repeat for the large preview"),
             CommandOptionSpec::value("-O", FreeForm, "sort order"),
             CommandOptionSpec::flag("-r", "reverse sort order"),
             CommandOptionSpec::flag("-y", "buffer mode never reads it, as on the pin"),
@@ -2378,15 +2374,14 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "display-panes",
         aliases: &["displayp"],
         description: "Display pane numbers",
-        usage: "[-bN] [-d duration] [-t target-client] [template]",
+        usage: "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]",
         options: &[
             CommandOptionSpec::value("-d", FreeForm, "duration in milliseconds"),
-            CommandOptionSpec::flag("-b", "do not block other commands, always on in zz"),
             CommandOptionSpec::flag("-N", "disable pane selection"),
-            CommandOptionSpec::value("-t", FreeForm, "target client"),
-            CommandOptionSpec::unsupported_flag("-k"),
-            CommandOptionSpec::unsupported_value("-s"),
-            CommandOptionSpec::unsupported_flag("-Z"),
+            CommandOptionSpec::flag("-Z", "leave the window unzoomed"),
+            CommandOptionSpec::flag("-k", "kill the pane when the mode ends"),
+            CommandOptionSpec::value("-s", Window, "source window"),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -3150,13 +3145,10 @@ mod tests {
             .commands
     }
 
-    const FLAGS_THE_PIN_REMOVED: &[(&str, &str)] = &[("display-panes", "-b")];
-
     fn catalog_flag_shapes(spec: &CommandSpec) -> BTreeMap<String, String> {
         spec.options
             .iter()
             .filter(|option| !option.name.starts_with("--"))
-            .filter(|option| !FLAGS_THE_PIN_REMOVED.contains(&(spec.name, option.name)))
             .map(|option| {
                 let arity = if option.optional_value {
                     "optional"
@@ -3236,7 +3228,7 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 327), ("optional", 8), ("required", 250)])
         );
-        assert_eq!((supported, unsupported), (571, 15));
+        assert_eq!((supported, unsupported), (525, 26));
         assert_eq!(usage_overrides.len(), 25);
         assert_eq!(
             usage_overrides,
@@ -4029,7 +4021,7 @@ mod tests {
         for command in [
             CommandInvocation::new("display-panes", ["{ display-message action }"])
                 .with_command_blocks([0]),
-            CommandInvocation::new("display-panes", ["-bN", "{ display-message action }"])
+            CommandInvocation::new("display-panes", ["-kNZ", "{ display-message action }"])
                 .with_command_blocks([1]),
             CommandInvocation::new("display-panes", ["--", "{ display-message action }"])
                 .with_command_blocks([1]),
@@ -4038,7 +4030,7 @@ mod tests {
             parse_tmux_command_options(spec, &command).expect("command-or-string template");
         }
 
-        for option in ["-d", "-t"] {
+        for option in ["-d", "-s", "-t"] {
             let command =
                 CommandInvocation::new("display-panes", [option, "{ display-message option }"])
                     .with_command_blocks([1]);

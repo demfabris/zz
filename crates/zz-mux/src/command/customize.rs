@@ -347,10 +347,10 @@ impl MuxEngine {
         let mut mode = CustomizeMode {
             format: options.value("-F").map(str::to_owned),
             filter: options.value("-f").map(str::to_owned),
-            preview: if options.has("-N") {
-                Preview::Off
-            } else {
-                Preview::Normal
+            preview: match options.count("-N") {
+                0 => Preview::Normal,
+                1 => Preview::Off,
+                _ => Preview::Big,
             },
             accept: options.has("-y"),
             kill_source: options.has("-k"),
@@ -520,7 +520,7 @@ impl MuxEngine {
                         }
                     } else {
                         self.user_option_at_target(*target, &name)
-                            .map(str::to_owned)
+                            .map(ToString::to_string)
                     };
                     if let Some(found) = found {
                         owner = *target;
@@ -2632,6 +2632,35 @@ mod tests {
                     if value == expected && *target == TmuxOptionTarget::Session(context.session.unwrap())),
                 "{name}"
             );
+        }
+    }
+
+    #[test]
+    fn customize_preview_flags_follow_mode_tree_start() {
+        let (mut engine, mut context, _) = engine_with_session();
+        for (flags, expected) in [
+            (&[][..], Preview::Normal),
+            (&["-N"][..], Preview::Off),
+            (&["-NN"][..], Preview::Big),
+            (&["-N", "-N"][..], Preview::Big),
+        ] {
+            let effects = engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("customize-mode", flags.iter().copied()),
+                )
+                .unwrap()
+                .effects;
+            let [
+                MuxEffect::PaneModeChanged {
+                    mode: Some(PaneModeRequest::Customize(mode)),
+                    ..
+                },
+            ] = effects.as_slice()
+            else {
+                panic!("customize-mode {flags:?} opened no mode: {effects:?}");
+            };
+            assert_eq!(mode.preview, expected, "{flags:?}");
         }
     }
 

@@ -4,7 +4,7 @@
 
 use std::{io, path::PathBuf};
 
-use crate::user_data::platform_data_dir;
+use zz_daemon_client::user_data::platform_data_dir;
 
 const DAEMON_DIRECTORY_NAME: &str = "daemon";
 const JOURNAL_DIRECTORY_NAME: &str = "agent-journal";
@@ -33,7 +33,7 @@ mod tests {
     use super::{
         DAEMON_DIRECTORY_NAME, JOURNAL_DIRECTORY_NAME, daemon_data_dir, journal_directory,
     };
-    use crate::user_data::platform_data_dir;
+    use zz_daemon_client::user_data::platform_data_dir;
 
     #[test]
     fn the_journal_lives_under_the_daemons_own_data_directory() {

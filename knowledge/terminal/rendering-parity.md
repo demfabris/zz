@@ -19,7 +19,7 @@ revisions, and GPUI caches shaped rows by revision. The work raises typography, 
 selection/links, and fractional-scale geometry to Zed's standard without discarding that path. One
 client-only layer paints on top of it so a remote pane feels local: local scroll sources rows from the
 pane's history ring. It builds on
-`zpui` + `zpui_platform` from our own `zpui/`; the list of zz changes lives in
+`zpui` + `zpui-platform` from our own `crates/zpui*`; the list of zz changes lives in
 [zpui](/references/zpui.md).
 
 # How frames map to GPUI painting

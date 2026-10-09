@@ -24,7 +24,6 @@ fn target(shared: &Arc<Shared>, context: &ExecutionContext, index: u64) -> Clien
 fn command(name: &str, index: u64) -> CommandInvocation {
     let target = format!("overlay-{index}");
     match name {
-        "display-panes" => CommandInvocation::new(name, ["-t", &target, "-d", "0"]),
         "command-prompt" => {
             CommandInvocation::new(name, ["-t", &target, "set-environment -g ANSWER %%"])
         }
@@ -65,13 +64,6 @@ fn continuation(shared: &Shared, target: ClientId, name: &str) -> cmdq::WaitCont
     let inner = shared.inner.lock();
     let client = inner.client(target).unwrap();
     let waiter = match name {
-        "display-panes" => client
-            .display_panes
-            .as_ref()
-            .unwrap()
-            .waiter
-            .as_ref()
-            .unwrap(),
         "command-prompt" => client
             .command_prompt
             .as_ref()
@@ -95,13 +87,13 @@ fn twenty_parked_overlays_add_zero_workers() {
     ) {
         return;
     }
-    for name in ["display-panes", "command-prompt", "confirm-before"] {
+    for name in ["command-prompt", "confirm-before"] {
         let (shared, context) = workspace();
         let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
         let targets = (0..20)
             .map(|index| target(&shared, &context, index))
             .collect::<Vec<_>>();
-        let before = crate::process_info::sample(std::process::id())
+        let before = zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads;
         let mut tasks = (0..20)
@@ -109,7 +101,7 @@ fn twenty_parked_overlays_add_zero_workers() {
             .collect::<Vec<_>>();
         assert_eq!(shared.connection_threads.worker_count(), 0);
         assert!(
-            crate::process_info::sample(std::process::id())
+            zz_daemon_client::process_info::sample(std::process::id())
                 .unwrap()
                 .threads
                 <= before
@@ -133,7 +125,7 @@ fn twenty_parked_overlays_add_zero_workers() {
 
 #[test]
 fn detach_and_disconnect_resume_each_overlay_once() {
-    for name in ["display-panes", "command-prompt", "confirm-before"] {
+    for name in ["command-prompt", "confirm-before"] {
         for disconnect in [false, true] {
             let (shared, context) = workspace();
             let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
@@ -160,7 +152,7 @@ fn detach_and_disconnect_resume_each_overlay_once() {
 
 #[test]
 fn issuing_client_disconnect_wakes_overlay_on_another_client() {
-    for name in ["display-panes", "command-prompt", "confirm-before"] {
+    for name in ["command-prompt", "confirm-before"] {
         let (shared, context) = workspace();
         let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
         let target = target(&shared, &context, 0);
@@ -210,36 +202,11 @@ fn finish(task: &mut wait_queue::CommandTask) {
 }
 
 #[test]
-fn timeout_replacement_and_cancellation_resume_overlays_once() {
+fn replacement_and_cancellation_resume_overlays_once() {
     let (shared, context) = workspace();
     let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
     let target = target(&shared, &context, 0);
-    let (_, mut task) = task(&shared, &context, "display-panes", 0);
-    let continuation = continuation(&shared, target, "display-panes");
-    let now = Instant::now();
-    let scheduled = {
-        let mut inner = shared.inner.lock();
-        let overlay = inner
-            .client_mut(target)
-            .unwrap()
-            .display_panes
-            .as_mut()
-            .unwrap();
-        overlay.deadline = Some(now);
-        DisplayPanesDeadline {
-            client: target,
-            token: overlay.token,
-            deadline: now,
-        }
-    };
-    assert!(shared.expire_display_panes(scheduled, now));
-    assert!(!shared.expire_display_panes(scheduled, now));
-    assert!(task.ready());
-    assert!(!continuation.complete());
-    finish(&mut task);
-    task.finish();
-
-    for name in ["display-panes", "command-prompt", "confirm-before"] {
+    for name in ["command-prompt", "confirm-before"] {
         let (_, mut pending) = self::task(&shared, &context, name, 0);
         let continuation = self::continuation(&shared, target, name);
         shared

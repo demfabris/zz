@@ -17,20 +17,20 @@ crate-type = ["cdylib", "rlib"]
 syntax-highlighting = ["zz-ui/tree-sitter"]
 
 [dependencies]
-zpui = { path = "../../zpui/crates/zpui" }
-zpui_platform = { path = "../../zpui/crates/zpui_platform", default-features = false }
+zpui = { path = "../../crates/zpui" }
+zpui-platform = { path = "../../crates/zpui-platform", default-features = false }
 zz-app = { path = "../app" }
 zz-protocol = { path = "../../crates/zz-protocol" }
 zz-ui = { path = "../../crates/zz-ui", features = ["agent"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-zpui_platform = { path = "../../zpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+zpui-platform = { path = "../../crates/zpui-platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
 wasm-bindgen = "=0.2.128"
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
-zpui = { path = "../../zpui/crates/zpui", features = ["test-support"] }
+zpui = { path = "../../crates/zpui", features = ["test-support"] }
 
 [lints.rust]
 unsafe_code = "deny"

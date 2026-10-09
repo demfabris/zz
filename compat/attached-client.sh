@@ -2031,61 +2031,50 @@ probe_forced_nested_attaches() {
 
 probe_display_panes_target_no_select() {
   local side="$1"
-  local client_name
-  local client_tty
   local error
-  local linux_basename
-  local stripped_tty
-  local target
+  local pane
 
-  client_name="$(side_command "$side" list-clients -F '#{client_name}')"
-  if [ -z "$client_name" ] || [[ "$client_name" == *$'\n'* ]]; then
-    fixture_failure "$side did not report exactly one target client name"
-  fi
-  client_tty="$(tmux_outer_command display-message -p -t "$OUTER_SESSION:$side" '#{pane_tty}')"
-  if [[ "$client_tty" != /dev/* ]]; then
-    fixture_failure "$side outer pane did not expose an attached client tty"
-  fi
-  stripped_tty="${client_tty#/dev/}"
   if error="$(side_command "$side" display-panes -t missing -d not-a-delay 2>&1)"; then
     fixture_failure "$side accepted a missing display-panes target"
   fi
   error="${error//$'\r'/}"
-  if [[ "$error" != *"can't find client: missing"* ]] || [[ "$error" == *"delay"* ]]; then
-    fixture_failure "$side resolved display-panes delay before target; got: ${error:-<empty>}"
+  if [[ "$error" != *"can't find pane: missing"* ]] || [[ "$error" == *"delay"* ]]; then
+    fixture_failure "$side resolved display-panes delay before its target pane; got: ${error:-<empty>}"
   fi
-  for target in "$client_tty" "$client_tty:" "$stripped_tty" "$stripped_tty:"; do
-    if error="$(side_command "$side" display-panes -t "$target" -d not-a-delay 2>&1)"; then
-      fixture_failure "$side accepted an invalid display-panes delay for tty target $target"
-    fi
-    error="${error//$'\r'/}"
-    if [[ "$error" == *"can't find client"* ]] || [[ "$error" != *"delay"* ]]; then
-      fixture_failure "$side did not resolve tty target $target before delay validation; got: ${error:-<empty>}"
-    fi
-  done
-  linux_basename="${stripped_tty##*/}"
-  if [ "$linux_basename" = "$stripped_tty" ]; then
-    linux_basename=3
+  if error="$(side_command "$side" display-panes -s missing -t missing -d not-a-delay 2>&1)"; then
+    fixture_failure "$side accepted a missing display-panes source window"
   fi
-  if [ "$linux_basename" = "$client_name" ]; then
-    if error="$(side_command "$side" display-panes -t "$linux_basename" -d not-a-delay 2>&1)"; then
-      fixture_failure "$side accepted an invalid display-panes delay for exact client name $linux_basename"
-    fi
-    error="${error//$'\r'/}"
-    if [[ "$error" == *"can't find client"* ]] || [[ "$error" != *"delay"* ]]; then
-      fixture_failure "$side did not preserve exact client-name precedence for $linux_basename; got: ${error:-<empty>}"
-    fi
-  else
-    if error="$(side_command "$side" display-panes -t "$linux_basename" -d not-a-delay 2>&1)"; then
-      fixture_failure "$side accepted Linux tty basename target $linux_basename"
-    fi
-    error="${error//$'\r'/}"
-    if [[ "$error" != *"can't find client: $linux_basename"* ]] || [[ "$error" == *"delay"* ]]; then
-      fixture_failure "$side did not reject Linux tty basename before delay validation; got: ${error:-<empty>}"
-    fi
+  error="${error//$'\r'/}"
+  if [[ "$error" != *"can't find window: missing"* ]]; then
+    fixture_failure "$side did not resolve the display-panes source window first; got: ${error:-<empty>}"
   fi
-  side_command "$side" display-panes -bN -t "$client_name:" -d 0 || \
-    fixture_failure "$side could not target a non-selectable pane overlay"
+  if error="$(side_command "$side" display-panes -b -d 0 2>&1)"; then
+    fixture_failure "$side accepted the display-panes -b flag 3.8 removed"
+  fi
+  error="${error//$'\r'/}"
+  if [[ "$error" != *"unknown flag -b"* ]]; then
+    fixture_failure "$side did not refuse display-panes -b; got: ${error:-<empty>}"
+  fi
+  pane="$(side_command "$side" display-message -p '#{pane_id}')"
+  pane="${pane//$'\r'/}"
+  [[ "$pane" == %* ]] || fixture_failure "$side did not report its current pane; got: ${pane:-<empty>}"
+  if error="$(side_command "$side" display-panes -t "$pane" -d not-a-delay 2>&1)"; then
+    fixture_failure "$side accepted an invalid display-panes delay"
+  fi
+  error="${error//$'\r'/}"
+  if [[ "$error" != *"delay invalid"* ]]; then
+    fixture_failure "$side did not reject the display-panes delay after its target; got: ${error:-<empty>}"
+  fi
+  side_command "$side" display-panes -N -t "$pane" -d 0 || \
+    fixture_failure "$side could not open a non-selectable display-panes mode"
+  wait_for_side_output "$side" panes-mode "display-panes -N mode" \
+    display-message -p -t "$pane" '#{pane_mode}'
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" 1
+  assert_side_output_stays "$side" panes-mode "display-panes -N mode after a digit" \
+    display-message -p -t "$pane" '#{pane_mode}'
+  tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
+  wait_for_side_output "$side" "" "display-panes -N mode closed by q" \
+    display-message -p -t "$pane" '#{pane_mode}'
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" F11
   wait_for_marker "$side" 5a5a5a5a
 }

@@ -2,6 +2,7 @@
 
 pub mod agent_stream;
 pub mod app_identity;
+mod browser_cookie;
 mod catalog;
 mod control;
 mod exec;
@@ -26,6 +27,11 @@ mod float_wire_tests;
 
 pub use tree_delta::{TreeDelta, TreeDeltaError, TreeOp};
 
+pub use browser_cookie::{
+    BrowserCookie, BrowserCookiePriority, BrowserCookieSameSite, CookieImportBatch,
+    CookieImportError, CookieImportResult, MAX_COOKIE_IMPORT_BYTES, MAX_COOKIE_IMPORT_COUNT,
+    SiteDataClearResult, parse_cookie_import,
+};
 pub use catalog::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, COMMAND_SPECS, CommandArgsParseRule,
     CommandArgsParseSpec, CommandOptionSpec, CommandResolution, CommandSpec, CommandValueKind,
@@ -39,6 +45,7 @@ pub use control::{
     ClientView, ClientViewport, Hello, KeySubscription, MAX_BATCH_FRAMES, MouseBindings,
     Subscriptions, TTY_INPUT_CAPABILITY, TreeSubscription, Welcome, key_tables_hash,
 };
+pub const UNZOOMED_LAYOUT_VARIABLE: &str = "unzoomed_layout";
 pub use exec::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecExit, ExecFlags, ExecOutcome, ExecRequest,
     ExecResume, ExecResumeKind, MAX_EXEC_TTY_BYTES,
@@ -87,9 +94,10 @@ pub use message::{
     NEW_SESSION_ATTACH_CAPABILITY, PANE_FRAME_CAPABILITY, PROTOCOL_VERSION, PaneBorderPresentation,
     PaneIndicator, PasteUploadPurpose, PastedImageFormat, PopupAction, PopupBorderLines,
     PopupPointer, PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult,
-    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
-    ServerHello, SourceSpan, StatusLine, StatusPosition, StdoutClaim, TerminalUiCommand,
-    agent_update_batch_bytes, paste_upload_extension_is_valid, split_command_words,
+    PromptCursor, ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS,
+    ServerError, ServerHello, SourceSpan, StatusLine, StatusPosition, StdoutClaim,
+    TerminalUiCommand, agent_update_batch_bytes, paste_upload_extension_is_valid,
+    split_command_words,
 };
 pub use message::{
     MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
@@ -101,12 +109,7 @@ pub use path_list::{
 };
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, EditorDescriptorError, FloatingPaneSnapshot,
-    LayoutNode, MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, ModalPaneSnapshot, MuxSnapshot, PaneBorderIndicators,
-    PaneBorderLines, PaneBorderStatus, PaneKindSnapshot, PaneMode, PaneSnapshot, PaneStatus,
-    PaneStatusKind, PaneStatusState, SessionSnapshot, SessionViewer, WindowSnapshot,
-    normalize_browser_profile_name,
+    DEFAULT_BROWSER_PROFILE, EditorDescriptor, EditorDescriptorError, FloatingPaneSnapshot, LayoutNode, MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MAX_WINDOW_STATUS_LABEL_BYTES, ModalPaneSnapshot, MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneKindSnapshot, PaneMode, PaneSnapshot, PaneStatus, PaneStatusKind, PaneStatusState, SessionSnapshot, SessionViewer, WindowSnapshot, normalize_browser_profile_name, MAX_FAVICON_BYTES, PanesModeArea, PanesModeBorder,
 };
 pub use style::{
     COLOUR_THEME_COUNT, DEFAULT_DARK_THEME_COLOURS, StyledSegment, ThemeColours, TmuxAlign,

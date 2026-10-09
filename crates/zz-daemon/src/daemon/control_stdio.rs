@@ -831,7 +831,7 @@ impl EventLoop {
             .as_ref()
             .is_some_and(|stdio| stdio.wants_input())
         {
-            let _ = crate::transport::wake_loop(&self.waker);
+            let _ = crate::wake::wake_loop(&self.waker);
         }
         true
     }

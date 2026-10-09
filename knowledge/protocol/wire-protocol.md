@@ -587,11 +587,11 @@ record/fetch round-trip for numbered placeholders.
 # Remote transport
 
 Remote carriers preserve the identical envelope but are platform-specific. macOS and Linux desktop
-clients use OpenSSH `ssh -N -L` to forward the daemon's Unix socket (`crates/zz-daemon/src/endpoint.rs`
-`ssh_forward_command`). iOS selects `RusshForward` in `crates/zz-daemon/src/client.rs`
+clients use OpenSSH `ssh -N -L` to forward the daemon's Unix socket (`crates/zz-daemon-client/src/endpoint.rs`
+`ssh_forward_command`). iOS selects `RusshForward` in `crates/zz-daemon-client/src/client.rs`
 `connect_endpoint_with_prompts_and_terminal`; it opens an in-process `russh` session, runs
 `zz proxy --socket ...`, and pumps frames over the SSH channel's stdio
-(`crates/zz-daemon/src/russh_client.rs` `establish`). `Endpoint::parse` accepts `unix://`, a bare
+(`crates/zz-daemon-client/src/russh_client.rs` `establish`). `Endpoint::parse` accepts `unix://`, a bare
 path, and `ssh://[user@]host[:port][/remote/socket]`, and nothing else . a `quic://` string is
 rejected with a pointer at `ssh://`. Both carriers expose one reliable ordered byte stream to the
 protocol, with no alternate frame shape, compression, or unidirectional supersession. That keeps
@@ -801,6 +801,13 @@ rewrites the output of a command such a client runs with `zz_mux::legacy_layouts
 returns. Status lines, snapshots and `refresh-client -B`
 subscriptions stay v2 (3.8's `monitor.c` evaluates subscriptions with no client).
 
+Catch-up item `pin.control-3-8` adds no type. A `window-layout-changed` `HookEvent` published to
+control clients may carry an `unzoomed_layout` variable
+(`zz_protocol::UNZOOMED_LAYOUT_VARIABLE`) holding a v2 layout: it marks the unzoom step of a zoomed
+window's resize, and the control client prints that layout as both layouts with the `Z` flag
+removed, which is what 3.8 formats when the event fires. The daemon strips the key before the
+event reaches hooks. A client without it prints the snapshot's layout, as before.
+
 v108 is unreleased as of 2026-10-07. Claude Code agent panes stop going through the
 `claude-agent-acp` adapter: `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` becomes `claude`, and the daemon
 drives the user's own binary over Claude Code's stream-json protocol
@@ -859,12 +866,53 @@ keep their tags but the daemon never sends the event and ignores the input; they
 version. In Rust both are named `RetiredPopup` with `#[serde(rename = "Popup")]`, so the tag and
 the encoding are unchanged and no client names the popup any more.
 
+v108 also carries tmux 3.8's copy-mode line numbers and refresh-now (catch-up item
+`pin.keys-copy`). `zz_terminal::CopyModeAction` appends `RefreshNow`, `LineNumbersOn { option_off }`,
+`LineNumbersOff` and `LineNumbersToggle { option_off }` after `RefreshToggle`; `option_off` is the
+window's `copy-mode-line-numbers` read when the command ran. `GotoLine(u32)` becomes
+`GotoLine { line: Option<i32>, option_absolute: bool }`; `option_absolute` says the option was
+`absolute`, `relative` or `hybrid`, and then a goto with line numbers shown counts from the top of
+history. `ModePresentation` appends
+`line_numbers: u8` (0 off, 1 default, 2 absolute, 3 relative, 4 hybrid), `line_number_style` and
+`current_line_number_style`, and a copy view with `-H` is now published when it shows line numbers,
+with an empty `position`. `MouseBindings` grows the `Empty` mouse location after `StatusDefault`,
+which moves every `ControlN` bit up by one kind row.
+
+v108 also carries tmux 3.8's prompt cursor (catch-up item `fix.mode-styles`).
+`CommandPromptState` appends `command_mode: bool` (the vi table's `PROMPT_COMMANDMODE`, which
+draws the client prompt in `message-command-style`) and `prompt_cursor: PromptCursor`, and
+`ConfirmState` appends `prompt_cursor`. `PromptCursor { style: u8, colour: Option<TmuxColour> }`
+is what `prompt_set_options` reads from the session when the prompt opens: `style` is the
+`prompt-cursor-style` index (0 default through 6 bar), `colour` is `prompt-cursor-colour`, `None`
+when empty or `default`. A command prompt in command mode carries the
+`prompt-command-cursor-*` pair instead. The raw TUI sends DECSCUSR and OSC 12 while a client
+prompt or confirm is up and `\e[2 q` and OSC 112 once it is gone, the way `tty_update_cursor`
+does, gated on the terminal's `cstyle` and `ccolour` features. `ChooserPreview::Client` appends `border_style`, the
+`tree-mode-border-style` of the previewed client's current window, which `window_client_draw` draws
+the rule above the client's status rows in.
+
+v108 also carries a control client's guard output as bytes (catch-up item `fix.option-bytes`).
+`EventPayload::ControlCommandGuard.output` becomes `RawText`, like `ControlCommandGuardRaw`
+already was, so a control client that never subscribed gets the bytes tmux 3.8's `cmdq_print`
+writes for a UTF-8 client instead of U+FFFD. postcard encodes a byte string and a UTF-8 string
+the same way, so a UTF-8 guard's frame is unchanged; one holding other bytes now decodes.
+`control_command_guard_output_round_trips_bytes_that_are_not_utf8` pins it.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside
   `Hello` and `Welcome` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
 - v108 requires updated clients and daemon together, including the daemon on every ssh host.
+  It appends `PaneMode::Panes { areas, borders, border_style, copy, format }`, the pin's
+  `window_panes_mode` (`display-panes` as a pane mode). Each `PanesModeArea` is one pane of the
+  source window laid out on the mode pane the way `window_panes_get_geometry` maps it, with its
+  `number`, its resolved `display-panes-colour` or `display-panes-active-colour`, its expanded
+  `display-panes-format` `label` and the `viewport` the daemon froze when the mode opened.
+  `PanesModeBorder { x, y, cell }` names a `CELL_*` border glyph drawn in `border_style`
+  (`display-panes-border-style`); `copy` is false when the window is larger than the pane and the
+  client draws each viewport through `screen_write_preview` instead of a top-left copy. The raw TUI
+  draws it; the GPUI, iOS and web clients ignore it and keep their native `DisplayPanes` overlay.
 - v107 requires updated clients and daemon together, including the daemon on every ssh host.
 - v106 requires updated clients and daemon together. A v105 daemon retains the old
   placement limit even after the GUI is rebuilt; restarting only the GUI cannot fix

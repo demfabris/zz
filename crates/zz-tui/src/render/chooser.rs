@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, ChooserPreview, ChooserPreviewSize,
-    ChooserPreviewTile, ThemeColours, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxStyle,
-    apply_style, parse_style, parse_styled_segments,
+    ChooserPreviewTile, StyledSegment, ThemeColours, TmuxAttributeState, TmuxAttributes,
+    TmuxColour, TmuxStyle, apply_style, parse_style, parse_styled_segments,
 };
 use zz_terminal::{
     CellWidth, Color, Glyph, PackedCell, PackedStyle, TerminalAppearance, TerminalViewport,
@@ -174,7 +174,7 @@ fn acs_text(text: &str) -> String {
     text.chars().map(acs_glyph).collect()
 }
 
-fn acs_glyph(character: char) -> char {
+pub(super) fn acs_glyph(character: char) -> char {
     match character {
         '+' => '\u{2192}',
         ',' => '\u{2190}',
@@ -222,7 +222,22 @@ fn text_width(text: &str) -> usize {
         .sum()
 }
 
-fn markup_width(markup: &str) -> usize {
+#[cfg(test)]
+pub(super) fn cell_text(grid: &Grid, y: u16) -> String {
+    (0..grid.width)
+        .filter_map(|x| grid.index(x, y))
+        .map(|index| grid.cells[index].glyph.as_str())
+        .collect()
+}
+
+pub(super) fn segments_width(segments: &[StyledSegment]) -> usize {
+    segments
+        .iter()
+        .map(|segment| text_width(&segment.text))
+        .sum()
+}
+
+pub(super) fn markup_width(markup: &str) -> usize {
     parse_styled_segments(markup)
         .iter()
         .map(|segment| text_width(&segment.text))
@@ -359,8 +374,27 @@ impl Grid {
         base: &TmuxStyle,
         default_colours: bool,
     ) -> u16 {
+        self.segments(
+            x,
+            y,
+            limit,
+            &parse_styled_segments(markup),
+            base,
+            default_colours,
+        )
+    }
+
+    pub(super) fn segments(
+        &mut self,
+        x: u16,
+        y: u16,
+        limit: u16,
+        segments: &[StyledSegment],
+        base: &TmuxStyle,
+        default_colours: bool,
+    ) -> u16 {
         let mut used = 0_u16;
-        for segment in parse_styled_segments(markup) {
+        for segment in segments {
             if used >= limit {
                 break;
             }
@@ -419,7 +453,45 @@ impl Grid {
         }
     }
 
-    fn preview(&mut self, x: u16, y: u16, nx: u16, ny: u16, viewport: &TerminalViewport) {
+    pub(super) fn copy(&mut self, x: u16, y: u16, nx: u16, ny: u16, viewport: &TerminalViewport) {
+        let default_style = viewport.styles().first().copied().unwrap_or_else(|| {
+            PackedStyle::new(
+                viewport.foreground,
+                viewport.background,
+                None,
+                0,
+                UnderlineStyle::None,
+            )
+        });
+        for row in 0..ny.min(viewport.rows) {
+            for column in 0..nx.min(viewport.columns) {
+                let cell = viewport.cell(row, column).unwrap_or(PackedCell::EMPTY);
+                if matches!(cell.width(), CellWidth::SpacerTail | CellWidth::SpacerHead) {
+                    continue;
+                }
+                let (glyph, width) = glyph_of(viewport, cell);
+                if column + u16::from(width) > nx {
+                    break;
+                }
+                let paint = Paint::Pane {
+                    style: viewport.style(cell).unwrap_or(default_style),
+                    reverse: false,
+                    foreground: viewport.foreground,
+                    background: viewport.background,
+                };
+                self.set(x + column, y + row, &glyph, width, &paint);
+            }
+        }
+    }
+
+    pub(super) fn preview(
+        &mut self,
+        x: u16,
+        y: u16,
+        nx: u16,
+        ny: u16,
+        viewport: &TerminalViewport,
+    ) {
         let cursor = viewport.cursor.filter(|cursor| cursor.visible());
         let (px, py) = cursor.map_or((0, 0), |cursor| {
             (
@@ -1318,6 +1390,7 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
                     status,
                     status_style,
                     status_width,
+                    border_style,
                 }) => {
                     let rows = narrow(status.len()).min(box_y);
                     let body = box_y.saturating_sub(2 + rows);
@@ -1329,7 +1402,7 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
                             2,
                             box_top + box_y - rows,
                             box_x,
-                            &Paint::Style(border.clone()),
+                            &Paint::Style(layered(border_style, &plain())),
                         );
                     }
                     let compose = u16::try_from(*status_width).unwrap_or(box_x).max(box_x);

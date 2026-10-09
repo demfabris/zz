@@ -730,10 +730,6 @@ known_drift() {
     customize-array-key-values)
     printf 'gap:pin.formats-options'
     ;;
-  switch-mode-kill-visible | switch-mode-kill-covered | switch-mode-kill-uncovered | \
-    switch-mode-kill-survives-cover | switch-mode-kill-control)
-    printf 'TUI-014'
-    ;;
   esac
 }
 
@@ -745,16 +741,12 @@ known_drift_reason() {
   customize-*)
     printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 rebuilt customize mode (window-customize.c: Session Hooks, Window & Pane Hooks, Global and Session Environment sections in the tree, e to edit, C for changed only, editable array keys); zz still draws the d77c9dc6 tree"
     ;;
-  switch-mode-*)
-    printf '%s' "REGRESSION measured 2026-10-09, not 3.8 drift: with a client attached, zz split-window -d -h shrinks an 80x23 window to 78 columns (-d -v takes one row instead), so the two panes read 39 and 38 where both pins read 40 and 39; split-window without -d, and the same split with no client attached, keep 80. These cases were asserted green at d77c9dc6 through TUI-014 attempt 20"
-    ;;
   esac
 }
 
 known_drift_channel() {
   case "$1" in
   gap:pin.formats-options) printf 'screen' ;;
-  TUI-014) printf 'state' ;;
   esac
 }
 

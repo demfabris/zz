@@ -1845,7 +1845,10 @@ mod tests {
             zz_terminal::CopyModeAction::SearchCursorWord {
                 direction: SearchDirection::Backward,
             },
-            zz_terminal::CopyModeAction::GotoLine(42),
+            zz_terminal::CopyModeAction::GotoLine {
+                line: Some(42),
+                option_absolute: true,
+            },
         ] {
             let message = ProtocolMessage::Input(crate::InputMessage::TerminalView {
                 pane: PaneId(3),
@@ -2795,6 +2798,8 @@ mod tests {
                     mode: crate::CommandPromptMode::Text,
                     no_freeze: false,
                     pane: None,
+                    command_mode: false,
+                    prompt_cursor: crate::PromptCursor::default(),
                 }),
             },
         });

@@ -150,7 +150,7 @@ impl CellGeometry {
 }
 
 impl CellNode {
-    fn geometry(&self) -> CellGeometry {
+    pub(crate) fn geometry(&self) -> CellGeometry {
         match self {
             Self::Leaf { geometry, .. }
             | Self::Float { geometry, .. }
@@ -248,6 +248,10 @@ impl CellLayout {
         } else {
             parse_v1(input.as_bytes())
         }
+    }
+
+    pub(crate) const fn root(&self) -> &CellNode {
+        &self.root
     }
 
     pub(crate) fn extent(&self) -> (u16, u16) {

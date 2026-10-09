@@ -586,6 +586,9 @@ await_observable() {
     screen)
       if capture_plain "$side" 2>/dev/null | grep -Fq "$value"; then return 0; fi
       ;;
+    absent)
+      if ! capture_plain "$side" 2>/dev/null | grep -Fq "$value"; then return 0; fi
+      ;;
     none) return 0 ;;
     esac
     sleep 0.05
@@ -1136,7 +1139,7 @@ run_search() {
   type_both "$KEY_SEARCHBACK"
   copy_case "$table-fresh-entry-search-prompt" screen '(search up)'
   type_both Escape
-  copy_case "$table-fresh-entry-search-prompt-escape" none ''
+  copy_case "$table-fresh-entry-search-prompt-escape" absent '(search up)'
   type_both q
   copy_case "$table-fresh-entry-search-prompt-cancel" format '#{pane_in_mode}=0'
   assert_mode_formats "$table-fresh-entry-search-prompt-cancel"

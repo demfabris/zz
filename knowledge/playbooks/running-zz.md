@@ -529,7 +529,7 @@ WASM target used by the browser check below.
 ```sh
 cargo fmt --all -- --check
 git diff --check
-cargo test --workspace --all-features --quiet
+cargo ci-test --quiet
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo build --workspace --all-targets --all-features
 cargo check --workspace --all-targets --all-features

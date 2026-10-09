@@ -198,7 +198,7 @@ impl RenderOnce for CommandPaletteSurface {
                     .text_color(cx.theme().foreground.muted())
                     .children(self.hints.into_iter().map(|hint| palette_hint(hint, cx))),
             );
-        zz_kit::foundation::surface_enter(
+        zpui_kit::foundation::surface_enter(
             surface,
             ElementId::NamedInteger("command-palette-open".into(), self.revision),
             px(0.0),

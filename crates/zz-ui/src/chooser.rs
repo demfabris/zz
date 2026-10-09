@@ -223,7 +223,7 @@ impl RenderOnce for ChooserModal {
                 self.font_family,
                 cx,
             ));
-        zz_kit::foundation::surface_enter(surface, "chooser-open", px(0.0))
+        zpui_kit::foundation::surface_enter(surface, "chooser-open", px(0.0))
     }
 }
 

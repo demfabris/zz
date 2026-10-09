@@ -4,7 +4,7 @@ title: Sidebar navigation and native choosers
 description: Persistent sidebar navigation for sessions and windows plus daemon-owned pane and paste-buffer choosers, with tmux-style keyboard movement and activation.
 resource: crates/zz-mux/src/command.rs
 tags: [tmux, choose-tree, choose-buffer, chooser, overlay]
-timestamp: 2026-09-15T22:16:59Z
+timestamp: 2026-10-09T00:00:00Z
 ---
 
 # Overview
@@ -53,8 +53,10 @@ Navigate palette preserves the hierarchy of the `-s` and `-w` forms:
 
 Supported flags are `-s`, `-w`, `-Z` (zoom), `-t` (target pane), `-f` (format filter), `-K`
 (per-row shortcut-key format), `-N` (no preview), `-O` (sort order), and `-r` (reverse). One `-N`
-is already zz's only chooser layout; repeated `-NN`, tmux's large-preview mode, is rejected. The pin
-accepts `-s` and `-w` together and gives `-s` precedence. These flags change only the initial
+opens the chooser with its preview off and `-NN` with the large preview, a list a quarter of the
+screen high, as `mode_tree_start` does; `v` cycles on from there. The raw TUI draws the preview;
+the desktop overlay has no preview pane. The pin accepts `-s` and `-w` together and gives `-s`
+precedence. These flags change only the initial
 collapse depth; every form retains the complete hierarchy. A default chooser opened from a
 one-pane source window initially selects that window row. The accepted sort names are case-insensitive:
 `activity`, `creation`, `index`/`key`, `modifier`, `name`/`title`, `order`, `size`,
@@ -149,7 +151,7 @@ names and full server-side contents, and `q`/Escape closes. Buffers default to c
 newest first; `-r` alone makes that oldest first. Filters receive the source
 session/window/pane context plus buffer facts, and a zero-match filter falls back to the
 unfiltered chooser with the same `filter: no matches` status. `-K` expands one shortcut key per row
-and one `-N` selects the already-native previewless layout; repeated `-NN` remains unsupported.
+and `-N` and `-NN` open it with the preview off or large, as for `choose-tree`.
 Both clients reserve a shortcut gutter only when at least one rendered row has a key, so a fully
 keyless list uses the full row width. Custom row formats (`-F`), `-k`/`-y`, tagging, editor
 integration, and broader presentation behavior remain unsupported.

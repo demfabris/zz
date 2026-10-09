@@ -6,7 +6,7 @@ use std::{
         mpsc::{self, Receiver, Sender},
     },
 };
-use zz_daemon::{
+use zz_daemon_client::{
     AskpassPromptKind, AskpassReply, DaemonError, Endpoint, EndpointError, InteractiveClient,
     SshPrompts,
 };

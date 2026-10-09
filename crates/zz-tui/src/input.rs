@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use zz_client::{
     ChromeAction, Disposition, Effect, MenuKeyResult, MenuPointerKind, PrefixView, resolve_menu_key,
 };
-use zz_daemon::{
+use zz_daemon_client::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
 use zz_protocol::{
@@ -1204,16 +1204,12 @@ fn handle_mouse(
     if matches!(event.kind, MouseEventKind::Down(_)) {
         focus_pane(model, client, entry.pane)?;
     }
-    let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !mouse_tracking;
-    if let Some(action) = pane_mouse_action(
-        &model.size,
+    if let Some(action) = native_pane_mouse_action(
+        model,
+        entry.pane,
+        content,
         event,
-        entry,
-        global_column,
-        global_row,
-        global_x,
-        global_y,
-        force_selection,
+        (global_column, global_row, global_x, global_y),
     ) {
         client
             .send_input(InputMessage::TerminalView {
@@ -1255,11 +1251,7 @@ fn bound_mouse_key(
     global_x: u32,
     global_y: u32,
 ) -> MouseKeyRoute {
-    let Some(latch) =
-        latched_mouse_location(model, event, global_column, global_row, global_x, global_y)
-    else {
-        return MouseKeyRoute::Native;
-    };
+    let latch = latched_mouse_location(model, event, global_column, global_row, global_x, global_y);
     let Some(key) = mouse_key_name(event, &latch.location, latch.dragging) else {
         return MouseKeyRoute::Native;
     };
@@ -1447,13 +1439,50 @@ fn bound_mouse_view_action(
     global_x: u32,
     global_y: u32,
 ) -> Option<TerminalViewAction> {
-    let entry = *model.layout.panes.iter().find(|entry| entry.pane == pane)?;
+    let content = model
+        .layout
+        .panes
+        .iter()
+        .find(|entry| entry.pane == pane)?
+        .content();
+    native_pane_mouse_action(
+        model,
+        pane,
+        content,
+        event,
+        (global_column, global_row, global_x, global_y),
+    )
+}
+
+fn native_pane_mouse_action(
+    model: &Model,
+    pane: zz_protocol::PaneId,
+    content: Rect,
+    event: MouseEvent,
+    (global_column, global_row, global_x, global_y): (u16, u16, u32, u32),
+) -> Option<TerminalViewAction> {
     let viewport = model.viewports.get(&pane)?;
     let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking;
+    let (content, global_column) = match crate::mode_view::presentation(model, pane, viewport)
+        .and_then(|mode| crate::mode_view::line_number_gutter(mode, viewport))
+    {
+        Some(gutter) => {
+            let body = gutter.body(content);
+            let last = body.x.saturating_add(body.width.saturating_sub(1));
+            (body, global_column.clamp(body.x, last.max(body.x)))
+        }
+        None => (content, global_column),
+    };
+    let source = model
+        .layout
+        .panes
+        .iter()
+        .find(|entry| entry.pane == pane)
+        .map_or((0, 0), |entry| entry.source);
     pane_mouse_action(
         &model.size,
         event,
-        entry,
+        (content, source),
         global_column,
         global_row,
         global_x,
@@ -1516,11 +1545,11 @@ fn latched_mouse_location(
     global_row: u16,
     global_x: u32,
     global_y: u32,
-) -> Option<crate::state::MouseDragLatch> {
+) -> crate::state::MouseDragLatch {
     let press = (global_column, global_row, global_x, global_y);
     match event.kind {
         MouseEventKind::Down(button) => {
-            let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
+            let (location, pane, window) = mouse_key_location(model, global_column, global_row);
             let latch = crate::state::MouseDragLatch {
                 button,
                 location,
@@ -1532,18 +1561,18 @@ fn latched_mouse_location(
                 press,
             };
             model.mouse_drag = Some(latch.clone());
-            Some(latch)
+            latch
         }
         MouseEventKind::Drag(button) => match model.mouse_drag.as_mut() {
             Some(latch) if latch.button == button => {
                 latch.dragging = true;
-                Some(latch.clone())
+                latch.clone()
             }
             _ => resolved_mouse_latch(model, global_column, global_row, press),
         },
         MouseEventKind::Up(button) => {
             let latch = match model.mouse_drag.as_ref() {
-                Some(latch) if latch.button == button => Some(latch.clone()),
+                Some(latch) if latch.button == button => latch.clone(),
                 _ => resolved_mouse_latch(model, global_column, global_row, press),
             };
             model.mouse_drag = None;
@@ -1558,9 +1587,9 @@ fn resolved_mouse_latch(
     global_column: u16,
     global_row: u16,
     press: (u16, u16, u32, u32),
-) -> Option<crate::state::MouseDragLatch> {
-    let (location, pane, window) = mouse_key_location(model, global_column, global_row)?;
-    Some(crate::state::MouseDragLatch {
+) -> crate::state::MouseDragLatch {
+    let (location, pane, window) = mouse_key_location(model, global_column, global_row);
+    crate::state::MouseDragLatch {
         button: MouseButton::Left,
         location,
         pane,
@@ -1569,7 +1598,7 @@ fn resolved_mouse_latch(
         dragging: false,
         bound: false,
         press,
-    })
+    }
 }
 
 /// The axis of the divider a cell belongs to, which is the axis
@@ -1602,11 +1631,11 @@ fn mouse_key_location(
     model: &Model,
     global_column: u16,
     global_row: u16,
-) -> Option<(
+) -> (
     String,
     Option<zz_protocol::PaneId>,
     Option<zz_protocol::WindowId>,
-)> {
+) {
     if let Some(index) = model.status_row_at(global_row) {
         let (status_x, _) = model.status_area();
         let target = global_column
@@ -1629,7 +1658,7 @@ fn mouse_key_location(
             Some(zz_protocol::TmuxRange::Window(window)) => model.window_id_at_index(window),
             _ => None,
         };
-        return Some((location, None, window));
+        return (location, None, window);
     }
     let window = model.window().map(|window| window.id);
     if let Some(entry) = model.pane_at(global_column, global_row) {
@@ -1638,15 +1667,12 @@ fn mouse_key_location(
         } else {
             "Border"
         };
-        return Some((location.to_owned(), Some(entry.pane), window));
+        return (location.to_owned(), Some(entry.pane), window);
     }
-    if let Some(entry) = divider_owner(model, global_column, global_row) {
-        return Some(("Border".to_owned(), Some(entry), window));
-    }
-    model
-        .canvas()
-        .contains(global_column, global_row)
-        .then(|| ("Empty".to_owned(), None, window))
+    let Some(entry) = divider_owner(model, global_column, global_row) else {
+        return ("Empty".to_owned(), None, window);
+    };
+    ("Border".to_owned(), Some(entry), window)
 }
 
 /// A divider cell belongs to the pane it is the far edge of.
@@ -1813,7 +1839,7 @@ pub(crate) fn app_mouse_forward_action(
     let action = pane_mouse_action(
         &model.size,
         event,
-        entry,
+        (content, entry.source),
         global_column,
         global_row,
         global_x,
@@ -1827,15 +1853,14 @@ pub(crate) fn app_mouse_forward_action(
 fn pane_mouse_action(
     size: &crate::tty::TerminalSize,
     event: MouseEvent,
-    entry: PaneRect,
+    (content, source): (Rect, (u16, u16)),
     global_column: u16,
     global_row: u16,
     global_x: u32,
     global_y: u32,
     force_selection: bool,
 ) -> Option<TerminalViewAction> {
-    let content = entry.content();
-    let (left, top) = entry.source;
+    let (left, top) = source;
     let column = global_column.saturating_sub(content.x).saturating_add(left);
     let row = global_row.saturating_sub(content.y).saturating_add(top);
     let x = global_x
@@ -2098,6 +2123,71 @@ const fn modifiers(value: KeyModifiers) -> Modifiers {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_shift_click_past_the_line_number_gutter_lands_on_the_first_column() {
+        use crate::terminal_event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use zz_protocol::{ModePresentation, PaneId};
+        use zz_terminal::{SessionStatus, TerminalMode, TerminalViewAction, TerminalViewport};
+
+        let core = zz_client::ClientCore::new();
+        let endpoint = zz_daemon_client::Endpoint::parse("unix:///tmp/zz-input-test.sock")
+            .expect("test endpoint");
+        let mut model = crate::state::Model::new(
+            &core,
+            crate::tty::TerminalSize {
+                columns: 80,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        let mut viewport = TerminalViewport::blank(80, 24, SessionStatus::Running);
+        viewport.mode = TerminalMode::Copy {
+            position: 0,
+            total: 0,
+            hide_position: false,
+        };
+        model.viewports.insert(PaneId(1), viewport);
+        std::sync::Arc::make_mut(&mut model.status)
+            .modes
+            .push(ModePresentation {
+                pane: PaneId(1),
+                view: false,
+                position: String::new(),
+                position_style: String::new(),
+                selection_style: String::new(),
+                vi_keys: false,
+                match_style: String::new(),
+                current_match_style: String::new(),
+                line_numbers: 1,
+                line_number_style: String::new(),
+                current_line_number_style: String::new(),
+            });
+        let content = crate::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        let event = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 0,
+            modifiers: KeyModifiers::SHIFT,
+        };
+        let Some(TerminalViewAction::Mouse(input)) =
+            super::native_pane_mouse_action(&model, PaneId(1), content, event, (4, 0, 32, 0))
+        else {
+            panic!("a click in a copy-mode pane is a view action");
+        };
+        assert_eq!(input.cell.column, 0);
+    }
+
     #[test]
     fn xterm_shift_sequences_reach_the_shared_key_contract() {
         for (bytes, expected) in [
@@ -3168,6 +3258,7 @@ mod tests {
             prompt: "Confirm? ".to_owned(),
             confirm_key,
             default_yes,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         }
     }
 

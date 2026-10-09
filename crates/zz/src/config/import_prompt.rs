@@ -40,7 +40,7 @@ pub(crate) fn choose_tmux_config(window: &mut Window, cx: &mut App) {
             let path = selected.await.ok()?.ok()??.into_iter().next()?;
             window
                 .update(|window, cx| {
-                    let Some(target) = zz_daemon::mux_config_write_path() else {
+                    let Some(target) = zz_daemon_client::mux_config_write_path() else {
                         crate::window::toast::push(
                             zz_ui::notification::Notification::error(
                                 "Could not resolve the zz multiplexer configuration path",
@@ -98,7 +98,7 @@ pub(crate) fn maybe_prompt(window: &mut Window, cx: &mut App) {
         return;
     }
     let ghostty = zz_terminal::discover_ghostty_config();
-    let tmux = zz_daemon::discover_tmux_config();
+    let tmux = zz_daemon_client::discover_tmux_config();
     if ghostty.is_none() && tmux.is_none() {
         mark_prompted();
         return;

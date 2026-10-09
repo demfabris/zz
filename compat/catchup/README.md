@@ -60,11 +60,15 @@ orchestrator never runs the full suite per item.
      (refresh its `compat/.cache` from the main checkout), then goes to review.
    - Merge checks, narrow: `compat/catchup/cargo.sh clippy -p <touched crates> --all-targets
      --all-features -- -D warnings`, the item's own filtered tests, and `just compat check` if the
-     registry, oracle or manifest tests changed.
+     registry, oracle or manifest tests changed. A merge that changes `zz-protocol` (wire types,
+     `key.rs` default tables, the catalog) also runs `cargo.sh test -p zz-client`: its which-key and
+     reducer tests read those tables (pin.keys-copy's 3.8 `T` binding broke two, 2026-10-09).
    - `ledger.py set <id> merged --sha <merge sha>`, commit the ledger, push `main`.
    - Delete the branch locally and on origin. Start the next ready item in the same slot
      (`wt.sh item` switches the warm worktree to a new branch), or `wt.sh rm <slot>` if nothing is
-     ready. No worktree outlives its work.
+     ready. No worktree outlives its work. A slot whose branch is in review stays on that branch
+     until the review reports: Codex reads `git diff main...HEAD` in that worktree, so the next item
+     starts in another slot. [The capture-e-links review saw an empty diff after its slot switched.]
 5. **Milestones**: at M1, M2 and M3 run the [full suite](#full-suite-milestones-only) once on `main`.
 
 Orchestrator shell habits: never `pkill -f <pattern>` (it matches the shell running it; list pids
@@ -93,7 +97,8 @@ Each rule cost a campaign real time. The source is in brackets
 
 1. **Cargo only through `compat/catchup/cargo.sh`.** It caps memory, sets `--jobs` from RAM, and
    holds one of two cargo slots inside `flock -o`, so a killed lane's daemons cannot keep a slot
-   locked. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
+   locked. When both slots are busy it polls every slot, so a build never queues behind one slot
+   while the other is free. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
    it too when run as `PATH=$PWD/compat/catchup/bin:$PATH <script>`; always run them that way. [Five lanes OOMed alienware for hours; a leaked slot fd stalled every lane for 7 h.]
 2. **Iterate behind a filter**: `compat/catchup/cargo.sh test -p <crate> --lib <name>`. Run the full
    test package of each crate you touched once, before your final commit. Never
@@ -126,7 +131,9 @@ Each rule cost a campaign real time. The source is in brackets
    your turn waiting on a background task. [A reviewer that did was dropped, LOG.]
 9. **Fixtures that start tmux or zz**: scrub HOME and the XDG dirs only (not `env -i`), start tmux
    with `-L zzprobe-$$ -f /dev/null`, put sockets directly under `/tmp` with short names.
-   [A shared HOME made a fixture compare the pin with itself, LOG.]
+   [A shared HOME made a fixture compare the pin with itself, LOG.] Run every `compat/tui-*.sh` and
+   `compat/run.sh` with `LANG=en_US.UTF-8`: agent shells have `LANG` empty, and tmux then draws ACS
+   borders where zz draws Unicode, so whole fixtures go red (pin.keys-copy, 2026-10-09).
 10. **Proofs at tip**: every result in your report comes from your final commit.
 11. **Zones are a hint, not a fence.** If a clause needs a file outside your item's zones, edit it
     and say so. [Three cycles left items open because the last fix sat in "someone else's" crate.]
@@ -179,6 +186,10 @@ so one of them may run beside the compiling lanes. On macOS there is no `systemd
   the measured 3.8 delta with its oracle tools). Never `/tmp`: it is RAM and a reboot empties it.
 - **Before stopping or switching machines**: every lane branch committed (a WIP commit is fine) and
   pushed, ledger notes saying where each lane stands, `main` pushed.
+- **main is shared**: fabrico and other sessions push to it while the campaign runs (two restructures on
+  2026-10-09). `git fetch` before every push; an unpushed ledger-only commit is rebased onto
+  `origin/main`, anything else is merged. After a restructure lands, tell every running lane to merge
+  `main` before its final commit.
 - **Before every push** (public repo): `python3 compat/evidence-secrets.py`, then
   `git diff origin/<branch>..HEAD | rg -n 'gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY'`
   must print nothing.
@@ -200,15 +211,6 @@ plus the ledger item as the prompt, from the lane's worktree. If Codex is out
 (`^ERROR: You've hit your usage limit`, "model is at capacity"), run the same prompt through an Opus
 subagent instead and note it in the ledger. Killing the orchestrator leaves a running `codex` child;
 check `pgrep -af codex` on resume.
-
-## Paused 2026-10-09
-
-fabrico paused the campaign. Nothing is running. Merged: float.design, pin.move, fix.streams,
-fix.capture-links, pin.layout-v2, pin.formats-options, fix.small-semantics, pin.contract-breaks,
-fix.tui-colour, pin.tui-fixtures, pin.hooks-events. Each in-flight item's ledger notes end with a
-`PAUSED` line saying exactly what is left (review to rerun, checks to run, then merge). All lane
-branches are pushed to `origin/catchup/<id>`; worktrees `zz-cu-a`..`zz-cu-e` on alienware are
-clean. Resume with the steps above, starting from those PAUSED notes.
 
 ## Decisions
 
@@ -249,3 +251,26 @@ clean. Resume with the steps above, starting from those PAUSED notes.
   known differences, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.
+- 2026-10-09 fabrico resumed the campaign after the restructure (gpui renamed zpui and moved in-repo,
+  zz-kit split out of zz-ui, clients/gpui-shared became clients/app, clients/ios). Orchestrator: lane
+  branches take main by merge, not rebase: their history is on origin and several carry merges already, so a rebase would force-push
+  and replay those. Registry, generated gaps.md and wire doc conflicts are resolved by the
+  orchestrator; a code conflict is resolved too when it is local, and the relaunched lane compiles it.
+- 2026-10-09 orchestrator: fix.tui-regressions gets a final fix pass after two reviews (per-client
+  report places, stale reports sized from the client's window size) and merges without a third review,
+  each repro pinned by a daemon test.
+- 2026-10-09 orchestrator: pin.display-panes gets a final fix pass after two reviews: the desktop overlay
+  becomes a function of the pane's top mode instead of an object created at open, and copy-mode entry
+  replaces panes-mode; it merges without a third review, each P1 pinned by a daemon test.
+- 2026-10-09 fabrico: read-only control clients keep refusing state changes (`client is read-only`).
+  3.8 runs new-window, rename-window, set-option, set-buffer and kill-window for a read-only `-C`
+  client (control.c never checks the flag; only send-keys does), which reads as an upstream
+  oversight. zz keeps read-only meaning read-only on every client type, which `zz share` viewers
+  will build on; queries and refresh-client on itself run as in 3.8. Registered native.
+- 2026-10-09 orchestrator: float.clients takes a final fix pass after two reviews (7 P1, mostly one
+  cause: clipping a float rewrote its rect instead of cropping its surface). Because the float track is
+  large and each item's reviews only saw its own slice, one whole-track Codex review
+  (`git diff main...catchup/float.keys`) runs before the track merges to main.
+- 2026-10-09 orchestrator: a centred display-popup sits one row higher than 3.8's at an odd client
+  height, because the modal pane is placed in window cells; recorded with the title column and the `O`
+  flag as known drift under `display-popup.modal-pane` (fabrico's master-model ruling).

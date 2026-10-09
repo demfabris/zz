@@ -37,7 +37,7 @@ LEDGER = ROOT / "compat/tui/campaign.json"
 FIXTURES = {
     "TUI-001": ["compat/tui-pane-geometry.sh", "compat/status-row.sh"],
     "TUI-002": ["compat/tui-screen-diff.sh"],
-    "TUI-003": ["compat/tui-stock-keys.sh"],
+    "TUI-003": ["compat/tui-stock-keys.sh", "compat/tui-launch-diff.sh"],
     "TUI-004": ["compat/tui-indicators.sh", "compat/tui-screen-diff.sh"],
     "TUI-005": ["compat/tui-copy-mode.sh"],
     "TUI-006": ["compat/tui-choosers.sh"],

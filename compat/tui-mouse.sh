@@ -459,8 +459,8 @@ check_value() {
 }
 case_owner() {
   case "$1" in
-  border-click/* | status-clicks/*)
-    printf 'gap:pin.keys-copy'
+  status-clicks/*)
+    printf 'gap:menus.client-owned'
     ;;
   customize-mouse-*)
     printf 'gap:pin.formats-options'
@@ -1172,13 +1172,13 @@ case_border_click() {
     assert_value border-click/marked-set "$(marked_set zz)" "$(marked_set tmux)"
   else
     settle_both MARK-borderclick 'the border click'
-    record_value border-click/marked-set "$BORDER_CLICK_DRIFT" "$(marked_set zz)" "$(marked_set tmux)"
+    assert_value border-click/marked-set "$(marked_set zz)" "$(marked_set tmux)"
   fi
   assert_value border-click/active-pane \
     "$(active_pane_index zz)" "$(active_pane_index tmux)"
   unsplit_both
 }
-BORDER_CLICK_DRIFT='PIN 3.8, gap:pin.keys-copy: 3.8 binds MouseDown1Border to select-pane -t= (key-bindings.c), so a border click no longer clears the marked pane on the pin, while zz keeps the d77c9dc6 select-pane -M binding'
+BORDER_CLICK_DRIFT='3.8 binds MouseDown1Border to select-pane -t= (key-bindings.c), so unbinding it on zz leaves the same marked and active panes as the pin'
 pin_border_click_clears_mark() {
   side_command tmux list-keys -T root MouseDown1Border 2>/dev/null | grep -q 'select-pane -M'
 }
@@ -1234,7 +1234,7 @@ case_status_clicks() {
   run_on_both kill-window -t "=$INNER_SESSION:1"
   wait_for 'the pin back to one window' pin_window_count_is 1
 }
-STATUS_MENU_DRIFT='PIN 3.8, gap:pin.keys-copy: 3.8 menus belong to the window (ad6832e6), so the window menu a status click opens for a window the client is not showing is drawn on that window and the pin client shows nothing, while zz draws it over the current window'
+STATUS_MENU_DRIFT='NATIVE, gap:menus.client-owned: 3.8 menus belong to the window (ad6832e6), so the window menu a status click opens for a window the client is not showing is drawn on that window and the pin client shows nothing, while zz menus are client overlays and zz draws it over the current window'
 pin_menus_follow_the_window() {
   ! side_command tmux list-commands display-panes 2>/dev/null | grep -q -- '-b'
 }

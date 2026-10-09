@@ -25,7 +25,7 @@ where the bytes would go, and `display-message -I` has no argument slot at all.
 
 One reader with two read shapes, one cap for the sinks that hold their payload, one carrier, three sinks.
 
-**The reader** lives in `crates/zz-daemon/src/client.rs`. The CLI opts in through
+**The reader** lives in `crates/zz-daemon-client/src/client.rs`. The CLI opts in through
 `CommandClient::enable_stdin`; each command request carries `stdin_available`. When a sink
 executes, including sinks inside aliases and sourced files, the daemon asks the client for bytes in
 one of two shapes. `ClientFileOperation::ReadStdin` is a whole read for the `Argument` and `Config`

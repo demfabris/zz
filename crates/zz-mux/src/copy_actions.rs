@@ -100,6 +100,9 @@ pub const PINNED_COPY_MODE_ACTIONS: &[PinnedCopyAction] = &[
     entry("jump-to-backward", JumpPagePrompt, false),
     entry("jump-to-forward", JumpPagePrompt, false),
     entry("jump-to-mark", JumpPagePrompt, true),
+    entry("line-numbers-off", CursorGeometry, true),
+    entry("line-numbers-on", CursorGeometry, true),
+    entry("line-numbers-toggle", CursorGeometry, true),
     entry("middle-line", CursorGeometry, true),
     entry("next-matching-bracket", JumpPagePrompt, true),
     entry("next-paragraph", LogicalLineAndModeKeys, true),
@@ -124,6 +127,7 @@ pub const PINNED_COPY_MODE_ACTIONS: &[PinnedCopyAction] = &[
     entry("rectangle-off", SelectionLifecycle, false),
     entry("rectangle-on", SelectionLifecycle, false),
     entry("rectangle-toggle", SelectionLifecycle, false),
+    entry("refresh-now", Vocabulary, true),
     entry("refresh-off", Vocabulary, true),
     entry("refresh-on", Vocabulary, true),
     entry("refresh-toggle", Vocabulary, true),
@@ -188,7 +192,7 @@ mod tests {
 
     #[test]
     fn the_inventory_holds_every_pinned_action_name_once_in_sorted_order() {
-        assert_eq!(PINNED_COPY_MODE_ACTIONS.len(), 95);
+        assert_eq!(PINNED_COPY_MODE_ACTIONS.len(), 99);
         for pair in PINNED_COPY_MODE_ACTIONS.windows(2) {
             assert!(
                 pair[0].name < pair[1].name,
@@ -209,7 +213,7 @@ mod tests {
             .iter()
             .filter(|entry| copy_mode_action_is_mapped(entry.name))
             .count();
-        assert_eq!(mapped, 94);
+        assert_eq!(mapped, 98);
         for entry in PINNED_COPY_MODE_ACTIONS {
             let Some(action) = copy_mode_probe_action(entry.name) else {
                 continue;

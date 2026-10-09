@@ -3628,7 +3628,7 @@ mod completion_tests {
     #[cfg(not(target_os = "macos"))]
     use zpui::{TestAppContext, VisualTestContext};
     #[cfg(not(target_os = "macos"))]
-    use zz_daemon::DaemonError;
+    use zz_daemon_client::DaemonError;
     #[cfg(not(target_os = "macos"))]
     use zz_ui::Root;
 
@@ -3855,8 +3855,8 @@ mod completion_tests {
         let (fixture, cx) = cx.add_window_view(|window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".into())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread("test client".into())),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -4092,7 +4092,7 @@ mod completion_tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -4202,7 +4202,7 @@ mod completion_tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -4310,7 +4310,7 @@ mod completion_tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

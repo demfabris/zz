@@ -51,7 +51,7 @@ pub(super) fn client_cell_fact(capabilities: &[String]) -> Option<(u32, u32)> {
 pub(super) fn client_exits_on_detach_fact(capabilities: &[String]) -> bool {
     capabilities
         .iter()
-        .any(|capability| capability == crate::CLIENT_EXITS_ON_DETACH_CAPABILITY)
+        .any(|capability| capability == zz_daemon_client::CLIENT_EXITS_ON_DETACH_CAPABILITY)
 }
 
 pub(super) fn presize_client_terminals(
@@ -80,6 +80,7 @@ pub(super) fn presize_client_terminals(
     else {
         return seeded;
     };
+    let extent = (columns, rows);
     let panes = inner
         .client(client)
         .and_then(|c| c.visible_terminals.as_ref())
@@ -111,6 +112,7 @@ pub(super) fn presize_client_terminals(
                 cell_height_px,
             },
         );
+        record_report_place(inner, client, pane, Some(extent));
         seeded.insert(pane);
     }
     seeded

@@ -86,6 +86,7 @@ mod tests {
             prompt: "Confirm? ".to_owned(),
             confirm_key: b'Y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
         assert!(confirm_accepts(
             &state,
@@ -114,6 +115,7 @@ mod tests {
             prompt: String::new(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
         let control = Modifiers {
             control: true,

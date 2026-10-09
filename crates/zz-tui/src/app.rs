@@ -10,7 +10,7 @@ use std::{
 };
 
 use zz_client::{ClientCore, CoreEvent, InputEvent, Outbound, PrefixView};
-use zz_daemon::{Endpoint, HostEntry, InteractiveClient};
+use zz_daemon_client::{Endpoint, HostEntry, InteractiveClient};
 use zz_protocol::{
     BrowserCommand, BrowserDescriptor, ClientExitAction, CommandInvocation, CommandResponse,
     GuiResponse, InputMessage, NEW_SESSION_ATTACH_CAPABILITY, PaneId, PaneKindSnapshot,
@@ -1408,7 +1408,7 @@ fn forward_protocol_message(
     frames: &FrameInbox,
     kitty_images: &KittyImageInbox,
     kitty_gate: &AtomicU8,
-    mut send_outbound: impl FnMut(Outbound) -> Result<(), zz_daemon::DaemonError>,
+    mut send_outbound: impl FnMut(Outbound) -> Result<(), zz_daemon_client::DaemonError>,
 ) -> bool {
     let mut core = lock_core(core);
     core.handle_message(message);

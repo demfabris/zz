@@ -27,6 +27,7 @@ getrandom.workspace = true
 
 [dev-dependencies]
 zz-daemon = { workspace = true, features = ["default"] }
+zz-daemon-client.workspace = true
 
 [lints]
 workspace = true

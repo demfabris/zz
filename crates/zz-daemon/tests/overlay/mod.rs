@@ -15,7 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zz_daemon::{CommandClient, Daemon, DaemonError, InteractiveClient};
+use zz_daemon::Daemon;
+use zz_daemon_client::{CommandClient, DaemonError, InteractiveClient};
 use zz_protocol::{
     CommandInvocation, Event, EventPayload, InputMessage, MenuState, PaneId, ProtocolMessage,
 };

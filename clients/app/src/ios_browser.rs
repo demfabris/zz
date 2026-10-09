@@ -22,7 +22,7 @@ use objc::{
 };
 use raw_window_handle::RawWindowHandle;
 use zpui::{Bounds, Pixels, Window};
-use zz_daemon::InteractiveClient;
+use zz_daemon_client::InteractiveClient;
 
 use zpui_ios::{CGPoint, CGRect, CGSize, id, nil, ns_array, ns_string, nsstring_to_string};
 pub use zz_client::element_picker::ElementPickerAppearance;

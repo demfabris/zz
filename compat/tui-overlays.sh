@@ -372,15 +372,12 @@ client_on_both() {
   done
 }
 PIN_DISPLAY_PANES_MODE=0
-DISPLAY_PANES_MODE=same
-DISPLAY_PANES_OWNER=gap:pin.display-panes
-DISPLAY_PANES_REASON='PIN 3.8, gap:pin.display-panes: 3.8 made display-panes a pane mode (window-panes.c) with no -b and a target pane for -t, so the pin draws its labels as a mode of the target pane while zz still raises the d77c9dc6 client overlay'
-CENTRE_MENU_MODE=same
-CENTRE_MENU_OWNER=gap:pin.keys-copy
-CENTRE_MENU_REASON='PIN 3.8, gap:pin.keys-copy: 3.8 menus belong to the window (ad6832e6), so display-menu -x C -y C centres on the window and the pin draws the menu a row above the client-centred row zz still uses at an odd height'
+ZOOM_REFLOW_MODE=same
+ZOOM_REFLOW_OWNER=gap:terminal.zoom-reflow
+ZOOM_REFLOW_REASON='gap:terminal.zoom-reflow (accepted engine limit, fabrico 2026-09-18): 3.8 display-panes zooms its pane, and libghostty and the pin reflow a pane whose history holds a wrapped line differently on a width change (resize-pane -Z twice shows the same split), so the pane content after the mode, and the live copy the mode redraws at a new size, differ while the mode screen itself is asserted'
 display_panes_on_both() {
   if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
-    side_command zz display-panes -b -d 0 -t "$(client_name zz)" || die 'zz refused display-panes'
+    side_command zz display-panes -d 0 || die 'zz refused display-panes'
     side_command tmux display-panes -d 0 || die 'tmux refused display-panes'
   else
     client_on_both display-panes -b -d 0 -t CLIENT
@@ -967,12 +964,13 @@ display_panes_case() {
   wait_for 'the zz labels' screen_differs_from zz "$zz_before"
   wait_for 'the tmux labels' screen_differs_from tmux "$tmux_before"
   settle_both MARK-panes 'the pane labels'
-  verdict panes-shown "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-shown same
   resize_both_to 80 30
   settle_both MARK-panes 'the pane labels at 80x30'
-  verdict panes-resized "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
-  [ "$PIN_DISPLAY_PANES_MODE" -eq 0 ] ||
-    tmux_inner_command copy-mode -q -t "=$INNER_SESSION:0.0" || die 'tmux refused copy-mode -q'
+  verdict panes-resized "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
+  if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
+    run_on_both copy-mode -q -t "=$INNER_SESSION:0.0"
+  fi
   resize_both_to 80 24
   mark_both panesback
   zz_before="$(capture_screen zz)"
@@ -985,7 +983,7 @@ display_panes_case() {
   wait_for 'zz selected pane 1' active_pane_index_is zz 1
   wait_for 'tmux selected pane 1' active_pane_index_is tmux 1
   settle_both MARK-panes 'the digit selection'
-  verdict panes-selected same
+  verdict panes-selected "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
 
   mark_both panesz
   zz_before="$(capture_screen zz)"
@@ -996,14 +994,15 @@ display_panes_case() {
   settle_both MARK-panesz 'the pane labels'
   type_on_both Z
   settle_both MARK-panesz 'the labels closed by a non-pane key'
-  verdict panes-closed-by-key "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-closed-by-key "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
   [ "$PIN_DISPLAY_PANES_MODE" -eq 0 ] || type_on_both Enter
   DIVIDER_RULE=0
 }
 
-# ODD SIZE AND USER STYLES. cmd_display_menu_get_pos centres on tty->sy, the
-# client's full height, and clamps against it, so at 79x23 a centred menu and a
-# centred popup sit where (sy - 1) / 2 + h / 2 - h puts them. menu.c and
+# ODD SIZE AND USER STYLES. cmd_display_menu_get_menu_pos centres a menu on
+# window->sy and cmd_display_menu_get_popup_pos a popup on tty->sy, the
+# client's full height, so at 79x23 each sits where (sy - 1) / 2 + h / 2 - h
+# puts it in its own frame, the menu a row higher. menu.c and
 # popup.c leave a user style's missing background as the terminal's default
 # ground. The split display-panes left behind is closed first and the pane
 # re-marked after the resize, so no residue of resizing a -h split reaches a
@@ -1029,10 +1028,10 @@ centred_surfaces() {
   press_on_both C
   both_screen_has CENTRE-MENU 'the centred menu'
   settle_both "MARK-$label" 'the centred menu'
-  verdict "centre-menu-$label" "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
+  verdict "centre-menu-$label" same
   type_on_both Down
   settle_both "MARK-$label" 'the centred menu after Down'
-  verdict "centre-menu-$label-down" "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
+  verdict "centre-menu-$label-down" same
   type_on_both Escape
   both_screen_lacks CENTRE-MENU 'the cancelled centred menu'
   settle_both "MARK-$label" 'the cancelled centred menu'
@@ -1068,7 +1067,7 @@ odd_size_case() {
   press_on_both D
   both_screen_has CENTRE-MENU 'the centred -M menu'
   settle_both MARK-click 'the centred -M menu'
-  verdict centre-menu-mouse-opened "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
+  verdict centre-menu-mouse-opened same
   click_item_on_both 'Third item'
   both_option_is @overlay_menu third 'the clicked third item of the centred menu'
   both_screen_lacks CENTRE-MENU 'the centred menu closed by the click'
@@ -1088,12 +1087,12 @@ odd_size_case() {
   wait_for 'the zz coloured labels' screen_differs_from zz "$zz_before"
   wait_for 'the tmux coloured labels' screen_differs_from tmux "$tmux_before"
   settle_both MARK-colours 'the coloured pane labels'
-  verdict panes-coloured-shown "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-coloured-shown same
   type_on_both 1
   wait_for 'zz selected pane 1 from the coloured labels' active_pane_index_is zz 1
   wait_for 'tmux selected pane 1 from the coloured labels' active_pane_index_is tmux 1
   settle_both MARK-colours 'the coloured labels closed by a digit'
-  verdict panes-coloured-selected same
+  verdict panes-coloured-selected "$ZOOM_REFLOW_MODE" "$ZOOM_REFLOW_REASON" "$ZOOM_REFLOW_OWNER"
   DIVIDER_RULE=0
 }
 
@@ -1107,9 +1106,72 @@ wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 if ! tmux_inner_command -f /dev/null start-server \; list-commands display-panes 2>/dev/null |
   grep -q -- '-b'; then
   PIN_DISPLAY_PANES_MODE=1
-  DISPLAY_PANES_MODE=record
-  CENTRE_MENU_MODE=record
+  ZOOM_REFLOW_MODE=record
 fi
+
+# THE PROMPT CURSOR. prompt_set_options reads prompt-cursor-style and
+# prompt-cursor-colour, and the prompt-command-cursor-* pair for vi command
+# mode, from the session as the prompt opens (prompt.c:131-155); prompt_draw
+# hangs them on the status screen (prompt.c:613-621), so tty_update_cursor
+# sends Ss and Cs while the prompt is up and Se and Cr once it is gone
+# (tty.c:788-880). The outer tmux reads them back as cursor_shape,
+# cursor_blinking and cursor_colour, which the cursor tuple asserts. With
+# status-keys vi, Escape puts the prompt in command mode, which swaps the pair
+# and paints the row in message-command-style. confirm-before raises a prompt
+# through the same status_prompt_set, so it carries the first pair too. The
+# case runs on a fresh outer server and puts every option back after.
+PROMPT_CURSOR_OPTIONS=(
+  prompt-cursor-style bar
+  prompt-cursor-colour red
+  prompt-command-cursor-style blinking-underline
+  prompt-command-cursor-colour '#00ff00'
+  status-keys vi
+)
+cursor_shape_is() {
+  [ "$(tmux_outer_command display-message -p -t "=$OUTER_SESSION:$1" '#{cursor_shape}' 2>/dev/null)" = "$2" ]
+}
+both_cursor_shape_is() {
+  wait_for "$2 cursor on zz" cursor_shape_is zz "$1"
+  wait_for "$2 cursor on tmux" cursor_shape_is tmux "$1"
+}
+prompt_cursor_case() {
+  CASE_LABEL=prompt-cursor
+  local index
+  attach_both_at 80 24
+  for ((index = 0; index < ${#PROMPT_CURSOR_OPTIONS[@]}; index += 2)); do
+    set_on_both "${PROMPT_CURSOR_OPTIONS[index]}" "${PROMPT_CURSOR_OPTIONS[index + 1]}"
+  done
+  mark_both pcursor
+  press_on_both ':'
+  type_on_both -l 'abc'
+  both_last_row_has ':abc' 'the typed prompt'
+  both_cursor_shape_is bar 'the prompt'
+  settle_both MARK-pcursor 'the prompt with its cursor style'
+  verdict prompt-cursor-styled same
+  type_on_both Escape
+  both_cursor_shape_is underline 'the command-mode prompt'
+  settle_both MARK-pcursor 'the command-mode prompt'
+  verdict prompt-command-cursor-styled same
+  type_on_both C-c
+  both_last_row_starts_with 'L' 'the cancelled prompt'
+  both_cursor_shape_is block 'the restored'
+  settle_both MARK-pcursor 'the cancelled prompt'
+  verdict prompt-cursor-restored same
+  client_on_both confirm-before -b -t CLIENT -p 'CURSOR-CONFIRM? ' \
+    'set-option -g @overlay_confirm yes'
+  both_last_row_has 'CURSOR-CONFIRM?' 'the confirm prompt'
+  both_cursor_shape_is bar 'the confirm prompt'
+  settle_both MARK-pcursor 'the confirm prompt with its cursor style'
+  verdict confirm-cursor-styled same
+  type_on_both n
+  both_last_row_lacks 'CURSOR-CONFIRM?' 'the refused confirm prompt'
+  both_cursor_shape_is block 'the refused confirm'
+  settle_both MARK-pcursor 'the refused confirm prompt'
+  verdict confirm-cursor-restored same
+  for ((index = 0; index < ${#PROMPT_CURSOR_OPTIONS[@]}; index += 2)); do
+    run_on_both set-option -gu "${PROMPT_CURSOR_OPTIONS[index]}"
+  done
+}
 
 run_cases() {
   printf 'overlay differential at %sx%s (pin %s)\n' \
@@ -1124,6 +1186,7 @@ run_cases() {
   popup_case
   display_panes_case
   odd_size_case
+  prompt_cursor_case
 
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded (%s)\n' "$FAILURES" "$CHECKS" "$RECORDS" "$(owner_tally)"
@@ -1283,27 +1346,23 @@ run_self_check() {
   type_on_both Escape
   both_screen_lacks OVERLAY-MENU 'the equivalent menu cancelled'
 
-  if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
-    printf 'note  self-check display-panes colour skipped: %s\n' "$DISPLAY_PANES_REASON"
-  else
-    CASE_LABEL='self-check display-panes colour'
-    side_command zz set-option -g display-panes-active-colour colour124 || die 'zz refused set-option'
-    run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
-    run_on_both select-pane -t "=$INNER_SESSION:0.0"
-    DIVIDER_RULE=1
-    mark_both colour
-    local zz_before tmux_before
-    zz_before="$(capture_screen zz)"
-    tmux_before="$(capture_screen tmux)"
-    display_panes_on_both
-    wait_for 'the zz one-sided labels' screen_differs_from zz "$zz_before"
-    wait_for 'the tmux one-sided labels' screen_differs_from tmux "$tmux_before"
-    settle_both MARK-colour 'the one-sided pane colour'
-    compare_rows self-check-panes-colour styled || true
-    self_check_case 'display-panes, a display-panes-active-colour only one side sets' rows
-    type_on_both Escape
-    DIVIDER_RULE=0
-  fi
+  CASE_LABEL='self-check display-panes colour'
+  side_command zz set-option -g display-panes-active-colour colour124 || die 'zz refused set-option'
+  run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  DIVIDER_RULE=1
+  mark_both colour
+  local zz_before tmux_before
+  zz_before="$(capture_screen zz)"
+  tmux_before="$(capture_screen tmux)"
+  display_panes_on_both
+  wait_for 'the zz one-sided labels' screen_differs_from zz "$zz_before"
+  wait_for 'the tmux one-sided labels' screen_differs_from tmux "$tmux_before"
+  settle_both MARK-colour 'the one-sided pane colour'
+  compare_rows self-check-panes-colour styled || true
+  self_check_case 'display-panes, a display-panes-active-colour only one side sets' rows
+  type_on_both Escape
+  DIVIDER_RULE=0
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

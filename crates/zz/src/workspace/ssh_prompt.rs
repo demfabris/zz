@@ -3,7 +3,7 @@
 use std::{cell::Cell, rc::Rc};
 
 use zpui::{App, AppContext as _, Entity, Focusable as _, Window};
-use zz_daemon::{AskpassPromptKind, AskpassReply};
+use zz_daemon_client::{AskpassPromptKind, AskpassReply};
 use zz_ui::{
     WindowExt as _,
     feedback::{ssh_confirm_prompt_dialog, ssh_secret_prompt_dialog},

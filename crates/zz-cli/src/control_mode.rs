@@ -16,7 +16,7 @@ use std::sync::mpsc;
 #[cfg(any(not(unix), test))]
 use std::thread;
 
-use zz_daemon::InteractiveClient;
+use zz_daemon_client::InteractiveClient;
 use zz_protocol::{
     CommandInvocation, CommandResponse, ControlSourceFileEvent, EventPayload, ExecOutcome,
     MuxSnapshot, ProtocolMessage, SessionId, WindowId,
@@ -1327,7 +1327,7 @@ fn handle_protocol<W: Write>(
             }
             EventPayload::HookEvent { name, variables } => {
                 if state.attached_session.is_some()
-                    && (name != "window-layout-changed" || !output.exit_draining)
+                    && !output.notifications_closed
                     && let Some(line) = render_hook(state, &name, &variables)
                 {
                     output.notify(line.as_bytes())?;
@@ -1379,13 +1379,8 @@ fn handle_protocol<W: Write>(
                 error,
                 sticky_failure,
                 flags,
-            } => {
-                if sticky_failure || (error && is_source_error_message(&text)) {
-                    state.return_code = 1;
-                }
-                output.control_command_guard(&text, error, flags)?;
             }
-            EventPayload::ControlCommandGuardRaw {
+            | EventPayload::ControlCommandGuardRaw {
                 output: text,
                 error,
                 sticky_failure,
@@ -1504,11 +1499,18 @@ fn render_hook(
                     zz_mux::legacy_layout(dump)
                 }
             };
+            let flags = state.raw_window_flags(session, window);
+            if let Some(unzoomed) = variables.get(zz_protocol::UNZOOMED_LAYOUT_VARIABLE) {
+                let unzoomed = layout(unzoomed);
+                return Some(format!(
+                    "%layout-change {window_id} {unzoomed} {unzoomed} {}",
+                    flags.replace('Z', "")
+                ));
+            }
             Some(format!(
-                "%layout-change {window_id} {} {} {}",
+                "%layout-change {window_id} {} {} {flags}",
                 layout(&window.layout_dump),
                 layout(&window.visible_layout_dump),
-                state.raw_window_flags(session, window)
             ))
         }
         "session-created" | "session-closed" => Some("%sessions-changed".to_owned()),
@@ -1744,7 +1746,7 @@ fn capture_pending_return<W: Write>(
     match PendingReturn::from_stdin(stdin, return_code, pending_stdin.len()) {
         Ok(return_event) => {
             if return_event.discards_pane_output() {
-                output.begin_exit_drain();
+                output.begin_exit_drain(return_event.closes_notifications());
             }
             *pending_return = Some(return_event);
         }
@@ -1817,7 +1819,7 @@ fn finish_control_return<W: Write + ControlClose>(
     pending_stdin: &mut VecDeque<StdinEvent>,
 ) -> io::Result<u8> {
     if pending_return.discards_pane_output() {
-        output.begin_exit_drain();
+        output.begin_exit_drain(pending_return.closes_notifications());
     }
     let code = pending_return.code();
     let (input_closed, input_error) = match pending_return {
@@ -2284,6 +2286,7 @@ struct ControlWriter<W: Write> {
     open_frame: Option<Frame>,
     deferred: VecDeque<DeferredOutput>,
     exit_draining: bool,
+    notifications_closed: bool,
     exit_requested: bool,
     exit_held: bool,
     st_sent: bool,
@@ -2300,6 +2303,7 @@ impl<W: Write> ControlWriter<W> {
             open_frame: None,
             deferred: VecDeque::new(),
             exit_draining: false,
+            notifications_closed: false,
             exit_requested: false,
             exit_held: false,
             st_sent: false,
@@ -2339,8 +2343,9 @@ impl<W: Write> ControlWriter<W> {
         self.output.flush()
     }
 
-    fn begin_exit_drain(&mut self) {
+    fn begin_exit_drain(&mut self, close_notifications: bool) {
         self.exit_draining = true;
+        self.notifications_closed |= close_notifications;
         self.deferred
             .retain(|deferred| !matches!(deferred, DeferredOutput::PaneOutput(_)));
     }
@@ -2793,6 +2798,10 @@ impl PendingReturn {
 
     fn discards_pane_output(&self) -> bool {
         matches!(self, Self::Blank { .. } | Self::Eof { .. })
+    }
+
+    fn closes_notifications(&self) -> bool {
+        matches!(self, Self::Blank { .. })
     }
 
     fn has_preceding_input(&self) -> bool {
@@ -3516,7 +3525,7 @@ mod tests {
             ProtocolMessage::Event(zz_protocol::Event {
                 sequence: 1,
                 payload: EventPayload::ControlCommandGuard {
-                    output: "ready\n".to_owned(),
+                    output: "ready\n".into(),
                     error: false,
                     sticky_failure: false,
                     flags: 1,
@@ -3673,7 +3682,7 @@ mod tests {
         let guard = ProtocolMessage::Event(zz_protocol::Event {
             sequence: 1,
             payload: EventPayload::ControlCommandGuard {
-                output: "partial".to_owned(),
+                output: "partial".into(),
                 error: false,
                 sticky_failure: false,
                 flags: 1,
@@ -4100,7 +4109,7 @@ mod tests {
                 ProtocolMessage::Event(zz_protocol::Event {
                     sequence: 1,
                     payload: EventPayload::ControlCommandGuard {
-                        output: output.to_owned(),
+                        output: output.into(),
                         error,
                         sticky_failure,
                         flags,
@@ -4131,7 +4140,7 @@ mod tests {
                 ProtocolMessage::Event(zz_protocol::Event {
                     sequence,
                     payload: EventPayload::ControlCommandGuard {
-                        output: "diagnostic".to_owned(),
+                        output: "diagnostic".into(),
                         error: false,
                         sticky_failure,
                         flags: 0,
@@ -4154,7 +4163,7 @@ mod tests {
             (
                 1,
                 EventPayload::ControlCommandGuard {
-                    output: String::new(),
+                    output: "".into(),
                     error: false,
                     sticky_failure: false,
                     flags: 1,
@@ -4177,7 +4186,7 @@ mod tests {
             (
                 4,
                 EventPayload::ControlCommandGuard {
-                    output: "AFTER".to_owned(),
+                    output: "AFTER".into(),
                     error: false,
                     sticky_failure: false,
                     flags: 1,
@@ -5667,12 +5676,47 @@ mod tests {
     }
 
     #[test]
-    fn blank_and_eof_suppress_layout_notifications_while_live_clients_keep_them() {
-        for stdin in [StdinEvent::Line(String::new()), StdinEvent::Eof] {
-            let mut draining_state = layout_notification_state();
-            let mut live_state = layout_notification_state();
-            let mut draining = ControlWriter::new(Vec::new(), false);
-            let mut live = ControlWriter::new(Vec::new(), false);
+    fn an_unzoom_step_renders_the_layout_it_fired_with() {
+        let mut state = layout_notification_state();
+        let mut writer = ControlWriter::new(Vec::new(), false);
+        for variables in [
+            BTreeMap::from([
+                ("hook_window".to_owned(), "@3".to_owned()),
+                (
+                    zz_protocol::UNZOOMED_LAYOUT_VARIABLE.to_owned(),
+                    "1234,80x24,0,0,5".to_owned(),
+                ),
+            ]),
+            BTreeMap::from([("hook_window".to_owned(), "@3".to_owned())]),
+        ] {
+            handle_protocol(
+                ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: EventPayload::HookEvent {
+                        name: "window-layout-changed".to_owned(),
+                        variables,
+                    },
+                }),
+                &mut state,
+                &mut writer,
+            )
+            .unwrap();
+        }
+        assert_eq!(
+            std::str::from_utf8(&writer.output).unwrap(),
+            "%layout-change @3 1234,80x24,0,0,5 1234,80x24,0,0,5 !*-\n\
+             %layout-change @3 abcd,80x24,0,0,5 ef01,80x24,0,0,5 !*-Z\n"
+        );
+    }
+
+    #[test]
+    fn a_blank_line_closes_notifications_and_end_of_file_keeps_them() {
+        for (stdin, closed) in [
+            (StdinEvent::Line(String::new()), true),
+            (StdinEvent::Eof, false),
+        ] {
+            let mut state = layout_notification_state();
+            let mut writer = ControlWriter::new(Vec::new(), false);
             let mut pending_return = None;
             let mut pending_stdin = VecDeque::new();
             capture_pending_return(
@@ -5680,47 +5724,51 @@ mod tests {
                 0,
                 &mut pending_return,
                 &mut pending_stdin,
-                &mut draining,
+                &mut writer,
             );
-            let mut snapshot = live_state.snapshot.clone();
+            let mut snapshot = state.snapshot.clone();
             let window = &mut snapshot.sessions[0].windows[0];
             window.layout_dump = "aafd,120x40,0,0,0".to_owned();
             window.visible_layout_dump = "aafd,120x40,0,0,0".to_owned();
-            for (state, writer) in [
-                (&mut draining_state, &mut draining),
-                (&mut live_state, &mut live),
+            for (sequence, payload) in [
+                (1, EventPayload::Snapshot(snapshot.clone())),
+                (
+                    2,
+                    EventPayload::HookEvent {
+                        name: "window-layout-changed".to_owned(),
+                        variables: BTreeMap::from([("hook_window".to_owned(), "@3".to_owned())]),
+                    },
+                ),
+                (
+                    3,
+                    EventPayload::HookEvent {
+                        name: "window-renamed".to_owned(),
+                        variables: BTreeMap::from([
+                            ("hook_window".to_owned(), "@3".to_owned()),
+                            ("hook_window_name".to_owned(), "shell".to_owned()),
+                            ("hook_session".to_owned(), "$1".to_owned()),
+                        ]),
+                    },
+                ),
             ] {
-                for (sequence, payload) in [
-                    (1, EventPayload::Snapshot(snapshot.clone())),
-                    (
-                        2,
-                        EventPayload::HookEvent {
-                            name: "window-layout-changed".to_owned(),
-                            variables: BTreeMap::from([(
-                                "hook_window".to_owned(),
-                                "@3".to_owned(),
-                            )]),
-                        },
-                    ),
-                ] {
-                    handle_protocol(
-                        ProtocolMessage::Event(zz_protocol::Event { sequence, payload }),
-                        state,
-                        writer,
-                    )
-                    .unwrap();
-                }
+                handle_protocol(
+                    ProtocolMessage::Event(zz_protocol::Event { sequence, payload }),
+                    &mut state,
+                    &mut writer,
+                )
+                .unwrap();
             }
             assert!(pending_return.is_some());
-            assert!(draining.output.is_empty());
             assert_eq!(
-                draining_state.snapshot.sessions[0].windows[0].layout_dump,
+                state.snapshot.sessions[0].windows[0].layout_dump,
                 "aafd,120x40,0,0,0"
             );
-            assert_eq!(
-                live.output,
-                b"%layout-change @3 aafd,120x40,0,0,0 aafd,120x40,0,0,0 !*-Z\n"
-            );
+            let expected: &[u8] = if closed {
+                b""
+            } else {
+                b"%layout-change @3 aafd,120x40,0,0,0 aafd,120x40,0,0,0 !*-Z\n%window-renamed @3 shell\n"
+            };
+            assert_eq!(writer.output, expected);
         }
     }
 

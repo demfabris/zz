@@ -1,5 +1,5 @@
 use zz_config::{remove_fleet_host, write_fleet_host};
-use zz_daemon::{Endpoint, RejectedHost, configured_fleet_hosts, validate_fleet_host};
+use zz_daemon_client::{Endpoint, RejectedHost, configured_fleet_hosts, validate_fleet_host};
 
 const FLEET_USAGE: &str = "usage: zz fleet add <name> <ssh-destination>\n       zz fleet list [-F <format>]\n       zz fleet remove <name>";
 const FLEET_ADD_USAGE: &str = "usage: zz fleet add <name> <ssh-destination>";

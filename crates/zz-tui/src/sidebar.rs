@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use zz_daemon::{Endpoint, HostEntry};
+use zz_daemon_client::{Endpoint, HostEntry};
 use zz_protocol::{
     MAX_COMMAND_PROMPT_BYTES, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId,
     WindowId, WindowSnapshot,

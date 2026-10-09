@@ -1829,8 +1829,6 @@ mod daemon_autostart {
             "40-later.conf",
             "display-message -p LATER_OUTPUT\n",
         );
-        let read_error = std::fs::read_to_string(&unreadable)
-            .expect_err("reading the source directory must fail");
         let continued = fixture.run(&[
             "source-file",
             &good,
@@ -1841,7 +1839,7 @@ mod daemon_autostart {
         assert_eq!(continued.stdout, b"GOOD_OUTPUT\nLATER_OUTPUT\n");
         assert_eq!(
             continued.stderr,
-            format!("{read_error}: {}\n", unreadable.display()).into_bytes()
+            format!("Input/output error: {}\n", unreadable.display()).into_bytes()
         );
     }
 
@@ -3233,7 +3231,7 @@ tmux set-option -g @plugin loaded
             .prefix("zz app cwd ")
             .tempdir_in("/tmp")
             .expect("temporary app working directory");
-        let client = zz_daemon::InteractiveClient::connect(&fixture.socket)
+        let client = zz_daemon_client::InteractiveClient::connect(&fixture.socket)
             .expect("connect GUI-style interactive client");
         client
             .attach_default_in(working_directory.path())
@@ -3457,6 +3455,74 @@ tmux set-option -g @plugin loaded
         assert_eq!(output.status.code(), Some(1));
         assert_eq!(output.stdout, b"before\n");
         assert_eq!(output.stderr, b"open terminal failed: not a terminal\n");
+    }
+
+    #[test]
+    fn a_pane_killed_mid_stream_exits_one_without_a_daemon_error() {
+        let fixture = Fixture::new();
+        if !local_socket_bind_available(&fixture.socket) {
+            return;
+        }
+        assert!(
+            fixture
+                .run(&["new-session", "-d", "-s", "dying"])
+                .status
+                .success()
+        );
+        let split = || {
+            let created = fixture.run(&[
+                "split-window",
+                "-d",
+                "-t",
+                "=dying:",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "",
+            ]);
+            assert!(created.status.success());
+            String::from_utf8(created.stdout)
+                .expect("pane id")
+                .trim()
+                .to_owned()
+        };
+        for after in [&b""[..], b"AFTER-"] {
+            let pane = split();
+            let (child, mut stdin) = fixture.spawn_with_open_stdin(&[
+                "display-message",
+                "-I",
+                "-t",
+                &pane,
+                ";",
+                "display-message",
+                "-p",
+                "tail-out",
+                ";",
+                "set-option",
+                "-g",
+                "@after",
+                "yes",
+            ]);
+            stdin.write_all(b"RED").expect("write the stream");
+            stdin.flush().expect("flush the stream");
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !String::from_utf8_lossy(
+                &fixture.run(&["capture-pane", "-p", "-t", &pane]).stdout,
+            )
+            .contains("RED")
+            {
+                assert!(Instant::now() < deadline, "the stream never reached {pane}");
+                thread::sleep(Duration::from_millis(20));
+            }
+            assert!(fixture.run(&["kill-pane", "-t", &pane]).status.success());
+            stdin.write_all(after).expect("write after the kill");
+            drop(stdin);
+            let output = child.wait_with_output().expect("collect the stream client");
+            assert_eq!(output.status.code(), Some(1));
+            assert_eq!(output.stdout, b"");
+            assert_eq!(String::from_utf8_lossy(&output.stderr), "");
+            assert_eq!(fixture.run(&["show-options", "-gqv", "@after"]).stdout, b"");
+        }
     }
 
     #[test]

@@ -5,7 +5,7 @@ use std::{
 };
 
 use zz_client::{ClientCore, Effect, InputEvent, InputOwner, InputRouter, SurfaceKind};
-use zz_daemon::{Endpoint, HostEntry};
+use zz_daemon_client::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, CommandPromptState, ConfirmState,
     DisplayPanesState, InputMessage, MenuState, MuxSnapshot, PaneBorderIndicators, PaneBorderLines,
@@ -1335,6 +1335,7 @@ mod tests {
             prompt: "Confirm attached? ".to_owned(),
             confirm_key: b'Y',
             default_yes: true,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
         let mut core = ClientCore::new();
         core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
@@ -1376,6 +1377,7 @@ mod tests {
             prompt: "Confirm? ".to_owned(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
         assert_eq!(model.message_row_y(), Some(23));
 

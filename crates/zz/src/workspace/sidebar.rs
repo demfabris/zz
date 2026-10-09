@@ -1614,7 +1614,7 @@ mod tests {
     };
 
     use zpui::TestAppContext;
-    use zz_daemon::DaemonError;
+    use zz_daemon_client::DaemonError;
     use zz_protocol::{
         Axis, BrowserDescriptor, LayoutNode, PaneKindSnapshot, PaneSnapshot, SessionSnapshot,
         SplitId, WindowSnapshot,
@@ -1633,7 +1633,7 @@ mod tests {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(DaemonError::Thread("test client".to_owned())),
-                zz_daemon::default_socket_path(),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });
@@ -1707,7 +1707,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -1821,7 +1821,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -2003,7 +2003,7 @@ mod tests {
             .iter()
             .map(|name| crate::config::HostEntry {
                 name: (*name).to_owned(),
-                endpoint: zz_daemon::Endpoint::parse(&format!("ssh://{name}"))
+                endpoint: zz_daemon_client::Endpoint::parse(&format!("ssh://{name}"))
                     .expect("test endpoint"),
             })
             .collect::<Vec<_>>();

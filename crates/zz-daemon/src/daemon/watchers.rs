@@ -131,7 +131,7 @@ struct TerminalWatcher {
     previous_bar_state: ProgressBarState,
     previous_program_status: Option<Arc<ProgramStatus>>,
     fanout: PaneFrameFanout,
-    mode_memo: BTreeMap<TerminalViewId, (u8, ScrollbarState, Option<SearchStatus>)>,
+    mode_memo: BTreeMap<TerminalViewId, (u8, ScrollbarState, Option<SearchStatus>, u8)>,
     completion_handled: bool,
     previous_reported_path: Option<String>,
 }
@@ -344,6 +344,9 @@ impl TerminalWatcher {
                         mode_kind(viewport.mode),
                         viewport.scrollbar,
                         viewport.search,
+                        terminal
+                            .copy_mode_facts(view)
+                            .map_or(0, |facts| facts.line_numbers),
                     );
                     let before = self.mode_memo.insert(view, key);
                     if before != Some(key)

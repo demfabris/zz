@@ -6,7 +6,7 @@
 //! keeps its name with an empty value, a hidden one keeps its value, and the
 //! position counts the store from zero however many entries it holds.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod clients;
 

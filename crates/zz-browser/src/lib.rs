@@ -1,4 +1,3 @@
-mod cookies;
 #[cfg(any(feature = "cef-runtime", test))]
 use zz_client::element_picker;
 mod event;
@@ -21,16 +20,9 @@ mod url_input;
 )]
 mod cef_runtime;
 
-pub use cookies::{
-    BrowserCookie, BrowserCookiePriority, BrowserCookieSameSite, CookieImportBatch,
-    CookieImportError, CookieImportResult, MAX_COOKIE_IMPORT_BYTES, MAX_COOKIE_IMPORT_COUNT,
-    SiteDataClearResult, parse_cookie_import,
-};
 #[cfg(any(feature = "cef-runtime", test))]
 pub use element_picker::ElementPickerAppearance;
-pub use event::{
-    BrowserCursor, BrowserEvent, ContextMenuRequest, EditFlags, MAX_FAVICON_BYTES, SessionId,
-};
+pub use event::{BrowserCursor, BrowserEvent, ContextMenuRequest, EditFlags, SessionId};
 pub use frame::{
     BrowserGpuContext, FrameError, FrameMailbox, FrameMailboxDiagnostics, FrameTier, GpuFrame,
     OsrFrame, OwnedBgraFrame,
@@ -44,15 +36,16 @@ pub use input::{
     PointerPhase, Viewport, WheelEvent, named_key_input, terminal_key_input,
 };
 pub use lifecycle::{RuntimePhase, SessionPhase};
-pub use profile::{
-    BrowserProfileError, BrowserProfilePaths, recent_pages_path, resolve_profile_paths,
-};
+pub use profile::{BrowserProfileError, BrowserProfilePaths, resolve_profile_paths};
 pub use url_input::{
     SearchProvider, UrlInputError, diagnostic_url, normalize_url, resolve_address,
 };
+pub use zz_protocol::app_identity::recent_pages_path;
 pub use zz_protocol::{
-    BrowserProfileNameError, DEFAULT_BROWSER_PROFILE, MAX_BROWSER_PROFILE_NAME_BYTES,
-    normalize_browser_profile_name,
+    BrowserCookie, BrowserCookiePriority, BrowserCookieSameSite, BrowserProfileNameError,
+    CookieImportBatch, CookieImportError, CookieImportResult, DEFAULT_BROWSER_PROFILE,
+    MAX_BROWSER_PROFILE_NAME_BYTES, MAX_COOKIE_IMPORT_BYTES, MAX_COOKIE_IMPORT_COUNT,
+    MAX_FAVICON_BYTES, SiteDataClearResult, normalize_browser_profile_name, parse_cookie_import,
 };
 
 #[cfg(feature = "cef-runtime")]

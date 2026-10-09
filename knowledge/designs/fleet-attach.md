@@ -17,7 +17,7 @@ timestamp: 2026-07-29T18:28:47Z
 
 > **Status: v1 implemented (2026-07-29), unix + ssh arms.** Landed as designed with zero
 > daemon/wire changes: `Endpoint`/`connect_endpoint` in `zz-daemon`'s client half
-> (`crates/zz-daemon/src/endpoint.rs`), `host-<name> = <uri>` config keys, the
+> (`crates/zz-daemon-client/src/endpoint.rs`), `host-<name> = <uri>` config keys, the
 > `HostConnection` map + remote connect machinery in `crates/zz/src/mux/`, and the
 > client-composed fleet section in choose-tree. One deviation from the plan below: the
 > "manual `reconnect` command" first became automatic fallback-to-local on attached-host

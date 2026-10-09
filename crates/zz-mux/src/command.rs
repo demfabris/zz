@@ -1,11 +1,13 @@
 mod customize;
 mod mode_prompt;
+mod panes_mode;
 mod switch_mode;
 pub use customize::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CustomizeEdit, CustomizeMenu,
     CustomizeMenuItem, CustomizeMode, CustomizeResult, customize_menu_feed,
 };
 pub use mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
+pub use panes_mode::{PanesModeAreaGeometry, PanesModeGeometry};
 pub use switch_mode::{SwitchAction, SwitchMode};
 
 use std::{
@@ -22,15 +24,15 @@ use std::{
 use parking_lot::Mutex;
 use zz_protocol::{
     AgentAutoApprove, AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, ChooseTreeKind,
-    ClientEnvironmentBlob, ClientId, CommandInvocation, CommandPromptMode, CommandPromptType,
-    CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE, DEFAULT_AGENT_CLAUDE_CODE_COMMAND,
-    DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE, EditorDescriptor, KeyToken,
-    MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey, NATIVE_COMMAND_NAMES,
-    PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PopupBorderLines, RawText, ServerError, SessionId, SourceSpan, TerminalUiCommand, WindowId,
-    catalog_command_spec, command_specs, normalize_browser_profile_name,
-    parse_tmux_command_options, parse_tmux_options, resolve_command,
-    unimplemented_tmux_command_spec,
+    ChooserPreviewSize, ClientEnvironmentBlob, ClientId, CommandInvocation, CommandPromptMode,
+    CommandPromptType, CommandResolution, CommandSpec, DEFAULT_AGENT_AUTO_APPROVE,
+    DEFAULT_AGENT_CLAUDE_CODE_COMMAND, DEFAULT_AGENT_COMMAND, DEFAULT_BROWSER_PROFILE,
+    EditorDescriptor, KeyToken, MAX_AGENT_COMMAND_BYTES, MAX_GUI_TEXT_BYTES, MuxOptionKey,
+    NATIVE_COMMAND_NAMES, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId,
+    PaneKindSnapshot, PopupBorderLines, RawText, ServerError, SessionId, SourceSpan,
+    TerminalUiCommand, WindowId, catalog_command_spec, command_specs,
+    normalize_browser_profile_name, parse_tmux_command_options, parse_tmux_options,
+    resolve_command, unimplemented_tmux_command_spec,
 };
 use zz_terminal::{
     CopyJump, CopyJumpDirection, CopyModeAction, CopyModeCopy, CopyModeCountPolicy, CopyModeSearch,
@@ -124,6 +126,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "display-panes-time",
     "display-panes-colour",
     "display-panes-active-colour",
+    "display-panes-border-style",
     "message-limit",
     "buffer-limit",
     "set-clipboard",
@@ -208,7 +211,19 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "copy-mode-position-format",
     "copy-mode-position-style",
     "copy-mode-selection-style",
+    "copy-mode-line-numbers",
+    "copy-mode-line-number-style",
+    "copy-mode-current-line-number-style",
     "switch-mode-match-style",
+    "tree-mode-border-style",
+    "tree-mode-preview-format",
+    "tree-mode-preview-style",
+    "tree-mode-selection-style",
+    "message-command-style",
+    "prompt-cursor-style",
+    "prompt-cursor-colour",
+    "prompt-command-cursor-style",
+    "prompt-command-cursor-colour",
     "theme",
     "dark-theme-black",
     "dark-theme-white",
@@ -248,7 +263,9 @@ const COPY_MODE_CONTEXT_FORMATS: &[&str] = &[
     "copy_cursor_word",
     "copy_cursor_x",
     "copy_cursor_y",
+    "copy_line_numbers",
     "rectangle_toggle",
+    "refresh_active",
     "scroll_position",
     "search_count",
     "search_count_partial",
@@ -548,11 +565,6 @@ const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
         &["clipboard_invalid"],
     ),
     (
-        "window-copy.c",
-        "window_copy_formats",
-        &["copy_line_numbers", "refresh_active"],
-    ),
-    (
         "window-customize.c",
         "window_customize_build",
         &["is_environment"],
@@ -705,6 +717,10 @@ struct RowFormatHooks<'a, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -713,7 +729,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -782,6 +798,10 @@ struct ShownOptionHooks<'a, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ShownOptionHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -790,7 +810,7 @@ impl<H: StatusHooks> StatusHooks for ShownOptionHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -1460,6 +1480,7 @@ pub enum MuxEffect {
     },
     ChooseTree {
         pane: PaneId,
+        preview: ChooserPreviewSize,
         kind: ChooseTreeKind,
         /// `choose-client -i`: the client mode opens on `window_client_draw_info`
         /// rather than on the preview.
@@ -1484,6 +1505,7 @@ pub enum MuxEffect {
     },
     ChooseBuffer {
         pane: PaneId,
+        preview: ChooserPreviewSize,
         filter: Option<String>,
         format: Option<String>,
         kill_source: bool,
@@ -1494,10 +1516,14 @@ pub enum MuxEffect {
     },
     DisplayPanes {
         pane: PaneId,
-        duration_ms: u32,
+        delay: Option<String>,
         selectable: bool,
         template: Option<CommandPromptTemplate>,
         source: Option<SourceSpan>,
+        source_window: WindowId,
+        source_session: SessionId,
+        kill_source: bool,
+        zoom: bool,
     },
     DisplayMessage {
         pane: Option<PaneId>,
@@ -1612,6 +1638,29 @@ pub enum PaneModeRequest {
     Clock,
     Customize(Box<CustomizeMode>),
     Switch(Box<SwitchMode>),
+    Panes(Box<PanesMode>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanesMode {
+    pub source_session: SessionId,
+    pub source_window: WindowId,
+    pub duration_ms: u32,
+    pub ignore_keys: bool,
+    pub template: Option<CommandPromptTemplate>,
+    pub source: Option<SourceSpan>,
+    pub kill_source: bool,
+    pub zoom: bool,
+    pub token: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DisplayPanesOptions {
+    pub time_ms: u32,
+    pub colour: String,
+    pub active_colour: String,
+    pub format: String,
+    pub border_style: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1762,7 +1811,7 @@ impl StatusHooks for ConfigConditionHooks<'_> {
                 .get(name)
                 .or_else(|| self.engine.global_window_user_options.get(name))
                 .or_else(|| self.engine.global_session_user_options.get(name))
-                .cloned()
+                .map(ToString::to_string)
         } else {
             self.engine.global_tmux_option_value(name)
         };
@@ -1778,6 +1827,10 @@ impl StatusHooks for ConfigConditionHooks<'_> {
 }
 
 impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -1786,7 +1839,7 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -1860,6 +1913,10 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -1868,7 +1925,7 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -1928,6 +1985,10 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
 }
 
 impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
+    fn copy_line_numbers(&mut self, context: &StatusContext, option: &str) -> Option<String> {
+        self.inner.copy_line_numbers(context, option)
+    }
+
     fn stable_option_lookups(&self) -> bool {
         self.inner.stable_option_lookups()
     }
@@ -1936,7 +1997,7 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         let option_context = if context.session_id.is_empty()
             && context.window_id.is_empty()
             && context.pane_id.is_empty()
@@ -1951,18 +2012,18 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
             &option_context.pane_id,
             name,
         ) {
-            return Some(value);
+            return Some(value.into());
         }
         if name.starts_with('@') {
             return self
                 .user_options
-                .user_option(
+                .user_option_bytes(
                     &option_context.pane_id,
                     &option_context.window_id,
                     &option_context.session_id,
                     name,
                 )
-                .map(str::to_owned);
+                .cloned();
         }
         if self.inner.only_tmux_options()
             && *LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS
@@ -2229,7 +2290,7 @@ enum ShowOptionArgument {
     AlreadyExpanded,
 }
 
-type UserOptions = BTreeMap<String, String>;
+type UserOptions = BTreeMap<String, RawText>;
 
 type SharedUserOptions = Arc<UserOptions>;
 
@@ -2263,6 +2324,17 @@ impl FormatFacts {
     /// session, global window, global session, server.
     #[must_use]
     pub fn user_option(&self, pane: &str, window: &str, session: &str, name: &str) -> Option<&str> {
+        self.user_option_bytes(pane, window, session, name)
+            .map(RawText::as_str)
+    }
+
+    pub fn user_option_bytes(
+        &self,
+        pane: &str,
+        window: &str,
+        session: &str,
+        name: &str,
+    ) -> Option<&RawText> {
         let window = self.pane_windows.get(pane).map_or(window, String::as_str);
         self.panes
             .get(pane)
@@ -2276,7 +2348,6 @@ impl FormatFacts {
             .or_else(|| self.global_window.get(name))
             .or_else(|| self.global_session.get(name))
             .or_else(|| self.server.get(name))
-            .map(String::as_str)
     }
 }
 
@@ -2509,6 +2580,7 @@ impl CommandAliasResolution {
 #[derive(Debug)]
 pub struct MuxEngine {
     pub state: MuxState,
+    pane_status_hidden: BTreeSet<PaneId>,
     swept_removals: u64,
     pub keys: KeyTables,
     global_mode_keys: ModeKeys,
@@ -2866,6 +2938,7 @@ impl Default for MuxEngine {
     fn default() -> Self {
         Self {
             state: MuxState::default(),
+            pane_status_hidden: BTreeSet::new(),
             swept_removals: 0,
             keys: KeyTables::default(),
             global_mode_keys: ModeKeys::default(),
@@ -3649,9 +3722,8 @@ impl MuxEngine {
     }
 
     #[must_use]
-    pub fn display_panes_format_for_session(&self, session: Option<SessionId>) -> String {
-        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
-        self.scalar_option_effective(target, "display-panes-format")
+    pub fn display_panes_format_for_window(&self, window: WindowId) -> String {
+        self.scalar_option_effective(TmuxOptionTarget::Window(window), "display-panes-format")
             .unwrap_or_default()
             .to_owned()
     }
@@ -3881,6 +3953,37 @@ impl MuxEngine {
         (vi, separators.to_owned())
     }
 
+    #[must_use]
+    pub fn prompt_cursor_options(&self, session: Option<SessionId>) -> [(u8, String); 2] {
+        let target = session.map_or(TmuxOptionTarget::GlobalSession, TmuxOptionTarget::Session);
+        let value = |name: &str| {
+            exact_tmux_option(name)
+                .and_then(|option| self.tmux_option_readback(option, target, true).ok())
+                .flatten()
+                .map(|(value, _)| value)
+                .unwrap_or_default()
+        };
+        let read = |style: &str, colour: &str| {
+            let style = match value(style).as_str() {
+                "blinking-block" => 1,
+                "block" => 2,
+                "blinking-underline" => 3,
+                "underline" => 4,
+                "blinking-bar" => 5,
+                "bar" => 6,
+                _ => 0,
+            };
+            (style, value(colour))
+        };
+        [
+            read("prompt-cursor-style", "prompt-cursor-colour"),
+            read(
+                "prompt-command-cursor-style",
+                "prompt-command-cursor-colour",
+            ),
+        ]
+    }
+
     fn window_option_override(&self, window: WindowId, option: WindowOption) -> Option<&str> {
         self.window_options
             .get(&window)?
@@ -4025,9 +4128,35 @@ impl MuxEngine {
         Ok(panes)
     }
 
+    pub fn display_panes_delay(
+        &self,
+        window: WindowId,
+        delay: Option<&str>,
+    ) -> Result<u32, ServerError> {
+        delay.map_or_else(
+            || Ok(self.window_knobs(window).display_panes_time_ms),
+            |value| {
+                parse_strtonum(value, 0, i64::from(u32::MAX), "delay")
+                    .map(|value| u32::try_from(value).expect("delay is bounded"))
+            },
+        )
+    }
+
     #[must_use]
-    pub fn display_panes_time_for_session(&self, session: SessionId) -> u32 {
-        self.session_knobs(session).display_panes_time_ms
+    pub fn display_panes_options(&self, window: WindowId) -> DisplayPanesOptions {
+        let target = TmuxOptionTarget::Window(window);
+        let value = |name: &str| {
+            self.scalar_option_effective(target, name)
+                .unwrap_or_default()
+                .to_owned()
+        };
+        DisplayPanesOptions {
+            time_ms: self.window_knobs(window).display_panes_time_ms,
+            colour: value("display-panes-colour"),
+            active_colour: value("display-panes-active-colour"),
+            format: value("display-panes-format"),
+            border_style: value("display-panes-border-style"),
+        }
     }
 
     #[must_use]
@@ -4084,6 +4213,32 @@ impl MuxEngine {
     pub fn pane_border_status(&self, window: WindowId) -> PaneBorderStatus {
         self.scalar_option_effective(TmuxOptionTarget::Window(window), "pane-border-status")
             .map_or(PaneBorderStatus::Off, PaneBorderStatus::parse)
+    }
+
+    #[must_use]
+    pub fn displayed_pane_border_status(&self, window: WindowId) -> PaneBorderStatus {
+        let hidden = self
+            .state
+            .windows
+            .get(&window)
+            .and_then(|window| window.zoomed_pane)
+            .is_some_and(|pane| self.pane_status_hidden.contains(&pane));
+        if hidden {
+            PaneBorderStatus::Off
+        } else {
+            self.pane_border_status(window)
+        }
+    }
+
+    pub fn set_pane_status_hidden(&mut self, pane: PaneId, hidden: bool) {
+        let changed = if hidden {
+            self.pane_status_hidden.insert(pane)
+        } else {
+            self.pane_status_hidden.remove(&pane)
+        };
+        if changed {
+            self.state.bump_generation();
+        }
     }
 
     /// `window_pane_get_pane_lines` reads `wp->window->options` for every pane
@@ -4313,10 +4468,24 @@ impl MuxEngine {
     #[must_use]
     pub fn parse_config(&self, source: impl Into<String>, input: &str) -> crate::ParsedConfig {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_with(source, input, &mut context)
+    }
+
+    #[must_use]
+    pub fn parse_config_raw(
+        &self,
+        source: impl Into<String>,
+        input: &RawText,
+    ) -> crate::ParsedConfig {
+        match input.to_utf8() {
+            Some(text) => self.parse_config(source, text),
+            None => self
+                .parse_config_file_bytes(source, input.as_bytes())
+                .into_invocations(),
+        }
     }
 
     #[must_use]
@@ -4326,7 +4495,7 @@ impl MuxEngine {
         input: &str,
     ) -> crate::ParsedConfig {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_without_assignment_overlay(source, input, &mut context)
@@ -4339,7 +4508,7 @@ impl MuxEngine {
         input: &[u8],
     ) -> crate::ParsedConfigBytes {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_file_bytes_with_assignment_overlay(
@@ -4357,7 +4526,7 @@ impl MuxEngine {
         input: &[u8],
     ) -> crate::ParsedConfigBytes {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_file_bytes_with_assignment_overlay(
@@ -4375,7 +4544,7 @@ impl MuxEngine {
         input: &[u8],
     ) -> crate::ParsedConfigBytes {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_buffer_bytes_with_assignment_overlay(
@@ -4392,7 +4561,14 @@ impl MuxEngine {
         source_groups: bool,
         owner: &str,
     ) -> Result<Vec<CommandInvocation>, ServerError> {
-        prepare_callback_commands_with_aliases(self, input, source_groups, owner, true, true)
+        prepare_callback_commands_with_aliases(
+            self,
+            &RawText::from(input),
+            source_groups,
+            owner,
+            true,
+            true,
+        )
     }
 
     pub fn prepare_frozen_callback_commands(
@@ -4401,7 +4577,14 @@ impl MuxEngine {
         source_groups: bool,
         owner: &str,
     ) -> Result<Vec<CommandInvocation>, ServerError> {
-        prepare_callback_commands_with_aliases(self, input, source_groups, owner, false, false)
+        prepare_callback_commands_with_aliases(
+            self,
+            &RawText::from(input),
+            source_groups,
+            owner,
+            false,
+            false,
+        )
     }
 
     pub fn prepare_frozen_callback_invocations(
@@ -4771,9 +4954,14 @@ impl MuxEngine {
 
     #[must_use]
     pub fn global_environment_variable(&self, name: &str) -> Option<String> {
+        self.global_environment_bytes(name).map(String::from)
+    }
+
+    #[must_use]
+    pub fn global_environment_bytes(&self, name: &str) -> Option<RawText> {
         self.global_environment
             .get(name)
-            .and_then(|entry| entry.value.as_ref().map(ToString::to_string))
+            .and_then(|entry| entry.value.clone())
     }
 
     pub fn set_config_environment(
@@ -5295,7 +5483,7 @@ impl MuxEngine {
             .checked_add(u32::try_from(offset).ok()?)
     }
 
-    fn pane_at_index(&self, window: WindowId, index: u32) -> Option<PaneId> {
+    pub fn pane_at_index(&self, window: WindowId, index: u32) -> Option<PaneId> {
         let offset = index.checked_sub(self.pane_base_index_for_window(window))?;
         self.state
             .windows
@@ -9736,7 +9924,7 @@ impl MuxEngine {
     #[must_use]
     pub fn pane_geometry(&self, pane: PaneId) -> Option<(u16, u16)> {
         let window = self.state.window_for_pane(pane)?;
-        let status = self.pane_border_status(window);
+        let status = self.displayed_pane_border_status(window);
         self.state
             .windows
             .get(&window)?
@@ -10194,6 +10382,36 @@ impl MuxEngine {
                     target_client,
                     require_mode: true,
                 }));
+            };
+            let action = match action {
+                CopyModeAction::LineNumbersOn { .. }
+                | CopyModeAction::LineNumbersToggle { .. }
+                | CopyModeAction::GotoLine { .. } => {
+                    let target = ExecutionContext::for_pane(&self.state, pane)
+                        .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+                    let option = self.expand_pane_format(
+                        "#{copy-mode-line-numbers}",
+                        &target,
+                        context.session,
+                        context.target_format_client(),
+                        hooks,
+                    );
+                    let option_off = option == "off";
+                    match action {
+                        CopyModeAction::LineNumbersOn { .. } => {
+                            CopyModeAction::LineNumbersOn { option_off }
+                        }
+                        CopyModeAction::GotoLine { line, .. } => CopyModeAction::GotoLine {
+                            line,
+                            option_absolute: matches!(
+                                option.as_str(),
+                                "absolute" | "relative" | "hybrid"
+                            ),
+                        },
+                        _ => CopyModeAction::LineNumbersToggle { option_off },
+                    }
+                }
+                action => action,
             };
             let action = match action.count_policy() {
                 CopyModeCountPolicy::Once => TerminalViewAction::CopyMode(action),
@@ -10695,7 +10913,6 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("choose-tree", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        reject_large_preview("choose-tree", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -10703,6 +10920,7 @@ impl MuxEngine {
         )?;
         Ok(Execution::effect(MuxEffect::ChooseTree {
             pane,
+            preview: chooser_preview(&options),
             kind: if options.has("-s") || options.has("-w") {
                 ChooseTreeKind::Windows
             } else {
@@ -10737,7 +10955,6 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("choose-client", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        reject_large_preview("choose-client", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -10745,6 +10962,7 @@ impl MuxEngine {
         )?;
         Ok(Execution::effect(MuxEffect::ChooseTree {
             pane,
+            preview: chooser_preview(&options),
             kind: ChooseTreeKind::Clients,
             info_preview: options.has("-i"),
             sessions_only: false,
@@ -10876,7 +11094,6 @@ impl MuxEngine {
         let (options, positional) = parse_command_options("choose-buffer", args)?;
         spec.validate_positional_maximum(positional.len())?;
         let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
-        reject_large_preview("choose-buffer", &options)?;
         let sort = TmuxSort::parse(
             options.value("-O"),
             options.has("-r"),
@@ -10884,6 +11101,7 @@ impl MuxEngine {
         )?;
         Ok(Execution::effect(MuxEffect::ChooseBuffer {
             pane,
+            preview: chooser_preview(&options),
             filter: options.value("-f").map(str::to_owned),
             format: options.value("-F").map(str::to_owned),
             kill_source: options.has("-k"),
@@ -11150,30 +11368,39 @@ impl MuxEngine {
                 }
             })
             .transpose()?;
-        let pane = self.resolve_pane(None, context.window, context.pane)?;
-        let duration_ms = options.value("-d").map_or_else(
-            || {
-                let window = self
-                    .state
-                    .window_for_pane(pane)
-                    .expect("display-panes pane was resolved");
-                let session = self.state.windows[&window].session;
-                Ok(self.display_panes_time_for_session(session))
-            },
-            |value| {
-                value.parse::<u32>().map_err(|_| {
-                    ServerError::InvalidCommand(format!(
-                        "display-panes duration must be an unsigned millisecond value: {value}"
-                    ))
+        let source_window = options
+            .value("-s")
+            .map(|target| self.resolve_window(Some(target), context.session, context.window))
+            .transpose()?;
+        let pane = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let target_window = self
+            .state
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let source_window = source_window.unwrap_or(target_window);
+        let source_session = if source_window == target_window {
+            context
+                .session
+                .filter(|session| {
+                    self.state
+                        .sessions
+                        .get(session)
+                        .is_some_and(|state| state.windows.contains(&target_window))
                 })
-            },
-        )?;
+                .unwrap_or(self.state.windows[&target_window].session)
+        } else {
+            self.state.windows[&source_window].session
+        };
         Ok(Execution::effect(MuxEffect::DisplayPanes {
             pane,
-            duration_ms,
+            delay: options.value("-d").map(str::to_owned),
             selectable: !options.has("-N"),
             template,
             source: invocation.source.clone(),
+            source_window,
+            source_session,
+            kill_source: options.has("-k"),
+            zoom: !options.has("-Z"),
         }))
     }
 
@@ -11692,7 +11919,8 @@ impl MuxEngine {
                     "not an array: {argument}"
                 )));
             }
-            return self.set_user_option(context, parsed.name, value, &options, false);
+            let value = value.map(RawText::from);
+            return self.set_user_option(context, parsed.name, value.as_ref(), &options, false);
         }
         let table_option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
@@ -11844,12 +12072,14 @@ impl MuxEngine {
             let already = self.user_option_at_target(target, &name).is_some();
             if !options.has("-o") || !already {
                 let value = if options.has("-a") {
-                    let old = self
+                    let mut value = self
                         .user_option_at_target(target, &name)
+                        .cloned()
                         .unwrap_or_default();
-                    format!("{old}{body}")
+                    value.push_bytes(body.as_bytes());
+                    value
                 } else {
-                    body.to_owned()
+                    RawText::from(body)
                 };
                 self.user_options_at_target_mut(target)
                     .insert(name.clone(), value);
@@ -11857,7 +12087,7 @@ impl MuxEngine {
             }
         } else if self.user_option_at_target(target, &name).is_none() {
             self.user_options_at_target_mut(target)
-                .insert(name.clone(), String::new());
+                .insert(name.clone(), RawText::default());
         }
         self.format_monitors
             .retain(|monitor| monitor.target != target || monitor.name != name);
@@ -12031,7 +12261,7 @@ impl MuxEngine {
         if value.is_empty() {
             return None;
         }
-        Some(value.to_owned())
+        Some(value.to_string())
     }
 
     /// `notify_parse_hook` with `expand` set, which `notify_monitor_add` always
@@ -12933,21 +13163,20 @@ impl MuxEngine {
             .get(1)
             .map(|value| {
                 let value = if invocation.argument_is_command_block(positional_start + 1) {
-                    normalize_typed_command_block(
+                    RawText::from(normalize_typed_command_block(
                         self,
                         crate::parser::command_block_body(value).unwrap_or(value),
-                    )?
+                    )?)
                 } else {
-                    value.to_string()
+                    value.clone()
                 };
                 Ok(if options.has("-F") {
-                    expand_format_with_hooks(&value, self, format_context, hooks).to_string()
+                    expand_format_with_hooks(&value, self, format_context, hooks)
                 } else {
                     value
                 })
             })
             .transpose()?;
-        let value = value.as_deref();
         if parsed.index.is_some() && (parsed.name.starts_with('@') || is_native_option(parsed.name))
         {
             return Err(ServerError::InvalidCommand(format!(
@@ -12955,8 +13184,15 @@ impl MuxEngine {
             )));
         }
         if parsed.name.starts_with('@') {
-            return self.set_user_option(context, parsed.name, value, &options, force_window);
+            return self.set_user_option(
+                context,
+                parsed.name,
+                value.as_ref(),
+                &options,
+                force_window,
+            );
         }
+        let value = value.as_deref();
         if is_native_option(parsed.name) {
             return self.set_native_option(parsed.name, value, &options, force_window);
         }
@@ -13100,7 +13336,7 @@ impl MuxEngine {
         &mut self,
         context: &ExecutionContext,
         option: &str,
-        value: Option<&str>,
+        value: Option<&RawText>,
         options: &Options,
         force_window: bool,
     ) -> Result<Execution, ServerError> {
@@ -13143,9 +13379,9 @@ impl MuxEngine {
         if options.has("-a")
             && let Some(current) = values.get_mut(option)
         {
-            current.push_str(value);
+            current.push_bytes(value.as_bytes());
         } else {
-            values.insert(option.to_owned(), value.to_owned());
+            values.insert(option.to_owned(), value.clone());
         }
         Ok(self.user_option_changed(context, target, option))
     }
@@ -13630,10 +13866,8 @@ impl MuxEngine {
         ))
     }
 
-    fn user_option_at_target(&self, target: TmuxOptionTarget, name: &str) -> Option<&str> {
-        self.user_options_at_target(target)?
-            .get(name)
-            .map(String::as_str)
+    fn user_option_at_target(&self, target: TmuxOptionTarget, name: &str) -> Option<&RawText> {
+        self.user_options_at_target(target)?.get(name)
     }
 
     fn user_options_at_target(&self, target: TmuxOptionTarget) -> Option<&UserOptions> {
@@ -13667,7 +13901,7 @@ impl MuxEngine {
         target: TmuxOptionTarget,
         name: &str,
         include_inherited: bool,
-    ) -> Option<(&'a str, bool)> {
+    ) -> Option<(&'a RawText, bool)> {
         if let Some(value) = self.user_option_at_target(target, name) {
             return Some((value, false));
         }
@@ -13696,7 +13930,7 @@ impl MuxEngine {
             .map(|values| {
                 values
                     .iter()
-                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .map(|(name, value)| (name.clone(), value.to_string()))
                     .collect()
             })
             .unwrap_or_default()
@@ -13722,7 +13956,7 @@ impl MuxEngine {
             for (name, value) in values {
                 rows.push(FormatOptionRow {
                     name: name.clone(),
-                    value: value.clone(),
+                    value: value.to_string(),
                     is_user: true,
                     ..FormatOptionRow::default()
                 });
@@ -16723,7 +16957,7 @@ fn tmux_option_value_is_string(option: TmuxOption) -> bool {
 
 #[derive(Default)]
 struct ShownOptions {
-    lines: Vec<String>,
+    lines: Vec<RawText>,
     values: Option<BTreeMap<String, String>>,
     rows: Vec<ShownOptionRow>,
 }
@@ -16799,15 +17033,16 @@ impl ShownOptions {
 fn push_shown_option(
     lines: &mut ShownOptions,
     name: &str,
-    value: &str,
+    value: impl Into<RawText>,
     is_string: bool,
     inherited: bool,
     value_only: bool,
 ) {
-    lines.record(name, value);
-    lines.row(name, value, is_string, inherited, true);
+    let value = value.into();
+    lines.record(name, &value);
+    lines.row(name, &value, is_string, inherited, true);
     if value_only {
-        lines.lines.push(value.to_owned());
+        lines.lines.push(value);
         return;
     }
     let name = if inherited {
@@ -16816,11 +17051,11 @@ fn push_shown_option(
         name.to_owned()
     };
     let value = if is_string {
-        tmux_args_escape(value)
+        tmux_args_escape_bytes(value.as_bytes())
     } else {
-        value.to_owned()
+        value.to_string()
     };
-    lines.lines.push(format!("{name} {value}"));
+    lines.lines.push(format!("{name} {value}").into());
 }
 
 fn push_shown_array(
@@ -16848,11 +17083,14 @@ fn push_shown_array(
         lines.record(name, "");
         lines.row(name, "", is_string, inherited, false);
         if !value_only {
-            lines.lines.push(if inherited {
-                format!("{name}*")
-            } else {
-                name.to_owned()
-            });
+            lines.lines.push(
+                if inherited {
+                    format!("{name}*")
+                } else {
+                    name.to_owned()
+                }
+                .into(),
+            );
         }
         return;
     }
@@ -16872,13 +17110,15 @@ fn printed_lines(lines: &[String]) -> String {
     output
 }
 
-fn shown_options_output(lines: &ShownOptions) -> String {
+fn shown_options_output(lines: &ShownOptions) -> RawText {
     if let Some(values) = &lines.values {
-        return serde_json::to_string(values).expect("option values serialize");
+        return serde_json::to_string(values)
+            .expect("option values serialize")
+            .into();
     }
-    let mut output = lines.lines.join("\n");
-    if lines.lines.last().is_some_and(String::is_empty) {
-        output.push('\n');
+    let mut output = RawText::join(&lines.lines, b"\n");
+    if lines.lines.last().is_some_and(|line| line.is_empty()) {
+        output.push_bytes(b"\n");
     }
     output
 }
@@ -16888,18 +17128,27 @@ fn indexed_option_name(name: &str, index: Option<&str>) -> String {
 }
 
 fn tmux_args_escape(value: &str) -> String {
-    if value.is_empty() {
+    tmux_args_escape_bytes(value.as_bytes())
+}
+
+fn tmux_args_escape_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
         return "''".to_owned();
     }
-    let double_quoted = value.bytes().any(|byte| b" #';${}%".contains(&byte));
-    let single_quoted = !double_quoted && value.bytes().any(|byte| b" \"".contains(&byte));
-    let bytes = value.as_bytes();
+    let double_quoted = bytes.iter().any(|byte| b" #';${}%".contains(byte));
+    let single_quoted = !double_quoted && bytes.iter().any(|byte| b" \"".contains(byte));
     if bytes.len() == 1 && bytes[0] != b' ' && (double_quoted || single_quoted || bytes[0] == b'~')
     {
         return format!("\\{}", char::from(bytes[0]));
     }
 
-    let escaped = tmux_vis(value, double_quoted);
+    let mut escaped = String::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        escaped.push_str(&tmux_vis(chunk.valid(), double_quoted));
+        for byte in chunk.invalid() {
+            write!(escaped, "\\{byte:03o}").expect("writing to a string cannot fail");
+        }
+    }
     if single_quoted {
         format!("'{escaped}'")
     } else if double_quoted {
@@ -18710,15 +18959,12 @@ fn required_arg<'a>(
         .ok_or_else(|| ServerError::CommandParse(format!("{option} requires an argument")))
 }
 
-/// One `-N` asks a chooser for no preview, which is the only layout zz's
-/// choosers have; a repeated `-N` is the pin's large-preview mode
-/// (`MODE_TREE_PREVIEW_BIG` in `mode_tree_start`, selected by
-/// `args_has(args, 'N') > 1`), and zz has no presentation to match it with.
-fn reject_large_preview(command: &str, options: &Options) -> Result<(), ServerError> {
-    if options.count("-N") > 1 {
-        return Err(ServerError::UnsupportedCommand(format!("{command} -NN")));
+fn chooser_preview(options: &Options) -> ChooserPreviewSize {
+    match options.count("-N") {
+        0 => ChooserPreviewSize::Normal,
+        1 => ChooserPreviewSize::Off,
+        _ => ChooserPreviewSize::Big,
     }
-    Ok(())
 }
 
 fn chooser_command_template(
@@ -18879,6 +19125,18 @@ impl MuxEngine {
         session: &str,
         name: &str,
     ) -> Option<&str> {
+        self.format_user_option_bytes(pane, window, session, name)
+            .map(RawText::as_str)
+    }
+
+    #[must_use]
+    pub fn format_user_option_bytes(
+        &self,
+        pane: &str,
+        window: &str,
+        session: &str,
+        name: &str,
+    ) -> Option<&RawText> {
         let pane = pane.parse().ok();
         let window = pane
             .and_then(|pane| self.state.window_for_pane(pane))
@@ -18899,7 +19157,6 @@ impl MuxEngine {
             .or_else(|| self.global_window_user_options.get(name))
             .or_else(|| self.global_session_user_options.get(name))
             .or_else(|| self.server_user_options.get(name))
-            .map(String::as_str)
     }
 
     #[must_use]
@@ -19247,11 +19504,15 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::RefreshOn
             | CopyModeAction::RefreshOff
             | CopyModeAction::RefreshToggle
+            | CopyModeAction::RefreshNow
+            | CopyModeAction::LineNumbersOn { .. }
+            | CopyModeAction::LineNumbersOff
+            | CopyModeAction::LineNumbersToggle { .. }
             | CopyModeAction::RefreshRevision
             | CopyModeAction::RecentreTopBottom
             | CopyModeAction::NextMatchingBracket
             | CopyModeAction::PreviousMatchingBracket
-            | CopyModeAction::GotoLine(_)
+            | CopyModeAction::GotoLine { .. }
             | CopyModeAction::PageDownScrollExit
             | CopyModeAction::HalfPageDownScrollExit
             | CopyModeAction::ScrollDownAndCancel
@@ -19357,6 +19618,10 @@ fn copy_mode_action(
         "refresh-on" => Some(CopyModeAction::RefreshOn),
         "refresh-off" => Some(CopyModeAction::RefreshOff),
         "refresh-toggle" => Some(CopyModeAction::RefreshToggle),
+        "refresh-now" => Some(CopyModeAction::RefreshNow),
+        "line-numbers-on" => Some(CopyModeAction::LineNumbersOn { option_off: true }),
+        "line-numbers-off" => Some(CopyModeAction::LineNumbersOff),
+        "line-numbers-toggle" => Some(CopyModeAction::LineNumbersToggle { option_off: true }),
         "recentre-top-bottom" => Some(CopyModeAction::RecentreTopBottom),
         "scroll-exit-on" => Some(CopyModeAction::ScrollExitOn),
         "scroll-exit-off" => Some(CopyModeAction::ScrollExitOff),
@@ -19672,10 +19937,12 @@ fn copy_selection_mode(argument: Option<&str>) -> Option<CopySelectionMode> {
 
 fn copy_goto_line_action(arguments: &[RawText]) -> Option<CopyModeAction> {
     let [line] = arguments else { return None };
-    let target = pinned_strtonum(line, -1, i64::from(i32::MAX)).map_or(u32::MAX, |parsed| {
-        u32::try_from(parsed).unwrap_or(i32::MAX.unsigned_abs())
-    });
-    Some(CopyModeAction::GotoLine(target))
+    let line = pinned_strtonum(line, -1, i64::from(i32::MAX))
+        .and_then(|parsed| i32::try_from(parsed).ok());
+    Some(CopyModeAction::GotoLine {
+        line,
+        option_absolute: false,
+    })
 }
 
 /// The pin's `strtonum` grammar: `strtoll` base ten over the whole string,
@@ -19779,7 +20046,7 @@ fn bound_commands(
         if let [argument] = tail {
             return prepare_callback_commands_with_aliases(
                 engine,
-                crate::parser::command_block_body(argument).unwrap_or(argument),
+                &raw_command_block_body(argument),
                 true,
                 "bind-key",
                 false,
@@ -19800,13 +20067,21 @@ fn bound_commands(
     Ok(commands)
 }
 
+fn raw_command_block_body(argument: &RawText) -> RawText {
+    argument
+        .as_bytes()
+        .strip_prefix(b"{")
+        .and_then(|rest| rest.strip_suffix(b"}"))
+        .map_or_else(|| argument.clone(), RawText::from_bytes)
+}
+
 fn parse_bound_command_string(
     engine: &MuxEngine,
-    input: &str,
+    input: &RawText,
     source_groups: bool,
     owner: &str,
 ) -> Result<Vec<CommandInvocation>, ServerError> {
-    let parsed = engine.parse_config(format!("<{owner}>"), input);
+    let parsed = engine.parse_config_raw(format!("<{owner}>"), input);
     if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
         return Err(ServerError::CommandParse(diagnostic.message));
     }
@@ -19817,7 +20092,7 @@ fn parse_bound_command_string(
 
 fn prepare_callback_commands_with_aliases(
     engine: &MuxEngine,
-    input: &str,
+    input: &RawText,
     source_groups: bool,
     owner: &str,
     command_aliases_available: bool,
@@ -19903,8 +20178,14 @@ fn prepare_expanded_callback_invocation(
     aliases_available: bool,
 ) -> Result<(), ServerError> {
     if let Some(body) = command_alias_group_body(command) {
-        let commands =
-            prepare_callback_commands_with_aliases(engine, body, true, owner, false, false)?;
+        let commands = prepare_callback_commands_with_aliases(
+            engine,
+            &RawText::from(body),
+            true,
+            owner,
+            false,
+            false,
+        )?;
         command.args[0] =
             format!("{{ {} }}", format_callback_commands_round_trip(&commands)).into();
         return validate_static_command_chain(&commands);
@@ -19930,8 +20211,7 @@ fn prepare_expanded_callback_invocation(
         if !command.argument_is_command_block(index) {
             continue;
         }
-        let value = &command.args[index];
-        let body = crate::parser::command_block_body(value).unwrap_or(value);
+        let body = raw_command_block_body(&command.args[index]);
         let item_owner = if menu_items.contains(&index) {
             "<menu-item>"
         } else {
@@ -19939,7 +20219,7 @@ fn prepare_expanded_callback_invocation(
         };
         let commands = prepare_callback_commands_with_aliases(
             engine,
-            body,
+            &body,
             true,
             item_owner,
             aliases_available,
@@ -20354,7 +20634,7 @@ fn command_round_trip_print(command: &CommandInvocation) -> String {
                     if command.argument_is_command_block(index) {
                         argument.to_string()
                     } else {
-                        tmux_args_escape(argument)
+                        tmux_args_escape_bytes(argument.as_bytes())
                     }
                 })
                 .collect::<Vec<_>>()
@@ -20657,11 +20937,14 @@ fn push_shown_hook_option(
         lines.record(name, "");
         lines.row(name, "", false, inherited && mark_inherited_empty, false);
         if !value_only {
-            lines.lines.push(if inherited && mark_inherited_empty {
-                format!("{name}*")
-            } else {
-                name.to_owned()
-            });
+            lines.lines.push(
+                if inherited && mark_inherited_empty {
+                    format!("{name}*")
+                } else {
+                    name.to_owned()
+                }
+                .into(),
+            );
         }
         return;
     }
@@ -29538,7 +29821,10 @@ mod tests {
         assert!(matches!(
             execution.effects.as_slice(),
             [MuxEffect::TerminalView {
-                action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(42)),
+                action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                    line: Some(42),
+                    ..
+                }),
                 ..
             }]
         ));
@@ -29572,19 +29858,22 @@ mod tests {
         };
 
         for (argument, line) in [
-            ("0", 0_u32),
+            ("0", 0_i32),
             ("5", 5),
             ("+6", 6),
             (" 13", 13),
             ("2147483647", 2_147_483_647),
-            ("-1", 2_147_483_647),
+            ("-1", -1),
         ] {
             let execution = goto(&mut engine, &mut context, argument);
             assert!(
                 matches!(
                     execution.effects.as_slice(),
                     [MuxEffect::TerminalView {
-                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                            line: Some(actual),
+                            ..
+                        }),
                         ..
                     }] if *actual == line
                 ),
@@ -29609,9 +29898,12 @@ mod tests {
                 matches!(
                     execution.effects.as_slice(),
                     [MuxEffect::TerminalView {
-                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                            line: None,
+                            ..
+                        }),
                         ..
-                    }] if i32::try_from(*actual).is_err()
+                    }]
                 ),
                 "goto-line {argument:?} must still reach the mode with no target"
             );
@@ -36251,7 +36543,7 @@ mod tests {
         assert_eq!(engine.bell_action_for_session(session), BellAction::Other);
         assert_eq!(engine.visual_bell_for_session(session), VisualBell::Both);
         assert_eq!(engine.key_table_for_session(session), "custom");
-        assert_eq!(engine.display_panes_time_for_session(session), 1400);
+        assert_eq!(engine.display_panes_options(window).time_ms, 1400);
         assert_eq!(engine.window_size(window), WindowSize::Largest);
         assert!(!engine.allow_set_title(pane));
         assert_eq!(
@@ -38577,7 +38869,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 152);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 165);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)
@@ -39146,7 +39438,7 @@ mod tests {
         );
         assert_eq!(
             global.base.get("display-panes-format").map(String::as_str),
-            Some("#[align=right]#{pane_width}x#{pane_height}")
+            Some("#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}")
         );
 
         let scoped = engine.status_row_variables_for_session(Some(session));
@@ -39403,41 +39695,48 @@ mod tests {
     }
 
     #[test]
-    fn display_panes_format_resolves_session_then_global_then_default() {
+    fn display_panes_options_resolve_window_then_global_then_default() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
             .execute(&mut context, &command("new-session", &["-s", "fmt"]))
             .unwrap();
-        let session = context.session.expect("session id");
+        let window = context.window.expect("window id");
+        let options = engine.display_panes_options(window);
         assert_eq!(
-            engine.display_panes_format_for_session(Some(session)),
-            "#[align=right]#{pane_width}x#{pane_height}"
+            options.format,
+            "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
         );
+        assert_eq!(options.border_style, "bg=themedarkgrey,fg=themelightgrey");
+        assert_eq!(options.time_ms, 1000);
         engine
             .execute(
                 &mut context,
                 &command("set-option", &["-g", "display-panes-format", "GLOBAL"]),
             )
             .unwrap();
-        assert_eq!(
-            engine.display_panes_format_for_session(Some(session)),
-            "GLOBAL"
-        );
+        assert_eq!(engine.display_panes_format_for_window(window), "GLOBAL");
         engine
             .execute(
                 &mut context,
                 &command(
                     "set-option",
-                    &["-t", "fmt", "display-panes-format", "#{pane_index}"],
+                    &["-w", "-t", "fmt:", "display-panes-format", "#{pane_index}"],
                 ),
             )
             .unwrap();
-        assert_eq!(
-            engine.display_panes_format_for_session(Some(session)),
-            "#{pane_index}"
-        );
-        assert_eq!(engine.display_panes_format_for_session(None), "GLOBAL");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "set-option",
+                    &["-w", "-t", "fmt:", "display-panes-time", "250"],
+                ),
+            )
+            .unwrap();
+        let options = engine.display_panes_options(window);
+        assert_eq!(options.format, "#{pane_index}");
+        assert_eq!(options.time_ms, 250);
     }
 
     #[test]
@@ -39723,6 +40022,76 @@ mod tests {
                 .output,
             "history-trickle 2000"
         );
+    }
+
+    #[test]
+    fn user_options_keep_bytes_that_are_not_utf8() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let mut run = |name: &str, args: Vec<RawText>| {
+            engine
+                .execute(&mut context, &CommandInvocation::new(name, args))
+                .unwrap()
+                .output
+                .as_bytes()
+                .to_vec()
+        };
+        run(
+            "set-option",
+            vec![
+                "-g".into(),
+                "@bytes".into(),
+                RawText::from_bytes(b"a\xfeb".to_vec()),
+            ],
+        );
+        run(
+            "set-option",
+            vec![
+                "-ga".into(),
+                "@bytes".into(),
+                RawText::from_bytes(b"\xfd".to_vec()),
+            ],
+        );
+        assert_eq!(
+            run("show-options", vec!["-g".into(), "@bytes".into()]),
+            b"@bytes a\\376b\\375"
+        );
+        assert_eq!(
+            run("show-options", vec!["-gv".into(), "@bytes".into()]),
+            b"a\xfeb\xfd"
+        );
+        assert_eq!(
+            run("show-options", vec!["-g".into()])
+                .split(|byte| *byte == b'\n')
+                .find(|line| line.starts_with(b"@bytes "))
+                .expect("listed"),
+            b"@bytes a\\376b\\375"
+        );
+    }
+
+    #[test]
+    fn text_config_reparses_as_bytes_for_byte_variables_and_octal_escapes() {
+        let mut engine = MuxEngine::default();
+        engine.set_config_environment(
+            "BYTES".to_owned(),
+            RawText::from_bytes(b"a\xfdb".to_vec()),
+            false,
+        );
+        let parsed = engine.parse_config(
+            "<test>",
+            "set-buffer -b one \"$BYTES\"\nset-buffer -b two \"\\303\\251\\376\"\n",
+        );
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert_eq!(parsed.commands.len(), 2);
+        assert_eq!(parsed.commands[0].args[2].as_bytes(), b"a\xfdb");
+        assert_eq!(parsed.commands[1].args[2].as_bytes(), b"\xc3\xa9\xfe");
+        let plain = engine.parse_config("<test>", "set-buffer -b three \"\\101\"\n");
+        assert_eq!(plain.commands[0].args[2], "A");
+        let assignment = engine.parse_config("<test>", "OCTAL=a\\375b\n");
+        assert_eq!(assignment.environment[0].value.as_bytes(), b"a\xfdb");
     }
 
     #[test]
@@ -43782,6 +44151,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Windows,
                 info_preview: false,
                 sessions_only: true,
@@ -43809,6 +44179,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Windows,
                 info_preview: false,
                 sessions_only: false,
@@ -43866,6 +44237,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Panes,
                 info_preview: false,
                 sessions_only: false,
@@ -43888,6 +44260,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Windows,
                 info_preview: false,
                 sessions_only: true,
@@ -43967,6 +44340,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseTree {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 kind: ChooseTreeKind::Panes,
                 info_preview: false,
                 sessions_only: false,
@@ -44030,6 +44404,7 @@ mod tests {
                 .effects,
             vec![MuxEffect::ChooseBuffer {
                 pane,
+                preview: ChooserPreviewSize::Normal,
                 filter: None,
                 format: None,
                 kill_source: false,
@@ -44113,58 +44488,59 @@ mod tests {
     }
 
     #[test]
-    fn display_panes_builds_a_timed_native_overlay_effect() {
+    fn display_panes_builds_a_pane_mode_effect_with_the_pin_flags() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
             .execute(&mut context, &command("new-session", &["-s", "work"]))
             .unwrap();
         let pane = context.pane.unwrap();
+        let window = context.window.unwrap();
+        let session = context.session.unwrap();
+        let effect = |delay: Option<&str>, selectable, template, kill_source, zoom| {
+            MuxEffect::DisplayPanes {
+                pane,
+                delay: delay.map(str::to_owned),
+                selectable,
+                template,
+                source: None,
+                source_window: window,
+                source_session: session,
+                kill_source,
+                zoom,
+            }
+        };
 
-        for (name, args, duration_ms) in [
-            ("display-panes", Vec::new(), 1_000),
-            ("displayp", vec!["-b", "-d2500"], 2_500),
-            ("display-panes", vec!["-d", "0"], 0),
+        for (name, args, expected) in [
+            (
+                "display-panes",
+                Vec::new(),
+                effect(None, true, None, false, true),
+            ),
+            (
+                "displayp",
+                vec!["-d2500", "-k"],
+                effect(Some("2500"), true, None, true, true),
+            ),
+            (
+                "display-panes",
+                vec!["-d", "0", "-Z"],
+                effect(Some("0"), true, None, false, false),
+            ),
+            (
+                "display-panes",
+                vec!["-N", "-t", "work:0.0", "-s", "work:0"],
+                effect(None, false, None, false, true),
+            ),
         ] {
-            let execution = engine.execute(&mut context, &command(name, &args)).unwrap();
             assert_eq!(
-                execution.effects,
-                vec![MuxEffect::DisplayPanes {
-                    pane,
-                    duration_ms,
-                    selectable: true,
-                    template: None,
-                    source: None,
-                }]
+                engine
+                    .execute(&mut context, &command(name, &args))
+                    .unwrap()
+                    .effects,
+                vec![expected]
             );
         }
-        engine
-            .execute(
-                &mut context,
-                &command("set-option", &["display-time", "1200"]),
-            )
-            .unwrap();
-        assert_eq!(
-            engine
-                .execute(&mut context, &command("display-panes", &[]))
-                .unwrap()
-                .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1_000,
-                selectable: true,
-                template: None,
-                source: None,
-            }]
-        );
-        assert!(matches!(
-            engine
-                .execute(&mut context, &command("display-message", &["hello"]))
-                .unwrap()
-                .effects
-                .as_slice(),
-            [MuxEffect::DisplayMessage { text, duration_ms: None, .. }] if text == "hello"
-        ));
         engine
             .execute(
                 &mut context,
@@ -44173,55 +44549,56 @@ mod tests {
             .unwrap();
         assert_eq!(
             engine
-                .execute(&mut context, &command("display-panes", &[]))
-                .unwrap()
-                .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1200,
-                selectable: true,
-                template: None,
-                source: None,
-            }]
-        );
-
-        assert_eq!(
-            engine
-                .execute(
-                    &mut context,
-                    &command("display-panes", &["-N", "-t", "client"]),
-                )
-                .unwrap()
-                .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1200,
-                selectable: false,
-                template: None,
-                source: None,
-            }]
-        );
-        assert!(matches!(
-            engine.execute(&mut context, &command("display-panes", &["-d", "forever"])),
-            Err(ServerError::InvalidCommand(_))
-        ));
-        assert_eq!(
-            engine
                 .execute(
                     &mut context,
                     &command("display-panes", &["select-pane -t %%%"]),
                 )
                 .unwrap()
                 .effects,
-            vec![MuxEffect::DisplayPanes {
-                pane,
-                duration_ms: 1200,
-                selectable: true,
-                template: Some(CommandPromptTemplate::String(
+            vec![effect(
+                None,
+                true,
+                Some(CommandPromptTemplate::String(
                     "select-pane -t %%%".to_owned()
                 )),
-                source: None,
-            }]
+                false,
+                true,
+            )]
+        );
+        assert_eq!(engine.display_panes_delay(window, None).unwrap(), 1200);
+        assert_eq!(engine.display_panes_delay(window, Some("0")).unwrap(), 0);
+        for (value, message) in [
+            ("forever", "delay invalid"),
+            ("-5", "delay too small"),
+            ("99999999999", "delay too large"),
+        ] {
+            assert_eq!(
+                engine
+                    .display_panes_delay(window, Some(value))
+                    .unwrap_err()
+                    .tmux_message(),
+                message
+            );
+        }
+        for (args, message) in [
+            (
+                vec!["-t", "missing", "-d", "forever"],
+                "can't find pane: missing",
+            ),
+            (
+                vec!["-s", "missing", "-t", "nope"],
+                "can't find window: missing",
+            ),
+        ] {
+            let error = engine
+                .execute(&mut context, &command("display-panes", &args))
+                .unwrap_err();
+            assert_eq!(error.tmux_message(), message, "{args:?}");
+        }
+        assert!(
+            engine
+                .execute(&mut context, &command("display-panes", &["-b"]))
+                .is_err()
         );
     }
 

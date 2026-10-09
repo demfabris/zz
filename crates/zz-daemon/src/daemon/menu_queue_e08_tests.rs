@@ -77,7 +77,7 @@ fn twenty_open_blocking_menus_add_zero_workers() {
     let targets = (0..20)
         .map(|index| target(&shared, &context, index))
         .collect::<Vec<_>>();
-    let before = crate::process_info::sample(std::process::id())
+    let before = zz_daemon_client::process_info::sample(std::process::id())
         .unwrap()
         .threads;
     let mut tasks = (0..20)
@@ -85,7 +85,7 @@ fn twenty_open_blocking_menus_add_zero_workers() {
         .collect::<Vec<_>>();
     assert_eq!(shared.connection_threads.worker_count(), 0);
     assert!(
-        crate::process_info::sample(std::process::id())
+        zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads
             <= before
@@ -189,4 +189,42 @@ fn selected_action_is_queued_after_close_against_the_saved_target() {
         task.finish().0,
         CommandResponse::Success { exit_code: 0, .. }
     ));
+}
+
+#[test]
+fn a_centred_menu_centres_on_a_window_smaller_than_the_client() {
+    let (shared, mut context) = workspace();
+    let client = target(&shared, &context, 0);
+    shared.inner.lock().client_mut(client).expect("client").size = Some((80, 24));
+    for command in [
+        CommandInvocation::new("set-option", ["-w", "window-size", "manual"]),
+        CommandInvocation::new("resize-window", ["-x", "40", "-y", "10"]),
+        CommandInvocation::new(
+            "display-menu",
+            [
+                "-x",
+                "C",
+                "-y",
+                "C",
+                "-T",
+                "MENU",
+                "Alpha",
+                "a",
+                "set -g @x 1",
+                "Beta",
+                "b",
+                "set -g @x 2",
+            ],
+        ),
+    ] {
+        shared
+            .execute(client, ClientKind::Interactive, &mut context, &command)
+            .expect("command");
+    }
+    let inner = shared.inner.lock();
+    let state = &inner.clients[&client].menu.as_ref().expect("menu").state;
+    assert_eq!(
+        (state.left, state.top, state.width, state.height),
+        (13, 2, 13, 4)
+    );
 }

@@ -28,7 +28,7 @@ pub const fn preference_kind_for_category(
 }
 
 use crate::atomic_write;
-use zz_daemon::user_data::{
+use zz_daemon_client::user_data::{
     platform_data_dir, restrict_directory_to_current_user, restrict_to_current_user,
 };
 

@@ -60,18 +60,18 @@ use crate::{
     window::corners::{WindowCorners, round_div_radii},
 };
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 pub(crate) const TERMINAL_FONT: &str = "Menlo";
 #[cfg(target_os = "windows")]
 pub(crate) const TERMINAL_FONT: &str = "Cascadia Mono";
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub(crate) const TERMINAL_FONT: &str = "Noto Sans Mono";
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 const LOCAL_TERMINAL_FONT_CANDIDATES: &[&str] = &["Menlo", "Monaco"];
 #[cfg(target_os = "windows")]
 const LOCAL_TERMINAL_FONT_CANDIDATES: &[&str] = &["Cascadia Mono", "Consolas"];
-#[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "windows")))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const LOCAL_TERMINAL_FONT_CANDIDATES: &[&str] = &[
     "Noto Sans Mono",
     "DejaVu Sans Mono",
@@ -81,9 +81,9 @@ const LOCAL_TERMINAL_FONT_CANDIDATES: &[&str] = &[
 
 // CoreText backends (macOS, iOS) take font size in points; the rest take 96-DPI
 // logical pixels.
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 const GPUI_UNITS_PER_FONT_POINT: f32 = 1.0;
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 const GPUI_UNITS_PER_FONT_POINT: f32 = 96.0 / 72.0;
 
 static COPY_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
@@ -2997,7 +2997,7 @@ mod tests {
         }
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+    #[cfg(not(target_os = "macos"))]
     #[test]
     fn terminal_font_zoom_suppresses_application_ui_scaling() {
         let mut bindings =
@@ -3410,8 +3410,10 @@ mod tests {
         let (terminal, cx) = cx.add_window_view(move |window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -3475,8 +3477,10 @@ mod tests {
         let (terminal, cx) = cx.add_window_view(move |window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -3610,8 +3614,10 @@ mod tests {
         let (terminal, cx) = cx.add_window_view(|window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -3654,8 +3660,10 @@ mod tests {
         let (terminal, cx) = cx.add_window_view(|window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -3709,8 +3717,10 @@ mod tests {
         let (terminal, cx) = cx.add_window_view(|window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

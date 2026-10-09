@@ -280,7 +280,13 @@ fn mode_requests_render_the_same_presentation_on_a_detached_universe() {
             fixture.alpha,
             fixture.alpha_pane,
             false,
-            (3, 9),
+            ModeShown {
+                position: 3,
+                limit: 9,
+                line_numbers: 0,
+                hide_position: false,
+                rows: 0,
+            },
         )
         .expect("mode request");
         drop(contexts);
@@ -485,7 +491,7 @@ fn terminal_features_and_overrides_reach_a_connected_client_on_the_next_read() {
     let (after, _) = read();
     assert_eq!(
         after & !before,
-        crate::terminal_features::terminal_feature_mask(["sync"])
+        zz_daemon_client::terminal_feature_mask(["sync"])
     );
     run(&[
         "set-option",

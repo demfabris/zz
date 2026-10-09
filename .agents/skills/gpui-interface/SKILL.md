@@ -86,7 +86,7 @@ whole block. Give the checkbox a **first-line strut** of `window.line_height()`,
 size the box to the ambient font (`window.text_style().font_size`), then apply
 the same 0.5px optical drop. Magic `.mt(rems(0.4))` plus a rem-sized box will
 not track a 13px agent transcript. Worked example:
-`render_list_item_row` in `crates/zz-kit/src/text/node.rs`.
+`render_list_item_row` in `crates/zpui-kit/src/text/node.rs`.
 
 ## One row, three callers
 

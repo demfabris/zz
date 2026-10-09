@@ -12,7 +12,7 @@ fn tty_hello() -> ProtocolMessage {
     hello.kind = ClientKind::Interactive;
     hello.capabilities = vec![
         zz_protocol::TTY_INPUT_CAPABILITY.to_owned(),
-        crate::CLIENT_EXITS_ON_DETACH_CAPABILITY.to_owned(),
+        zz_daemon_client::CLIENT_EXITS_ON_DETACH_CAPABILITY.to_owned(),
     ];
     ProtocolMessage::Hello(Hello::from_client(hello))
 }

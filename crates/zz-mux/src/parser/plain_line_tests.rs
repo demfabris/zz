@@ -7,6 +7,7 @@ fn walk<C: ConfigContext>(input: &str, context: &mut C, assignment_overlay: bool
         context,
         assignment_overlay,
     )
+    .0
 }
 
 fn full_parse(input: &str) -> ParsedConfig {

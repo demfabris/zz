@@ -2,8 +2,8 @@ mod customize;
 mod mode_prompt;
 mod switch_mode;
 pub use customize::{
-    CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CustomizeMenu, CustomizeMenuItem,
-    CustomizeMode, CustomizeResult, customize_menu_feed,
+    CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CustomizeEdit, CustomizeMenu,
+    CustomizeMenuItem, CustomizeMode, CustomizeResult, customize_menu_feed,
 };
 pub use mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
 pub use switch_mode::{SwitchAction, SwitchMode};
@@ -100,6 +100,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "default-shell",
     "default-command",
     "default-terminal",
+    "editor",
     "remain-on-exit",
     "focus-events",
     "extended-keys",
@@ -895,6 +896,55 @@ pub struct MouseEventTarget {
     /// `sr->start` for the status range the gesture landed in, which is where
     /// `cmd_display_menu_get_pos` puts `-x W`.
     pub status_range_start: Option<u16>,
+    pub press: Option<(u16, u16)>,
+    pub drag: Option<MouseDrag>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseDragKind {
+    NewPane,
+    MovePane,
+    ResizeFloat,
+    ResizeTiled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseDrag {
+    pub kind: MouseDragKind,
+    pub pane: PaneId,
+    pub anchor: (u16, u16),
+    pub last: (u16, u16),
+}
+
+fn mouse_anchor(mouse: &MouseEventTarget) -> (u16, u16) {
+    mouse
+        .drag
+        .map(|drag| drag.anchor)
+        .or(mouse.press)
+        .unwrap_or((mouse.column, mouse.row))
+}
+
+fn mouse_anchor_cell(mouse: &MouseEventTarget) -> (i32, i32) {
+    let (x, y) = mouse_anchor(mouse);
+    (i32::from(x), i32::from(y))
+}
+
+fn mouse_last_cell(mouse: &MouseEventTarget) -> (i32, i32) {
+    let (x, y) = mouse
+        .drag
+        .map(|drag| drag.last)
+        .or(mouse.press)
+        .unwrap_or((mouse.column, mouse.row));
+    (i32::from(x), i32::from(y))
+}
+
+fn armed_mouse_drag(kind: MouseDragKind, pane: PaneId, mouse: &MouseEventTarget) -> MuxEffect {
+    MuxEffect::ArmMouseDrag(MouseDrag {
+        kind,
+        pane,
+        anchor: mouse_anchor(mouse),
+        last: (mouse.column, mouse.row),
+    })
 }
 
 impl MouseEventTarget {
@@ -1325,6 +1375,7 @@ pub enum MuxEffect {
     PaneWaitForExit {
         pane: PaneId,
     },
+    ArmMouseDrag(MouseDrag),
     PanesRemoved(Vec<PaneId>),
     PaneRelocated {
         pane: PaneId,
@@ -7369,6 +7420,10 @@ impl MuxEngine {
                 ));
             }
         }
+        let drag_mouse = context.invoking_mouse().cloned();
+        if options.has("-M") && floating && drag_mouse.is_none() {
+            return Ok(Execution::default());
+        }
         let kind = self.spawn_pane_kind("new-pane", context, &options, &positional, hooks)?;
         let command = matches!(kind, PaneKind::Terminal)
             .then(|| shell_command_positional(&positional))
@@ -7428,6 +7483,16 @@ impl MuxEngine {
                     );
                 }
             }
+        }
+        if options.has("-M")
+            && floating
+            && let Some(pane) = created
+            && let Some(mouse) = drag_mouse
+            && self.new_pane_mouse_resize(pane, &mouse)?
+        {
+            execution
+                .effects
+                .push(armed_mouse_drag(MouseDragKind::NewPane, pane, &mouse));
         }
         if options.has("-I")
             && let Some(bytes) = stdin
@@ -8025,7 +8090,21 @@ impl MuxEngine {
         }
         if command == "move-pane" {
             if options.has("-M") {
-                return Ok(Execution::default());
+                let Some(mouse) = context.invoking_mouse().cloned() else {
+                    return Ok(Execution::default());
+                };
+                let Some(pane) = mouse.pane else {
+                    return Ok(Execution::default());
+                };
+                if self.mouse_float_geometry(pane).is_none() {
+                    return Ok(Execution::default());
+                }
+                self.state.select_pane_with_zoom(pane, true)?;
+                self.move_float_from_mouse(pane, &mouse)?;
+                return Ok(Execution {
+                    effects: vec![armed_mouse_drag(MouseDragKind::MovePane, pane, &mouse)],
+                    ..Execution::default()
+                });
             }
             if ["-P", "-z", "-X", "-Y", "-U", "-D", "-L", "-R"]
                 .iter()
@@ -9224,18 +9303,58 @@ impl MuxEngine {
         context: &ExecutionContext,
         pane: PaneId,
     ) -> Result<Execution, ServerError> {
-        let Some(mouse) = context.invoking_mouse() else {
+        let Some(mouse) = context.invoking_mouse().cloned() else {
             return Ok(Execution::default());
         };
-        let Some(axis) = mouse.border else {
-            return Ok(Execution::default());
-        };
-        let window = self
+        if let Some(drag) = mouse.drag {
+            let alive = match drag.kind {
+                MouseDragKind::NewPane => self.new_pane_mouse_resize(drag.pane, &mouse)?,
+                MouseDragKind::MovePane => self.move_float_from_mouse(drag.pane, &mouse)?,
+                MouseDragKind::ResizeFloat => self.resize_float_from_mouse(drag.pane, &mouse)?,
+                MouseDragKind::ResizeTiled => {
+                    self.resize_tiled_from_mouse(drag.pane, &mouse)?;
+                    true
+                }
+            };
+            return Ok(Execution {
+                effects: alive
+                    .then(|| armed_mouse_drag(drag.kind, drag.pane, &mouse))
+                    .into_iter()
+                    .collect(),
+                ..Execution::default()
+            });
+        }
+        let floating = self
             .state
             .window_for_pane(pane)
-            .ok_or_else(|| ServerError::PaneNotFound(pane.to_string()))?;
+            .is_some_and(|window| self.state.windows[&window].shows_floating(pane));
+        let kind = if floating {
+            self.state.select_pane_with_zoom(pane, true)?;
+            self.resize_float_from_mouse(pane, &mouse)?;
+            MouseDragKind::ResizeFloat
+        } else {
+            self.resize_tiled_from_mouse(pane, &mouse)?;
+            MouseDragKind::ResizeTiled
+        };
+        Ok(Execution {
+            effects: vec![armed_mouse_drag(kind, pane, &mouse)],
+            ..Execution::default()
+        })
+    }
+
+    fn resize_tiled_from_mouse(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<(), ServerError> {
+        let Some(axis) = mouse.border else {
+            return Ok(());
+        };
+        let Some(window) = self.state.window_for_pane(pane) else {
+            return Ok(());
+        };
         let Some(geometry) = self.state.windows[&window].layout.pane_geometry(pane) else {
-            return Ok(Execution::default());
+            return Ok(());
         };
         let cells = match axis {
             Axis::Horizontal => i32::from(mouse.column) - geometry.xoff,
@@ -9243,10 +9362,142 @@ impl MuxEngine {
         };
         let cells = u16::try_from(cells).ok();
         let Some(cells) = cells.filter(|cells| *cells > 0) else {
-            return Ok(Execution::default());
+            return Ok(());
         };
         self.state.resize_pane_to(pane, axis, cells)?;
-        Ok(Execution::default())
+        Ok(())
+    }
+
+    fn mouse_float_geometry(&self, pane: PaneId) -> Option<CellGeometry> {
+        let window = self.state.window_for_pane(pane)?;
+        let window = &self.state.windows[&window];
+        if !window.shows_floating(pane) {
+            return None;
+        }
+        window.layout.pane_geometry(pane)
+    }
+
+    fn move_float_from_mouse(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<bool, ServerError> {
+        let Some(mut cell) = self.mouse_float_geometry(pane) else {
+            return Ok(false);
+        };
+        let (x, y) = (i32::from(mouse.column), i32::from(mouse.row));
+        let (lx, ly) = mouse_last_cell(mouse);
+        if x != lx || y != ly {
+            cell.xoff += x - lx;
+            cell.yoff += y - ly;
+            self.state.set_float_geometry(pane, cell)?;
+        }
+        Ok(true)
+    }
+
+    fn resize_float_from_mouse(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<bool, ServerError> {
+        let Some(cell) = self.mouse_float_geometry(pane) else {
+            return Ok(false);
+        };
+        let (x, y) = (i32::from(mouse.column), i32::from(mouse.row));
+        let (lx, ly) = mouse_last_cell(mouse);
+        let (sx, sy) = (i32::from(cell.sx), i32::from(cell.sy));
+        let left = cell.xoff - 1;
+        let right = cell.xoff + sx;
+        let top = cell.yoff - 1;
+        let bottom = cell.yoff + sy;
+        let at_left = lx == left || lx == left + 1;
+        let at_right = lx == right + 1 || lx == right;
+        let next = if at_left && ly == top {
+            Some(((sx + lx - x).max(1), (sy + ly - y).max(1), x + 1, y + 1))
+        } else if at_right && ly == top {
+            Some((
+                (x - cell.xoff).max(1),
+                (sy + ly - y).max(1),
+                cell.xoff,
+                y + 1,
+            ))
+        } else if at_left && ly == bottom {
+            let new_sy = y - cell.yoff;
+            (new_sy >= 1).then(|| ((sx + lx - x).max(1), new_sy, x + 1, cell.yoff))
+        } else if at_right && ly == bottom {
+            Some((
+                (x - cell.xoff).max(1),
+                (y - cell.yoff).max(1),
+                cell.xoff,
+                cell.yoff,
+            ))
+        } else if lx == right {
+            let new_sx = x - cell.xoff;
+            (new_sx >= 1).then(|| (new_sx, sy, cell.xoff, cell.yoff))
+        } else if lx == left {
+            let new_sx = sx + lx - x;
+            (new_sx >= 1).then(|| (new_sx, sy, x + 1, cell.yoff))
+        } else if ly == bottom {
+            let new_sy = y - cell.yoff;
+            (new_sy >= 1).then(|| (sx, new_sy, cell.xoff, cell.yoff))
+        } else if ly == top {
+            Some((sx, sy, cell.xoff + x - lx, y + 1))
+        } else {
+            None
+        };
+        if let Some((sx, sy, xoff, yoff)) = next {
+            self.state.set_float_geometry(
+                pane,
+                CellGeometry {
+                    sx: u16::try_from(sx).unwrap_or(u16::MAX),
+                    sy: u16::try_from(sy).unwrap_or(u16::MAX),
+                    xoff,
+                    yoff,
+                },
+            )?;
+        }
+        Ok(true)
+    }
+
+    fn new_pane_mouse_resize(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<bool, ServerError> {
+        if self.mouse_float_geometry(pane).is_none() {
+            return Ok(false);
+        }
+        let border = i32::from(self.pane_lines(pane) != PaneBorderLines::None);
+        let (ax, ay) = mouse_anchor_cell(mouse);
+        let span = |at: i32, anchor: i32| {
+            if at >= anchor {
+                (at - anchor + 1, anchor + border)
+            } else {
+                let size = anchor - at + 1;
+                (size, anchor - size + 1 + border)
+            }
+        };
+        let (sx, xoff) = span(i32::from(mouse.column), ax);
+        let (sy, yoff) = span(i32::from(mouse.row), ay);
+        let inner = |size: i32| {
+            if border == 0 {
+                size.max(1)
+            } else if size <= 2 {
+                1
+            } else {
+                size - 2
+            }
+        };
+        self.state.set_float_geometry(
+            pane,
+            CellGeometry {
+                sx: u16::try_from(inner(sx)).unwrap_or(u16::MAX),
+                sy: u16::try_from(inner(sy)).unwrap_or(u16::MAX),
+                xoff,
+                yoff,
+            },
+        )?;
+        Ok(true)
     }
 
     fn resize_window(
@@ -14102,6 +14353,12 @@ impl MuxEngine {
     /// before it interrogates the terminal. It is a server option, so the
     /// global session store is the only place it lives.
     #[must_use]
+    pub fn editor_option(&self) -> String {
+        self.global_tmux_option_value("editor")
+            .unwrap_or_else(|| "/usr/bin/vi".to_owned())
+    }
+
+    #[must_use]
     pub fn terminal_features_option(&self) -> Vec<String> {
         self.array_option_readback(TmuxOptionTarget::Server, "terminal-features", true)
             .into_iter()
@@ -17677,16 +17934,17 @@ fn mouse_key_identity(base: &str) -> Option<(u32, u8, u8)> {
         ("Status", 1),
         ("Border", 5),
         ("Pane", 0),
-        ("Control0", 9),
-        ("Control1", 10),
-        ("Control2", 11),
-        ("Control3", 12),
-        ("Control4", 13),
-        ("Control5", 14),
-        ("Control6", 15),
-        ("Control7", 16),
-        ("Control8", 17),
-        ("Control9", 18),
+        ("Empty", 9),
+        ("Control0", 10),
+        ("Control1", 11),
+        ("Control2", 12),
+        ("Control3", 13),
+        ("Control4", 14),
+        ("Control5", 15),
+        ("Control6", 16),
+        ("Control7", 17),
+        ("Control8", 18),
+        ("Control9", 19),
     ];
     const EVENTS: &[(&str, u8, bool)] = &[
         ("MouseDragEnd", 7, true),
@@ -17977,6 +18235,7 @@ fn parse_mouse_key(value: &str) -> Option<String> {
         "ScrollbarSlider",
         "ScrollbarDown",
         "Border",
+        "Empty",
         "Control0",
         "Control1",
         "Control2",
@@ -38282,7 +38541,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 151);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 152);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

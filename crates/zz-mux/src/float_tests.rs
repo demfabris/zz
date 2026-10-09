@@ -479,3 +479,124 @@ fn a_refused_float_split_leaves_the_float_its_size() {
         );
     }
 }
+
+#[test]
+fn mouse_drags_create_move_and_resize_floats_like_tmux() {
+    use crate::{
+        ExecutionContext, MouseDrag, MouseDragKind, MouseEventTarget, MuxEffect, MuxEngine,
+    };
+    use zz_protocol::CommandInvocation;
+
+    let mut engine = MuxEngine::default();
+    let mut context = ExecutionContext::default();
+    engine
+        .execute(
+            &mut context,
+            &CommandInvocation::new("new-session", ["-s", "s", "-x", "80", "-y", "24"]),
+        )
+        .unwrap();
+    let tile = context.pane.unwrap();
+    let window = context.window;
+    let cell = |engine: &MuxEngine, pane: PaneId| {
+        let snapshot = engine.state.snapshot();
+        let float = snapshot.sessions[0].windows[0]
+            .floating
+            .iter()
+            .find(|float| float.pane == pane)
+            .copied()
+            .unwrap();
+        (float.sx, float.sy, float.xoff, float.yoff)
+    };
+    let mouse =
+        |pane: Option<PaneId>, at: (u16, u16), press: (u16, u16), drag: Option<MouseDrag>| {
+            MouseEventTarget {
+                pane,
+                window,
+                column: at.0,
+                row: at.1,
+                border: None,
+                view_action: None,
+                press_action: None,
+                status_range_start: None,
+                press: Some(press),
+                drag,
+            }
+        };
+    let armed = |effects: &[MuxEffect]| {
+        effects.iter().find_map(|effect| match effect {
+            MuxEffect::ArmMouseDrag(drag) => Some(*drag),
+            _ => None,
+        })
+    };
+
+    let panes = engine.state.snapshot().sessions[0].windows[0].panes.len();
+    engine
+        .execute(&mut context, &CommandInvocation::new("new-pane", ["-M"]))
+        .unwrap();
+    assert_eq!(
+        engine.state.snapshot().sessions[0].windows[0].panes.len(),
+        panes
+    );
+
+    let mut drag_context = context.clone();
+    drag_context.set_invoking_mouse(Some(mouse(Some(tile), (50, 16), (10, 4), None)));
+    let execution = engine
+        .execute(
+            &mut drag_context,
+            &CommandInvocation::new("new-pane", ["-M"]),
+        )
+        .unwrap();
+    let drag = armed(&execution.effects).unwrap();
+    assert_eq!(drag.kind, MouseDragKind::NewPane);
+    assert_eq!((drag.anchor, drag.last), ((10, 4), (50, 16)));
+    let float = drag.pane;
+    assert_eq!(cell(&engine, float), (39, 11, 11, 5));
+
+    let target = float.to_string();
+    let mut update = context.clone();
+    update.set_invoking_mouse(Some(mouse(Some(float), (60, 18), (10, 4), Some(drag))));
+    let execution = engine
+        .execute(
+            &mut update,
+            &CommandInvocation::new("resize-pane", ["-M", "-t", target.as_str()]),
+        )
+        .unwrap();
+    assert_eq!(armed(&execution.effects).unwrap().last, (60, 18));
+    assert_eq!(cell(&engine, float), (49, 13, 11, 5));
+
+    let mut moving = context.clone();
+    moving.set_invoking_mouse(Some(mouse(Some(float), (30, 10), (20, 7), None)));
+    let execution = engine
+        .execute(&mut moving, &CommandInvocation::new("move-pane", ["-M"]))
+        .unwrap();
+    assert_eq!(
+        armed(&execution.effects).unwrap().kind,
+        MouseDragKind::MovePane
+    );
+    assert_eq!(cell(&engine, float), (49, 13, 21, 8));
+
+    let mut resizing = context.clone();
+    resizing.set_invoking_mouse(Some(mouse(Some(float), (75, 12), (70, 12), None)));
+    let execution = engine
+        .execute(
+            &mut resizing,
+            &CommandInvocation::new("resize-pane", ["-M", "-t", target.as_str()]),
+        )
+        .unwrap();
+    assert_eq!(
+        armed(&execution.effects).unwrap().kind,
+        MouseDragKind::ResizeFloat
+    );
+    assert_eq!(cell(&engine, float), (54, 13, 21, 8));
+
+    let mut top = context.clone();
+    top.set_invoking_mouse(Some(mouse(Some(float), (35, 10), (30, 7), None)));
+    engine
+        .execute(
+            &mut top,
+            &CommandInvocation::new("resize-pane", ["-M", "-t", target.as_str()]),
+        )
+        .unwrap();
+    assert_eq!(cell(&engine, float), (54, 13, 26, 11));
+    assert!(engine.state.validate().is_ok());
+}

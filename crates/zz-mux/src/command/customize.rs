@@ -161,6 +161,14 @@ pub struct CustomizeResult {
     pub close: bool,
     pub commands: Vec<CommandInvocation>,
     pub menu: Option<CustomizeMenu>,
+    pub edit: Option<CustomizeEdit>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CustomizeEdit {
+    pub value: String,
+    name: String,
+    target: TmuxOptionTarget,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -257,6 +265,7 @@ impl CustomizeResult {
             close: false,
             commands: Vec::new(),
             menu: None,
+            edit: None,
         }
     }
 }
@@ -1147,6 +1156,7 @@ impl MuxEngine {
                 close: true,
                 commands: Vec::new(),
                 menu: None,
+                edit: None,
             };
         };
         if let Some((prompt, _)) = &mut mode.prompt {
@@ -1209,6 +1219,7 @@ impl MuxEngine {
                 close: true,
                 commands: Vec::new(),
                 menu: None,
+                edit: None,
             };
         };
         let columns = self.customize_screen_columns(pane);
@@ -1276,6 +1287,7 @@ impl MuxEngine {
                 close: true,
                 commands: Vec::new(),
                 menu: None,
+                edit: None,
             };
         };
         if line >= size {
@@ -1307,6 +1319,7 @@ impl MuxEngine {
                 outside,
                 name,
             }),
+            edit: None,
         }
     }
 
@@ -1325,6 +1338,7 @@ impl MuxEngine {
                 close: true,
                 commands: Vec::new(),
                 menu: None,
+                edit: None,
             };
         }
         let mut key = key;
@@ -1345,7 +1359,36 @@ impl MuxEngine {
                     close: true,
                     commands: Vec::new(),
                     menu: None,
+                    edit: None,
                 };
+            }
+            ModeKey::Char('e') => {
+                if let Item::Option {
+                    name,
+                    array_key,
+                    target,
+                    metadata,
+                    value,
+                    ..
+                } = &row_at(mode).item
+                    && !metadata.is_some_and(|option| {
+                        matches!(
+                            option.metadata.kind,
+                            TmuxOptionKind::Flag | TmuxOptionKind::Choice
+                        )
+                    })
+                {
+                    return CustomizeResult {
+                        edit: Some(CustomizeEdit {
+                            value: value.clone(),
+                            name: array_key
+                                .as_ref()
+                                .map_or_else(|| name.clone(), |key| format!("{name}[{key}]")),
+                            target: *target,
+                        }),
+                        ..CustomizeResult::stay()
+                    };
+                }
             }
             ModeKey::F1 | ModeKey::Ctrl('h') => mode.help = true,
             ModeKey::Up | ModeKey::Char('k') | ModeKey::Ctrl('p') => mode.up(size, true),
@@ -1671,7 +1714,28 @@ impl MuxEngine {
             close: false,
             commands,
             menu: None,
+            edit: None,
         }
+    }
+
+    pub fn customize_edited(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        edit: &CustomizeEdit,
+        value: &str,
+        expand: &mut CustomizeExpand<'_>,
+    ) -> CustomizeResult {
+        let rows = self.customize_rows(pane, mode, expand);
+        let lines = customize_lines(&rows, mode);
+        let tag = lines.get(mode.current).map(|line| rows[*line].id.clone());
+        self.customize_commands(
+            pane,
+            mode,
+            vec![customize_set_command(&edit.name, edit.target, value)],
+            tag,
+            expand,
+        )
     }
 
     fn customize_set_key(

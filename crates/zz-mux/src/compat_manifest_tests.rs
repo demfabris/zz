@@ -159,8 +159,8 @@ const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
     ("copy-mode", 67),
     ("copy-mode-vi", 78),
     ("move", 19),
-    ("prefix", 57),
-    ("root", 12),
+    ("prefix", 62),
+    ("root", 17),
 ];
 
 fn root() -> PathBuf {
@@ -1260,10 +1260,10 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 151);
+    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 152);
     assert_eq!(
         consumers.len(),
-        151,
+        152,
         "option consumer roster contains duplicates"
     );
     assert!(
@@ -1282,13 +1282,13 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         };
         scope_counts[index] += 1;
     }
-    assert_eq!(scope_counts, [39, 47, 45, 20]);
+    assert_eq!(scope_counts, [40, 47, 45, 20]);
 
     let tracked = items
         .keys()
         .filter_map(|item| item.strip_prefix("option:"))
         .collect::<BTreeSet<_>>();
-    assert_eq!(tracked.len(), 32, "active option gap count changed");
+    assert_eq!(tracked.len(), 31, "active option gap count changed");
     assert!(
         consumers.is_disjoint(&tracked),
         "consumed and tracked option names overlap"
@@ -1551,20 +1551,20 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         308,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 367, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 378, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        275,
+        285,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        33,
+        23,
         "missing default binding count changed"
     );
     assert_eq!(
         native_keys.len(),
-        92,
+        93,
         "native default binding count changed"
     );
     assert_eq!(
@@ -1574,7 +1574,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        233,
+        243,
         "structurally matching shared binding count changed"
     );
     assert_eq!(
@@ -1722,7 +1722,7 @@ fn shared_prefix_keys_carry_the_pinned_notes() {
         differing.is_empty(),
         "prefix notes differ from the pin: {differing:?}"
     );
-    assert_eq!(shared, 75, "shared prefix key count changed");
+    assert_eq!(shared, 80, "shared prefix key count changed");
     let unnoted = key_tables
         .list(Some("prefix"))
         .filter(|(_, _, binding)| binding.note.is_none())

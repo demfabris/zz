@@ -452,6 +452,167 @@ modal_cases() {
   verdict modal-close
 }
 
+floating_count_is() {
+  [ "$(side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_floating_flag}' 2>/dev/null | grep -c 1)" -eq "$2" ]
+}
+active_float_at() {
+  [ "$(side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active}#{pane_floating_flag} #{pane_x},#{pane_y}' 2>/dev/null |
+    awk '$1 == 11 { print $2; exit }')" = "$2" ]
+}
+both_floating_count_is() {
+  wait_for "$2 on zz" floating_count_is zz "$1"
+  wait_for "$2 on tmux" floating_count_is tmux "$1"
+}
+pane_menu_on_both() {
+  local column="$1" row="$2" side
+  for side in zz tmux; do
+    send_bytes "$side" "$(printf '\033[<10;%s;%sM' "$((column + 1))" "$((row + 1))")"
+  done
+  both_screen_has Respawn 'the pane menu'
+  MENU_RELEASE="$(printf '\033[<10;%s;%sm' "$((column + 1))" "$((row + 1))")"
+}
+release_menu_press_on_both() {
+  send_bytes zz "$MENU_RELEASE"
+  send_bytes tmux "$MENU_RELEASE"
+}
+
+key_cases() {
+  CASE_LABEL=prefix-star
+  attach_both
+  set_on_both default-command "$INNER_SHELL"
+  run_on_both split-window -h "$INNER_SHELL"
+  press_on_both '*'
+  both_floating_count_is 1 'the prefix * float'
+  verdict prefix-star
+  CASE_LABEL=prefix-g-1
+  press_on_both g
+  type_on_both 1
+  wait_for 'the zz float in the top-left corner' active_float_at zz 1,1
+  wait_for 'the tmux float in the top-left corner' active_float_at tmux 1,1
+  verdict prefix-g-1
+  CASE_LABEL=prefix-at-tile
+  press_on_both @
+  both_floating_count_is 0 'the prefix @ tile'
+  verdict prefix-at-tile
+  CASE_LABEL=prefix-at-float
+  press_on_both @
+  both_floating_count_is 1 'the prefix @ float'
+  verdict prefix-at-float
+}
+
+pane_menu_cases() {
+  CASE_LABEL=menu-float
+  attach_both
+  set_on_both default-command "$INNER_SHELL"
+  run_on_both split-window -h "$INNER_SHELL"
+  pane_menu_on_both 10 5
+  type_on_both f
+  both_floating_count_is 1 'the menu Float'
+  release_menu_press_on_both
+  both_screen_lacks Respawn 'the closed pane menu'
+  verdict menu-float
+  CASE_LABEL=menu-move
+  local side float_x float_y
+  for side in zz tmux; do
+    side_command "$side" list-panes -t "=$INNER_SESSION" -F '#{pane_floating_flag} #{pane_x} #{pane_y}' |
+      awk '$1 == 1 { print $2, $3 }' >"$SCRATCH_DIR/float-$side"
+  done
+  read -r float_x float_y <"$SCRATCH_DIR/float-tmux"
+  pane_menu_on_both "$((float_x + 2))" "$((float_y + 1))"
+  type_on_both Down
+  type_on_both Enter
+  both_screen_has 'Bottom Right' 'the Move menu'
+  type_on_both 4
+  both_screen_lacks 'Bottom Right' 'the closed Move menu'
+  release_menu_press_on_both
+  verdict menu-move
+  CASE_LABEL=menu-tile
+  for side in zz tmux; do
+    side_command "$side" list-panes -t "=$INNER_SESSION" -F '#{pane_floating_flag} #{pane_x} #{pane_y}' |
+      awk '$1 == 1 { print $2, $3 }' >"$SCRATCH_DIR/float-$side"
+  done
+  read -r float_x float_y <"$SCRATCH_DIR/float-tmux"
+  pane_menu_on_both "$((float_x + 2))" "$((float_y + 1))"
+  type_on_both t
+  both_floating_count_is 0 'the menu Tile'
+  release_menu_press_on_both
+  both_screen_lacks Respawn 'the closed pane menu'
+  verdict menu-tile
+}
+
+write_editor() {
+  printf '#!/bin/sh\nprintf "EDITOR-UP\\n"\nread answer\n[ "$answer" = ok ] || exit 3\nprintf "appended\\n" >>"$1"\nexit 0\n' \
+    >"$SCRATCH_DIR/editor.sh"
+  chmod +x "$SCRATCH_DIR/editor.sh"
+}
+facts_verdict() {
+  local name="$1" zz_facts tmux_facts
+  CHECKS=$((CHECKS + 1))
+  zz_facts="$(pane_facts zz)"
+  tmux_facts="$(pane_facts tmux)"
+  if [ "$zz_facts" = "$tmux_facts" ]; then
+    printf 'ok    %s\n' "$name"
+    return 0
+  fi
+  FAILURES=$((FAILURES + 1))
+  printf 'DIFF  %s\n      panes tmux:\n%s\n      panes zz:\n%s\n' "$name" "$tmux_facts" "$zz_facts"
+}
+value_verdict() {
+  local name="$1" zz_value="$2" tmux_value="$3"
+  CHECKS=$((CHECKS + 1))
+  if [ "$zz_value" = "$tmux_value" ]; then
+    printf 'ok    %s: both %s\n' "$name" "$zz_value"
+    return 0
+  fi
+  FAILURES=$((FAILURES + 1))
+  printf 'DIFF  %s\n      tmux: %s\n      zz:   %s\n' "$name" "$tmux_value" "$zz_value"
+}
+modal_count_is() {
+  [ "$(side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_modal_flag}' 2>/dev/null | grep -c 1)" -eq "$2" ]
+}
+editor_round() {
+  local name="$1" answer="$2"
+  type_on_both e
+  both_screen_has EDITOR-UP "the $name editor"
+  wait_for "the $name modal on zz" modal_count_is zz 1
+  wait_for "the $name modal on tmux" modal_count_is tmux 1
+  facts_verdict "$name-modal"
+  type_on_both "$answer" Enter
+  wait_for "the $name modal gone on zz" modal_count_is zz 0
+  wait_for "the $name modal gone on tmux" modal_count_is tmux 0
+}
+
+editor_cases() {
+  CASE_LABEL=editor-buffer
+  attach_both
+  write_editor
+  run_on_both set-option -s editor "$SCRATCH_DIR/editor.sh"
+  run_on_both set-buffer -b edit1 'first line'
+  run_on_both bind-key -T prefix B choose-buffer
+  run_on_both bind-key -T prefix K customize-mode
+  press_on_both B
+  both_screen_has edit1 'the buffer chooser'
+  editor_round editor-buffer ok
+  wait_for 'the zz buffer edited' sh -c '[ "$('"$(printf '%q' "$ZZ_BIN")"' --socket '"$(printf '%q' "$ZZ_SOCKET")"' show-buffer -b edit1 2>/dev/null)" != "first line" ]'
+  value_verdict editor-buffer/show-buffer \
+    "$(side_command zz show-buffer -b edit1)" "$(side_command tmux show-buffer -b edit1)"
+  CASE_LABEL=editor-buffer-failed
+  editor_round editor-buffer-failed no
+  value_verdict editor-buffer-failed/show-buffer \
+    "$(side_command zz show-buffer -b edit1)" "$(side_command tmux show-buffer -b edit1)"
+  type_on_both q
+  CASE_LABEL=editor-option
+  press_on_both K
+  both_screen_has 'Server Options' 'the customize tree'
+  type_on_both /
+  type_on_both -l status-left
+  type_on_both Enter
+  editor_round editor-option ok
+  wait_for 'the zz option edited' sh -c '[ "$('"$(printf '%q' "$ZZ_BIN")"' --socket '"$(printf '%q' "$ZZ_SOCKET")"' show-options -gv status-left 2>/dev/null)" != L ]'
+  value_verdict editor-option/status-left \
+    "$(side_command zz show-options -gv status-left)" "$(side_command tmux show-options -gv status-left)"
+}
+
 printf 'floating pane differential at %sx%s (%s)\n' \
   "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$("$TMUX_BIN" -V)"
 overlap_cases
@@ -460,6 +621,9 @@ borderless_case
 popup_zoomed_case
 no_tiled_case
 modal_cases
+key_cases
+pane_menu_cases
+editor_cases
 
 if [ "$FAILURES" -ne 0 ]; then
   printf '%s of %s comparisons differ\n' "$FAILURES" "$CHECKS"

@@ -138,7 +138,7 @@ use crate::{
     DaemonError, configure_shell_job_environment, diagnostic_elapsed_us, diagnostic_timer,
     keys::{
         ChooserPromptEdit, choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer,
-        chooser_prompt_edit, client_key_inputs, input_key_name, send_tokens,
+        chooser_prompt_edit, client_key_inputs, input_key_name, overlay_key_action, send_tokens,
     },
     lifecycle::DaemonIdentityGuard,
     paths::{default_mux_config, discover_tmux_config, home_directory, mux_config_write_path},
@@ -10124,6 +10124,11 @@ impl Shared {
                     | MuxEffect::SuppressAfterHook
                     | MuxEffect::PaneMovedInWindow { .. }
                     | MuxEffect::ZoomCycled { .. } => {}
+                    MuxEffect::ArmMouseDrag(drag) => {
+                        if let Some(registered) = inner.client_mut(client) {
+                            registered.mouse_drag = Some(*drag);
+                        }
+                    }
                     MuxEffect::PaneWaitForExit { pane } => {
                         if let Some(terminal) = inner.terminals.get(pane).cloned() {
                             let entry = inner
@@ -10226,6 +10231,9 @@ impl Shared {
                         for pane in panes {
                             if let Some(pipe) = inner.pane_pipes.remove(pane) {
                                 pipes_to_close.push(pipe);
+                            }
+                            if let Some(editor) = inner.editors.remove(pane) {
+                                let _ = std::fs::remove_file(&editor.path);
                             }
                             Self::release_removed_pane_wait(&mut inner, *pane);
                             if let Some(terminal) = inner.terminals_mut().remove(pane) {
@@ -18817,6 +18825,175 @@ impl Shared {
         Ok(execution)
     }
 
+    fn spawn_editor(
+        self: &Arc<Self>,
+        client: ClientId,
+        pane: PaneId,
+        text: &[u8],
+        target: EditorTarget,
+    ) {
+        let (columns, rows, lines, editor) = {
+            let inner = self.inner.lock();
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            if inner.engine.state.windows[&window].modal_pane().is_some() {
+                return;
+            }
+            let columns = inner
+                .engine
+                .window_extent(window, zz_protocol::Axis::Horizontal)
+                .unwrap_or_default();
+            let rows = inner
+                .engine
+                .window_extent(window, zz_protocol::Axis::Vertical)
+                .unwrap_or_default();
+            (
+                columns,
+                rows,
+                inner.engine.pane_border_lines(window),
+                inner.engine.editor_option(),
+            )
+        };
+        let Ok(file) = tempfile::Builder::new()
+            .prefix("tmux.")
+            .rand_bytes(8)
+            .tempfile_in("/tmp")
+        else {
+            return;
+        };
+        let text = if text.is_empty() {
+            b"\n".as_slice()
+        } else {
+            text
+        };
+        if std::fs::write(file.path(), text).is_err() {
+            return;
+        }
+        let Ok(path) = file.into_temp_path().keep() else {
+            return;
+        };
+        let sx = i32::from(columns) * 9 / 10;
+        let sy = i32::from(rows) * 9 / 10;
+        let xoff = i32::from(columns) / 2 - sx / 2;
+        let yoff = i32::from(rows) / 2 - sy / 2;
+        let border = i32::from(lines != zz_protocol::PaneBorderLines::None);
+        let new_pane = CommandInvocation::new(
+            "new-pane",
+            [
+                "-O".to_owned(),
+                "-t".to_owned(),
+                pane.to_string(),
+                "-c".to_owned(),
+                "/tmp".to_owned(),
+                "-x".to_owned(),
+                (sx + 2 * border).to_string(),
+                "-y".to_owned(),
+                (sy + 2 * border).to_string(),
+                "-X".to_owned(),
+                (xoff - border).to_string(),
+                "-Y".to_owned(),
+                (yoff - border).to_string(),
+                "--".to_owned(),
+                format!("{editor} {}", path.display()),
+            ],
+        );
+        let Some(mut context) = ExecutionContext::for_pane(&self.inner.lock().engine.state, pane)
+        else {
+            return;
+        };
+        context.set_spawn_pane_options(vec![("remain-on-exit".to_owned(), "off".to_owned())]);
+        let created = self
+            .execute(client, ClientKind::Interactive, &mut context, &new_pane)
+            .ok()
+            .and_then(|execution| {
+                execution.effects.iter().find_map(|effect| match effect {
+                    MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                    _ => None,
+                })
+            });
+        let Some(editor_pane) = created else {
+            let _ = std::fs::remove_file(&path);
+            return;
+        };
+        self.inner.lock().editors.insert(
+            editor_pane,
+            EditorSession {
+                client,
+                path,
+                target,
+            },
+        );
+        self.publish_snapshot();
+    }
+
+    fn finish_editor(self: &Arc<Self>, pane: PaneId, exit_code: u8) {
+        let Some(session) = self.inner.lock().editors.remove(&pane) else {
+            return;
+        };
+        let text = (exit_code == 0)
+            .then(|| std::fs::read(&session.path).ok())
+            .flatten()
+            .filter(|text| !text.is_empty());
+        let _ = std::fs::remove_file(&session.path);
+        let Some(mut text) = text else {
+            return;
+        };
+        match session.target {
+            EditorTarget::Buffer(name) => {
+                {
+                    let mut inner = self.inner.lock();
+                    let Some(buffer) = inner
+                        .paste_buffers
+                        .iter_mut()
+                        .find(|buffer| buffer.name == name)
+                    else {
+                        return;
+                    };
+                    if buffer.data.last().is_some_and(|last| *last != b'\n')
+                        && text.last() == Some(&b'\n')
+                    {
+                        text.pop();
+                    }
+                    if !text.is_empty() {
+                        buffer.data = Arc::from(text);
+                    }
+                }
+                self.refresh_choose_buffers();
+            }
+            EditorTarget::Option { pane, edit } => {
+                if text.last() == Some(&b'\n') {
+                    text.pop();
+                }
+                let value = String::from_utf8_lossy(&text).into_owned();
+                let Some(PaneModeRequest::Customize(mut mode)) = self
+                    .inner
+                    .lock()
+                    .pane_modes
+                    .get(&pane)
+                    .and_then(|modes| modes.last())
+                    .cloned()
+                else {
+                    return;
+                };
+                let result = {
+                    let inner = self.inner.lock();
+                    let facts = borrowed_format_hook_facts(&inner);
+                    let mut expand = customize_expander(&inner, pane, &facts);
+                    inner
+                        .engine
+                        .customize_edited(pane, &mut mode, &edit, &value, &mut expand)
+                };
+                let Some(mut context) =
+                    ExecutionContext::for_pane(&self.inner.lock().engine.state, pane)
+                else {
+                    return;
+                };
+                self.apply_customize_result(session.client, &mut context, pane, mode, &result);
+            }
+        }
+    }
+
     fn client_file_operation(
         self: &Arc<Self>,
         client: Option<ClientId>,
@@ -21057,7 +21234,7 @@ impl Shared {
                     view_action,
                     press_action,
                     status_range_start,
-                    press: _,
+                    press,
                 } => {
                     self.input_mouse_key(
                         client,
@@ -21073,6 +21250,8 @@ impl Shared {
                             view_action,
                             press_action,
                             status_range_start,
+                            press,
+                            drag: None,
                         },
                     )?;
                 }
@@ -22689,6 +22868,15 @@ impl Shared {
                     self.raise_mode_tree_menu(client, pane, menu, x, y);
                 }
                 self.apply_customize_result(client, context, pane, mode, &result);
+                if let Some(edit) = result.edit {
+                    let value = edit.value.clone();
+                    self.spawn_editor(
+                        client,
+                        pane,
+                        value.as_bytes(),
+                        EditorTarget::Option { pane, edit },
+                    );
+                }
                 true
             }
             PaneModeRequest::Switch(mut mode) => {
@@ -22855,6 +23043,22 @@ impl Shared {
         key: &str,
         mouse: &MouseEventTarget,
     ) -> Result<(), DaemonError> {
+        let base = key.rsplit('-').next().unwrap_or(key);
+        let armed = self
+            .inner
+            .lock()
+            .client_mut(client)
+            .and_then(|registered| registered.mouse_drag.take());
+        if let Some(drag) = armed {
+            if base.starts_with("MouseDrag") && !base.starts_with("MouseDragEnd") {
+                return self.update_mouse_drag(client, kind, context, drag, mouse);
+            }
+            if base.starts_with("Wheel") {
+                if let Some(registered) = self.inner.lock().client_mut(client) {
+                    registered.mouse_drag = Some(drag);
+                }
+            }
+        }
         let outside_modal = (!key.contains("Status"))
             .then(|| {
                 let inner = self.inner.lock();
@@ -23059,6 +23263,47 @@ impl Shared {
     /// a mouse mode armed, so the pane input the client encoded with the event
     /// is the write, and anything the client encoded for its own pointer
     /// handling instead is dropped the way an unarmed pane drops a report.
+    fn update_mouse_drag(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        drag: zz_mux::MouseDrag,
+        mouse: &MouseEventTarget,
+    ) -> Result<(), DaemonError> {
+        let (session, window) = {
+            let inner = self.inner.lock();
+            let Some(session) = client_attached_session(&inner, client) else {
+                return Ok(());
+            };
+            let Some(window) = inner.engine.state.window_for_pane(drag.pane) else {
+                return Ok(());
+            };
+            (session, window)
+        };
+        let mut context = context.clone();
+        context.retarget(&ExecutionContext::new(
+            Some(session),
+            Some(window),
+            Some(drag.pane),
+        ));
+        context.no_hooks = true;
+        context.set_invoking_mouse(Some(MouseEventTarget {
+            pane: Some(drag.pane),
+            window: Some(window),
+            drag: Some(drag),
+            ..mouse.clone()
+        }));
+        let target = drag.pane.to_string();
+        self.execute(
+            client,
+            kind,
+            &mut context,
+            &CommandInvocation::new("resize-pane", ["-M", "-t", target.as_str()]),
+        )?;
+        Ok(())
+    }
+
     fn forward_mouse_key_to_pane(
         self: &Arc<Self>,
         client: ClientId,
@@ -23834,6 +24079,28 @@ impl Shared {
                 _ if swallowed_help => ChooseBufferAction::Close,
                 ChooseBufferAction::Key(input) if prompt_edit.is_none() => {
                     let searching = chooser.search.is_some();
+                    if !searching
+                        && overlay_key_action(&inner.engine.keys, "choose-buffer", &input)
+                            == Some("edit")
+                    {
+                        let source = chooser.source_pane;
+                        let edit = usize::try_from(chooser.rendered.selected)
+                            .ok()
+                            .and_then(|index| chooser.rendered.items.get(index))
+                            .and_then(|item| {
+                                inner
+                                    .paste_buffers
+                                    .iter()
+                                    .find(|buffer| buffer.name == item.name)
+                            })
+                            .map(|buffer| (buffer.name.clone(), Arc::clone(&buffer.data)));
+                        inner.client_entry(client).choose_buffer.replace(chooser);
+                        drop(inner);
+                        if let Some((name, data)) = edit {
+                            self.spawn_editor(client, source, &data, EditorTarget::Buffer(name));
+                        }
+                        return Ok(());
+                    }
                     if let Some(row) =
                         chooser_row_for_key(&chooser.rendered.items, &input, searching, |item| {
                             &item.key
@@ -27152,8 +27419,8 @@ impl Shared {
         ) {
             return;
         }
+        let exit_code = pane_wait_exit_code(terminal, &status);
         {
-            let exit_code = pane_wait_exit_code(terminal, &status);
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -27164,6 +27431,7 @@ impl Shared {
             }
             Self::wake_pane_exit_wait(&mut inner, pane, exit_code);
         }
+        self.finish_editor(pane, exit_code);
         let (failed, dead_status, dead_signal) = match status {
             zz_terminal::SessionStatus::Exited(status) => {
                 let failed = status.code != 0 || status.signal.is_some();
@@ -34760,6 +35028,7 @@ struct Client {
     ctrl_attachment: Option<u64>,
     ctrl_initializing: bool,
     clipboard_query: Option<Instant>,
+    mouse_drag: Option<zz_mux::MouseDrag>,
 }
 
 #[derive(Default)]
@@ -34830,6 +35099,7 @@ struct ServerState {
     next_message_number: u64,
     next_timed_message_id: u64,
     paste_buffers: Vec<PasteBuffer>,
+    editors: BTreeMap<PaneId, EditorSession>,
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
     active_shell_jobs: usize,
@@ -37680,6 +37950,20 @@ fn take_command_output(inner: &mut ServerState, client: ClientId) -> Option<Reti
         .and_then(|c| c.subscriber.as_ref())
         .cloned();
     Some((output, subscriber))
+}
+
+struct EditorSession {
+    client: ClientId,
+    path: PathBuf,
+    target: EditorTarget,
+}
+
+enum EditorTarget {
+    Buffer(String),
+    Option {
+        pane: PaneId,
+        edit: zz_mux::CustomizeEdit,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -52873,6 +53157,7 @@ mod tests {
                 close: true,
                 commands: Vec::new(),
                 menu: None,
+                edit: None,
             },
         );
         let inner = shared.inner.lock();

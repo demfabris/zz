@@ -999,9 +999,7 @@ impl CellLayout {
 
     pub(crate) fn validate(&self) -> Result<(), String> {
         let geometry = self.root.geometry();
-        if !matches!(self.root, CellNode::Float { .. })
-            && (geometry.xoff != 0 || geometry.yoff != 0)
-        {
+        if self.root.tiled() && (geometry.xoff != 0 || geometry.yoff != 0) {
             return Err("root offset is not zero".to_owned());
         }
         let mut dividers = BTreeSet::new();

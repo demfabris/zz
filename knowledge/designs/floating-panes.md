@@ -316,6 +316,27 @@ Recorded by float.clients (2026-10-09).
 - The raw TUI fills a window with no tiled pane with the default `fill-character` inside cell
   (`bg=themedarkgrey`); a user `fill-character` is not read.
 
+# Where the float.keys build differs
+
+Recorded by float.keys (2026-10-09).
+
+- The per-client drag is `Client.mouse_drag` in the daemon, armed by `MuxEffect::ArmMouseDrag`
+  from `new-pane -M`, `move-pane -M` and `resize-pane -M`. A later drag report of the same client
+  runs `resize-pane -M -t <pane>` with the armed drag in the invoking mouse event and no hooks, which
+  dispatches to the update the arming command chose; any report that is not a drag or a wheel ends
+  it. The raw TUI keeps sending a gesture's drag and release reports once one of them was bound,
+  whatever key they name, and `MouseKey.press` carries the press cell on each.
+- A tiled border drag arms the drag too, so its later reports skip the key tables; the update is the
+  existing absolute resize to the pointer, which lands where 3.8's relative one does.
+- `new-pane` into a window whose root is a float wraps it in a node carrying the float's offsets, as
+  `layout_replace_with_node` does, so the layout check accepts a non-zero root offset when no tile is
+  left.
+- The editor modal is `new-pane -O -c /tmp` with outer `-x -y -X -Y` that give the 90% content box
+  and `remain-on-exit off`; `choose-buffer`'s `e` is the `edit` row of zz's `choose-buffer` table.
+- `compat/tui-floating.sh` picks the pane menu's Move item with Down and Enter: in zz a mouse release
+  that chooses a menu item whose command opens another menu leaves no menu up, where 3.8 shows the
+  second one.
+
 # zz-only extensions
 
 - `new-pane --kind terminal|browser|picker|agent [--profile] [--provider]`, inherited from

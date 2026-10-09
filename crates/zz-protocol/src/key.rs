@@ -429,6 +429,108 @@ impl Default for KeyTables {
                 note: None,
             },
         );
+        for (key, note) in [
+            (",", "Display move menu"),
+            (".", "Display move and resize menu"),
+            ("0", "Move pane to fill the window"),
+            ("1", "Move pane to top-left corner"),
+            ("2", "Move pane to top-right corner"),
+            ("3", "Move pane to bottom-left corner"),
+            ("4", "Move pane to bottom-right corner"),
+            ("Up", "Move pane to top"),
+            ("Down", "Move pane to bottom"),
+            ("Left", "Move pane to left"),
+            ("Right", "Move pane to right"),
+            ("M-1", "Move pane to top-left corner and resize"),
+            ("M-2", "Move pane to top-right corner and resize"),
+            ("M-3", "Move pane to bottom-left corner and resize"),
+            ("M-4", "Move pane to bottom-right corner and resize"),
+            ("M-Up", "Move pane to top and resize"),
+            ("M-Down", "Move pane to bottom and resize"),
+            ("M-Left", "Move pane to left and resize"),
+            ("M-Right", "Move pane to right and resize"),
+        ] {
+            tables.update_binding_metadata("move", key, Some(note.to_owned()), false);
+        }
+        let float_toggle = |target: &[&str]| {
+            let mut args = vec!["-F"];
+            args.extend_from_slice(target);
+            args.extend([
+                "#{pane_floating_flag}",
+                "{ join-pane }",
+                "{ break-pane -W }",
+            ]);
+            let block = args.len() - 2;
+            CommandInvocation::new("if-shell", args).with_command_blocks([block, block + 1])
+        };
+        let switcher = |mode: &str| {
+            vec![
+                CommandInvocation::new(
+                    "new-pane",
+                    ["-E", "-X", "0", "-Y", "0", "-x", "75%", "-y", "30%"],
+                ),
+                CommandInvocation::new("move-pane", ["-P", "bottom-centre"]),
+                CommandInvocation::new("switch-mode", [mode]),
+            ]
+        };
+        for (key, commands, note) in [
+            (
+                "*",
+                vec![CommandInvocation::new("new-pane", [] as [&str; 0])],
+                "New floating pane",
+            ),
+            (
+                "@",
+                vec![float_toggle(&[])],
+                "Toggle pane between floating and tiled",
+            ),
+            (
+                "g",
+                vec![CommandInvocation::new("switch-client", ["-T", "move"])],
+                "Move a floating pane",
+            ),
+            ("Tab", switcher("-kw"), "Switch to a window"),
+            ("BTab", switcher("-ks"), "Switch to a session"),
+        ] {
+            tables.bind(
+                "prefix",
+                key,
+                Binding {
+                    commands,
+                    repeat: false,
+                    note: Some(note.to_owned()),
+                },
+            );
+        }
+        for (key, command) in [
+            (
+                "C-MouseDrag1Pane",
+                CommandInvocation::new("new-pane", ["-M"]),
+            ),
+            (
+                "C-MouseDrag1Empty",
+                CommandInvocation::new("new-pane", ["-M"]),
+            ),
+            (
+                "M-MouseDrag1Pane",
+                CommandInvocation::new("move-pane", ["-M"]),
+            ),
+            (
+                "M-MouseDrag1Border",
+                CommandInvocation::new("move-pane", ["-M"]),
+            ),
+            ("MouseDown1Control7", float_toggle(&["-t", "="])),
+        ] {
+            tables.bind(
+                "root",
+                key,
+                Binding {
+                    commands: vec![command],
+                    repeat: false,
+                    note: None,
+                },
+            );
+        }
         for (key, prompt, command) in [
             ("x", "kill-pane #P? (y/n)", "kill-pane"),
             ("&", "kill-window #W? (y/n)", "kill-window"),
@@ -1013,6 +1115,7 @@ impl Default for KeyTables {
             ("choose-buffer", "Enter", "accept"),
             ("choose-buffer", "p", "paste"),
             ("choose-buffer", "d", "delete"),
+            ("choose-buffer", "e", "edit"),
             ("choose-buffer", "q", "cancel"),
             ("choose-buffer", "Escape", "cancel"),
             ("choose-buffer", "C-g", "cancel"),

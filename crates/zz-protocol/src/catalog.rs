@@ -643,10 +643,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     ("load-buffer", "[-b buffer-name] [-t target-client] path"),
     (
-        "move-pane",
-        "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
-    ),
-    (
         "new-window",
         "[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]",
     ),
@@ -1774,7 +1770,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "new-pane",
         aliases: &["newp"],
         description: "Create a floating pane",
-        usage: "[-AbCDdEfhIkKLOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
+        usage: "[-AbCDdEfhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("--kind", PaneKind, "pane kind").native(),
             CommandOptionSpec::value("--profile", FreeForm, "browser profile").native(),
@@ -1785,7 +1781,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-D", "kill the modal pane on Escape or C-c"),
             CommandOptionSpec::flag("-K", "send every key to the modal pane"),
             CommandOptionSpec::flag("-L", "split instead of floating"),
-            CommandOptionSpec::unsupported_flag("-M"),
+            CommandOptionSpec::flag("-M", "size the float from the invoking mouse drag"),
             CommandOptionSpec::flag("-O", "make the pane modal"),
             CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),
             CommandOptionSpec::value("-y", FreeForm, "height in cells or percent"),
@@ -1878,7 +1874,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "move-pane",
         aliases: &["movep"],
         description: "Move a pane into another window",
-        usage: "[-bdfhv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
+        usage: "[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
         options: &[
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
@@ -1896,7 +1892,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-X", FreeForm, "floating x position"),
             CommandOptionSpec::value("-Y", FreeForm, "floating y position"),
             CommandOptionSpec::value("-z", FreeForm, "floating z-index"),
-            CommandOptionSpec::unsupported_flag("-M"),
+            CommandOptionSpec::flag("-M", "move the float with the invoking mouse drag"),
         ],
         positionals: &[],
         variadic: None,
@@ -3240,8 +3236,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 327), ("optional", 8), ("required", 250)])
         );
-        assert_eq!((supported, unsupported), (569, 17));
-        assert_eq!(usage_overrides.len(), 26);
+        assert_eq!((supported, unsupported), (571, 15));
+        assert_eq!(usage_overrides.len(), 25);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

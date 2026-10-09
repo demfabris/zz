@@ -594,6 +594,7 @@ pub(crate) fn run(
     model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
     model.begin_client_focus_attach();
     let mut event_loop = EventLoop::new(&client).map_err(|error| error.to_string())?;
+    event_loop.adopt_negotiation(&core);
     if terminal.kitty_probe_sent() {
         event_loop.await_graphics_reply();
     }
@@ -720,7 +721,7 @@ pub(crate) fn run(
                                         | CoreEvent::KeyTablesChanged
                                 ) {
                                     refresh_terminal_options(&mut model, &core, &escape_time);
-                                    adopt_terminal_negotiation(&core, &mut event_loop);
+                                    event_loop.adopt_negotiation(&core);
                                 }
                                 let popup_lifecycle_changed = matches!(
                                     &*event,
@@ -1298,15 +1299,6 @@ fn escape_timeout_ms(options: &zz_protocol::MuxOptions) -> u64 {
         .and_then(|option| option.value.parse::<u64>().ok())
         .unwrap_or(10)
         .max(1)
-}
-
-fn adopt_terminal_negotiation(core: &Mutex<ClientCore>, event_loop: &mut EventLoop) {
-    let core = lock_core(core);
-    let Some((features, user_keys)) = core.terminal_negotiation() else {
-        return;
-    };
-    event_loop.set_user_keys(user_keys);
-    crate::tty::adopt_negotiated_features(features);
 }
 
 fn refresh_terminal_options(model: &mut Model, core: &Mutex<ClientCore>, escape_time: &AtomicU64) {

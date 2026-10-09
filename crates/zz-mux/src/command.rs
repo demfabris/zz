@@ -101,7 +101,6 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "focus-events",
     "extended-keys",
     "terminal-features",
-    "terminal-overrides",
     "user-keys",
     "allow-passthrough",
     "allow-rename",
@@ -36873,7 +36872,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 152);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 151);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)

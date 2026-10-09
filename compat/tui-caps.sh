@@ -129,6 +129,11 @@
 #                                  chrome that is is compared by
 #                                  compat/tui-screen-diff.sh under UTF-8
 #                                  clients only. Not driven.
+#   capability-string overrides    `,*:Eneks@` stops the pin's extended-  named
+#                                  key request and not the raw TUI's,
+#                                  which writes a fixed sequence set;
+#                                  open on options.client-terminal-
+#                                  negotiation. Not driven.
 #   extkeys named by the           the daemon hands the raw TUI the       named
 #     terminal-features array      roster tty_term_create would build,
 #                                  extkeys included; the pin arms on its

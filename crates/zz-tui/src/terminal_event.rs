@@ -154,23 +154,32 @@ impl EventParser {
             .collect();
     }
 
-    fn user_key(&self) -> UserKeyMatch {
+    fn user_key(&self, expired: bool) -> UserKeyMatch {
         let mut found: Option<(usize, u16)> = None;
-        let mut partial = false;
+        let mut longer = false;
         for (sequence, number) in &self.user_keys {
             if self.bytes.starts_with(sequence) {
-                if found.is_none_or(|(consumed, _)| sequence.len() > consumed) {
+                if found.is_none_or(|best| (sequence.len(), *number) > best) {
                     found = Some((sequence.len(), *number));
                 }
             } else if sequence.starts_with(&self.bytes) {
-                partial = true;
+                longer = true;
             }
         }
-        match found {
-            Some((consumed, number)) => UserKeyMatch::Complete { consumed, number },
-            None if partial && self.bytes.first() == Some(&0x1b) => UserKeyMatch::Partial,
-            None => UserKeyMatch::Absent,
+        if longer && !expired && self.bytes.first() == Some(&0x1b) {
+            return UserKeyMatch::Partial;
         }
+        found.map_or(UserKeyMatch::Absent, |(consumed, number)| {
+            UserKeyMatch::Complete { consumed, number }
+        })
+    }
+
+    fn take_user_key(&mut self, number: u16, consumed: usize, output: &mut Vec<Event>) {
+        self.bytes.drain(..consumed);
+        output.push(Event::Key(KeyEvent::new(
+            KeyCode::User(number),
+            KeyModifiers::NONE,
+        )));
     }
 
     pub fn push(&mut self, input: &[u8], output: &mut Vec<Event>) {
@@ -209,6 +218,17 @@ impl EventParser {
             if self.bytes.starts_with(b"\x1b[?") || self.bytes.starts_with(b"\x1b_") {
                 return;
             }
+            if let UserKeyMatch::Complete { consumed, number } = self.user_key(true) {
+                self.take_user_key(number, consumed, output);
+                self.parse(output);
+                return;
+            }
+            if let Some(parsed) = parse_one(&self.bytes, self.graphics_reply.is_some()) {
+                self.bytes.drain(..parsed.consumed);
+                output.extend(parsed.event);
+                self.parse(output);
+                return;
+            }
             self.bytes.remove(0);
             output.push(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
             self.parse(output);
@@ -243,13 +263,9 @@ impl EventParser {
                 self.in_paste = true;
                 continue;
             }
-            match self.user_key() {
+            match self.user_key(false) {
                 UserKeyMatch::Complete { consumed, number } => {
-                    self.bytes.drain(..consumed);
-                    output.push(Event::Key(KeyEvent::new(
-                        KeyCode::User(number),
-                        KeyModifiers::NONE,
-                    )));
+                    self.take_user_key(number, consumed, output);
                     continue;
                 }
                 UserKeyMatch::Partial => return,
@@ -739,6 +755,60 @@ mod tests {
         let mut events = Vec::new();
         parser.push(bytes, &mut events);
         events
+    }
+
+    #[test]
+    fn a_user_key_extending_a_built_in_key_holds_it_until_escape_time() {
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["\x1b[Aq".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"\x1b[A", &mut events);
+        assert!(events.is_empty());
+        parser.flush_escape(&mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(KeyCode::Up, KeyModifiers::NONE))]
+        );
+        events.clear();
+        parser.push(b"\x1b[Aq", &mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(
+                KeyCode::User(0),
+                KeyModifiers::NONE
+            ))]
+        );
+    }
+
+    #[test]
+    fn a_complete_user_key_waits_while_a_longer_one_can_still_arrive() {
+        let user = |number| Event::Key(KeyEvent::new(KeyCode::User(number), KeyModifiers::NONE));
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["\x1b[99~".to_owned(), "\x1b[99~q".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"\x1b[99~", &mut events);
+        assert!(events.is_empty());
+        parser.push(b"q", &mut events);
+        assert_eq!(events, [user(1)]);
+        events.clear();
+        parser.push(b"\x1b[99~", &mut events);
+        parser.flush_escape(&mut events);
+        assert_eq!(events, [user(0)]);
+    }
+
+    #[test]
+    fn a_sequence_on_two_user_keys_fires_the_later_one() {
+        let mut parser = EventParser::default();
+        parser.set_user_keys(&["\x1b[99~".to_owned(), "\x1b[99~".to_owned()]);
+        let mut events = Vec::new();
+        parser.push(b"\x1b[99~", &mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(
+                KeyCode::User(1),
+                KeyModifiers::NONE
+            ))]
+        );
     }
 
     #[test]

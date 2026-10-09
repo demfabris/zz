@@ -564,6 +564,26 @@ mod tests {
     }
 
     #[test]
+    fn a_negotiated_extkeys_feature_writes_the_extended_key_request() {
+        let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&written);
+        let writer = crate::writer::TerminalWriter::with_sink(Box::new(move |bytes| {
+            sink.lock().unwrap().extend_from_slice(bytes);
+            Ok(())
+        }));
+        ACTIVE_OUTPUT.with(|output| {
+            *output.borrow_mut() = Some(std::rc::Rc::new(std::cell::RefCell::new(writer)));
+        });
+        EXTENDED_KEYS_OPTION.store(true, Ordering::Relaxed);
+        adopt_negotiated_features(&["extkeys".to_owned()]);
+        let armed = EXTENDED_KEYS_ARMED.swap(false, Ordering::Relaxed);
+        EXTENDED_KEYS_OPTION.store(false, Ordering::Relaxed);
+        ACTIVE_OUTPUT.with(|output| output.borrow_mut().take());
+        assert!(armed);
+        assert_eq!(written.lock().unwrap().as_slice(), EXTENDED_KEYS_ENABLE);
+    }
+
+    #[test]
     fn extended_keys_arm_for_every_value_but_off() {
         assert!(extended_keys_armed("on\n"));
         assert!(extended_keys_armed("always"));

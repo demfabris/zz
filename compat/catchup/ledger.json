@@ -439,7 +439,7 @@
       "id": "pin.hooks-events",
       "track": "pin",
       "title": "3.8 hooks, event payloads, set-hook -E/-T, wait-for -E/-v/-l/-w/-F",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -459,7 +459,39 @@
       "branch": "catchup/pin.hooks-events",
       "sha": null,
       "notes": [
-        "2026-10-09 from pin.contract-breaks: scenarios failing at 3.8 that look like this item's: daemon-command-item-format (#{command} inside an after-hook is set-buffer on 3.8), source-file-current-file (@cf-hook), smoke/args-parse-set-hook and smoke/config-chain-parse-abort (tmux-side only); show-options-hooks also diverges on display-panes options (pin.display-panes) and after-queue."
+        "2026-10-09 from pin.contract-breaks: scenarios failing at 3.8 that look like this item's: daemon-command-item-format (#{command} inside an after-hook is set-buffer on 3.8), source-file-current-file (@cf-hook), smoke/args-parse-set-hook and smoke/config-chain-parse-abort (tmux-side only); show-options-hooks also diverges on display-panes options (pin.display-panes) and after-queue.",
+        "2026-10-09: lane done at aa3119b71: 25/30 closed; session-group hooks filed under sessions.linked-groups (never), accepted; leftovers in pin.hooks-events-2"
+      ]
+    },
+    {
+      "id": "pin.hooks-events-2",
+      "track": "pin",
+      "title": "Rest of the 3.8 hook surface",
+      "status": "todo",
+      "deps": [
+        "pin.hooks-events"
+      ],
+      "zones": [
+        "crates/zz-daemon/src/daemon.rs",
+        "crates/zz-daemon/src/daemon/hook_events.rs",
+        "crates/zz-mux/src/command.rs",
+        "compat/scenarios"
+      ],
+      "gaps": [
+        "pin.hooks-events"
+      ],
+      "accept": [
+        "pane-prompt-opened and pane-prompt-closed fire around command-prompt -P (and status prompts, as 3.8) with 3.8's payload.",
+        "wait-for -E, -v and -F work as 3.8: an event sink every producer feeds whether or not a hook is set, and a parked waiter that prints payload lines.",
+        "The 12 missing hook_* payload keys resolve (pane-exited exit keys, old_session/new_session and _name forms, pane_command, pane_current_path, prompt_type, group/group_size where zz has the fact; group keys register native with sessions.linked-groups).",
+        "after-select-pane is skipped when the target pane is already active, as 3.8.",
+        "set-hook -E @x runs nothing when @x was set with set-option rather than set-hook, as 3.8 (zz needs to remember how a user hook was set).",
+        "The pin.hooks-events gap closes."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: leftovers of pin.hooks-events."
       ]
     },
     {

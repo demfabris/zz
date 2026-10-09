@@ -12,7 +12,7 @@ use zpui::{
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, Outbound, TERMINAL_TABLE,
 };
-use zz_daemon::{AskpassPromptKind, AskpassReply, InteractiveClient};
+use zz_daemon_client::{AskpassPromptKind, AskpassReply, InteractiveClient};
 use zz_protocol::{InputMessage, PaneId, ProtocolMessage};
 use zz_terminal::{
     ClipboardTarget, KeyAction, KeyCode, PointerCellEvent, TerminalMouseButton, TerminalMouseInput,

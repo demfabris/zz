@@ -261,10 +261,10 @@ fn a_daemon_spawned_with_blocked_signals_reaps_its_startup_shell_and_honors_sigt
     }
     assert!(holder.0.exists(), "startup shell started");
     let (connected, welcome) = mpsc::channel();
-    let endpoint = crate::Endpoint::Local(socket.clone());
+    let endpoint = zz_daemon_client::Endpoint::Local(socket.clone());
     thread::spawn(move || {
         let _ = connected.send(
-            crate::InteractiveClient::connect_endpoint_with_prompts_and_attach(
+            zz_daemon_client::InteractiveClient::connect_endpoint_with_prompts_and_attach(
                 &endpoint,
                 Some(TerminalColorScheme::Dark),
                 None,

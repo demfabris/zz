@@ -28,7 +28,7 @@ fn main() -> ExitCode {
     if let Some(exit) = zz_cli::run_askpass_mode() {
         return exit;
     }
-    let socket = zz_daemon::default_socket_path();
+    let socket = zz_daemon_client::default_socket_path();
     match zz_cli::run_startup(
         &socket,
         StartupOptions {

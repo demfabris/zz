@@ -60,7 +60,8 @@ stream.
 |-------|------|
 | [zz-protocol](/crates/zz-protocol.md) | stable IDs, versioned length-prefixed control protocol, packed terminal lanes |
 | [zz-mux](/crates/zz-mux.md) | renderer-free state machine: layouts, targets, commands, key tables, `.tmux.conf` |
-| [zz-daemon](/crates/zz-daemon.md) | persistent daemon: mux state, PTYs, ACP adapter children, frame and agent-stream fanout, sockets, attachment, CLI |
+| [zz-daemon](/crates/zz-daemon.md) | persistent daemon: mux state, PTYs, ACP adapter children, frame and agent-stream fanout, the listening socket, attachment |
+| [zz-daemon-client](/crates/zz-daemon-client.md) | the client half every client links: local and ssh endpoints, askpass, `CommandClient`/`InteractiveClient`, the shared transport |
 | [zz-terminal](/crates/zz-terminal.md) | per-PTY child + libghostty on a worker thread; publishes terminal frames |
 | [zz-browser](/crates/zz-browser.md) | CEF init, subprocess dispatch, request context, input translation, frame mailboxes |
 | [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |

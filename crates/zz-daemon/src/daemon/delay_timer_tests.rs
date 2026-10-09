@@ -12,7 +12,7 @@ fn twenty_delays_add_no_threads_and_only_their_deadlines() {
     let waker = Arc::new(mio::Waker::new(poll.registry(), mio::Token(1)).unwrap());
     let mut timers = LoopTimers::new(&shared, &waker);
     shared.loop_active.store(true, Ordering::Release);
-    let threads = crate::process_info::sample(std::process::id())
+    let threads = zz_daemon_client::process_info::sample(std::process::id())
         .unwrap()
         .threads;
     assert_eq!(timers.next(Instant::now()), None);
@@ -50,7 +50,7 @@ fn twenty_delays_add_no_threads_and_only_their_deadlines() {
     }));
     assert_eq!(shared.connection_threads.worker_count(), 0);
     assert!(
-        crate::process_info::sample(std::process::id())
+        zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads
             <= threads

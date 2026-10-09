@@ -16,7 +16,8 @@ use std::{
 };
 
 use zz_client::{ClientCore, Outbound};
-use zz_daemon::{CommandClient, Daemon, InteractiveClient};
+use zz_daemon::Daemon;
+use zz_daemon_client::{CommandClient, InteractiveClient};
 use zz_protocol::{
     CommandInvocation, Event, EventPayload, InputMessage, MuxSnapshot, PaneId, PaneKindSnapshot,
     ProtocolMessage,

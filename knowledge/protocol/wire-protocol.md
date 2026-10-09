@@ -587,11 +587,11 @@ record/fetch round-trip for numbered placeholders.
 # Remote transport
 
 Remote carriers preserve the identical envelope but are platform-specific. macOS and Linux desktop
-clients use OpenSSH `ssh -N -L` to forward the daemon's Unix socket (`crates/zz-daemon/src/endpoint.rs`
-`ssh_forward_command`). iOS selects `RusshForward` in `crates/zz-daemon/src/client.rs`
+clients use OpenSSH `ssh -N -L` to forward the daemon's Unix socket (`crates/zz-daemon-client/src/endpoint.rs`
+`ssh_forward_command`). iOS selects `RusshForward` in `crates/zz-daemon-client/src/client.rs`
 `connect_endpoint_with_prompts_and_terminal`; it opens an in-process `russh` session, runs
 `zz proxy --socket ...`, and pumps frames over the SSH channel's stdio
-(`crates/zz-daemon/src/russh_client.rs` `establish`). `Endpoint::parse` accepts `unix://`, a bare
+(`crates/zz-daemon-client/src/russh_client.rs` `establish`). `Endpoint::parse` accepts `unix://`, a bare
 path, and `ssh://[user@]host[:port][/remote/socket]`, and nothing else . a `quic://` string is
 rejected with a pointer at `ssh://`. Both carriers expose one reliable ordered byte stream to the
 protocol, with no alternate frame shape, compression, or unidirectional supersession. That keeps

@@ -321,8 +321,8 @@ async fn rejects_authentication_commands_and_malformed_addresses() {
 
 #[tokio::test]
 async fn shutdown_closes_listener_active_connections_and_pending_handshakes() {
-    #[cfg(all(unix, feature = "daemon"))]
-    if !crate::daemon::solo_tests::rerun_alone(
+    #[cfg(unix)]
+    if !crate::solo_tests::rerun_alone(
         "russh_socks::tests::shutdown_closes_listener_active_connections_and_pending_handshakes",
     ) {
         return;
@@ -382,8 +382,8 @@ fn unused_loopback_port(window: u16) -> u16 {
 
 #[tokio::test]
 async fn loopback_forwards_http_and_tcp_in_both_families_with_original_port() {
-    #[cfg(all(unix, feature = "daemon"))]
-    if !crate::daemon::solo_tests::rerun_alone(
+    #[cfg(unix)]
+    if !crate::solo_tests::rerun_alone(
         "russh_socks::tests::loopback_forwards_http_and_tcp_in_both_families_with_original_port",
     ) {
         return;
@@ -462,8 +462,8 @@ async fn loopback_forwards_http_and_tcp_in_both_families_with_original_port() {
 
 #[tokio::test]
 async fn loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners() {
-    #[cfg(all(unix, feature = "daemon"))]
-    if !crate::daemon::solo_tests::rerun_alone(
+    #[cfg(unix)]
+    if !crate::solo_tests::rerun_alone(
         "russh_socks::tests::loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners",
     ) {
         return;
@@ -497,8 +497,8 @@ async fn loopback_rejects_invalid_ports_and_conflicts_without_partial_listeners(
 
 #[tokio::test]
 async fn loopback_shutdown_closes_connections_and_reconnect_rebinds_same_port() {
-    #[cfg(all(unix, feature = "daemon"))]
-    if !crate::daemon::solo_tests::rerun_alone(
+    #[cfg(unix)]
+    if !crate::solo_tests::rerun_alone(
         "russh_socks::tests::loopback_shutdown_closes_connections_and_reconnect_rebinds_same_port",
     ) {
         return;
@@ -618,8 +618,8 @@ async fn assert_http(host: &str, port: u16, body: &str) {
 
 #[tokio::test]
 async fn ssh_inventory_prepares_page_and_api_ports_then_refreshes_without_dropping_streams() {
-    #[cfg(all(unix, feature = "daemon"))]
-    if !crate::daemon::solo_tests::rerun_alone(
+    #[cfg(unix)]
+    if !crate::solo_tests::rerun_alone(
         "russh_socks::tests::ssh_inventory_prepares_page_and_api_ports_then_refreshes_without_dropping_streams",
     ) {
         return;
@@ -713,8 +713,8 @@ async fn ssh_inventory_bounds_output_and_time_and_recovers_after_failure() {
 
 #[tokio::test]
 async fn discovered_port_conflicts_are_isolated_with_room_for_forty_services() {
-    #[cfg(all(unix, feature = "daemon"))]
-    if !crate::daemon::solo_tests::rerun_alone(
+    #[cfg(unix)]
+    if !crate::solo_tests::rerun_alone(
         "russh_socks::tests::discovered_port_conflicts_are_isolated_with_room_for_forty_services",
     ) {
         return;

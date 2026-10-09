@@ -10,7 +10,7 @@ use crate::daemon::{
     ClientId, ClientKind, CommandInvocation, ExecutionContext, OutboundMailbox, Shared, attach,
     client_size_fact,
 };
-use crate::transport::{LoopThread, clear_loop_again, wake_loop};
+use crate::wake::{LoopThread, clear_loop_again, wake_loop};
 
 const WAKE: Token = Token(7);
 

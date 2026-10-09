@@ -212,6 +212,7 @@ zz-cli = { path = "crates/zz-cli" }
 zz-client = { path = "crates/zz-client" }
 zz-config = { path = "crates/zz-config" }
 zz-daemon = { path = "crates/zz-daemon", default-features = false }
+zz-daemon-client = { path = "crates/zz-daemon-client" }
 zz-mux = { path = "crates/zz-mux" }
 zz-protocol = { path = "crates/zz-protocol" }
 zz-terminal = { path = "crates/zz-terminal", default-features = false }

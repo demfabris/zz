@@ -27,9 +27,10 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use zz_daemon::{
-    CommandClient, CommandOutcome, Daemon, DaemonError, Endpoint, ExecChain, ExecChainEnd,
-    ExecClassifier, InteractiveClient, classify_local_connect_error, terminate_incompatible_daemon,
+use zz_daemon::Daemon;
+use zz_daemon_client::{
+    CommandClient, CommandOutcome, DaemonError, Endpoint, ExecChain, ExecChainEnd, ExecClassifier,
+    InteractiveClient, classify_local_connect_error, terminate_incompatible_daemon,
     unmasked::SpawnUnmasked as _,
 };
 use zz_mux::MuxEngine;
@@ -208,7 +209,7 @@ pub fn run_startup(socket_path: &Path, options: StartupOptions) -> Startup {
         client_utf8,
         client_features,
     } = arguments;
-    zz_daemon::set_client_terminal_flags(zz_daemon::ClientTerminalFlags {
+    zz_daemon_client::set_client_terminal_flags(zz_daemon_client::ClientTerminalFlags {
         utf8: client_utf8,
         features: client_features,
     });
@@ -360,9 +361,9 @@ pub fn attach_parent_console() {
 #[cfg(any(unix, windows))]
 #[must_use]
 pub fn run_askpass_mode() -> Option<ExitCode> {
-    let socket = std::env::var_os(zz_daemon::ASKPASS_SOCKET_ENV)?;
+    let socket = std::env::var_os(zz_daemon_client::ASKPASS_SOCKET_ENV)?;
     let prompt = std::env::args_os().nth(1).unwrap_or_default();
-    Some(zz_daemon::run_helper(
+    Some(zz_daemon_client::run_helper(
         Path::new(&socket),
         &prompt.to_string_lossy(),
     ))
@@ -835,7 +836,7 @@ fn run_command_mode(
     }
 
     if command == "proxy" {
-        return Some(match zz_daemon::run_socket_proxy(socket_path) {
+        return Some(match zz_daemon_client::run_socket_proxy(socket_path) {
             Ok(()) => ExitCode::SUCCESS,
             Err(error) => {
                 eprintln!("zz proxy: {error}");
@@ -2123,8 +2124,8 @@ fn spawn_daemon(
     }
     if let Some(hint) = tmux_import_hint(
         std::io::stderr().is_terminal(),
-        zz_daemon::mux_config_write_path().is_some_and(|path| path.exists()),
-        zz_daemon::discover_tmux_config().as_deref(),
+        zz_daemon_client::mux_config_write_path().is_some_and(|path| path.exists()),
+        zz_daemon_client::discover_tmux_config().as_deref(),
     ) {
         eprintln!("{hint}");
     }
@@ -2482,7 +2483,7 @@ fn connect_host_command_client(name: &str) -> Result<CommandClient, String> {
 }
 
 fn configured_host_endpoint(name: &str) -> Result<Endpoint, String> {
-    let (hosts, _) = zz_daemon::configured_fleet_hosts()
+    let (hosts, _) = zz_daemon_client::configured_fleet_hosts()
         .map_err(|error| format!("could not read zz/config: {error}"))?;
     if let Some(host) = hosts.iter().find(|host| host.name == name) {
         return Ok(host.endpoint.clone());
@@ -2562,7 +2563,7 @@ pub fn connect_terminal_surface_client_with_config(
                 None,
                 None,
                 &[
-                    zz_daemon::CLIENT_EXITS_ON_DETACH_CAPABILITY,
+                    zz_daemon_client::CLIENT_EXITS_ON_DETACH_CAPABILITY,
                     zz_protocol::TTY_INPUT_CAPABILITY,
                 ],
                 attach.cloned(),
@@ -2734,7 +2735,7 @@ mod tests {
     };
     #[cfg(unix)]
     use super::{tmux_label_socket_path, tmux_socket_root};
-    use zz_daemon::DaemonError;
+    use zz_daemon_client::DaemonError;
     use zz_mux::{CommandAliasResolution, ExecutionContext, MuxEngine};
     use zz_protocol::{
         CommandInvocation, ExecResumeKind, PreparedCommand, PreparedCommandResult, ServerError,
@@ -4088,7 +4089,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_spawned_daemon_that_exits_is_reaped_while_the_spawner_lives() {
-        use zz_daemon::unmasked::SpawnUnmasked as _;
+        use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
         let child = std::process::Command::new("/bin/sh")
             .args(["-c", "exit 0"])

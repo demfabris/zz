@@ -19,7 +19,7 @@ impl AppShell {
         }
         self.auth_prompt_id = Some(prompt.id);
         let connection = self.connection.clone();
-        let input = (prompt.kind == zz_daemon::AskpassPromptKind::Secret)
+        let input = (prompt.kind == zz_daemon_client::AskpassPromptKind::Secret)
             .then(|| cx.new(|cx| InputState::new(window, cx)));
         let focus = input.as_ref().map(|input| input.focus_handle(cx));
         window.open_dialog(cx, move |dialog, _, cx| {
@@ -42,7 +42,7 @@ impl AppShell {
                     });
                     true
                 })
-            } else if prompt.kind == zz_daemon::AskpassPromptKind::SaveKey {
+            } else if prompt.kind == zz_daemon_client::AskpassPromptKind::SaveKey {
                 zz_ui::feedback::ssh_offer_prompt_dialog(
                     dialog,
                     "Sign in without a password?",
@@ -57,7 +57,7 @@ impl AppShell {
                     true
                 })
             } else {
-                let title = if prompt.kind == zz_daemon::AskpassPromptKind::HostKey {
+                let title = if prompt.kind == zz_daemon_client::AskpassPromptKind::HostKey {
                     "Trust host key?"
                 } else {
                     "Allow authentication?"

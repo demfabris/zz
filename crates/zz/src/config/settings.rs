@@ -2174,7 +2174,7 @@ fn config_editor_subscription(
 
 fn config_file_path(kind: ConfigFileKind) -> io::Result<PathBuf> {
     match kind {
-        ConfigFileKind::Mux => zz_daemon::mux_config_write_path().ok_or_else(|| {
+        ConfigFileKind::Mux => zz_daemon_client::mux_config_write_path().ok_or_else(|| {
             io::Error::new(
                 ErrorKind::NotFound,
                 "cannot create zz/mux.conf because neither XDG_CONFIG_HOME nor HOME is available",
@@ -2730,7 +2730,7 @@ mod tests {
             "0.7"
         );
     }
-    use zz_daemon::{DaemonError, Endpoint};
+    use zz_daemon_client::{DaemonError, Endpoint};
 
     #[test]
     fn animations_are_the_first_interface_tweak() {
@@ -2765,7 +2765,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -2840,7 +2840,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -2918,7 +2918,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -2970,7 +2970,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

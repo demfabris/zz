@@ -36,7 +36,7 @@ timestamp: 2026-08-28T00:00:00-03:00
 > [wire-protocol](/protocol/wire-protocol.md). Historical
 > record of the 2026-07-31 campaign follows. M0 landed 2026-07-16 (commits
 > `6e6509c`, `7e5410c`): `ZZ_SOCKET`/global `--socket` overrides, the monomorphized `Transport`
-> trait seam in `crates/zz-daemon/src/transport.rs`, the `measure_attach` example, and
+> trait seam in `crates/zz-daemon-client/src/transport.rs`, the `measure_attach` example, and
 > `scripts/remote-attach.sh` . byte-identical attach through a forwarded socket, ~40 µs local
 > overhead. **M1 implemented 2026-07-29; QUIC is compiled unconditionally as of 2026-07-31:**
 > `QuicTransport` (`crates/zz-daemon/src/quic.rs`, quinn on smol . no tokio) carrying the

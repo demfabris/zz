@@ -225,7 +225,7 @@ impl EventLoop {
         input.clear();
         tty.input = input;
         if tty.again {
-            let _ = crate::transport::wake_loop(&self.waker);
+            let _ = crate::wake::wake_loop(&self.waker);
         }
         if closed {
             self.close_tty(token, true);

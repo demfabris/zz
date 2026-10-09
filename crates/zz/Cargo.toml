@@ -66,6 +66,7 @@ zz-browser.workspace = true
 zz-chrome-import.workspace = true
 zz-client.workspace = true
 zz-daemon = { workspace = true, features = ["default"] }
+zz-daemon-client.workspace = true
 zz-mux.workspace = true
 zz-protocol.workspace = true
 zz-terminal = { workspace = true, features = ["default"] }

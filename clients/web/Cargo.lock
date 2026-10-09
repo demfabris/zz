@@ -9548,7 +9548,7 @@ dependencies = [
  "zpui",
  "zpui-ios",
  "zz-client",
- "zz-daemon",
+ "zz-daemon-client",
  "zz-protocol",
  "zz-terminal",
  "zz-ui",
@@ -9575,17 +9575,15 @@ dependencies = [
 ]
 
 [[package]]
-name = "zz-daemon"
+name = "zz-daemon-client"
 version = "0.16.0"
 dependencies = [
  "core-foundation",
  "getrandom 0.4.3",
- "glob",
  "interprocess",
  "libc",
  "log",
  "parking_lot",
- "regex",
  "russh",
  "rustix",
  "security-framework-sys",
@@ -9593,7 +9591,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
- "windows-sys 0.61.2",
  "zeroize",
  "zz-protocol",
  "zz-terminal",
@@ -9612,6 +9609,7 @@ dependencies = [
  "smallvec",
  "thiserror 2.0.20",
  "unicode-width",
+ "url",
  "zz-terminal",
 ]
 

@@ -6,35 +6,31 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[cfg(any(feature = "daemon", windows))]
 use interprocess::local_socket::{ListenerNonblockingMode, ListenerOptions};
 use interprocess::{
     TryClone,
     local_socket::{GenericFilePath, prelude::*},
 };
 
-pub(crate) const SOCKET_ENVIRONMENT_VARIABLE: &str = "ZZ_SOCKET";
+pub const SOCKET_ENVIRONMENT_VARIABLE: &str = "ZZ_SOCKET";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct PeerCredentials {
-    pub(crate) pid: Option<u32>,
+pub struct PeerCredentials {
+    pub pid: Option<u32>,
     #[cfg(unix)]
-    pub(crate) effective_user_id: Option<u32>,
+    pub effective_user_id: Option<u32>,
 }
 
-pub(crate) trait Transport {
+pub trait Transport {
     type Endpoint: ?Sized;
-    #[cfg(any(feature = "daemon", windows))]
     type Listener: TransportListener<Stream = Self::Stream>;
     type Stream: TransportStream;
 
-    #[cfg(any(feature = "daemon", windows))]
     fn bind(endpoint: &Self::Endpoint) -> io::Result<Self::Listener>;
     fn connect(endpoint: &Self::Endpoint) -> io::Result<Self::Stream>;
 }
 
-#[cfg(any(feature = "daemon", windows))]
-pub(crate) trait TransportListener {
+pub trait TransportListener {
     type Stream: TransportStream;
 
     fn set_nonblocking(&self, nonblocking: bool) -> io::Result<()>;
@@ -49,94 +45,13 @@ pub(crate) trait TransportListener {
     }
 
     #[cfg(windows)]
-    fn wait_for_incoming(&self, timeout: Duration, _wake: &AcceptWake) -> io::Result<()> {
+    fn wait_for_incoming(&self, timeout: Duration) -> io::Result<()> {
         std::thread::sleep(timeout);
         Ok(())
     }
 }
 
-#[cfg(any(feature = "daemon", windows))]
-pub(crate) struct AcceptWake {
-    #[cfg(all(unix, feature = "daemon"))]
-    waker: parking_lot::Mutex<Option<std::sync::Arc<mio::Waker>>>,
-}
-
-#[cfg(any(feature = "daemon", windows))]
-impl AcceptWake {
-    pub(crate) fn new() -> Self {
-        Self {
-            #[cfg(all(unix, feature = "daemon"))]
-            waker: parking_lot::Mutex::new(None),
-        }
-    }
-
-    #[cfg(all(unix, feature = "daemon"))]
-    pub(crate) fn install(&self, waker: std::sync::Arc<mio::Waker>) {
-        *self.waker.lock() = Some(waker);
-    }
-
-    pub(crate) fn wake(&self) {
-        #[cfg(all(unix, feature = "daemon"))]
-        {
-            let waker = self.waker.lock().clone();
-            if let Some(waker) = waker
-                && let Err(error) = wake_loop(&waker)
-            {
-                log::warn!("could not wake the mux loop: {error}");
-            }
-        }
-    }
-}
-
-#[cfg(all(unix, feature = "daemon"))]
-thread_local! {
-    static LOOP_WAKER: std::cell::Cell<*const mio::Waker> = const { std::cell::Cell::new(std::ptr::null()) };
-    static LOOP_AGAIN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
-
-#[cfg(all(unix, feature = "daemon"))]
-pub(crate) fn wake_loop(waker: &mio::Waker) -> io::Result<()> {
-    let own = std::ptr::eq(LOOP_WAKER.get(), waker);
-    if own && LOOP_AGAIN.replace(true) {
-        return Ok(());
-    }
-    let woken = waker.wake();
-    if own && woken.is_err() {
-        LOOP_AGAIN.set(false);
-    }
-    woken
-}
-
-#[cfg(all(unix, feature = "daemon"))]
-pub(crate) fn clear_loop_again() {
-    LOOP_AGAIN.set(false);
-}
-
-#[cfg(all(unix, feature = "daemon"))]
-pub(crate) struct LoopThread {
-    waker: *const mio::Waker,
-    again: bool,
-}
-
-#[cfg(all(unix, feature = "daemon"))]
-impl LoopThread {
-    pub(crate) fn enter(waker: &std::sync::Arc<mio::Waker>) -> Self {
-        Self {
-            waker: LOOP_WAKER.replace(std::sync::Arc::as_ptr(waker)),
-            again: LOOP_AGAIN.replace(false),
-        }
-    }
-}
-
-#[cfg(all(unix, feature = "daemon"))]
-impl Drop for LoopThread {
-    fn drop(&mut self) {
-        LOOP_WAKER.set(self.waker);
-        LOOP_AGAIN.set(self.again);
-    }
-}
-
-pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
+pub trait TransportStream: Read + Write + Send + Sized + 'static {
     fn try_clone(&self) -> io::Result<Self>;
 
     #[cfg(unix)]
@@ -149,12 +64,10 @@ pub(crate) trait TransportStream: Read + Write + Send + Sized + 'static {
         Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 
-    #[cfg(all(feature = "daemon", any(windows, test)))]
     fn shutdown(&self) -> io::Result<()> {
         Ok(())
     }
 
-    #[cfg(feature = "daemon")]
     fn set_send_buffer_size(&self, _bytes: usize) -> io::Result<()> {
         Ok(())
     }
@@ -198,15 +111,13 @@ fn platform_default_socket_path() -> PathBuf {
     PathBuf::from(format!(r"\\.\pipe\{directory}-{user}-default"))
 }
 
-pub(crate) struct LocalTransport;
+pub struct LocalTransport;
 
 impl Transport for LocalTransport {
     type Endpoint = Path;
-    #[cfg(any(feature = "daemon", windows))]
     type Listener = LocalListener;
     type Stream = LocalStream;
 
-    #[cfg(any(feature = "daemon", windows))]
     fn bind(endpoint: &Self::Endpoint) -> io::Result<Self::Listener> {
         let name = endpoint.as_os_str().to_fs_name::<GenericFilePath>()?;
         ListenerOptions::new()
@@ -221,10 +132,8 @@ impl Transport for LocalTransport {
     }
 }
 
-#[cfg(any(feature = "daemon", windows))]
-pub(crate) struct LocalListener(LocalSocketListener);
+pub struct LocalListener(LocalSocketListener);
 
-#[cfg(any(feature = "daemon", windows))]
 impl TransportListener for LocalListener {
     type Stream = LocalStream;
 
@@ -256,10 +165,10 @@ impl TransportListener for LocalListener {
     }
 }
 
-pub(crate) struct LocalStream(LocalSocketStream);
+pub struct LocalStream(LocalSocketStream);
 
 impl LocalStream {
-    pub(crate) fn peer_credentials(&self) -> io::Result<PeerCredentials> {
+    pub fn peer_credentials(&self) -> io::Result<PeerCredentials> {
         let credentials = self.0.peer_creds()?;
         #[cfg(unix)]
         let pid = credentials.pid().and_then(|pid| u32::try_from(pid).ok());
@@ -274,7 +183,7 @@ impl LocalStream {
     }
 
     #[cfg(unix)]
-    pub(crate) fn set_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
+    pub fn set_timeout(&self, timeout: Option<std::time::Duration>) -> io::Result<()> {
         match &self.0 {
             LocalSocketStream::UdSocket(stream) => {
                 stream.inner().set_read_timeout(timeout)?;
@@ -284,7 +193,7 @@ impl LocalStream {
     }
 
     #[cfg(unix)]
-    pub(crate) fn shutdown(&self) -> io::Result<()> {
+    pub fn shutdown(&self) -> io::Result<()> {
         match &self.0 {
             LocalSocketStream::UdSocket(stream) => {
                 stream.inner().shutdown(std::net::Shutdown::Both)
@@ -317,12 +226,12 @@ impl TransportStream for LocalStream {
         }
     }
 
-    #[cfg(all(feature = "daemon", unix, test))]
+    #[cfg(unix)]
     fn shutdown(&self) -> io::Result<()> {
         LocalStream::shutdown(self)
     }
 
-    #[cfg(all(feature = "daemon", unix))]
+    #[cfg(unix)]
     fn set_send_buffer_size(&self, bytes: usize) -> io::Result<()> {
         match &self.0 {
             LocalSocketStream::UdSocket(stream) => {
@@ -353,7 +262,7 @@ impl Write for LocalStream {
     }
 }
 
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 impl TransportStream for std::os::unix::net::UnixStream {
     fn try_clone(&self) -> io::Result<Self> {
         Self::try_clone(self)
@@ -362,7 +271,6 @@ impl TransportStream for std::os::unix::net::UnixStream {
         use std::os::fd::AsFd;
         self.as_fd().try_clone_to_owned()
     }
-    #[cfg(test)]
     fn shutdown(&self) -> io::Result<()> {
         self.shutdown(std::net::Shutdown::Both)
     }

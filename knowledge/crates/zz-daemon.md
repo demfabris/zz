@@ -4,7 +4,7 @@ title: zz-daemon crate
 description: The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 resource: crates/zz-daemon/src/daemon.rs
 tags: [crate, daemon, ipc, fanout, transport, agent]
-timestamp: 2026-10-04T00:00:00-03:00
+timestamp: 2026-10-09T00:00:00-03:00
 ---
 
 # Overview
@@ -30,6 +30,13 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 [the app](/crates/zz.md), and the daemon only holds the browser pane's restorable
 `BrowserDescriptor` (URL + profile).
 
+The client half (the command and interactive clients, endpoints and ssh tunnels, askpass, the local
+transport, config paths, process facts) lives in [zz-daemon-client](/crates/zz-daemon-client.md).
+This crate is only the server and depends on that one for what both halves share: `DaemonError`,
+the local transport and listener, `DaemonIdentityGuard`, process facts, and the path helpers. A
+client that never hosts a daemon depends on `zz-daemon-client` alone, so editing the server does not
+rebuild it.
+
 # Responsibilities
 
 | Responsibility | Where |
@@ -45,24 +52,17 @@ send-keys, and client events. It contains no GPUI or CEF code; live browser rend
 | Attach/detach interactive clients | `attach` / `attach_target` / `detach`, `register` / `unregister`, `evict_other_clients` for `attach-session -d` |
 | Serve repair requests after a coalesced drop | `send_full` (`RequestFull`), `send_history` (`HistoryRequest` → `HistoryChunk`), `AgentRuntime::replay` (`AgentReplay` → `AgentUpdates`) |
 | Journal and fan out agent transcripts | `agent::journal::AgentJournal` under `<data>/zz/daemon/agent-journal`, `agent::fanout::AgentFanout` → the mailbox's `agent` lane |
-| Recover an incompatible daemon safely | `terminate_incompatible_daemon`, `DaemonIdentityGuard` (lifecycle) |
+| Recover an incompatible daemon safely | `terminate_incompatible_daemon`, `DaemonIdentityGuard` (zz-daemon-client `lifecycle`) |
 
 # Module map
 
 | Module (`crates/zz-daemon/src/`) | Public surface | Role |
 |-------------------------------|----------------|------|
-| `lib.rs` | re-exports `Daemon`, `DaemonError`, `CommandClient`, `InteractiveClient`, `short_device_name`, `agent_send_reads_stdin`, `default_socket_path`, `default_mux_config`, `discover_tmux_config`, `mux_config_candidates`, `mux_config_write_path`, `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon`, `daemon_identity_protocol_version`, `classify_local_connect_error`, `Endpoint`, `EndpointError`, `SshEndpoint`, `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper`, the `user_data` module, and (feature `agent`) the agent stream vocabulary a client deserializes against . `AgentStreamItem`, `AgentStreamPayload`, `AgentPrompt`, `AgentPromptOutcome`, `AgentSessionSummary`, `AgentSessionCapabilities`, and `AgentAuthMethod` | Crate root; the whole public API |
-| `daemon.rs` | `Daemon`, `DaemonError`, `agent_send_reads_stdin` | The server itself: local accept loop, `Shared`/`ServerState`, command execution, `OutboundMailbox` fan-out, terminal watching, attach/detach, input routing. It binds exactly one endpoint . the owner-only local socket |
-| `transport.rs` | `default_socket_path` | Platform IPC: wraps `interprocess` into `LocalListener`/`LocalStream`, per-platform endpoint paths, peer-credential capture |
-| `client.rs` | `CommandClient`, `InteractiveClient`, `short_device_name` | Client halves of the protocol: connect + handshake (`connect_endpoint` for an `ssh://` endpoint), endpoint-scoped cwd/tty/size/nested/environment hello facts, framed `ProtocolSender`/`ProtocolReceiver`, request/response and attach/detach/input helpers |
-| `paths.rs` | `default_mux_config`, `discover_tmux_config`, `mux_config_candidates`, `mux_config_write_path` | zz-owned config paths and donor discovery for explicit tmux imports |
-| `endpoint.rs` | `Endpoint`, `SshEndpoint`, `EndpointError` | Client-half endpoint abstraction: `unix://`/bare-path/`ssh://` URI parsing (a `quic://` string is rejected with a pointer at `ssh://`), the probe → auto-start → forward ssh sequence below, a managed `ssh -N -L` child with an RAII tunnel guard, and `EndpointError::ssh_reason` turning each failure into advice for the host row |
-| `askpass.rs` | `SshPrompts`, `AskpassPrompt`, `AskpassPromptKind`, `AskpassReply`, `ASKPASS_SOCKET_ENV`, `run_helper` | ssh's password and host-key prompts: the per-connect Unix socket the GUI answers on, the prompt classifier, and the helper mode `zz` re-enters when ssh runs it as `SSH_ASKPASS` |
-| `lifecycle.rs` | `RecoveredDaemon`, `DaemonRecoveryError`, `terminate_incompatible_daemon` | Single-instance identity file + guarded termination of an incompatible-protocol daemon |
+| `lib.rs` | re-exports `Daemon`, `agent_send_reads_stdin`, `append_stdin_payload`, `command_stdin_sink`, `CommandStdinSink`, `exec_resume_kind`, `load_buffer_reads_stdin`, `send_text_reads_stdin`, `path_walk_enters`, and (feature `agent`) the agent stream vocabulary a client deserializes against . `AgentStreamItem`, `AgentStreamPayload`, `AgentPrompt`, `AgentPromptOutcome`, `AgentSessionSummary`, `AgentSessionCapabilities`, and `AgentAuthMethod` | Crate root; the whole public API |
+| `daemon.rs` | `Daemon`, `agent_send_reads_stdin` | The server itself: local accept loop, `Shared`/`ServerState`, command execution, `OutboundMailbox` fan-out, terminal watching, attach/detach, input routing. It binds exactly one endpoint . the owner-only local socket |
+| `wake.rs` | (crate-internal) `AcceptWake`, `wake_loop`, `LoopThread` | The `mio` waker plumbing every producer thread uses to wake the event loop, with the per-thread latch that folds repeated wakes from the loop's own thread into one |
 | `keys.rs` | (crate-internal) `input_key_name`, `send_tokens` | tmux key spelling ↔ `KeyInput`; named-key/literal fan-out for `send-keys` |
 | `status.rs` | (crate-internal) `StatusRenderer`, `status_context` | Expands the [tmux status line](/tmux/status-line.md) per client: strftime, bounded `#()` execution with an output cache, change diffing |
-| `unmasked.rs` | `unmasked::SpawnUnmasked` | The only way zz starts a `std::process::Command`: `spawn_unmasked`, `output_unmasked` and `status_unmasked` clear the calling thread's signal mask for the spawn and put it back after. Since Rust 1.97 a child inherits the mask of the thread that spawned it, and GPUI's background threads block nearly every signal, so a plain spawn from the desktop app starts ssh, shells and helpers with SIGINT, SIGTERM, SIGCHLD and SIGWINCH blocked. `clippy.toml` disallows the plain `spawn`, `output` and `status`; tests and `zz-xtask` are exempt. Children the job registry owns (run-shell, if-shell, hooks, `#()` status jobs, pipe-pane, copy-pipe, discovery helpers) start through `daemon::jobs::spawn` instead: on Linux that is `spawn_unmasked`, on macOS a `posix_spawn` with `POSIX_SPAWN_CLOEXEC_DEFAULT` (`zz_terminal::posix_spawn`), because macOS has no `SOCK_CLOEXEC` and a descriptor another thread is still marking close-on-exec would otherwise stay open in the job for its whole life |
-| `user_data.rs` | `platform_data_dir`, `restrict_to_current_user`, `restrict_directory_to_current_user` | Where user-owned application data lives and how it is permission-hardened. The policy sits here because the daemon's agent journal answers to it too; `crates/zz/src/user_data.rs` is now a re-export of this module |
 | `agent/` (feature `agent`) | `AgentStreamItem`/`AgentStreamPayload` and friends via the crate root | The daemon-owned Agent runtime: `host` (one thread per pane, prompt queue, permission bookkeeping), `runtime` (the ACP connection), `fanout` (coalescing, wire sequence, replay ring, pane state), `journal`, `git_summary` (bounded current-worktree totals), `environment` (ACP child PATH repair and workspace identity), `paths`, plus a test-only in-process `fixture` |
 
 # How the daemon runs
@@ -175,7 +175,7 @@ cannot recover that history from the final map.
 
 ## Reaching a remote daemon over ssh
 
-`endpoint.rs` owns the client half. `SshForward::start` runs up to **three ssh children**, in order:
+`endpoint.rs` in [zz-daemon-client](/crates/zz-daemon-client.md) owns the client half. `SshForward::start` runs up to **three ssh children**, in order:
 
 | Step | Command | Why |
 |------|---------|-----|
@@ -245,7 +245,8 @@ it only needs to print the path it resolved).
 ## Password and host-key prompts
 
 ssh prompts on the terminal that launched the process, which a window does not have, so a
-password-protected or unknown host used to hang invisibly. `askpass.rs` routes those prompts to a
+password-protected or unknown host used to hang invisibly. `askpass.rs` (in
+[zz-daemon-client](/crates/zz-daemon-client.md)) routes those prompts to a
 dialog instead.
 
 `SshForward::start` opens a Unix socket in the private directory and hands every ssh child
@@ -787,11 +788,9 @@ closed except for `hooks.shutdown-window-unlinked-order`.
 # Examples
 
 ```rust
-// lib.rs public surface
-pub use client::{CommandClient, InteractiveClient};
-pub use daemon::{Daemon, DaemonError};
-pub use lifecycle::{DaemonRecoveryError, RecoveredDaemon, terminate_incompatible_daemon};
-pub use transport::default_socket_path;
+// zz-daemon is the server; the clients and the socket path come from zz-daemon-client.
+use zz_daemon::Daemon;
+use zz_daemon_client::{CommandClient, InteractiveClient, default_socket_path};
 
 // Run the persistent listener until `kill-server`.
 Daemon::new(default_socket_path()).run_foreground()?;
@@ -823,26 +822,22 @@ send-keys data flow (CLI → PTY):
 |------|------|
 | `crates/zz-daemon/src/lib.rs` | Crate root and public re-exports |
 | `crates/zz-daemon/src/daemon.rs` | `Daemon`, `run_foreground` accept loop, `Shared`/`ServerState`, startup config retention and one-shot delivery, `execute`, `OutboundMailbox` fan-out, `watch_terminal`, `attach`/`detach`, `input_*` routing |
-| `crates/zz-daemon/src/transport.rs` | `LocalListener`/`LocalStream` over `interprocess`, blocking accepted-stream normalization, `default_socket_path`, `PeerCredentials` |
-| `crates/zz-daemon/src/client.rs` | `CommandClient`, `InteractiveClient`, framed `ProtocolSender`/`ProtocolReceiver`, `connect`/`connect_endpoint` handshake, post-spawn Control startup ownership, `short_device_name` |
-| `crates/zz-daemon/src/endpoint.rs` | `Endpoint`/`SshEndpoint` parsing, the probe/auto-start/forward ssh commands and their shell quoting, `SshForward`'s RAII child, and the `EndpointError` → host-row advice mapping |
-| `crates/zz-daemon/src/paths.rs` | Platform discovery of the zz-owned `zz/mux.conf` and its write path |
 | `crates/zz-daemon/src/status.rs` | `StatusRenderer`: strftime, bounded `#()` execution with an output cache, and per-client status diffing. See [status line](/tmux/status-line.md). |
-| `crates/zz-daemon/src/lifecycle.rs` | `DaemonIdentityGuard`, `terminate_incompatible_daemon`, identity-file + guarded shutdown |
+| `crates/zz-daemon/src/wake.rs` | `AcceptWake`, `wake_loop`, `LoopThread`: waking the `mio` event loop from producer threads |
 | `crates/zz-daemon/src/keys.rs` | `input_key_name` (KeyInput → tmux spelling), `send_tokens` (named-key/literal fan-out) |
-| `crates/zz-daemon/src/user_data.rs` | `platform_data_dir` per OS and the Unix `0o600`/`0o700` hardening helpers, shared with the GUI |
 | `crates/zz-daemon/src/agent/host.rs` | `AgentHost`, `AgentPaneSpec`, `AgentPaneState`, `HostCommand`, and the per-pane `PanePump` |
 | `crates/zz-daemon/src/agent/runtime.rs` | `run_agent_runtime` / `run_agent_connection`, the ACP client role, auto-approve (`is_user_question`, `preferred_allow_option`), `StderrTail`, and `load_persistent_journal` |
 | `crates/zz-daemon/src/agent/fanout.rs` | `AgentRuntime` (what the daemon holds), the `AgentPublisher` trait, per-pane coalescing, wire sequencing, the replay ring, `AgentPaneWire` derivation, and first-prompt pane titles |
 | `crates/zz-daemon/src/agent/journal.rs` | Per-ACP-session JSONL append/replay/prune, session-ID jailing, the 32 MiB cap |
 | `crates/zz-daemon/src/agent/git_summary.rs` | Bounded branch and current-worktree file/addition/deletion capture through a throwaway Git index |
 | `crates/zz-daemon/src/agent/environment.rs` | ACP child `PATH` repair (login shell + version-manager bins), `warm_adapter_cache`, workspace-identity injection |
-| `crates/zz-daemon/Cargo.toml` | `default = ["daemon", "agent"]`. The daemon feature uses `async-signal`, `async-channel`, and `futures-lite` only to give the Unix signal-listener thread cancellable blocking; the core server remains thread-per-connection with no shared async runtime. The `agent` feature adds `agent-client-protocol`, `serde`/`serde_json`, and `base64`, and runs its pane threads on `futures-lite`'s `block_on` rather than any shared runtime. Clients that never render a transcript (`zz-tui`) depend on this crate with `default-features = false`. |
+| `crates/zz-daemon/Cargo.toml` | `default = ["agent"]`. There is no `daemon` feature: this crate is the server, and a client that only connects depends on [zz-daemon-client](/crates/zz-daemon-client.md) instead. The server runs no shared async runtime. The `agent` feature adds `agent-client-protocol`, `async-channel`, `base64`, `futures-lite`, and `smol`, and runs its pane threads on `futures-lite`'s `block_on` rather than any shared runtime. `cargo clippy -p zz-daemon -p zz-daemon-client --no-default-features --all-targets` lints the server without it. |
 
 # Related
 
 - Serves and consumes [the wire protocol](/crates/zz-protocol.md) and its [framing](/protocol/wire-protocol.md).
 - Hosts [the mux state machine](/crates/zz-mux.md) (`MuxEngine`, `MuxEffect`, key tables).
+- Its clients, endpoints, and shared transport live in [zz-daemon-client](/crates/zz-daemon-client.md).
 - Owns each pane's [PTY-backed terminal session](/crates/zz-terminal.md); see the
   [PTY worker model](/concepts/pty-worker.md) for the ownership boundary.
 - [Session persistence](/concepts/session-persistence.md) . detach/attach, what survives, transport per platform.

@@ -49,7 +49,7 @@ use zpui::{
 use zz_browser::{BrowserBootstrap, BrowserError, BrowserRuntime};
 pub(crate) use zz_cli::application_arguments;
 use zz_cli::{CommandLineOrigin, Startup, StartupOptions};
-use zz_daemon::{DaemonError, InteractiveClient, default_socket_path};
+use zz_daemon_client::{DaemonError, InteractiveClient, default_socket_path};
 use zz_protocol::CommandInvocation;
 use zz_terminal::TerminalColorScheme;
 use zz_ui::{Assets, Root};

@@ -601,7 +601,7 @@ pub(crate) fn authorized_key_script(key: &str, line: &str) -> String {
 
 /// Quote a value so the remote shell sees it verbatim; an ssh command line is parsed twice.
 #[cfg(any(unix, windows, test))]
-pub(crate) fn shell_quote(value: &str) -> String {
+pub fn shell_quote(value: &str) -> String {
     let mut quoted = String::with_capacity(value.len() + 2);
     quoted.push('\'');
     for character in value.chars() {

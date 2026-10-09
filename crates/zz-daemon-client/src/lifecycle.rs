@@ -1,4 +1,3 @@
-#[cfg(any(feature = "daemon", test))]
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::{
     ffi::{OsStr, OsString},
@@ -7,11 +6,9 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-#[cfg(any(feature = "daemon", test))]
 use std::{fs::OpenOptions, io::Write};
 
 use thiserror::Error;
-#[cfg(any(feature = "daemon", test))]
 use zz_protocol::PROTOCOL_VERSION;
 
 use crate::{
@@ -25,7 +22,6 @@ const MAX_IDENTITY_BYTES: u64 = 512;
 const TERMINATION_TIMEOUT: Duration = Duration::from_secs(3);
 const TERMINATION_POLL_INTERVAL: Duration = Duration::from_millis(20);
 
-#[cfg(any(feature = "daemon", test))]
 static IDENTITY_TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,7 +32,6 @@ struct IdentityRecord {
 }
 
 impl IdentityRecord {
-    #[cfg(any(feature = "daemon", test))]
     fn current() -> io::Result<Self> {
         let pid = std::process::id();
         let start_time = process_info::start_time(pid)
@@ -48,7 +43,6 @@ impl IdentityRecord {
         })
     }
 
-    #[cfg(any(feature = "daemon", test))]
     fn encode(self) -> String {
         match self.protocol_version {
             Some(protocol_version) => format!(
@@ -115,15 +109,13 @@ struct IdentityFile {
     contents: Vec<u8>,
 }
 
-#[cfg(any(feature = "daemon", test))]
-pub(crate) struct DaemonIdentityGuard {
+pub struct DaemonIdentityGuard {
     path: PathBuf,
     contents: Vec<u8>,
 }
 
-#[cfg(any(feature = "daemon", test))]
 impl DaemonIdentityGuard {
-    pub(crate) fn install(socket_path: &Path) -> io::Result<Self> {
+    pub fn install(socket_path: &Path) -> io::Result<Self> {
         let record = IdentityRecord::current()?;
         let contents = record.encode().into_bytes();
         let path = identity_path(socket_path);
@@ -132,7 +124,6 @@ impl DaemonIdentityGuard {
     }
 }
 
-#[cfg(any(feature = "daemon", test))]
 impl Drop for DaemonIdentityGuard {
     fn drop(&mut self) {
         remove_file_if_contents_match(&self.path, &self.contents);
@@ -414,7 +405,6 @@ fn validate_identity_permissions(
     Ok(())
 }
 
-#[cfg(any(feature = "daemon", test))]
 fn write_identity_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;

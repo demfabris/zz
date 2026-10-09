@@ -25,7 +25,7 @@ use crate::{
 
 /// Client and daemon must match this exactly. The handshake rejects any
 /// mismatch instead of negotiating down.
-pub const PROTOCOL_VERSION: u16 = 107;
+pub const PROTOCOL_VERSION: u16 = 108;
 pub const NEW_SESSION_ATTACH_CAPABILITY: &str = "new-session-attach-v1";
 pub const PANE_FRAME_CAPABILITY: &str = "pane-frame-v1";
 pub const CLIENT_TERMINAL_CAPABILITY: &str = "client-terminal-v1";
@@ -120,6 +120,12 @@ pub const MAX_AGENT_UPDATES_BYTES: usize = 9 * 1024 * 1024;
 pub const MAX_AGENT_STATE_BLOB_BYTES: usize = 256 * 1024;
 /// Largest pending permission request payload carried by [`AgentPaneWire`].
 pub const MAX_AGENT_PERMISSION_BYTES: usize = 64 * 1024;
+/// Background tasks one agent pane reports at once.
+pub const MAX_AGENT_TASKS: usize = 64;
+/// Questions answered by one reply, and choices per question.
+pub const MAX_AGENT_QUESTION_ANSWERS: usize = 32;
+/// One answer to an agent's question, typed or chosen.
+pub const MAX_AGENT_ANSWER_BYTES: usize = 16 * 1024;
 /// Largest JSON reply to an agent session listing or turn-diff request.
 pub const MAX_AGENT_RESULT_BYTES: usize = 1024 * 1024;
 /// Largest complete image one paste upload may carry. Clients normalize
@@ -142,12 +148,11 @@ pub(crate) const MAX_CONFIG_OVERRIDE_KEY_BYTES: usize = 128;
 pub(crate) const MAX_CONFIG_OVERRIDE_VALUE_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_MUX_OPTION_VALUE_BYTES: usize = 64 * 1024;
 
-/// The adapter commands an agent pane spawns, version-pinned on purpose:
-/// `@latest` costs a registry round trip on every pane spawn, so bumps are
-/// deliberate edits.
-pub const DEFAULT_AGENT_COMMAND: &str = "npx -y @agentclientprotocol/codex-acp@1.11.0";
-pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str =
-    "npx -y @agentclientprotocol/claude-agent-acp@0.76.0";
+/// The commands an agent pane spawns: the user's own `codex` (driven over
+/// `codex app-server`) and `claude` (driven over its stream-json protocol). A
+/// command whose program is neither runs as an ACP adapter.
+pub const DEFAULT_AGENT_COMMAND: &str = "codex";
+pub const DEFAULT_AGENT_CLAUDE_CODE_COMMAND: &str = "claude";
 pub const DEFAULT_AGENT_AUTO_APPROVE: AgentAutoApprove = AgentAutoApprove::Reads;
 /// Longest adapter command line an agent mux option may carry.
 pub const MAX_AGENT_COMMAND_BYTES: usize = 4 * 1024;
@@ -902,6 +907,54 @@ where
         ));
     }
     Ok(images)
+}
+
+fn deserialize_agent_tasks<'de, D>(deserializer: D) -> Result<Vec<AgentTaskWire>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let tasks = Vec::<AgentTaskWire>::deserialize(deserializer)?;
+    if tasks.len() > MAX_AGENT_TASKS {
+        return Err(D::Error::invalid_length(
+            tasks.len(),
+            &"agent tasks within the task count limit",
+        ));
+    }
+    Ok(tasks)
+}
+
+fn deserialize_agent_question_answers<'de, D>(
+    deserializer: D,
+) -> Result<Vec<AgentQuestionAnswer>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let answers = Vec::<AgentQuestionAnswer>::deserialize(deserializer)?;
+    if answers.len() > MAX_AGENT_QUESTION_ANSWERS {
+        return Err(D::Error::invalid_length(
+            answers.len(),
+            &"answers within the question count limit",
+        ));
+    }
+    Ok(answers)
+}
+
+fn deserialize_agent_answer_texts<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let answers = Vec::<String>::deserialize(deserializer)?;
+    if answers.len() > MAX_AGENT_QUESTION_ANSWERS
+        || answers
+            .iter()
+            .any(|answer| answer.len() > MAX_AGENT_ANSWER_BYTES)
+    {
+        return Err(D::Error::invalid_length(
+            answers.len(),
+            &"answers within the answer limits",
+        ));
+    }
+    Ok(answers)
 }
 
 fn deserialize_agent_permission_payload<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -2264,6 +2317,9 @@ pub enum InputMessage {
         rows: u16,
         layout_generation: u64,
     },
+    ClipboardReply {
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -2386,6 +2442,30 @@ pub struct AgentPermissionWire {
     pub payload: String,
 }
 
+/// Background work an agent is running: a shell command, a subagent, a
+/// monitor. The pane state carries the whole set, replaced on each change.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentTaskWire {
+    #[serde(deserialize_with = "deserialize_agent_option_text")]
+    pub id: String,
+    #[serde(deserialize_with = "deserialize_agent_option_text")]
+    pub kind: String,
+    #[serde(deserialize_with = "deserialize_agent_option_text")]
+    pub description: String,
+    #[serde(deserialize_with = "deserialize_optional_agent_option_text")]
+    pub tool_call_id: Option<String>,
+}
+
+/// One answer to an agent's question: the chosen labels, or typed text.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentQuestionAnswer {
+    #[serde(deserialize_with = "deserialize_agent_option_text")]
+    pub id: String,
+    #[serde(deserialize_with = "deserialize_agent_answer_texts")]
+    pub answers: Vec<String>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentGitSummary {
     #[serde(deserialize_with = "deserialize_optional_agent_option_text")]
@@ -2416,6 +2496,8 @@ pub struct AgentPaneWire {
     pub modes: String,
     pub pending_permission: Option<AgentPermissionWire>,
     pub git: Option<AgentGitSummary>,
+    #[serde(deserialize_with = "deserialize_agent_tasks")]
+    pub tasks: Vec<AgentTaskWire>,
 }
 
 impl AgentPaneWire {
@@ -2467,6 +2549,19 @@ impl AgentPaneWire {
             .is_some_and(|branch| branch.len() > MAX_AGENT_OPTION_BYTES)
         {
             return Err("agent Git branch exceeds the wire byte limit");
+        }
+        if self.tasks.len() > MAX_AGENT_TASKS
+            || self.tasks.iter().any(|task| {
+                task.id.len() > MAX_AGENT_OPTION_BYTES
+                    || task.kind.len() > MAX_AGENT_OPTION_BYTES
+                    || task.description.len() > MAX_AGENT_OPTION_BYTES
+                    || task
+                        .tool_call_id
+                        .as_ref()
+                        .is_some_and(|id| id.len() > MAX_AGENT_OPTION_BYTES)
+            })
+        {
+            return Err("agent tasks exceed the wire limits");
         }
         Ok(())
     }
@@ -3541,6 +3636,8 @@ pub enum EventPayload {
         wait_exit: bool,
         pause_after_ms: Option<u64>,
         no_output: bool,
+        #[serde(default)]
+        new_layouts: bool,
     },
     SubscriptionChanged {
         name: String,
@@ -3619,6 +3716,11 @@ pub enum EventPayload {
         flags: u32,
         canonical_name: Option<String>,
         guard: bool,
+    },
+    ClipboardQuery,
+    TerminalNegotiation {
+        features: Vec<String>,
+        user_keys: Vec<String>,
     },
 }
 
@@ -3967,6 +4069,19 @@ pub enum ProtocolMessage {
     },
     TtyInputClosed {
         handoff: u64,
+    },
+    /// Answer an agent's question card. First answer wins, like a permission.
+    AgentAnswerQuestion {
+        pane: PaneId,
+        request_id: u64,
+        #[serde(deserialize_with = "deserialize_agent_question_answers")]
+        answers: Vec<AgentQuestionAnswer>,
+    },
+    /// Stop one background task the pane state lists.
+    AgentStopTask {
+        pane: PaneId,
+        #[serde(deserialize_with = "deserialize_agent_option_text")]
+        task_id: String,
     },
 }
 
@@ -4728,6 +4843,7 @@ mod tests {
                 wait_exit: false,
                 pause_after_ms: None,
                 no_output: false,
+                new_layouts: false,
             }),
             44
         );
@@ -5516,7 +5632,7 @@ mod tests {
 
     #[test]
     fn detached_reason_holds_its_appended_wire_field() {
-        assert_eq!(super::PROTOCOL_VERSION, 107);
+        assert_eq!(super::PROTOCOL_VERSION, 108);
         for (reason, tag) in [
             (super::DetachReason::Requested, 0),
             (super::DetachReason::Evicted, 1),
@@ -5575,6 +5691,63 @@ mod tests {
                 event
             );
         }
+    }
+
+    #[test]
+    fn agent_question_and_task_messages_append_at_the_wire_tail_and_round_trip() {
+        let tag = |message: &super::ProtocolMessage| {
+            let bytes = postcard::to_stdvec(message).expect("message encodes");
+            let mut value = 0u32;
+            for (index, byte) in bytes.iter().enumerate() {
+                value |= u32::from(byte & 0x7f) << (7 * index);
+                if byte & 0x80 == 0 {
+                    break;
+                }
+            }
+            value
+        };
+        let base = tag(&super::ProtocolMessage::TtyInputClosed { handoff: 0 });
+        let pane = crate::PaneId(4);
+        let answer = super::ProtocolMessage::AgentAnswerQuestion {
+            pane,
+            request_id: 9,
+            answers: vec![super::AgentQuestionAnswer {
+                id: "color".to_owned(),
+                answers: vec!["red".to_owned(), "blue".to_owned()],
+            }],
+        };
+        let stop = super::ProtocolMessage::AgentStopTask {
+            pane,
+            task_id: "b7".to_owned(),
+        };
+        assert_eq!(tag(&answer), base + 1);
+        assert_eq!(tag(&stop), base + 2);
+        for message in [answer, stop] {
+            let bytes = postcard::to_stdvec(&message).expect("encode");
+            assert_eq!(
+                postcard::from_bytes::<super::ProtocolMessage>(&bytes).expect("decode"),
+                message
+            );
+        }
+        let state = super::AgentPaneWire {
+            tasks: vec![super::AgentTaskWire {
+                id: "b7".to_owned(),
+                kind: "shell".to_owned(),
+                description: "sleep 30".to_owned(),
+                tool_call_id: Some("toolu_1".to_owned()),
+            }],
+            ..super::AgentPaneWire::default()
+        };
+        let bytes = postcard::to_stdvec(&state).expect("encode state");
+        assert_eq!(
+            postcard::from_bytes::<super::AgentPaneWire>(&bytes).expect("decode state"),
+            state
+        );
+        let too_many = super::AgentPaneWire {
+            tasks: vec![super::AgentTaskWire::default(); super::MAX_AGENT_TASKS + 1],
+            ..super::AgentPaneWire::default()
+        };
+        assert!(too_many.validate().is_err());
     }
 
     #[test]

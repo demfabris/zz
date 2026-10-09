@@ -9,14 +9,16 @@ pub use zz_protocol::layout::{joined_layout, swapped_layout};
 use zz_protocol::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, MAX_GUI_TEXT_BYTES,
     MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PaneSnapshot, ServerError, SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot,
-    normalize_browser_profile_name,
+    PaneSnapshot, PaneStatus, ServerError, SessionId, SessionSnapshot, SplitId, WindowId,
+    WindowSnapshot, normalize_browser_profile_name,
 };
 
 use crate::{
     PresetOptions,
     journal::{ChangeJournal, Tracked},
-    layout::{CellGeometry, CellLayout, LayoutError, SplitSize, carve_border_row},
+    layout::{
+        CellGeometry, CellLayout, LayoutError, LayoutFormat, LeafState, SplitSize, carve_border_row,
+    },
 };
 
 pub(crate) const DEFAULT_WINDOW_EXTENT: (u16, u16) = (80, 24);
@@ -216,6 +218,7 @@ pub struct Pane {
     pub active_point: u64,
     /// A BEL rang here and nobody has been back since.
     pub bell: bool,
+    pub status: Option<PaneStatus>,
     pub dead: bool,
     pub dead_status: Option<u32>,
     pub dead_time: Option<u64>,
@@ -258,13 +261,26 @@ pub struct Window {
     z_order: Vec<PaneId>,
     last_panes: Vec<PaneId>,
     last_layout: Option<LayoutPreset>,
-    previous_layout: Option<Box<CellLayout>>,
+    previous_layout: Option<Box<SavedLayout>>,
     pub(crate) last_extent_probe: Option<(PaneId, u16, u16)>,
     /// The pin's `w->manual_sx`/`w->manual_sy`: the extent `resize-window`
     /// stored, kept while `window-size` is automatic so a return to manual
     /// restores it (resize.c `clients_calculate_size`).
     pub(crate) manual_extent: (u16, u16),
     input_options: InputOptions,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct SavedLayout {
+    layout: CellLayout,
+    selection: Option<SavedSelection>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SavedSelection {
+    pane_order: Vec<PaneId>,
+    active: PaneId,
+    last_panes: Vec<PaneId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -399,6 +415,54 @@ impl Window {
     pub(crate) fn last_pane(&self) -> Option<PaneId> {
         self.last_panes.first().copied()
     }
+
+    #[must_use]
+    pub fn layout_string(&self, format: LayoutFormat, pane_base_index: u32) -> String {
+        self.layout
+            .dump_as(format, &|pane| self.leaf_state(pane, pane_base_index))
+    }
+
+    #[must_use]
+    pub fn visible_layout_string(&self, format: LayoutFormat, pane_base_index: u32) -> String {
+        let Some(zoomed) = self.zoomed_pane else {
+            return self.layout_string(format, pane_base_index);
+        };
+        let (width, height) = self.layout.extent();
+        CellLayout::new(zoomed, width, height)
+            .dump_as(format, &|pane| self.leaf_state(pane, pane_base_index))
+    }
+
+    fn saved_layout(&self, legacy: bool) -> SavedLayout {
+        let selection = (!legacy).then(|| SavedSelection {
+            pane_order: self.pane_order.clone(),
+            active: self.active_pane,
+            last_panes: self
+                .last_panes
+                .iter()
+                .copied()
+                .filter(|pane| *pane != self.active_pane)
+                .collect(),
+        });
+        SavedLayout {
+            layout: self.layout.clone(),
+            selection,
+        }
+    }
+
+    fn leaf_state(&self, pane: PaneId, pane_base_index: u32) -> LeafState {
+        let position = |panes: &[PaneId]| {
+            panes
+                .iter()
+                .position(|candidate| *candidate == pane)
+                .and_then(|position| u32::try_from(position).ok())
+        };
+        LeafState {
+            active: pane == self.active_pane,
+            last: position(&self.last_panes),
+            index: pane_base_index.saturating_add(position(&self.pane_order).unwrap_or_default()),
+            z: None,
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -414,12 +478,23 @@ pub struct MuxState {
     last_active_session: Option<SessionId>,
     input_options: InputOptions,
     marked_pane: Option<(SessionId, WindowId, PaneId)>,
+    pub(crate) global_pane_base_index: u32,
+    pub(crate) window_pane_base_indices: BTreeMap<WindowId, u32>,
+    pub(crate) legacy_layout_saves: bool,
     pub sessions: Tracked<SessionId, Session>,
     pub windows: Tracked<WindowId, Window>,
     pub(crate) journal: ChangeJournal,
 }
 
 impl MuxState {
+    #[must_use]
+    pub fn pane_base_index(&self, window: WindowId) -> u32 {
+        self.window_pane_base_indices
+            .get(&window)
+            .copied()
+            .unwrap_or(self.global_pane_base_index)
+    }
+
     #[must_use]
     pub fn generation(&self) -> u64 {
         self.generation
@@ -513,6 +588,7 @@ impl MuxState {
             kind: PaneKind::Terminal,
             active_point,
             bell: false,
+            status: None,
             dead: false,
             dead_status: None,
             dead_time: None,
@@ -641,6 +717,7 @@ impl MuxState {
             kind,
             active_point,
             bell: false,
+            status: None,
             dead: false,
             dead_status: None,
             dead_time: None,
@@ -1208,6 +1285,7 @@ impl MuxState {
                 kind,
                 active_point,
                 bell: false,
+                status: None,
                 dead: false,
                 dead_status: None,
                 dead_time: None,
@@ -1604,7 +1682,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window)
             .expect("window was resolved");
-        let previous = window.layout.clone();
+        let previous = window.saved_layout(self.legacy_layout_saves);
         window
             .layout
             .apply_preset(preset, &panes, options, &mut ids);
@@ -1627,17 +1705,23 @@ impl MuxState {
             .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
             .pane_order
             .clone();
-        let mut parsed = CellLayout::parse(layout)
-            .map_err(|error| ServerError::InvalidCommand(format!("{}: {layout}", error.cause())))?;
+        let invalid = |cause: &str| ServerError::InvalidCommand(format!("{cause}: {layout}"));
+        let mut parsed = CellLayout::parse(layout).map_err(|error| invalid(error.cause()))?;
         let cells = parsed.pane_count();
         if panes.len() > cells {
-            return Err(ServerError::InvalidCommand(format!(
-                "have {} panes but need {cells}: {layout}",
+            return Err(invalid(&format!(
+                "have {} panes but need {cells}",
                 panes.len()
             )));
         }
         while parsed.pane_count() > panes.len() {
             parsed.trim_bottom_right();
+        }
+        parsed
+            .check_sizes()
+            .map_err(|error| invalid(error.cause()))?;
+        if parsed.has_floating() {
+            return Err(invalid("floating panes are not supported"));
         }
         let split_ids = (0..panes.len().saturating_sub(1))
             .map(|_| self.allocate_split_id())
@@ -1648,21 +1732,28 @@ impl MuxState {
                 .next()
                 .expect("parsed layout has one split ID per edge")
         };
-        let next = parsed.into_layout(&panes, &mut ids);
+        let (next, selection) = parsed.into_layout(&panes, &mut ids);
         let split_ids_exhausted = split_ids.next().is_none();
         debug_assert!(
             split_ids_exhausted,
             "parsed layout consumes one fresh ID per split"
         );
 
+        let active_point = selection
+            .as_ref()
+            .and_then(|selection| selection.active)
+            .map(|_| self.allocate_sort_point());
         let window = self
             .windows
             .get_mut(&mut self.journal, &window)
             .expect("window was resolved");
-        let previous = std::mem::replace(&mut window.layout, next);
-        window.z_order = window.layout.panes_in_order();
+        let previous = window.saved_layout(self.legacy_layout_saves);
+        window.layout = next;
         window.previous_layout = Some(Box::new(previous));
         window.last_extent_probe = None;
+        if let Some(selection) = selection {
+            apply_window_selection(window, selection.active, selection.last_panes, active_point);
+        }
         self.bump_generation();
         Ok(())
     }
@@ -1699,7 +1790,7 @@ impl MuxState {
                 .windows
                 .get_mut(&mut self.journal, &window)
                 .expect("window was resolved");
-            window.previous_layout = Some(Box::new(window.layout.clone()));
+            window.previous_layout = Some(Box::new(window.saved_layout(self.legacy_layout_saves)));
             return Ok(());
         }
         let (pane_order, split_count) = {
@@ -1711,7 +1802,7 @@ impl MuxState {
                 .previous_layout
                 .as_deref()
                 .expect("previous layout was checked");
-            if previous.pane_count() != window_state.pane_order.len() {
+            if previous.layout.pane_count() != window_state.pane_order.len() {
                 return Err(ServerError::InvalidCommand(format!(
                     "window {window} previous layout no longer matches its panes"
                 )));
@@ -1724,16 +1815,39 @@ impl MuxState {
         let split_ids = (0..split_count)
             .map(|_| self.allocate_split_id())
             .collect::<Vec<_>>();
+        let active_point = self.allocate_sort_point();
 
         let window = self
             .windows
             .get_mut(&mut self.journal, &window)
             .expect("window was resolved");
-        let mut restored = *window
+        let current = window.saved_layout(self.legacy_layout_saves);
+        let SavedLayout {
+            layout: mut restored,
+            selection,
+        } = *window
             .previous_layout
             .take()
             .expect("previous layout was validated");
-        let replaced = restored.replace_panes_in_order(&pane_order);
+        let moved = |pane: PaneId, saved: &SavedSelection| {
+            saved
+                .pane_order
+                .iter()
+                .position(|candidate| *candidate == pane)
+                .and_then(|position| pane_order.get(position))
+                .copied()
+        };
+        let order = selection.as_ref().map_or_else(
+            || Some(pane_order.clone()),
+            |saved| {
+                restored
+                    .panes_in_order()
+                    .into_iter()
+                    .map(|pane| moved(pane, saved))
+                    .collect::<Option<Vec<_>>>()
+            },
+        );
+        let replaced = restored.replace_panes_in_order(order.as_deref().unwrap_or(&pane_order));
         debug_assert!(replaced);
         let mut split_ids = split_ids.into_iter();
         let mut ids = || {
@@ -1747,9 +1861,18 @@ impl MuxState {
             split_ids_exhausted,
             "restored layout consumes one fresh ID per split"
         );
-        let current = std::mem::replace(&mut window.layout, restored);
+        window.layout = restored;
         window.previous_layout = Some(Box::new(current));
         window.zoomed_pane = None;
+        if let Some(saved) = selection.filter(|_| order.is_some()) {
+            let active = moved(saved.active, &saved);
+            let last_panes = saved
+                .last_panes
+                .iter()
+                .filter_map(|pane| moved(*pane, &saved))
+                .collect();
+            apply_window_selection(window, active, last_panes, Some(active_point));
+        }
         self.bump_generation();
         Ok(())
     }
@@ -1762,7 +1885,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window_id)
             .expect("pane window exists");
-        let previous = window.layout.clone();
+        let previous = window.saved_layout(self.legacy_layout_saves);
         window
             .layout
             .spread(pane)
@@ -1834,6 +1957,18 @@ impl MuxState {
             return false;
         }
         pane_state.bell = bell;
+        self.bump_generation();
+        true
+    }
+
+    pub fn set_pane_status(&mut self, pane: PaneId, status: Option<PaneStatus>) -> bool {
+        let Some(pane_state) = self.pane_mut(pane) else {
+            return false;
+        };
+        if pane_state.status == status {
+            return false;
+        }
+        pane_state.status = status;
         self.bump_generation();
         true
     }
@@ -2782,7 +2917,8 @@ impl MuxState {
                 index: self.windows[&window].index,
             });
         }
-        if !exact && let Some((forward, offset)) = parse_offset(target) {
+        if !exact && let Some(offset) = parse_offset(target) {
+            let (forward, offset) = offset.map_err(|()| not_found())?;
             if index_mode {
                 let current = self.windows[&state.active_window].index;
                 let index = if forward {
@@ -2833,7 +2969,8 @@ impl MuxState {
                 });
             }
         }
-        if let Ok(index) = target.parse::<u32>()
+        if !target.starts_with(['+', '-'])
+            && let Ok(index) = target.parse::<u32>()
             && index <= MAX_WINDOW_INDEX
         {
             let window = self.window_at_index(session, index);
@@ -3025,7 +3162,8 @@ impl MuxState {
                 .pane_in_direction(state.active_pane, *direction)?
                 .ok_or_else(not_found);
         }
-        if let Some((forward, offset)) = parse_offset(target) {
+        if let Some(offset) = parse_offset(target) {
+            let (forward, offset) = offset.map_err(|()| not_found())?;
             let current = state
                 .pane_order
                 .iter()
@@ -3898,12 +4036,9 @@ impl MuxState {
             .input_options
             .synchronize_panes()
             .unwrap_or_else(|| self.global_synchronize_panes());
-        let (width, height) = window.layout.extent();
-        let layout_dump = window.layout.dump();
-        let visible_layout_dump = window.zoomed_pane.map_or_else(
-            || layout_dump.clone(),
-            |pane| CellLayout::new(pane, width, height).dump(),
-        );
+        let pane_base_index = self.pane_base_index(window.id);
+        let layout_dump = window.layout_string(LayoutFormat::V2, pane_base_index);
+        let visible_layout_dump = window.visible_layout_string(LayoutFormat::V2, pane_base_index);
         WindowSnapshot {
             id: window.id,
             index: window.index,
@@ -3936,6 +4071,7 @@ impl MuxState {
                             active_border_colour: None,
                             border_status_text: String::new(),
                             mode: None,
+                            status: pane.status.clone(),
                         },
                     )
                 })
@@ -3990,10 +4126,7 @@ impl MuxState {
                 return Err(format!("window {window_id} active pane is missing"));
             }
             let history = window.last_panes.iter().copied().collect::<BTreeSet<_>>();
-            if history.len() != window.last_panes.len()
-                || history.contains(&window.active_pane)
-                || !history.is_subset(&pane_set)
-            {
+            if history.len() != window.last_panes.len() || !history.is_subset(&pane_set) {
                 return Err(format!("window {window_id} pane history is invalid"));
             }
             if window
@@ -4236,20 +4369,22 @@ fn normalize_pane_target(target: &str) -> &str {
     }
 }
 
-fn parse_offset(target: &str) -> Option<(bool, u32)> {
+fn parse_offset(target: &str) -> Option<Result<(bool, u32), ()>> {
     let (forward, offset) = match target.as_bytes().first() {
         Some(b'+') => (true, &target[1..]),
         Some(b'-') => (false, &target[1..]),
         _ => return None,
     };
-    let offset = if offset.is_empty() {
-        1
-    } else {
-        offset.parse::<u32>().ok()?
-    };
-    (1..=MAX_WINDOW_INDEX)
-        .contains(&offset)
-        .then_some((forward, offset))
+    if offset.is_empty() {
+        return Some(Ok((forward, 1)));
+    }
+    let offset = offset
+        .trim_start_matches([' ', '\t', '\n', '\x0b', '\x0c', '\r'])
+        .parse::<i64>()
+        .ok()
+        .and_then(|offset| u32::try_from(offset).ok())
+        .filter(|offset| (1..=MAX_WINDOW_INDEX).contains(offset));
+    Some(offset.map(|offset| (forward, offset)).ok_or(()))
 }
 
 #[derive(Clone)]
@@ -4446,6 +4581,24 @@ fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) 
     true
 }
 
+fn apply_window_selection(
+    window: &mut Window,
+    active: Option<PaneId>,
+    last_panes: Vec<PaneId>,
+    active_point: Option<u64>,
+) {
+    if let (Some(active), Some(active_point)) = (active, active_point)
+        && activate_window_pane(window, active, false)
+    {
+        window
+            .panes
+            .get_mut(&active)
+            .expect("selected pane belongs to the window")
+            .active_point = active_point;
+    }
+    window.last_panes = last_panes;
+}
+
 fn repair_window_after_pane_removal(window: &mut Window, pane: PaneId) {
     window.zoomed_pane = None;
     window.clear_pane_screen_extents();
@@ -4481,14 +4634,10 @@ fn lose_window_pane(window: &mut Window, pane: PaneId) {
 }
 
 fn normalize_window_history(window: &mut Window) {
-    let active = window.active_pane;
     let panes = &window.panes;
     window
         .last_panes
-        .retain(|candidate| *candidate != active && panes.contains_key(candidate));
-    window
-        .last_panes
-        .truncate(window.panes.len().saturating_sub(1));
+        .retain(|candidate| panes.contains_key(candidate));
 }
 
 fn insert_pane_order(
@@ -5802,6 +5951,37 @@ mod tests {
         assert_eq!(pane_size(trimmed, first), (49, 20));
         assert_eq!(pane_size(trimmed, third), (50, 20));
         assert!(state.validate().is_ok());
+    }
+
+    #[test]
+    fn serialized_layouts_keep_the_tiled_z_order() {
+        let mut state = MuxState::default();
+        let (_, window, first) = state.create_session("work").unwrap();
+        let second = state
+            .split_pane_with(
+                first,
+                Axis::Horizontal,
+                PaneKind::Terminal,
+                SplitPlacement {
+                    before: true,
+                    ..SplitPlacement::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            state.windows[&window].layout.panes_in_order(),
+            [second, first]
+        );
+        assert_eq!(state.windows[&window].z_order(), [first, second]);
+
+        state
+            .select_layout_string(window, "0209,80x24,0,0{40x24,0,0,1,39x24,41,0,0}")
+            .unwrap();
+        assert_eq!(
+            state.windows[&window].layout.panes_in_order(),
+            [second, first]
+        );
+        assert_eq!(state.windows[&window].z_order(), [first, second]);
     }
 
     #[test]

@@ -2068,7 +2068,7 @@ impl InteractiveClient {
     }
 
     pub fn send(&self, message: &ProtocolMessage) -> Result<(), DaemonError> {
-        self.send_locked(message, |writer| writer.send(message))
+        self.send_locked(&TracedMessage(message), |writer| writer.send(message))
     }
 
     fn send_locked(
@@ -2089,6 +2089,32 @@ impl InteractiveClient {
             diagnostic_elapsed_us(started),
         );
         result
+    }
+}
+
+pub(crate) struct TracedMessage<'a>(pub(crate) &'a ProtocolMessage);
+
+impl fmt::Debug for TracedMessage<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.0 {
+            ProtocolMessage::AgentAnswerQuestion {
+                pane,
+                request_id,
+                answers,
+            } => formatter
+                .debug_struct("AgentAnswerQuestion")
+                .field("pane", pane)
+                .field("request_id", request_id)
+                .field(
+                    "answers",
+                    &answers
+                        .iter()
+                        .map(|answer| (&answer.id, answer.answers.len()))
+                        .collect::<Vec<_>>(),
+                )
+                .finish(),
+            message => message.fmt(formatter),
+        }
     }
 }
 
@@ -2481,7 +2507,8 @@ pub fn client_terminal_colour_count() -> u32 {
         &std::env::var("TERM").unwrap_or_default(),
         &std::env::var("COLORTERM").unwrap_or_default(),
         crate::terminal_features::terminal_feature_mask(flags.features.iter().map(String::as_str))
-            | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed),
+            | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed)
+            | NEGOTIATED_TERMINAL_FEATURES.load(Ordering::Relaxed),
     )
 }
 
@@ -2506,6 +2533,15 @@ fn client_utf8_capability(capabilities: &mut Vec<String>) {
 /// keeps it for the next hello and reports it over the connection it already
 /// holds.
 static LEARNED_TERMINAL_FEATURES: AtomicU32 = AtomicU32::new(0);
+
+static NEGOTIATED_TERMINAL_FEATURES: AtomicU32 = AtomicU32::new(0);
+
+pub fn adopt_negotiated_terminal_features(features: &[String]) {
+    NEGOTIATED_TERMINAL_FEATURES.fetch_or(
+        crate::terminal_features::terminal_feature_mask(features.iter().map(String::as_str)),
+        Ordering::Relaxed,
+    );
+}
 
 static INTERACTIVE_WRITER: Mutex<Option<Weak<Mutex<ProtocolSender<ClientStream>>>>> =
     Mutex::new(None);
@@ -2533,6 +2569,7 @@ pub fn client_terminal_feature_mask() -> u32 {
     crate::terminal_features::terminal_feature_mask(
         client_terminal_flags().features.iter().map(String::as_str),
     ) | LEARNED_TERMINAL_FEATURES.load(Ordering::Relaxed)
+        | NEGOTIATED_TERMINAL_FEATURES.load(Ordering::Relaxed)
 }
 
 fn report_learned_terminal_features(learned: u32) {
@@ -3163,6 +3200,28 @@ mod tests {
         terminal_facts_capabilities_with,
     };
 
+    #[test]
+    fn traced_answers_keep_the_question_and_drop_what_was_typed() {
+        let message = zz_protocol::ProtocolMessage::AgentAnswerQuestion {
+            pane: zz_protocol::PaneId(3),
+            request_id: 9,
+            answers: vec![zz_protocol::AgentQuestionAnswer {
+                id: "Which token?".to_owned(),
+                answers: vec!["hunter2".to_owned()],
+            }],
+        };
+        let traced = format!("{:#?}", super::TracedMessage(&message));
+        assert!(traced.contains("Which token?"));
+        assert!(!traced.contains("hunter2"));
+        let prompt = zz_protocol::ProtocolMessage::AgentCancel {
+            pane: zz_protocol::PaneId(3),
+        };
+        assert_eq!(
+            format!("{:#?}", super::TracedMessage(&prompt)),
+            format!("{prompt:#?}")
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn an_undecodable_frame_is_skipped_without_losing_the_next_one() {
@@ -3282,11 +3341,18 @@ mod tests {
                 "work".to_owned(),
                 true,
                 true,
-                Some("ignore-size,!active-pane"),
+                Some("ignore-size,!no-detach-on-destroy"),
             ),
             zz_protocol::CommandInvocation::new(
                 "attach-session",
-                ["-d", "-r", "-f", "ignore-size,!active-pane", "-t", "work",],
+                [
+                    "-d",
+                    "-r",
+                    "-f",
+                    "ignore-size,!no-detach-on-destroy",
+                    "-t",
+                    "work",
+                ],
             )
         );
     }

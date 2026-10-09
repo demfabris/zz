@@ -2189,6 +2189,60 @@ pub unsafe extern "C" fn zz_client_agent_cancel(client: *mut ZzClient, pane: u64
     client.client.agent_cancel(PaneId(pane)).is_ok()
 }
 
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_answer_question(
+    client: *mut ZzClient,
+    pane: u64,
+    request_id: u64,
+    answers_json: *const c_char,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    if answers_json.is_null() {
+        return false;
+    }
+    let Some(answers) = unsafe { CStr::from_ptr(answers_json) }
+        .to_str()
+        .ok()
+        .and_then(|json| serde_json::from_str::<Vec<zz_protocol::AgentQuestionAnswer>>(json).ok())
+    else {
+        return false;
+    };
+    client
+        .client
+        .send(&ProtocolMessage::AgentAnswerQuestion {
+            pane: PaneId(pane),
+            request_id,
+            answers,
+        })
+        .is_ok()
+}
+
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn zz_client_agent_stop_task(
+    client: *mut ZzClient,
+    pane: u64,
+    task_id: *const c_char,
+) -> bool {
+    let Some(client) = (unsafe { client.as_ref() }) else {
+        return false;
+    };
+    if task_id.is_null() {
+        return false;
+    }
+    let Ok(task_id) = unsafe { CStr::from_ptr(task_id) }.to_str() else {
+        return false;
+    };
+    client
+        .client
+        .send(&ProtocolMessage::AgentStopTask {
+            pane: PaneId(pane),
+            task_id: task_id.to_owned(),
+        })
+        .is_ok()
+}
+
 /// Pop the next queued event into `out`; false when the queue is empty.
 ///
 /// # Safety
@@ -2866,6 +2920,7 @@ mod tests {
             active_border_colour: None,
             border_status_text: String::new(),
             mode: None,
+            status: None,
         }
     }
 

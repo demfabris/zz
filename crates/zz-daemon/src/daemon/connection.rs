@@ -170,6 +170,7 @@ impl Session {
         }
         warm_terminfo_entries(&hello.environment);
         let registration = ClientRegistrationGuard::new(shared, client);
+        shared.client_lifecycle_hook("client-created", client);
         log::debug!(
             target: "zz_daemon::diagnostics::connection",
             "registered client={client} kind={:?} hello={hello:#?}",
@@ -1097,7 +1098,9 @@ impl Session {
             | ProtocolMessage::AgentAuthenticate { .. }
             | ProtocolMessage::AgentSessionOp { .. }
             | ProtocolMessage::AgentReplay { .. }
-            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }) => {
+            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }
+            | ProtocolMessage::AgentAnswerQuestion { .. }
+            | ProtocolMessage::AgentStopTask { .. }) => {
                 let read_only_blocked = !matches!(
                     message,
                     ProtocolMessage::AgentReplay { .. }

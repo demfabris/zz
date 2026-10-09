@@ -7,8 +7,11 @@
 //! implements.
 
 pub(crate) mod catalog;
+pub(crate) mod child;
+pub(crate) mod claude;
 #[cfg(unix)]
 pub(crate) mod claude_peers;
+pub(crate) mod codex;
 #[cfg(unix)]
 pub(crate) mod codex_queue;
 pub(crate) mod environment;

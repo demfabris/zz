@@ -1,0 +1,91 @@
+# tmux 3.8 options, flags and formats closed by pin.formats-options.
+# remain-on-exit failed-key keeps a pane only after a failed exit, like failed.
+set-option -g remain-on-exit failed-key
+out: show-options -gv remain-on-exit
+new-window -d -n failedkey -- sh -c 'exit 3'
+new-window -d -n cleanexit -- sh -c 'exit 0'
+run-shell "sleep 0.5"
+out: list-windows -t w -F #{window_name}
+out: display-message -p -t w:failedkey #{pane_dead}:#{pane_dead_status}
+kill-window -t w:failedkey
+set-option -gu remain-on-exit
+# The 3.8 defaults.
+out: show-options -gv fill-character
+out: show-options -gwv pane-active-border-style
+out: show-options -g status-format
+# show-options, show-window-options and show-hooks -F with the option_* contexts.
+out: show-options -g -F #{option_name}|#{option_value}|#{option_is_string}|#{option_is_array}|#{option_has_array_key}|#{option_array_key}|#{option_is_parent}|#{option_has_value}|#{option_is_user}|#{option_is_hook}|#{option_value_only} status-keys
+out: show-options -g -F #{option_name}|#{option_array_key}|#{option_is_array}|#{option_has_array_key}|#{n:option_value} status-format
+out: show-options -gv -F #{option_value_only}:#{option_name}[#{option_array_key}] update-environment
+out: show-options -g -F #{option_name}:#{option_is_string}:#{option_is_array} history-limit
+set-option -g @fmtcase hello
+out: show-options -g -F #{option_name}=#{option_value}:#{option_is_user}:#{option_is_string} @fmtcase
+out: show-options -w -A -t w:0 -F #{option_name}:#{option_is_parent}:#{option_value} mode-keys
+out: show-window-options -g -F #{option_name}=#{option_value} pane-border-lines
+out: show-options -g -F #{option_name}:#{session_name} status
+set-hook -g after-new-window 'display-message hi'
+out: show-hooks -g -F #{option_name}|#{option_array_key}|#{option_value}|#{option_is_hook}|#{option_is_array} after-new-window
+set-hook -gu after-new-window
+set-hook -B @watch::#{session_name}
+out: show-hooks -B -F #{option_unset_name} @watch
+out: show-hooks -B -F #{option_name}|#{hook_monitor_target}|#{hook_monitor_format}|#{option_value} @watch
+out: show-hooks -g -F #{option_name}=#{option_value} @fmtcase
+out: show-hooks -g -F #{option_name}=#{option_value} status-keys
+out: show-options -g -F #{option_unset_name} status
+out: show-options -g -F #{option_unset_name} status-format
+set-option -g update-environment ''
+out: show-options -A -F #{option_is_parent}:#{option_has_value} update-environment
+out: show-options -A update-environment
+set-option -gu update-environment
+set-option -p -t w:0 pane-colours[0] red
+set-option -wU -t w:0 pane-colours
+out: show-options -pA -t w:0 pane-colours
+out: show-options -pA -t w:0 -F #{option_is_parent}:#{option_has_value} pane-colours
+# split-window -B validates against pane-border-lines and sets the new pane's option.
+new-window -d -n borders
+split-window -d -t w:borders -B double
+out: show-options -p -t w:borders.1 pane-border-lines
+err: split-window -d -t w:borders -B wavy
+out: list-panes -t w:borders -F #{pane_index}
+# pane_unzoomed_width and pane_unzoomed_height follow the tiled cell under zoom.
+resize-pane -Z -t w:borders.0
+out: display-message -p -t w:borders.0 #{pane_unzoomed_width}x#{pane_unzoomed_height}:#{pane_width}x#{pane_height}:#{window_zoomed_flag}
+out: display-message -p -t w:borders.1 #{pane_unzoomed_width}x#{pane_unzoomed_height}
+resize-pane -Z -t w:borders.0
+out: display-message -p -t w:borders.0 #{pane_unzoomed_width}x#{pane_unzoomed_height}:#{pane_width}x#{pane_height}
+# OSC 133 command marks, output and DEC private modes from a live pane.
+new-window -d -n marks -- sh
+run-shell "sleep 0.3"
+out: display-message -p -t w:marks #{pane_command_running}:#{pane_command_status}:#{?pane_command_start_time,set,unset}:#{?pane_last_prompt_time,set,unset}:#{?pane_last_output_time,set,unset}:#{e|>:#{pane_output_generation},0}:#{pane_private_modes}
+send-keys -t w:marks "printf '\\033]133\\073A\\007\\033]133\\073C\\007\\033[?1h\\033[?2004h'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_command_running}:#{pane_command_status}:#{?pane_command_start_time,set,unset}:#{?pane_command_end_time,set,unset}:#{?pane_last_prompt_time,set,unset}:#{e|<:#{pane_command_duration},5}:#{pane_private_modes}
+send-keys -t w:marks "printf '\\033]133\\073D\\0737\\007\\033[?1l\\033[?2004l'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_command_running}:#{pane_command_status}:#{?pane_command_end_time,set,unset}:#{e|<:#{pane_command_duration},5}:#{pane_private_modes}
+send-keys -t w:marks "printf '\\033]133\\073C\\007\\033]133\\073D\\007'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_command_running}:#{pane_command_status}
+send-keys -t w:marks "printf '\\033]133\\073C\\007\\033]133\\073D\\073300\\007'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_command_status}
+send-keys -t w:marks "printf '\\033[?1000h\\033[?1002h'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[?1003h\\033[?1006h\\033[?1000l'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[?12h\\033[0 q'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[?12h\\033[2 q'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[1 q'" Enter
+run-shell "sleep 0.5"
+out: display-message -p -t w:marks #{pane_private_modes}
+send-keys -t w:marks "printf '\\033[0 q\\033[?1006l'" Enter
+# The 3.8 modal formats: zz has no modal panes, so these read 0 and empty.
+out: display-message -p -t w:marks #{pane_modal_flag}:#{window_modal_pane}
+kill-window -t w:marks
+kill-window -t w:borders

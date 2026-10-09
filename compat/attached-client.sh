@@ -56,8 +56,8 @@ if ! TMUX_BIN="$(resolve_binary "$TMUX_INPUT")"; then
 fi
 
 TMUX_VERSION="$("$TMUX_BIN" -V 2>/dev/null || true)"
-if [ "$TMUX_VERSION" != "tmux next-3.8" ]; then
-  printf "error: tmux binary must report 'tmux next-3.8', got: %s\n" "${TMUX_VERSION:-<empty>}" >&2
+if [ "$TMUX_VERSION" != "tmux 3.8" ]; then
+  printf "error: tmux binary must report 'tmux 3.8', got: %s\n" "${TMUX_VERSION:-<empty>}" >&2
   exit 2
 fi
 
@@ -3142,7 +3142,7 @@ probe_requested_client_flags() {
   local fresh_session="requested-flags-fresh"
   local detached_session="requested-flags-detached"
   local missing_session="z"
-  local full_flags="ignore-size,no-detach-on-destroy,read-only,active-pane"
+  local full_flags="ignore-size,no-detach-on-destroy,read-only"
   local read_only_flags
 
   wait_for_terminal_ready "$side"

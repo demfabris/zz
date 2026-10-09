@@ -34,7 +34,7 @@ use libghostty_vt::{
     terminal::{
         ClipboardContent, ClipboardLocation, ClipboardWriteError, ColorScheme, CompressionMode,
         ConformanceLevel, CursorStyle as GhosttyCursorStyle, DeviceAttributeFeature,
-        DeviceAttributes, DeviceType, GridRead, Mode, Point, PointCoordinate, PointSpace,
+        DeviceAttributes, DeviceType, GridRead, Mode, ModeKind, Point, PointCoordinate, PointSpace,
         PrimaryDeviceAttributes, ScreenSnapshot, ScrollViewport, SecondaryDeviceAttributes,
         SizeReportSize, TertiaryDeviceAttributes,
     },
@@ -49,6 +49,10 @@ use smallvec::SmallVec;
 use thiserror::Error;
 
 use crate::ColourClass;
+use crate::program_status::{
+    MAX_PROGRAM_STATUS_OSC_BYTES, PROGRAM_STATUS_PREFIX, ProgramStatus, ProgramStatusReport,
+    parse_program_status,
+};
 use crate::{
     ATTR_BLINK, ATTR_BOLD, ATTR_EXPLICIT_RGB, ATTR_FAINT, ATTR_HYPERLINK, ATTR_INVISIBLE,
     ATTR_ITALIC, ATTR_OVERLINE, ATTR_STRIKETHROUGH, CellWidth, ClipboardTarget, Color, CopyJump,
@@ -292,6 +296,7 @@ const MAX_CLIPBOARD_WRITE_BYTES: usize = 8 * 1024 * 1024;
 const CLIPBOARD_TEXT_MIME: &str = "text/plain";
 const MAX_PENDING_ACTOR_COMMANDS: usize = 1;
 const MAX_PENDING_RELIABLE_EVENTS: usize = 4;
+const MAX_PENDING_SHELL_MARKS: usize = 65_536;
 const MAX_PENDING_RELIABLE_EVENT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_PENDING_TERMINAL_EVENTS: usize = MAX_PENDING_RELIABLE_EVENTS + 1;
 const RETAINED_CELL_PLANES: usize = 2;
@@ -439,18 +444,291 @@ struct EngineFilter {
     /// engine as it is read; `osc_overflowed` once it outgrew the cap and only
     /// its command number can still be parsed.
     osc: Vec<u8>,
+    osc_dropped: usize,
     osc_overflowed: bool,
     integration_title: bool,
     program_title_writes: u64,
     bar: ProgressBar,
     primary_history_size: usize,
     metadata_hint: bool,
+    program_status: ProgramStatus,
+    program_status_changed: bool,
+    replies: Option<Rc<RefCell<PtyEffects>>>,
+    output: PaneOutputFacts,
+    shell_marks: Vec<ShellMark>,
+    cursor_blink_set: bool,
+    mouse_mode: Option<usize>,
+    output_marks: Vec<(Screen, TrackedGridRef)>,
+}
+
+/// `format_cb_pane_private_modes`' table, in its order: the DEC private mode
+/// numbers whose state the format lists.
+pub const PRIVATE_MODE_NUMBERS: [u16; 14] = [
+    1, 6, 7, 12, 25, 1000, 1002, 1003, 1004, 1005, 1006, 2004, 2026, 2031,
+];
+
+const CURSOR_BLINK_MODE_BIT: usize = 3;
+const MOUSE_MODE_BITS: u16 = 0b111 << 5;
+
+impl EngineFilter {
+    /// The `input_csi_dispatch_sm_private` and `_rm_private` bookkeeping that
+    /// `pane_private_modes` reads and the engine does not keep: `?12h` and
+    /// `?12l` make the blink state the application's until `CSI 0 SP q` hands
+    /// it back, and the three mouse tracking modes replace each other, with
+    /// any of `?1000l` to `?1003l` clearing them all.
+    fn track_private_modes(&mut self, parameters: &[u8], final_byte: u8) {
+        if final_byte == b'q'
+            && let Some(style) = parameters.strip_suffix(b" ")
+        {
+            if style.is_empty() || style == b"0" {
+                self.cursor_blink_set = false;
+            }
+            return;
+        }
+        let set = match final_byte {
+            b'h' => true,
+            b'l' => false,
+            _ => return,
+        };
+        let Some(modes) = parameters.strip_prefix(b"?") else {
+            return;
+        };
+        for mode in modes.split(|byte| *byte == b';') {
+            match (mode, set) {
+                (b"12", _) => self.cursor_blink_set = true,
+                (b"1000", true) => self.mouse_mode = Some(5),
+                (b"1002", true) => self.mouse_mode = Some(6),
+                (b"1003", true) => self.mouse_mode = Some(7),
+                (b"1000" | b"1001" | b"1002" | b"1003", false) => self.mouse_mode = None,
+                _ => {}
+            }
+        }
+    }
+
+    /// `input_parse_pane` and `input_parse_buffer` count every read, before
+    /// anything decides what the bytes mean.
+    fn count_output(&mut self) {
+        self.output.output(unix_now());
+    }
+}
+
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Which OSC 133 mark `input_osc_133` fires an event for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellMarkKind {
+    Prompt,
+    CommandStarted,
+    CommandFinished,
+}
+
+/// One OSC 133 event, with the pane's command facts as the mark left them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShellMark {
+    pub kind: ShellMarkKind,
+    pub facts: PaneOutputFacts,
+}
+
+/// What `input_parse_pane`, `input_parse_buffer` and `input_osc_133` keep on
+/// `struct window_pane`: the output generation and time, and the OSC 133
+/// prompt and command marks. Times are Unix seconds, 0 for never.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PaneOutputFacts {
+    pub output_generation: u64,
+    pub last_output_time: u64,
+    pub last_prompt_time: u64,
+    pub command_start_time: u64,
+    pub command_end_time: u64,
+    pub command_running: bool,
+    pub command_status: Option<u8>,
+}
+
+impl PaneOutputFacts {
+    fn output(&mut self, now: u64) {
+        self.output_generation += 1;
+        self.last_output_time = now;
+    }
+
+    fn osc_133(&mut self, mark: &[u8], now: u64) {
+        match mark.first() {
+            Some(b'A' | b'N') => self.last_prompt_time = now,
+            Some(b'C') => {
+                self.command_start_time = now;
+                self.command_end_time = 0;
+                self.command_running = true;
+                self.command_status = None;
+            }
+            Some(b'D') => {
+                self.command_end_time = now;
+                self.command_running = false;
+                self.command_status = Some(osc_133_exit_status(mark));
+            }
+            _ => {}
+        }
+    }
+
+    /// `format_cb_pane_command_duration`: up to now while the command runs,
+    /// never negative.
+    #[must_use]
+    pub fn command_duration(&self, now: u64) -> Option<u64> {
+        if self.command_start_time == 0 {
+            return None;
+        }
+        let end = if self.command_running {
+            now
+        } else {
+            self.command_end_time
+        };
+        Some(end.max(self.command_start_time) - self.command_start_time)
+    }
+}
+
+/// `input_osc_133_exit_status`: no status or a `key=value` field reads 0, a
+/// number outside 0..=255 reads 255.
+fn osc_133_exit_status(mark: &[u8]) -> u8 {
+    let Some(rest) = mark.get(1..).and_then(|rest| rest.strip_prefix(b";")) else {
+        return 0;
+    };
+    if rest.is_empty() || rest[0] == b'=' || rest[0] == b';' {
+        return 0;
+    }
+    let field = rest.split(|byte| *byte == b';').next().unwrap_or_default();
+    if field.contains(&b'=') {
+        return 0;
+    }
+    std::str::from_utf8(field)
+        .ok()
+        .and_then(|field| field.parse::<i64>().ok())
+        .and_then(|status| u8::try_from(status).ok())
+        .unwrap_or(255)
 }
 
 impl EngineFilter {
+    fn mark_output_start(&mut self, terminal: &Terminal<'_, '_>) {
+        let (Ok(screen), Ok(row)) = (terminal.active_screen(), terminal.cursor_y()) else {
+            return;
+        };
+        let Ok(mark) = terminal.track_grid_ref(Point::Active(PointCoordinate {
+            x: 0,
+            y: u32::from(row),
+        })) else {
+            return;
+        };
+        self.output_marks.retain(|(_, mark)| mark.has_value());
+        let row = mark.point(PointSpace::Screen).ok().flatten();
+        if self.output_marks.last().is_some_and(|(last, previous)| {
+            *last == screen && previous.point(PointSpace::Screen).ok().flatten() == row
+        }) {
+            return;
+        }
+        self.output_marks.push((screen, mark));
+    }
+
+    fn erased_rows(
+        parameters: &[u8],
+        final_byte: u8,
+        terminal: &Terminal<'_, '_>,
+    ) -> Option<(Screen, u32, u32)> {
+        if final_byte != b'J'
+            || parameters
+                .first()
+                .is_some_and(|byte| (0x3c..0x40).contains(byte))
+        {
+            return None;
+        }
+        let screen = terminal.active_screen().ok()?;
+        let rows = u32::from(terminal.rows().ok()?);
+        let columns = terminal.cols().ok()?;
+        let x = terminal.cursor_x().ok()?;
+        let y = u32::from(terminal.cursor_y().ok()?);
+        let first = parameters.split(|byte| *byte == b';').next().unwrap_or(&[]);
+        let (start, end) = match engine_parameter(first).unwrap_or(0) {
+            0 => (if x == 0 { y } else { y + 1 }, rows.checked_sub(1)?),
+            1 => {
+                let end = if x >= columns.saturating_sub(1) {
+                    y
+                } else {
+                    y.checked_sub(1)?
+                };
+                (0, end)
+            }
+            2 => (0, rows.checked_sub(1)?),
+            _ => return None,
+        };
+        (start <= end).then_some((screen, start, end))
+    }
+
+    fn drop_erased_marks(&mut self, erased: (Screen, u32, u32)) {
+        let (screen, start, end) = erased;
+        self.output_marks.retain(|(owner, mark)| {
+            *owner != screen
+                || mark
+                    .point(PointSpace::Active)
+                    .ok()
+                    .flatten()
+                    .is_none_or(|point| point.y < start || point.y > end)
+        });
+    }
+
+    fn drop_alternate_marks(
+        &mut self,
+        parameters: &[u8],
+        final_byte: u8,
+        terminal: &Terminal<'_, '_>,
+    ) {
+        if final_byte == b'h'
+            && terminal.active_screen().ok() == Some(Screen::Primary)
+            && parameters.first() == Some(&b'?')
+            && parameters[1..]
+                .split(|byte| *byte == b';')
+                .any(|parameter| matches!(engine_parameter(parameter), Some(47 | 1047 | 1049)))
+        {
+            self.output_marks
+                .retain(|(screen, _)| *screen != Screen::Alternate);
+        }
+    }
+
+    fn output_rows(&self, terminal: &Terminal<'_, '_>) -> Vec<u64> {
+        let Ok(active) = terminal.active_screen() else {
+            return Vec::new();
+        };
+        let mut rows = self
+            .output_marks
+            .iter()
+            .filter(|(screen, _)| *screen == active)
+            .filter_map(|(_, mark)| mark.point(PointSpace::Screen).ok().flatten())
+            .map(|point| u64::from(point.y))
+            .collect::<Vec<_>>();
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+
     fn facts(&self, terminal: &Terminal<'_, '_>) -> Result<TerminalFacts, WorkerError> {
         let alternate_on = terminal.active_screen()? == Screen::Alternate;
+        let mut private_modes = 0_u16;
+        for (bit, number) in PRIVATE_MODE_NUMBERS.iter().enumerate() {
+            if terminal
+                .mode(Mode::new(*number, ModeKind::Dec))
+                .unwrap_or(false)
+            {
+                private_modes |= 1 << bit;
+            }
+        }
+        if !self.cursor_blink_set {
+            private_modes &= !(1 << CURSOR_BLINK_MODE_BIT);
+        }
+        private_modes &= !MOUSE_MODE_BITS;
+        if let Some(bit) = self.mouse_mode {
+            private_modes |= 1 << bit;
+        }
         Ok(TerminalFacts {
+            output: self.output,
+            private_modes,
             history_size: if alternate_on {
                 self.primary_history_size
             } else {
@@ -500,7 +778,9 @@ impl EngineFilter {
                         bytes = &bytes[1..];
                     }
                     other => {
-                        self.metadata_hint |= other == b'c';
+                        if other == b'c' {
+                            self.full_reset();
+                        }
                         terminal.vt_write(b"\x1b");
                         self.state = EngineState::Ground;
                     }
@@ -517,6 +797,11 @@ impl EngineFilter {
                     bytes = &bytes[1..];
                     if byte >= 0x40 {
                         self.metadata_hint |= csi_touches_metadata(&self.sequence, byte);
+                        let sequence = std::mem::take(&mut self.sequence);
+                        self.track_private_modes(&sequence, byte);
+                        self.sequence = sequence;
+                        let erased = Self::erased_rows(&self.sequence, byte, terminal);
+                        self.drop_alternate_marks(&self.sequence.clone(), byte, terminal);
                         if csi_needs_rewrite(&self.sequence, byte, knobs) {
                             write_engine_csi(
                                 &self.sequence,
@@ -531,6 +816,9 @@ impl EngineFilter {
                             raw.extend_from_slice(&self.sequence);
                             raw.push(byte);
                             terminal.vt_write(&raw);
+                        }
+                        if let Some(erased) = erased {
+                            self.drop_erased_marks(erased);
                         }
                         self.sequence.clear();
                         self.state = EngineState::Ground;
@@ -632,15 +920,26 @@ impl EngineFilter {
                     let final_byte = bytes[end];
                     let parameters = &bytes[escape + 2..end];
                     self.metadata_hint |= csi_touches_metadata(parameters, final_byte);
-                    if csi_needs_rewrite(parameters, final_byte, knobs) {
+                    self.track_private_modes(parameters, final_byte);
+                    self.drop_alternate_marks(parameters, final_byte, terminal);
+                    let clears_rows = final_byte == b'J' && !self.output_marks.is_empty();
+                    if clears_rows || csi_needs_rewrite(parameters, final_byte, knobs) {
                         terminal.vt_write(&bytes[start..escape]);
-                        write_engine_csi(
-                            parameters,
-                            final_byte,
-                            knobs,
-                            terminal,
-                            &mut self.primary_history_size,
-                        );
+                        let erased = Self::erased_rows(parameters, final_byte, terminal);
+                        if csi_needs_rewrite(parameters, final_byte, knobs) {
+                            write_engine_csi(
+                                parameters,
+                                final_byte,
+                                knobs,
+                                terminal,
+                                &mut self.primary_history_size,
+                            );
+                        } else {
+                            terminal.vt_write(&bytes[escape..=end]);
+                        }
+                        if let Some(erased) = erased {
+                            self.drop_erased_marks(erased);
+                        }
                         start = end + 1;
                     }
                     cursor = end + 1;
@@ -657,7 +956,7 @@ impl EngineFilter {
                     return &bytes[escape + 2..];
                 }
                 b'c' => {
-                    self.metadata_hint = true;
+                    self.full_reset();
                     cursor = escape + 2;
                 }
                 _ => {
@@ -688,15 +987,19 @@ impl EngineFilter {
             terminal.vt_write(bytes);
             return &[];
         };
+        let output_start = !self.osc_overflowed && self.osc.starts_with(b"133;C");
         if terminator == 0x1b {
             terminal.vt_write(&bytes[..end]);
-            self.finish_osc(bar, last_command_status);
+            self.finish_osc(bar, last_command_status, terminator);
             self.state = EngineState::Escape;
-            return &bytes[end + 1..];
+        } else {
+            terminal.vt_write(&bytes[..=end]);
+            self.finish_osc(bar, last_command_status, terminator);
+            self.state = EngineState::Ground;
         }
-        terminal.vt_write(&bytes[..=end]);
-        self.finish_osc(bar, last_command_status);
-        self.state = EngineState::Ground;
+        if output_start {
+            self.mark_output_start(terminal);
+        }
         &bytes[end + 1..]
     }
 
@@ -704,30 +1007,61 @@ impl EngineFilter {
     /// every other control byte inside an OSC is a null transition the pin
     /// drops.
     fn collect_osc(&mut self, bytes: &[u8]) {
-        if self.osc.len() + bytes.len() > MAX_ENGINE_OSC_BYTES {
-            self.osc_overflowed = true;
+        for &byte in bytes {
+            if self.osc_overflowed {
+                return;
+            }
+            let program_status = self.osc.starts_with(PROGRAM_STATUS_PREFIX);
+            if byte < 0x20 && !program_status {
+                continue;
+            }
+            let cap = if program_status {
+                MAX_PROGRAM_STATUS_OSC_BYTES
+            } else {
+                MAX_ENGINE_OSC_BYTES
+            };
+            if self.osc.len() + self.osc_dropped == cap {
+                self.osc_overflowed = true;
+            } else if byte < 0x20 {
+                self.osc_dropped += 1;
+            } else {
+                self.osc.push(byte);
+            }
         }
-        let room = MAX_ENGINE_OSC_BYTES - self.osc.len();
-        self.osc.extend(
-            bytes
-                .iter()
-                .copied()
-                .filter(|byte| *byte >= 0x20)
-                .take(room),
-        );
     }
 
     fn finish_osc(
         &mut self,
         bar: &mut Option<ProgressBar>,
         last_command_status: &mut Option<CommandStatusUpdate>,
+        terminator: u8,
     ) {
         let osc = std::mem::take(&mut self.osc);
         let overflowed = std::mem::take(&mut self.osc_overflowed);
+        self.osc_dropped = 0;
         let integration_title = std::mem::take(&mut self.integration_title);
         self.metadata_hint |= overflowed || osc_touches_metadata(&osc);
         if matches!(osc_command(&osc), Some((0 | 2, _))) {
             self.program_title_writes += u64::from(!integration_title);
+            return;
+        }
+        if !overflowed && let Some(mark) = osc.strip_prefix(b"133;") {
+            self.output.osc_133(mark, unix_now());
+            let kind = match mark.first() {
+                Some(b'A' | b'N') => Some(ShellMarkKind::Prompt),
+                Some(b'C') => Some(ShellMarkKind::CommandStarted),
+                Some(b'D') => Some(ShellMarkKind::CommandFinished),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                self.shell_marks.push(ShellMark {
+                    kind,
+                    facts: self.output,
+                });
+            }
+        }
+        if is_prompt_start(&osc) {
+            self.program_status_changed |= self.program_status.program_left();
             return;
         }
         if overflowed {
@@ -735,6 +1069,14 @@ impl EngineFilter {
         }
         if osc == SHELL_INTEGRATION_TITLE_MARK {
             self.integration_title = true;
+            return;
+        }
+        if let Some(body) = osc.strip_prefix(PROGRAM_STATUS_PREFIX) {
+            match parse_program_status(body) {
+                Some(ProgramStatusReport::Query) => self.answer_program_status_query(terminator),
+                Some(report) => self.program_status_changed |= self.program_status.apply(report),
+                None => {}
+            }
             return;
         }
         if let Some(status) = parse_osc_command_status(&osc) {
@@ -749,6 +1091,33 @@ impl EngineFilter {
         if self.bar != before {
             *bar = Some(self.bar);
         }
+    }
+
+    fn answer_program_status_query(&self, terminator: u8) {
+        if let Some(replies) = &self.replies {
+            let reply: &[u8] = if terminator == 0x07 {
+                b"\x1b]7501;?\x07"
+            } else {
+                b"\x1b]7501;?\x1b\\"
+            };
+            replies.borrow_mut().push(reply);
+        }
+    }
+
+    fn full_reset(&mut self) {
+        self.metadata_hint = true;
+        self.cursor_blink_set = false;
+        self.mouse_mode = None;
+        self.output_marks.clear();
+        self.program_status_changed |= self.program_status.reset();
+    }
+
+    fn take_shell_marks(&mut self) -> Vec<ShellMark> {
+        std::mem::take(&mut self.shell_marks)
+    }
+
+    fn take_program_status(&mut self) -> Option<ProgramStatus> {
+        std::mem::take(&mut self.program_status_changed).then(|| self.program_status.clone())
     }
 
     /// `input_exit_rename`: every way out of the rename state applies the
@@ -808,6 +1177,12 @@ fn csi_touches_metadata(parameters: &[u8], final_byte: u8) -> bool {
         b't' => parameters.starts_with(b"22") || parameters.starts_with(b"23"),
         _ => false,
     }
+}
+
+fn is_prompt_start(payload: &[u8]) -> bool {
+    payload
+        .strip_prefix(b"133;A")
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with(b";"))
 }
 
 fn parse_osc_command_status(payload: &[u8]) -> Option<CommandStatusUpdate> {
@@ -1297,6 +1672,8 @@ pub struct CaptureOptions {
     pub escape_sequences: bool,
     pub escape_nonprintable: bool,
     pub number_lines: bool,
+    pub line_flags: bool,
+    pub hyperlinks: bool,
 }
 
 impl Default for CaptureOptions {
@@ -1312,6 +1689,8 @@ impl Default for CaptureOptions {
             escape_sequences: false,
             escape_nonprintable: false,
             number_lines: false,
+            line_flags: false,
+            hyperlinks: false,
         }
     }
 }
@@ -1717,6 +2096,9 @@ fn terminal_event_channel(state: &Arc<EventQueueState>) -> (TerminalEventSender,
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TerminalFacts {
+    pub output: PaneOutputFacts,
+    /// One bit per [`PRIVATE_MODE_NUMBERS`] entry that is set.
+    pub private_modes: u16,
     pub history_size: usize,
     pub cursor_x: u16,
     pub cursor_y: u16,
@@ -1736,11 +2118,14 @@ struct PublishedViewports {
     fallback_current: bool,
     copy_facts: HashMap<TerminalViewId, Arc<CopyModeFacts>>,
     bar: ProgressBar,
+    program_status: Arc<ProgramStatus>,
     last_command_status: Option<i32>,
     facts: TerminalFacts,
     search_string: String,
     sunk: Vec<TerminalViewId>,
     size: (u16, u16),
+    shell_marks: VecDeque<ShellMark>,
+    shell_marks_dropped: u64,
 }
 
 impl PublishedViewports {
@@ -1753,10 +2138,13 @@ impl PublishedViewports {
             fallback_current: false,
             copy_facts: HashMap::new(),
             bar: ProgressBar::default(),
+            program_status: Arc::default(),
             last_command_status: None,
             facts: TerminalFacts::default(),
             search_string: String::new(),
             sunk: Vec::new(),
+            shell_marks: VecDeque::new(),
+            shell_marks_dropped: 0,
         }
     }
 }
@@ -2462,8 +2850,30 @@ impl TerminalSession {
     }
 
     #[must_use]
+    pub fn program_status(&self) -> Arc<ProgramStatus> {
+        Arc::clone(&self.latest.read().program_status)
+    }
+
+    #[must_use]
     pub fn last_command_status(&self) -> Option<i32> {
         self.latest.read().last_command_status
+    }
+
+    /// The OSC 133 marks the pane wrote since the last call, oldest first.
+    #[must_use]
+    pub fn take_shell_marks(&self) -> Vec<ShellMark> {
+        let mut latest = self.latest.write();
+        if latest.shell_marks.is_empty() {
+            return Vec::new();
+        }
+        latest.shell_marks.drain(..).collect()
+    }
+
+    /// How many OSC 133 marks were dropped because the daemon fell
+    /// `MAX_PENDING_SHELL_MARKS` behind.
+    #[must_use]
+    pub fn shell_marks_dropped(&self) -> u64 {
+        self.latest.read().shell_marks_dropped
     }
 
     #[must_use]
@@ -5355,6 +5765,25 @@ impl Publisher {
         self.latest.write().last_command_status = status;
     }
 
+    fn push_shell_marks(&self, marks: Vec<ShellMark>) {
+        if marks.is_empty() {
+            return;
+        }
+        let mut latest = self.latest.write();
+        for mark in marks {
+            if latest.shell_marks.len() == MAX_PENDING_SHELL_MARKS {
+                latest.shell_marks.pop_front();
+                latest.shell_marks_dropped += 1;
+            }
+            latest.shell_marks.push_back(mark);
+        }
+    }
+
+    fn set_program_status(&self, status: ProgramStatus) {
+        self.latest.write().program_status = Arc::new(status);
+        self.notify_latest();
+    }
+
     #[cfg(test)]
     fn publish(&self, viewport: TerminalViewport) {
         let viewport = Arc::new(viewport);
@@ -5962,6 +6391,7 @@ fn new_output_view(
             pane_search: None,
             search: Some(SearchWorker::spawn(wake.clone())),
         },
+        EngineFilter::default(),
         frozen,
     )?;
     if !frozen {
@@ -8412,6 +8842,10 @@ fn capture_history(
 #[path = "session/capture_work_e22_tests.rs"]
 mod capture_work_e22_tests;
 
+#[cfg(test)]
+#[path = "session/capture_links_tests.rs"]
+mod capture_links_tests;
+
 const CAPTURE_ROWS_PER_STEP: u64 = 512;
 
 trait CaptureGrid: GridRead {
@@ -8506,6 +8940,7 @@ enum CaptureSource {
 struct CaptureWork {
     source: CaptureSource,
     options: CaptureOptions,
+    output_rows: Vec<u64>,
     next: u64,
     end: u64,
     visible_start: u64,
@@ -8519,9 +8954,15 @@ impl CaptureWork {
     fn start(
         terminal: &Terminal<'_, '_>,
         mode: Option<&CopyModeState>,
+        filter: &EngineFilter,
         request: CaptureRequest,
     ) -> Option<Self> {
         let CaptureRequest { options, reply } = request;
+        let output_rows = if options.line_flags {
+            filter.output_rows(terminal)
+        } else {
+            Vec::new()
+        };
         let dimensions = if options.mode
             && let Some(mode) = mode
         {
@@ -8548,8 +8989,8 @@ impl CaptureWork {
                 .min(total.saturating_sub(1));
             let start = resolve_capture_boundary(options.start, visible_start, visible_end, total);
             let end = resolve_capture_boundary(options.end, visible_start, visible_end, total);
-            if start > end || end - start < CAPTURE_ROWS_PER_STEP {
-                return capture_terminal(terminal, mode, options).map(Err);
+            if start > end || end - start < CAPTURE_ROWS_PER_STEP || options.hyperlinks {
+                return capture_terminal_marked(terminal, mode, options, &output_rows).map(Err);
             }
             let source = if options.mode
                 && let Some(mode) = mode
@@ -8572,6 +9013,7 @@ impl CaptureWork {
             Ok(Ok((source, next, end, visible_start))) => Some(Self {
                 source,
                 options,
+                output_rows,
                 next,
                 end,
                 visible_start,
@@ -8620,6 +9062,7 @@ impl CaptureWork {
         let continuing = end < self.end && self.options.join_wrapped && self.wrapped(end)?;
         let keep_tail = continuing
             && !options.number_lines
+            && !options.line_flags
             && !options.escape_sequences
             && !options.preserve_trailing;
         let mut output = match &self.source {
@@ -8630,6 +9073,7 @@ impl CaptureWork {
                     ..options
                 },
                 &mut self.previous,
+                &self.output_rows,
             )?,
             CaptureSource::Mode(revision) => {
                 capture_revision(revision, self.visible_start as u32, options)?
@@ -8676,10 +9120,30 @@ fn step_capture_work(work: &mut VecDeque<CaptureWork>) {
     }
 }
 
+fn stamp_copy_mode_marks(
+    terminal: &Terminal<'_, '_>,
+    filter: &EngineFilter,
+    views: &ActiveTerminalViews,
+) {
+    for mode in views.values().filter_map(|view| view.copy_mode.as_deref()) {
+        mode.revision
+            .stamp_output_rows(|| filter.output_rows(terminal));
+    }
+}
+
 fn capture_terminal(
     terminal: &Terminal<'_, '_>,
     mode: Option<&CopyModeState>,
     options: CaptureOptions,
+) -> Result<String, TerminalCaptureError> {
+    capture_terminal_marked(terminal, mode, options, &[])
+}
+
+fn capture_terminal_marked(
+    terminal: &Terminal<'_, '_>,
+    mode: Option<&CopyModeState>,
+    options: CaptureOptions,
+    output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
     if options.mode
         && let Some(mode) = mode
@@ -8687,12 +9151,16 @@ fn capture_terminal(
         if options.alternate && mode.revision.screen != Screen::Alternate {
             return Err(TerminalCaptureError::AlternateUnavailable);
         }
+        if options.hyperlinks {
+            return Ok(String::new());
+        }
         return capture_mode_revision(mode, options);
     }
     capture_grid(
         terminal,
         options,
         &mut libghostty_vt::style::Style::default(),
+        output_rows,
     )
 }
 
@@ -8700,6 +9168,7 @@ fn capture_grid(
     terminal: &impl CaptureGrid,
     options: CaptureOptions,
     previous: &mut libghostty_vt::style::Style,
+    output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
     let active_screen = terminal.capture_screen().map_err(capture_failure)?;
     if options.alternate && active_screen != Screen::Alternate {
@@ -8725,15 +9194,25 @@ fn capture_grid(
     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
     let columns = terminal.capture_columns().map_err(capture_failure)?;
+    if options.hyperlinks {
+        return capture_hyperlinks(
+            terminal,
+            options,
+            (start, end),
+            visible_start,
+            columns,
+            output_rows,
+        );
+    }
     if options.escape_sequences {
         return capture_styled_terminal(
             terminal,
             options,
-            start,
-            end,
+            (start, end),
             visible_start,
             columns,
             previous,
+            output_rows,
         );
     }
     let head = terminal
@@ -8757,8 +9236,9 @@ fn capture_grid(
             .with_selection(&selection);
         terminal.capture_format(formatter_options)
     };
-    let output = format_range(options.join_wrapped && !options.number_lines)?;
-    let rows = if options.number_lines && options.join_wrapped {
+    let per_row = options.number_lines || options.line_flags;
+    let output = format_range(options.join_wrapped && !per_row)?;
+    let rows = if per_row && options.join_wrapped {
         Some(
             (start..=end)
                 .map(|row| {
@@ -8785,23 +9265,195 @@ fn capture_grid(
     };
     let trailing_rows = requested_rows.saturating_sub(written_rows);
     let output = pad_capture_rows(&output, trailing_rows, columns, options);
+    let flags = if options.line_flags {
+        Some(
+            (start..=end)
+                .map(|row| grid_line_flags(terminal, row, output_rows))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+    } else {
+        None
+    };
     Ok(decorate_capture(
         output,
         rows.as_deref(),
         options,
         start,
         visible_start,
+        flags.as_deref(),
     ))
+}
+
+const LINE_FLAG_HYPERLINK: u8 = 1 << 0;
+const LINE_FLAG_OUTPUT: u8 = 1 << 1;
+const LINE_FLAG_PROMPT: u8 = 1 << 2;
+const LINE_FLAG_WRAPPED: u8 = 1 << 3;
+const MAX_HYPERLINK_URI: usize = 1024;
+
+fn push_line_flags(output: &mut String, flags: u8) {
+    for (bit, letter) in [
+        (LINE_FLAG_HYPERLINK, 'H'),
+        (LINE_FLAG_OUTPUT, 'O'),
+        (LINE_FLAG_PROMPT, 'P'),
+        (LINE_FLAG_WRAPPED, 'W'),
+    ] {
+        if flags & bit != 0 {
+            output.push(letter);
+        }
+    }
+    if flags == 0 {
+        output.push('-');
+    }
+    output.push(' ');
+}
+
+fn grid_line_flags(
+    terminal: &impl GridRead,
+    row: u64,
+    output_rows: &[u64],
+) -> Result<u8, TerminalCaptureError> {
+    let line = terminal
+        .grid_ref(Point::Screen(PointCoordinate {
+            x: 0,
+            y: u32::try_from(row).unwrap_or(u32::MAX),
+        }))
+        .and_then(|grid| grid.row())
+        .map_err(capture_failure)?;
+    let mut flags = 0;
+    if line.has_hyperlink().map_err(capture_failure)? {
+        flags |= LINE_FLAG_HYPERLINK;
+    }
+    if output_rows.binary_search(&row).is_ok() {
+        flags |= LINE_FLAG_OUTPUT;
+    }
+    if line.semantic_prompt().map_err(capture_failure)? == RowSemanticPrompt::Prompt {
+        flags |= LINE_FLAG_PROMPT;
+    }
+    if line.is_wrapped().map_err(capture_failure)? {
+        flags |= LINE_FLAG_WRAPPED;
+    }
+    Ok(flags)
+}
+
+fn capture_hyperlinks(
+    terminal: &impl GridRead,
+    options: CaptureOptions,
+    (start, end): (u64, u64),
+    history_rows: u64,
+    columns: u16,
+    output_rows: &[u64],
+) -> Result<String, TerminalCaptureError> {
+    let mut output = String::new();
+    let mut found = 0_usize;
+    let mut carried: Option<Vec<u8>> = None;
+    let mut buffer = vec![0_u8; 256];
+    for row in start..=end {
+        let y = u32::try_from(row).unwrap_or(u32::MAX);
+        let line = terminal
+            .grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
+            .and_then(|grid| grid.row())
+            .map_err(capture_failure)?;
+        let wrapped = line.is_wrapped().map_err(capture_failure)?;
+        let mut current = carried.take();
+        if !line.has_hyperlink().map_err(capture_failure)? {
+            continue;
+        }
+        let mut uris = Vec::new();
+        for x in 0..columns {
+            let grid = terminal
+                .grid_ref(Point::Screen(PointCoordinate { x, y }))
+                .map_err(capture_failure)?;
+            let cell = grid.cell().map_err(capture_failure)?;
+            if matches!(
+                cell.wide().map_err(capture_failure)?,
+                CellWide::SpacerTail | CellWide::SpacerHead
+            ) {
+                continue;
+            }
+            if !cell.has_hyperlink().map_err(capture_failure)? {
+                current = None;
+                continue;
+            }
+            let length = match grid.hyperlink_uri(&mut buffer) {
+                Ok(length) => length,
+                Err(libghostty_vt::Error::OutOfSpace { required }) => {
+                    buffer.resize(required, 0);
+                    grid.hyperlink_uri(&mut buffer).map_err(capture_failure)?
+                }
+                Err(error) => return Err(capture_failure(error)),
+            };
+            let uri = &buffer[..length];
+            if current.as_deref() == Some(uri) {
+                continue;
+            }
+            let visible = visible_uri(uri);
+            if uri.is_empty() || visible.len() > MAX_HYPERLINK_URI {
+                current = None;
+                continue;
+            }
+            current = Some(uri.to_vec());
+            if found == usize::from(columns) {
+                break;
+            }
+            found += 1;
+            uris.push(visible);
+        }
+        if wrapped {
+            carried = current;
+        }
+        if uris.is_empty() {
+            continue;
+        }
+        if options.number_lines {
+            push_capture_line_number(&mut output, row, history_rows);
+        }
+        if options.line_flags {
+            push_line_flags(&mut output, grid_line_flags(terminal, row, output_rows)?);
+        }
+        output.push_str(&uris.join(" "));
+        if !(options.join_wrapped && wrapped) {
+            output.push('\n');
+        }
+        if output.len() > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+    }
+    if output.ends_with('\n') {
+        output.pop();
+    }
+    Ok(output)
+}
+
+fn visible_uri(uri: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::with_capacity(uri.len());
+    for chunk in uri.utf8_chunks() {
+        for character in chunk.valid().chars() {
+            match character {
+                '\\' => output.push_str("\\\\"),
+                '\t' | '\n' => output.push(character),
+                character if character.is_ascii_control() => {
+                    let _ = write!(output, "\\{:03o}", u32::from(character));
+                }
+                character => output.push(character),
+            }
+        }
+        for byte in chunk.invalid() {
+            let _ = write!(output, "\\{byte:03o}");
+        }
+    }
+    output
 }
 
 fn capture_styled_terminal(
     terminal: &impl GridRead,
     options: CaptureOptions,
-    start: u64,
-    end: u64,
+    (start, end): (u64, u64),
     history_rows: u64,
     columns: u16,
     previous: &mut libghostty_vt::style::Style,
+    output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
     let mut output = String::new();
     let mut graphemes = vec!['\0'; 8];
@@ -8882,6 +9534,9 @@ fn capture_styled_terminal(
         if options.number_lines {
             push_capture_line_number(&mut output, row, history_rows);
         }
+        if options.line_flags {
+            push_line_flags(&mut output, grid_line_flags(terminal, row, output_rows)?);
+        }
         if !options.join_wrapped && !options.preserve_trailing {
             output.push_str(line.trim_end_matches(' '));
         } else {
@@ -8908,6 +9563,7 @@ fn capture_styled_terminal(
         },
         start,
         history_rows,
+        None,
     ))
 }
 
@@ -9062,9 +9718,16 @@ fn decorate_capture(
     options: CaptureOptions,
     first_row: u64,
     history_rows: u64,
+    flags: Option<&[u8]>,
 ) -> String {
-    let text = if options.number_lines {
-        number_capture(&text, rows, first_row, history_rows)
+    let text = if options.number_lines || flags.is_some() {
+        number_capture(
+            &text,
+            rows,
+            (first_row, history_rows),
+            options.number_lines,
+            flags,
+        )
     } else {
         text
     };
@@ -9083,17 +9746,28 @@ fn push_capture_line_number(output: &mut String, row: u64, history_rows: u64) {
     output.push(' ');
 }
 
-fn number_capture(text: &str, rows: Option<&[bool]>, first_row: u64, history_rows: u64) -> String {
+fn number_capture(
+    text: &str,
+    rows: Option<&[bool]>,
+    (first_row, history_rows): (u64, u64),
+    numbers: bool,
+    flags: Option<&[u8]>,
+) -> String {
     let mut output = String::with_capacity(text.len());
     for (offset, line) in text.split('\n').enumerate() {
         if offset > 0 && rows.is_none_or(|rows| rows.get(offset - 1) != Some(&true)) {
             output.push('\n');
         }
-        push_capture_line_number(
-            &mut output,
-            first_row.saturating_add(offset as u64),
-            history_rows,
-        );
+        if numbers {
+            push_capture_line_number(
+                &mut output,
+                first_row.saturating_add(offset as u64),
+                history_rows,
+            );
+        }
+        if let Some(flags) = flags {
+            push_line_flags(&mut output, flags.get(offset).copied().unwrap_or(0));
+        }
         output.push_str(line);
     }
     output
@@ -9196,7 +9870,20 @@ fn capture_viewport(
             return Err(TerminalCaptureError::TooLarge);
         }
     }
-    Ok(decorate_capture(output, None, options, start, 0))
+    if options.hyperlinks {
+        return Ok(String::new());
+    }
+    let flags = options
+        .line_flags
+        .then(|| vec![0; usize::try_from(end - start + 1).unwrap_or(0)]);
+    Ok(decorate_capture(
+        output,
+        None,
+        options,
+        start,
+        0,
+        flags.as_deref(),
+    ))
 }
 
 fn capture_viewport_row(
@@ -9296,19 +9983,33 @@ fn capture_revision(
     }
     let head = u32::try_from(start).unwrap_or(u32::MAX);
     let tail = u32::try_from(end).unwrap_or(u32::MAX);
+    let per_row = options.number_lines || options.line_flags;
     let output = revision.capture_rows(
         head,
         tail,
-        options.join_wrapped && !options.number_lines,
+        options.join_wrapped && !per_row,
         options.preserve_trailing,
         options.escape_sequences,
     );
     if output.len() > MAX_CAPTURE_BYTES {
         return Err(TerminalCaptureError::TooLarge);
     }
-    let rows = (options.number_lines && options.join_wrapped).then(|| {
+    let rows = (per_row && options.join_wrapped).then(|| {
         (head..=tail)
             .map(|row| revision.row(row).wrapped())
+            .collect::<Vec<_>>()
+    });
+    let flags = options.line_flags.then(|| {
+        let output_rows = revision.output_rows();
+        (head..=tail)
+            .map(|row| {
+                let meta = revision.row(row);
+                (u8::from(revision.row_has_hyperlink(row)) * LINE_FLAG_HYPERLINK)
+                    | (u8::from(output_rows.binary_search(&u64::from(row)).is_ok())
+                        * LINE_FLAG_OUTPUT)
+                    | (u8::from(meta.prompt()) * LINE_FLAG_PROMPT)
+                    | (u8::from(meta.wrapped()) * LINE_FLAG_WRAPPED)
+            })
             .collect::<Vec<_>>()
     });
     Ok(decorate_capture(
@@ -9317,6 +10018,7 @@ fn capture_revision(
         options,
         start,
         visible_start,
+        flags.as_deref(),
     ))
 }
 
@@ -14316,6 +15018,9 @@ fn feed_pty_output(
         bar,
         last_command_status,
     } = engine;
+    if !bytes.is_empty() {
+        filter.count_output();
+    }
     passthrough.write(bytes, |unwrapped| {
         filter.write(
             unwrapped,
@@ -14419,6 +15124,9 @@ fn encode_key(
     writer: &mut dyn Write,
     input_bytes: &mut Vec<u8>,
 ) -> Result<(), WorkerError> {
+    if matches!(input.key, KeyCode::User(_)) {
+        return Ok(());
+    }
     let mut modifiers = key::Mods::empty();
     modifiers.set(key::Mods::SHIFT, input.modifiers.shift());
     modifiers.set(key::Mods::CTRL, input.modifiers.control());
@@ -14551,7 +15259,7 @@ fn ghostty_key(key: KeyCode) -> key::Key {
             24 => key::Key::F24,
             _ => key::Key::Unidentified,
         },
-        KeyCode::Unidentified => key::Key::Unidentified,
+        KeyCode::Unidentified | KeyCode::User(_) => key::Key::Unidentified,
     }
 }
 
@@ -16462,6 +17170,7 @@ mod tests {
                     mouse_tracking: false,
                     cursor_hidden: false,
                     program_title_writes: 0,
+                    ..filter.facts(&terminal).expect("alternate facts")
                 }
             );
             filter.write(
@@ -16490,6 +17199,7 @@ mod tests {
                     mouse_tracking: false,
                     cursor_hidden: false,
                     program_title_writes: 0,
+                    ..filter.facts(&terminal).expect("primary facts")
                 }
             );
         }
@@ -16855,6 +17565,110 @@ mod tests {
     }
 
     #[test]
+    fn engine_filter_keeps_the_pins_osc_133_command_marks_and_private_modes() {
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
+        let mut filter = EngineFilter::default();
+        let mut write = |filter: &mut EngineFilter, bytes: &[u8]| {
+            if !bytes.is_empty() {
+                filter.count_output();
+            }
+            filter.write(
+                bytes,
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut Vec::new(),
+                &mut None,
+                &mut None,
+            );
+            filter.facts(&terminal).expect("facts")
+        };
+        let fresh = write(&mut filter, b"");
+        assert_eq!(fresh.output, PaneOutputFacts::default());
+        assert_eq!(fresh.private_modes, 0b1_0100);
+        let prompt = write(&mut filter, b"\x1b]133;A\x07$ ");
+        assert_eq!(prompt.output.output_generation, 1);
+        assert_ne!(prompt.output.last_output_time, 0);
+        assert_ne!(prompt.output.last_prompt_time, 0);
+        assert_eq!(prompt.output.command_start_time, 0);
+        let running = write(&mut filter, b"\x1b]133;C\x07\x1b[?2004h\x1b[?1h");
+        assert!(running.output.command_running);
+        assert_eq!(running.output.command_status, None);
+        assert_eq!(running.output.output_generation, 2);
+        assert_eq!(running.private_modes, 0b1000_0001_0101);
+        let blinking = write(&mut filter, b"\x1b[?12h");
+        assert_eq!(blinking.private_modes, 0b1000_0001_1101);
+        let still = write(&mut filter, b"\x1b[?12l");
+        assert_eq!(still.private_modes, 0b1000_0001_0101);
+        write(&mut filter, b"\x1b[?12h");
+        let reset = write(&mut filter, b"\x1b[0 q");
+        assert_eq!(reset.private_modes, 0b1000_0001_0101);
+        write(&mut filter, b"\x1b[?12h");
+        let bare = write(&mut filter, b"\x1b[ q");
+        assert_eq!(bare.private_modes, 0b1000_0001_0101);
+        write(&mut filter, b"\x1b[?12h");
+        let steady = write(&mut filter, b"\x1b[2 q");
+        assert_eq!(steady.private_modes & (1 << 3), 0);
+        let blinking_block = write(&mut filter, b"\x1b[1 q");
+        assert_ne!(blinking_block.private_modes & (1 << 3), 0);
+        write(&mut filter, b"\x1b[0 q");
+        let standard = write(&mut filter, b"\x1b[?1000h\x1b[?1002h");
+        assert_eq!(standard.private_modes, 0b1000_0101_0101);
+        let any = write(&mut filter, b"\x1b[?1003h\x1b[?1006h");
+        assert_eq!(any.private_modes, 0b1100_1001_0101);
+        let cleared = write(&mut filter, b"\x1b[?1000l");
+        assert_eq!(cleared.private_modes, 0b1100_0001_0101);
+        let normal = write(&mut filter, b"\x1b[?1000h\x1b[?1006l");
+        assert_eq!(normal.private_modes, 0b1000_0011_0101);
+        let reset = write(&mut filter, b"\x1bc");
+        assert_eq!(reset.private_modes & 0b1110_0000, 0);
+        for (mark, status) in [
+            (&b"D"[..], 0),
+            (b"D;3", 3),
+            (b"D;256", 255),
+            (b"D;x", 255),
+            (b"D;3;aid=1", 3),
+            (b"D;aid=1", 0),
+            (b"D;", 0),
+        ] {
+            let mut bytes = b"\x1b]133;".to_vec();
+            bytes.extend_from_slice(mark);
+            bytes.push(0x07);
+            let finished = write(&mut filter, &bytes);
+            assert!(!finished.output.command_running);
+            assert_eq!(
+                finished.output.command_status,
+                Some(status),
+                "{}",
+                String::from_utf8_lossy(mark)
+            );
+            assert_ne!(finished.output.command_end_time, 0);
+        }
+    }
+
+    #[test]
+    fn pane_output_counts_bytes_the_passthrough_filter_drops() {
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
+        let mut passthrough = PassthroughFilter::default();
+        let mut filter = EngineFilter::default();
+        let mut engine = EngineOutput {
+            filter: &mut filter,
+            knobs: EngineKnobs::default(),
+            renames: &mut Vec::new(),
+            bar: &mut None,
+            last_command_status: &mut None,
+        };
+        feed_pty_output(
+            &mut terminal,
+            &mut passthrough,
+            &mut engine,
+            b"\x1bPtmux;\x1b\x1b]52;c;eA==\x07\x1b\\",
+        );
+        let facts = filter.facts(&terminal).expect("facts");
+        assert_eq!(facts.output.output_generation, 1);
+        assert_ne!(facts.output.last_output_time, 0);
+    }
+
+    #[test]
     fn engine_filter_counts_title_writes_the_shell_integration_did_not_mark() {
         let long_title = format!("\x1b]2;{}\x07", "t".repeat(200));
         let bytes = [
@@ -16942,6 +17756,96 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn engine_filter_answers_and_keeps_program_status() {
+        let effects = Rc::new(RefCell::new(PtyEffects::new()));
+        let sink = Rc::clone(&effects);
+        let mut terminal = new_terminal(20, 4, 16).expect("terminal");
+        terminal
+            .on_pty_write(move |_, bytes| sink.borrow_mut().push(bytes))
+            .expect("pty write");
+        register_device_attributes(&mut terminal).expect("device attributes");
+        let mut write = |filter: &mut EngineFilter, bytes: &[u8]| {
+            filter.write(
+                bytes,
+                EngineKnobs::default(),
+                &mut terminal,
+                &mut Vec::new(),
+                &mut None,
+                &mut None,
+            );
+        };
+        let mut filter = EngineFilter {
+            replies: Some(Rc::clone(&effects)),
+            ..EngineFilter::default()
+        };
+
+        write(&mut filter, b"\x1b]7501;?\x1b\\\x1b[c");
+        let replies = std::mem::take(&mut effects.borrow_mut().bytes);
+        assert!(
+            replies.starts_with(b"\x1b]7501;?\x1b\\\x1b[?"),
+            "{:?}",
+            String::from_utf8_lossy(&replies)
+        );
+        write(&mut filter, b"\x1b]7501;?\x07");
+        assert_eq!(effects.borrow().bytes, b"\x1b]7501;?\x07");
+        assert!(filter.take_program_status().is_none());
+
+        write(&mut filter, b"\x1b]7501;state=working:id=sync:msg=U3lu");
+        assert!(filter.take_program_status().is_none());
+        write(&mut filter, b"Y2luZyBwaG90b3M=\x1b\\");
+        let record = filter
+            .take_program_status()
+            .and_then(|status| status.headline())
+            .expect("split report");
+        assert_eq!(
+            (record.id.as_str(), record.state, record.message.as_str()),
+            ("sync", crate::ProgramState::Working, "Syncing photos")
+        );
+
+        let long = format!("\x1b]7501;state=working:msg={}\x07", "eHh4".repeat(500));
+        write(&mut filter, long.as_bytes());
+        let record = filter
+            .take_program_status()
+            .and_then(|status| status.headline())
+            .expect("long report");
+        assert_eq!(record.message, "xxx".repeat(500));
+
+        write(
+            &mut filter,
+            format!(
+                "\x1b]7501;state=done:msg=RG9uZQ\x07\x1b]7501;state=working:id=w\x07\x1b]133;A;aid={}\x07",
+                "x".repeat(80)
+            )
+            .as_bytes(),
+        );
+        let status = filter.take_program_status().expect("prompt");
+        assert_eq!(
+            status
+                .records()
+                .iter()
+                .map(|record| (record.state, record.message.as_str()))
+                .collect::<Vec<_>>(),
+            [(crate::ProgramState::Done, "Done")]
+        );
+
+        let padded = format!("\x1b]7501;{}state=clear\x07", "\t".repeat(4100));
+        write(&mut filter, padded.as_bytes());
+        assert!(filter.take_program_status().is_none());
+        write(&mut filter, b"\x1b]7501;\t\tstate=clear\x07");
+        let status = filter.take_program_status().expect("clear");
+        assert!(status.records().is_empty());
+
+        write(&mut filter, b"text\x1bcmore");
+        let status = filter.take_program_status().expect("reset");
+        assert!(status.records().is_empty() && !status.reported());
+
+        let mut quiet = EngineFilter::default();
+        write(&mut quiet, b"\x1b]7501;?\x07\x1b]7501;state=idle\x07");
+        assert_eq!(effects.borrow().bytes, b"\x1b]7501;?\x07");
+        assert!(quiet.take_program_status().is_some());
     }
 
     /// The same probe's edges. From `9;4;1;50`, the pin answered
@@ -20492,10 +21396,13 @@ mod tests {
     fn numbered_capture_uses_physical_rows_for_styled_wraps() {
         let rows = "\x1b[31mAAAA\x1b[0m\n\x1b[31mAAAA\x1b[0m\n\x1b[31mAA\x1b[0m\nNEXT";
         assert_eq!(
-            number_capture(rows, Some(&[true, true, false, false]), 0, 0),
+            number_capture(rows, Some(&[true, true, false, false]), (0, 0), true, None),
             "0 \x1b[31mAAAA\x1b[0m1 \x1b[31mAAAA\x1b[0m2 \x1b[31mAA\x1b[0m\n3 NEXT"
         );
-        assert_eq!(number_capture("old\nnew", None, 2, 3), "-1 old\n0 new");
+        assert_eq!(
+            number_capture("old\nnew", None, (2, 3), true, None),
+            "-1 old\n0 new"
+        );
     }
 
     #[test]
@@ -24050,6 +24957,32 @@ mod tests {
             0,
             "the pin's input_reset_cell puts the saved cursor back at 0,0"
         );
+    }
+
+    #[test]
+    fn a_user_key_reaches_the_pane_as_nothing() {
+        let terminal = new_terminal(80, 24, 16).expect("terminal");
+        let mut key_encoder = key::Encoder::new().expect("key encoder");
+        let mut key_event = key::Event::new().expect("key event");
+        let mut written = Vec::new();
+        let mut input_bytes = Vec::new();
+        encode_key(
+            &terminal,
+            &mut key_encoder,
+            &mut key_event,
+            KeyInput {
+                action: KeyAction::Press,
+                key: KeyCode::User(3),
+                modifiers: crate::Modifiers::default(),
+                text: None,
+                unshifted_codepoint: None,
+            },
+            Some(0x7f),
+            &mut written,
+            &mut input_bytes,
+        )
+        .expect("encode user key");
+        assert!(written.is_empty() && input_bytes.is_empty());
     }
 
     #[test]

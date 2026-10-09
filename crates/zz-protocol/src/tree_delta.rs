@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     LayoutNode, MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId,
-    PaneKindSnapshot, PaneMode, PaneSnapshot, SessionId, SessionSnapshot, SessionViewer,
-    TmuxColour, WindowId, WindowSnapshot,
+    PaneKindSnapshot, PaneMode, PaneSnapshot, PaneStatus, SessionId, SessionSnapshot,
+    SessionViewer, TmuxColour, WindowId, WindowSnapshot,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -101,6 +101,12 @@ pub enum TreeOp {
         active_border_colour: Option<TmuxColour>,
         border_status_text: String,
         mode: Option<PaneMode>,
+    },
+    PaneStatus {
+        session: SessionId,
+        window: WindowId,
+        pane: PaneId,
+        status: Option<PaneStatus>,
     },
 }
 
@@ -353,6 +359,14 @@ fn window_diff(
                 mode: pane.mode.clone(),
             });
         }
+        if previous.status != pane.status {
+            ops.push(TreeOp::PaneStatus {
+                session,
+                window,
+                pane: pane.id,
+                status: pane.status.clone(),
+            });
+        }
     }
 }
 
@@ -542,6 +556,14 @@ fn apply_op(snapshot: &mut MuxSnapshot, op: &TreeOp) -> Result<(), TreeDeltaErro
             pane.border_status_text.clone_from(border_status_text);
             pane.mode.clone_from(mode);
         }
+        TreeOp::PaneStatus {
+            session,
+            window,
+            pane,
+            status,
+        } => pane_mut(snapshot, *session, *window, *pane)?
+            .status
+            .clone_from(status),
     }
     Ok(())
 }

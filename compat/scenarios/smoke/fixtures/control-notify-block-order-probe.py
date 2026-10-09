@@ -7,7 +7,7 @@ pending is queued behind them instead of going straight out.  The question this
 probe answers is whether that ever moves a structural notification such as
 ``%window-add`` or ``%layout-change`` inside a block on pinned tmux, which is
 where zz would differ: zz defers every notification it raises during a block
-past the guard, and only ``%pause``/``%continue`` go straight out.
+past the guard, ``%pause`` and ``%continue`` included.
 
 Run it as ``python3 control-notify-block-order-probe.py <tmux|zz> <binary>``
 with a scrubbed ``HOME``.  It prints the two shapes it measured:
@@ -21,10 +21,9 @@ queue up, then raises ``new-window`` from a second client mid-stream.
 
 Measured 2026-09-06 on pinned d77c9dc6 and on zz at PROTOCOL_VERSION 99: both
 shapes put every structural notification after the block on both binaries, so
-the two engines agree.  The pin's only synchronous writers are
-``control_pause_pane`` and ``control_continue_pane``; every other notification
-is a ``notify_add`` command-queue item and therefore runs after the block it was
-raised during has closed.
+the two engines agree.  tmux 3.8 (6db5175e) writes every notification through
+``control_notify_write``, which holds it until the outermost guard closes, so
+``%pause`` and ``%continue`` now land after the block too.
 """
 
 import os

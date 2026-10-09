@@ -13,18 +13,21 @@ use parking_lot::Mutex;
 use serde_json::Value;
 #[cfg(test)]
 use zz_protocol::ClientInstanceId;
+use zz_protocol::agent_stream::agent_verb;
 use zz_protocol::{
-    AgentAutoApprove, AgentGitSummary, AgentProvider, ClientId, MAX_AGENT_PROMPT_BYTES,
-    MAX_AGENT_QUEUED_PROMPTS, PaneId,
+    AgentAutoApprove, AgentGitSummary, AgentProvider, AgentQuestionAnswer, AgentTaskWire, ClientId,
+    MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_TASKS, PaneId,
 };
 
 use crate::agent::{
+    claude::{ClaudeCommand, run_claude_runtime},
+    codex::{CodexCommand, run_codex_runtime},
     environment::{AgentWorkspaceEnvironment, warm_adapter_cache},
     git_summary,
     journal::AgentJournal,
     runtime::{AgentSpawnConfig, RuntimeCommand, RuntimeControl, run_agent_runtime},
     stream::{
-        AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentSessionCapabilities,
+        AgentAuthMethod, AgentPrompt, AgentPromptOutcome, AgentQuestion, AgentSessionCapabilities,
         AgentSessionSummary, AgentStreamItem, AgentStreamPayload,
     },
 };
@@ -77,6 +80,13 @@ pub(crate) enum HostCommand {
     DeleteSession {
         client: ClientId,
         session_id: String,
+    },
+    AnswerQuestion {
+        request_id: u64,
+        answers: Vec<AgentQuestionAnswer>,
+    },
+    StopTask {
+        task_id: String,
     },
 }
 
@@ -259,6 +269,7 @@ pub(crate) struct AgentPendingPermission {
     pub(crate) request_id: u64,
     pub(crate) tool_call: Value,
     pub(crate) options: Value,
+    pub(crate) questions: Vec<AgentQuestion>,
 }
 
 /// The pane state a client needs without replaying the stream: enough for a
@@ -277,6 +288,7 @@ pub(crate) struct AgentPaneState {
     pub(crate) error: Option<String>,
     pub(crate) last_seq: u64,
     pub(crate) git: Option<AgentGitSummary>,
+    pub(crate) tasks: Vec<AgentTaskWire>,
 }
 
 impl AgentPaneState {
@@ -294,6 +306,7 @@ impl AgentPaneState {
             error: None,
             last_seq: 0,
             git: None,
+            tasks: Vec::new(),
         }
     }
 
@@ -355,6 +368,24 @@ pub(crate) struct RuntimeChannels {
     pub(crate) commands: Receiver<RuntimeCommand>,
     pub(crate) controls: Receiver<RuntimeControl>,
     pub(crate) events: Sender<AgentStreamPayload>,
+}
+
+pub(crate) fn native_claude(
+    config: &AgentSpawnConfig,
+    provider: AgentProvider,
+) -> Option<ClaudeCommand> {
+    (provider == AgentProvider::ClaudeCode)
+        .then(|| ClaudeCommand::parse(config.command_for(provider)))
+        .flatten()
+}
+
+pub(crate) fn native_codex(
+    config: &AgentSpawnConfig,
+    provider: AgentProvider,
+) -> Option<CodexCommand> {
+    (provider == AgentProvider::Codex)
+        .then(|| CodexCommand::parse(config.command_for(provider)))
+        .flatten()
 }
 
 pub(crate) type PaneRunner = Box<
@@ -433,6 +464,20 @@ impl AgentHost {
         let mut config = self.config.lock().clone();
         config.workspace.adopt_pane_identity(&spec.workspace);
         let provider = spec.provider;
+        if let Some(command) = native_claude(&config, provider) {
+            let workspace = config.workspace;
+            let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
+                Box::pin(run_claude_runtime(command, workspace, provider, channels))
+            });
+            return self.open_with(pane, generation, spec, runner);
+        }
+        if let Some(command) = native_codex(&config, provider) {
+            let workspace = config.workspace;
+            let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
+                Box::pin(run_codex_runtime(command, workspace, provider, channels))
+            });
+            return self.open_with(pane, generation, spec, runner);
+        }
         let runner: PaneRunner = Box::new(move |channels: RuntimeChannels| {
             Box::pin(run_agent_runtime(
                 config,
@@ -534,7 +579,9 @@ impl AgentHost {
         }
         if matches!(
             &command,
-            HostCommand::Cancel | HostCommand::RespondPermission { .. }
+            HostCommand::Cancel
+                | HostCommand::RespondPermission { .. }
+                | HostCommand::AnswerQuestion { .. }
         ) {
             return handle
                 .control
@@ -669,6 +716,7 @@ async fn run_pane(
         git_refresh: GitRefreshGate::default(),
         next_turn_id: 0,
         active_turn: None,
+        external_busy: false,
         dispatched_prompt: None,
         active_waiter: None,
         session_waiter: None,
@@ -703,6 +751,7 @@ struct PanePump {
     git_refresh: GitRefreshGate,
     next_turn_id: u64,
     active_turn: Option<u64>,
+    external_busy: bool,
     dispatched_prompt: Option<(u64, AgentPrompt)>,
     active_waiter: Option<AgentTurnWaiter>,
     session_waiter: Option<crate::daemon::cmdq::Reply<Result<(), String>>>,
@@ -897,19 +946,46 @@ impl PanePump {
                     choice,
                     reply,
                 } => {
-                    let selected = select_permission(
-                        &self.state.lock().pending_permissions,
-                        request_id,
-                        &choice,
-                    );
+                    let selected = {
+                        let state = self.state.lock();
+                        let pending = &state.pending_permissions;
+                        select_permission(pending, request_id, &choice)
+                            .map(|(request_id, option_id)| (request_id, Some(option_id)))
+                            .or_else(|error| match choice {
+                                PermissionChoice::Deny => pending
+                                    .iter()
+                                    .find(|permission| {
+                                        request_id.is_none_or(|id| permission.request_id == id)
+                                    })
+                                    .filter(|permission| !permission.questions.is_empty())
+                                    .map(|permission| (permission.request_id, None))
+                                    .ok_or(error),
+                                _ => Err(error),
+                            })
+                    };
                     let result = selected.and_then(|(request_id, option_id)| {
-                        self.respond_permission(request_id, Some(option_id.clone()))
-                            .then_some(option_id)
+                        self.respond_permission(request_id, option_id.clone())
+                            .then(|| option_id.unwrap_or_else(|| "dismissed".to_owned()))
                             .ok_or_else(|| "agent runtime is busy".to_owned())
                     });
                     reply.try_send(result);
                 }
             },
+            HostCommand::AnswerQuestion {
+                request_id,
+                answers,
+            } => {
+                if self.send_control(RuntimeControl::AnswerQuestion {
+                    request_id,
+                    answers,
+                }) && self.active_waiter.is_some()
+                {
+                    self.turn_reply.permissions_allowed += 1;
+                }
+            }
+            HostCommand::StopTask { task_id } => {
+                self.send(RuntimeCommand::StopTask { task_id });
+            }
             HostCommand::Authenticate { method_id } => {
                 if !self.send(RuntimeCommand::Authenticate { method_id }) {
                     self.observe(AgentStreamPayload::AuthenticationFailed {
@@ -1096,6 +1172,7 @@ impl PanePump {
                     };
                     state.error = None;
                     state.git = None;
+                    state.tasks.clear();
                     settle_turn(&mut state);
                 }
                 AgentStreamPayload::SessionReady { session_id, .. } => {
@@ -1127,11 +1204,34 @@ impl PanePump {
                     request_id,
                     tool_call,
                     options,
+                    questions,
                 } => state.pending_permissions.push(AgentPendingPermission {
                     request_id: *request_id,
                     tool_call: tool_call.clone(),
                     options: options.clone(),
+                    questions: questions.clone(),
                 }),
+                AgentStreamPayload::TasksChanged { tasks } => {
+                    state.tasks = tasks.iter().take(MAX_AGENT_TASKS).cloned().collect();
+                }
+                AgentStreamPayload::Activity { busy } => {
+                    if *busy {
+                        if self.active_turn.is_none() && state.phase == AgentConnectionPhase::Ready
+                        {
+                            state.phase = AgentConnectionPhase::Running;
+                            self.external_busy = true;
+                        }
+                    } else if std::mem::take(&mut self.external_busy)
+                        && self.active_turn.is_none()
+                        && matches!(
+                            state.phase,
+                            AgentConnectionPhase::Running | AgentConnectionPhase::Cancelling
+                        )
+                    {
+                        state.phase = AgentConnectionPhase::Ready;
+                        follow = FollowUp::DrainQueue;
+                    }
+                }
                 AgentStreamPayload::PermissionResolved { request_id, .. } => state
                     .pending_permissions
                     .retain(|pending| pending.request_id != *request_id),
@@ -1201,12 +1301,14 @@ impl PanePump {
                 request_id,
                 tool_call,
                 options,
+                questions,
             } = &payload
         {
             Some(AgentPendingPermission {
                 request_id: *request_id,
                 tool_call: tool_call.clone(),
                 options: options.clone(),
+                questions: questions.clone(),
             })
         } else {
             None
@@ -1256,6 +1358,37 @@ impl PanePump {
             queued.settle(Err(AgentTurnFailure::Reclaimed));
             return;
         }
+        let (verbs, running) = {
+            let state = self.state.lock();
+            (
+                state.capabilities.verbs,
+                state.phase == AgentConnectionPhase::Running,
+            )
+        };
+        if verbs && let Some((verb, rest)) = agent_verb(&queued.prompt.text) {
+            let idle_steer =
+                (verb == "steer" && !running && !rest.is_empty()).then(|| rest.to_owned());
+            if let Some(text) = idle_steer {
+                queued.prompt.text = text;
+            } else {
+                let prompt = std::mem::take(&mut queued.prompt);
+                if self
+                    .commands
+                    .try_send(RuntimeCommand::Verb { prompt })
+                    .is_err()
+                {
+                    queued.settle(Err(AgentTurnFailure::Failed(
+                        "agent pane is not accepting commands".to_owned(),
+                    )));
+                    return;
+                }
+                queued.settle(Ok(AgentTurnReply {
+                    stop_reason: "zz_command".to_owned(),
+                    ..AgentTurnReply::default()
+                }));
+                return;
+            }
+        }
         if self.state.lock().phase.accepts_prompt() {
             self.dispatch(queued);
             return;
@@ -1279,6 +1412,7 @@ impl PanePump {
         self.next_turn_id = self.next_turn_id.saturating_add(1).max(1);
         let turn_id = self.next_turn_id;
         self.active_turn = Some(turn_id);
+        self.external_busy = false;
         self.active_waiter = queued.waiter;
         self.turn_reply = AgentTurnReply::default();
         self.turn_started = Instant::now();
@@ -1441,6 +1575,16 @@ impl PanePump {
 
     fn cancel(&mut self) {
         if !self.state.lock().phase.has_active_turn() {
+            return;
+        }
+        if self.external_busy && self.active_turn.is_none() {
+            let session_id = self.state.lock().session_id.clone();
+            if self.send_control(RuntimeControl::Cancel {
+                turn_id: 0,
+                session_id,
+            }) {
+                self.state.lock().phase = AgentConnectionPhase::Cancelling;
+            }
             return;
         }
         let session_id = self.state.lock().session_id.clone();
@@ -1969,6 +2113,156 @@ mod tests {
             .and_then(Value::as_str)
     }
 
+    #[test]
+    fn a_turn_the_agent_starts_itself_holds_prompts_and_stops_on_cancel() {
+        let fixture = Fixture::open_with_runner(Box::new(|channels| {
+            Box::pin(async move {
+                let send = |payload| channels.events.send(payload);
+                send(AgentStreamPayload::SessionReady {
+                    session_id: "s".to_owned(),
+                    modes: None,
+                    config_options: None,
+                })
+                .await
+                .map_err(|error| error.to_string())?;
+                send(AgentStreamPayload::Activity { busy: true })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let Ok(RuntimeControl::Cancel { turn_id: 0, .. }) = channels.controls.recv().await
+                else {
+                    return Err("expected an interrupt for the agent's own turn".to_owned());
+                };
+                send(AgentStreamPayload::Activity { busy: false })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                while let Ok(command) = channels.commands.recv().await {
+                    match command {
+                        RuntimeCommand::Prompt { turn_id, prompt } => {
+                            send(AgentStreamPayload::Update {
+                                update: serde_json::json!({
+                                    "sessionUpdate": "agent_message_chunk",
+                                    "content": { "type": "text", "text": format!("got {}", prompt.text) },
+                                }),
+                            })
+                            .await
+                            .map_err(|error| error.to_string())?;
+                            send(AgentStreamPayload::PromptFinished {
+                                turn_id,
+                                outcome: AgentPromptOutcome::Finished {
+                                    stop_reason: serde_json::json!("end_turn"),
+                                },
+                            })
+                            .await
+                            .map_err(|error| error.to_string())?;
+                        }
+                        RuntimeCommand::Shutdown => break,
+                        _ => {}
+                    }
+                }
+                Ok(())
+            })
+        }));
+        fixture.wait_for_session();
+        let deadline = Instant::now() + DEADLINE;
+        while fixture.state().phase != AgentConnectionPhase::Running {
+            assert!(
+                Instant::now() < deadline,
+                "the pane never showed the agent's own turn"
+            );
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        fixture.prompt("after it");
+        std::thread::sleep(Duration::from_millis(50));
+        assert_eq!(fixture.state().queued_prompts, 1);
+        assert!(!chunk_texts(&fixture.recorder.payloads()).contains(&"got after it".to_owned()));
+        fixture.command(HostCommand::Cancel);
+        fixture.recorder.wait("the queued prompt", |payload| {
+            chunk_text(payload) == Some("got after it")
+        });
+        fixture.close();
+    }
+
+    #[test]
+    fn zz_commands_skip_the_turn_queue_and_idle_steering_becomes_a_prompt() {
+        let fixture = Fixture::open_with_runner(Box::new(|channels| {
+            Box::pin(async move {
+                let send = |text: String| {
+                    channels.events.send(AgentStreamPayload::Update {
+                        update: serde_json::json!({
+                            "sessionUpdate": "agent_message_chunk",
+                            "content": { "type": "text", "text": text },
+                        }),
+                    })
+                };
+                channels
+                    .events
+                    .send(AgentStreamPayload::Ready {
+                        agent_name: "Claude Code".to_owned(),
+                        agent_key: "claude-code".to_owned(),
+                        auth_methods: Vec::new(),
+                        capabilities: AgentSessionCapabilities {
+                            verbs: true,
+                            ..AgentSessionCapabilities::default()
+                        },
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                channels
+                    .events
+                    .send(AgentStreamPayload::SessionReady {
+                        session_id: "s".to_owned(),
+                        modes: None,
+                        config_options: None,
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?;
+                while let Ok(command) = channels.commands.recv().await {
+                    match command {
+                        RuntimeCommand::Verb { prompt } => {
+                            send(format!("verb {}", prompt.text))
+                                .await
+                                .map_err(|error| error.to_string())?;
+                        }
+                        RuntimeCommand::Prompt { turn_id, prompt } => {
+                            send(format!("prompt {}", prompt.text))
+                                .await
+                                .map_err(|error| error.to_string())?;
+                            channels
+                                .events
+                                .send(AgentStreamPayload::PromptFinished {
+                                    turn_id,
+                                    outcome: AgentPromptOutcome::Finished {
+                                        stop_reason: serde_json::json!("end_turn"),
+                                    },
+                                })
+                                .await
+                                .map_err(|error| error.to_string())?;
+                        }
+                        RuntimeCommand::Shutdown => break,
+                        _ => {}
+                    }
+                }
+                Ok(())
+            })
+        }));
+        fixture.wait_for_session();
+        fixture.prompt("/btw what now");
+        fixture.recorder.wait("the side question", |payload| {
+            chunk_text(payload) == Some("verb /btw what now")
+        });
+        assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
+        fixture.prompt("/steer go left");
+        let payloads = fixture.recorder.wait("the steer prompt", |payload| {
+            chunk_text(payload) == Some("prompt go left")
+        });
+        assert!(
+            !chunk_texts(&payloads)
+                .iter()
+                .any(|text| text.starts_with("verb /steer"))
+        );
+        fixture.close();
+    }
+
     fn queued_prompt_texts(payloads: &[AgentStreamPayload]) -> Vec<String> {
         payloads
             .iter()
@@ -2297,6 +2591,7 @@ mod tests {
                     request_id: 42,
                     tool_call: serde_json::json!({"toolCallId": "question"}),
                     options: serde_json::json!([{"optionId": "yes", "name": "Yes", "kind": "answer"}]),
+                    questions: Vec::new(),
                 }],
                 "end_turn",
             );
@@ -2334,6 +2629,52 @@ mod tests {
             }
             fixture.close();
         }
+    }
+
+    #[test]
+    fn denying_a_question_card_dismisses_it() {
+        let fixture = scripted_reply_fixture(
+            vec![AgentStreamPayload::PermissionRequested {
+                request_id: 42,
+                tool_call: serde_json::json!({"toolCallId": "question"}),
+                options: serde_json::json!([]),
+                questions: vec![crate::agent::stream::AgentQuestion {
+                    id: "q0".to_owned(),
+                    question: "Which fruit?".to_owned(),
+                    ..Default::default()
+                }],
+            }],
+            "end_turn",
+        );
+        fixture.wait_for_session();
+        fixture.prompt("go");
+        fixture.recorder.wait("question", |payload| {
+            matches!(payload, AgentStreamPayload::PermissionRequested { .. })
+        });
+        let (sender, receiver) = crossbeam_channel::bounded(1);
+        fixture.command(HostCommand::RespondPermission {
+            response: PermissionResponse::Select {
+                request_id: None,
+                choice: PermissionChoice::Deny,
+                reply: crate::daemon::cmdq::Reply::new(move |result| {
+                    let _ = sender.send(result);
+                }),
+            },
+        });
+        assert_eq!(
+            receiver.recv_timeout(DEADLINE).expect("reply"),
+            Some(Ok("dismissed".to_owned()))
+        );
+        fixture.recorder.wait("dismissal", |payload| {
+            matches!(
+                payload,
+                AgentStreamPayload::PermissionResolved {
+                    request_id: 42,
+                    canceled: true
+                }
+            )
+        });
+        fixture.close();
     }
 
     #[test]
@@ -2571,11 +2912,13 @@ mod tests {
                     { "optionId": "reject", "kind": "reject_once" },
                     { "optionId": "later", "kind": "allow_once" }
                 ]),
+                questions: Vec::new(),
             },
             AgentPendingPermission {
                 request_id: 8,
                 tool_call: serde_json::json!({}),
                 options: serde_json::json!([{ "optionId": "other", "kind": "allow_always" }]),
+                questions: Vec::new(),
             },
         ];
         assert_eq!(
@@ -2923,6 +3266,7 @@ mod tests {
             git_refresh: GitRefreshGate::default(),
             next_turn_id: 0,
             active_turn: None,
+            external_busy: false,
             dispatched_prompt: None,
             active_waiter: None,
             session_waiter: None,

@@ -14,7 +14,7 @@ use gpui::{
 use serde_json::Value;
 use zz_client::agent_completion::{
     AgentCommand, CommandCompletion, active_command_hint, bare_command_name, completion_query,
-    completion_score, meaningful_command_description, ranked_completions,
+    completion_score, meaningful_command_description, pane_commands, ranked_completions,
 };
 use zz_client::agent_config::{
     AgentCatalogCache, AgentSettingsApply, AgentSettingsSelection, config_option_models,
@@ -22,20 +22,21 @@ use zz_client::agent_config::{
 };
 use zz_client::agent_transcript::{
     AgentPermissionKind, AgentThreadEntry, AgentToolKindModel, AgentToolStatusModel,
-    AgentTranscript, ToolPayload,
+    AgentTranscript, ToolPayload, is_zz_command, rewind_command,
 };
 use zz_protocol::{
-    AgentConnectionPhase, AgentDescriptor, AgentImage, AgentSessionOpKind, PaneId, ProtocolMessage,
-    agent_stream::AgentSessionSummary,
+    AgentConnectionPhase, AgentDescriptor, AgentImage, AgentQuestionAnswer, AgentSessionOpKind,
+    PaneId, ProtocolMessage,
+    agent_stream::{AgentQuestion, AgentSessionSummary},
 };
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, ElementExt as _, IconName, Sizable as _,
     StyledExt as _,
     agent::{
-        AgentEntry, AgentMarkdown, AgentTimeline, AgentTimelineStore, AgentToolEntry,
-        AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT,
-        MarkdownSlot, TimelineRow, TimelineStick, agent_attachment_thumbnail,
-        agent_jump_to_bottom_button, agent_pane_header,
+        AgentEntry, AgentMarkdown, AgentPaneStatus, AgentTimeline, AgentTimelineStore,
+        AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText,
+        COMPOSER_ATTACHMENT, MarkdownSlot, TimelineRow, TimelineStick, agent_attachment_thumbnail,
+        agent_jump_to_bottom_button, agent_pane_header, agent_status_pill,
         composer::{AgentComposer, COMPOSER_OUTER_PADDING},
         controls::{
             AgentControlChoice, AgentControlSelection, ComposerAction, agent_chrome_button,
@@ -46,7 +47,10 @@ use zz_ui::{
         presentation::{
             empty_state, error_card, permission_card, permission_option, welcome_state,
         },
+        question::{QuestionCardAction, QuestionCardState, QuestionCardStep},
+        tasks::{TaskTrayAction, TrayPanel, task_tray},
         title::{agent_thread_title_editor, agent_title_is_editing},
+        tool_output_text,
     },
     button::{Button, ButtonVariants as _},
     input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
@@ -72,6 +76,7 @@ pub(super) struct AgentPane {
     transcript: Transcript,
     timeline: Entity<AgentTimelineStore>,
     rows: Arc<Vec<TimelineRow>>,
+    entry_to_row: Vec<usize>,
     scroll: ListState,
     stick: TimelineStick,
     last_sequence: u64,
@@ -89,6 +94,8 @@ pub(super) struct AgentPane {
     permission_request_id: Option<u64>,
     permission_selected: usize,
     permission_answered: HashSet<u64>,
+    question: Option<QuestionCardState>,
+    tray_open: Option<TrayPanel>,
     usage: Option<(u64, u64)>,
     history_open: bool,
     history_compact: bool,
@@ -167,6 +174,7 @@ impl AgentPane {
                     this.usage = None;
                     this.last_sequence = 0;
                     this.rows = Arc::new(Vec::new());
+                    this.entry_to_row.clear();
                     this.scroll.reset(0);
                     this.stick.engage_now(&this.scroll, cx.reduce_motion());
                     this.timeline.update(cx, |timeline, cx| {
@@ -256,6 +264,7 @@ impl AgentPane {
             transcript: Transcript::default(),
             timeline,
             rows: Arc::new(Vec::new()),
+            entry_to_row: Vec::new(),
             scroll,
             stick,
             last_sequence: 0,
@@ -273,6 +282,8 @@ impl AgentPane {
             permission_request_id: None,
             permission_selected: 0,
             permission_answered: HashSet::new(),
+            question: None,
+            tray_open: None,
             usage: None,
             history_open: false,
             history_compact: true,
@@ -372,7 +383,14 @@ impl AgentPane {
         let input = self.input.read(cx);
         let value = input.value().to_string();
         let cursor = input.cursor();
-        let commands = self.connection.read(cx).agent_commands(self.pane);
+        let commands: Arc<[AgentCommand]> = {
+            let connection = self.connection.read(cx);
+            pane_commands(
+                &connection.agent_commands(self.pane),
+                connection.agent_verbs_supported(self.pane),
+            )
+            .into()
+        };
         let input_changed = value != self.last_input || cursor != self.last_cursor;
         if !input_changed && self.commands == commands {
             return false;
@@ -404,6 +422,22 @@ impl AgentPane {
     }
 
     fn enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.input.read(cx).value().trim().is_empty() {
+            let head = self.current_permission(cx);
+            self.synchronize_question_card(head.as_ref(), window, cx);
+            if let Some(card) = &self.question {
+                let step = card.card.submit();
+                self.apply_question_step(step, window, cx);
+                return;
+            }
+            if let Some((request_id, option)) = head.and_then(|permission| {
+                let option = permission.options.get(self.permission_selected)?.id.clone();
+                Some((permission.request_id, option))
+            }) {
+                self.respond_permission(request_id, Some(option), cx);
+                return;
+            }
+        }
         self.synchronize_completions(cx);
         if let Some(index) = self.completion_selected {
             self.accept_completion(index, window, cx);
@@ -531,7 +565,7 @@ impl AgentPane {
         Some(zz_ui::agent::slash::suggestion_list(rows, cx).into_any_element())
     }
 
-    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn send_prompt(&mut self, text: &str, images: &[AgentImage], cx: &mut Context<Self>) -> bool {
         let connection = self.connection.read(cx);
         let allowed = self.settings_apply.is_none()
             && connection.connected
@@ -543,42 +577,53 @@ impl AgentPane {
                 ) || (state.phase == AgentConnectionPhase::Ready
                     && state.pending_permission.is_none())
             });
-        let text = self.input.read(cx).value().to_string();
-        if !allowed || (text.trim().is_empty() && self.attachments.is_empty()) {
-            return;
+        if !allowed || (text.trim().is_empty() && images.is_empty()) {
+            return false;
         }
-        if let Err(error) = crate::attachments::validate_images(&text, &self.attachments) {
+        if let Err(error) = crate::attachments::validate_images(text, images) {
             self.draft_error = Some(error);
             cx.notify();
-            return;
+            return false;
         }
         self.connection.update(cx, |connection, cx| {
             connection.send(
                 ProtocolMessage::AgentPrompt {
                     pane: self.pane,
-                    text: text.clone(),
-                    images: self.attachments.clone(),
+                    text: text.to_owned(),
+                    images: images.to_vec(),
                 },
                 cx,
             );
         });
-        if !self.connection.read(cx).connected {
-            return;
+        let connection = self.connection.read(cx);
+        if !connection.connected {
+            return false;
         }
-        let queueing = self
-            .connection
-            .read(cx)
-            .core
-            .agent_state(self.pane)
-            .is_some_and(|state| {
-                matches!(
-                    state.phase,
-                    AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
-                )
-            });
-        if !queueing {
-            self.transcript.local_prompt(&text, &self.attachments);
+        let command = connection.agent_verbs_supported(self.pane) && is_zz_command(text);
+        let queueing = connection.core.agent_state(self.pane).is_some_and(|state| {
+            matches!(
+                state.phase,
+                AgentConnectionPhase::Running | AgentConnectionPhase::AwaitingPermission
+            )
+        });
+        if !queueing && !command {
+            self.transcript.local_prompt(text, images);
             self.transcript_dirty = true;
+        }
+        true
+    }
+
+    fn rewind_to(&mut self, message_id: &str, cx: &mut Context<Self>) {
+        if self.send_prompt(&rewind_command(message_id), &[], cx) {
+            cx.notify();
+        }
+    }
+
+    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.input.read(cx).value().to_string();
+        let attachments = self.attachments.clone();
+        if !self.send_prompt(&text, &attachments, cx) {
+            return;
         }
         self.attachments.clear();
         self.draft_error = None;
@@ -926,7 +971,9 @@ impl AgentPane {
         self.last_sequence = newest;
         self.transcript_dirty = false;
         self.synchronize_timeline_context(cx);
-        self.rows = fold_timeline_rows(&self.transcript.entries).rows;
+        let folded = fold_timeline_rows(&self.transcript.entries);
+        self.rows = folded.rows;
+        self.entry_to_row = folded.entry_to_row;
         if conversation_changed
             || self.transcript.entries.first().map(AgentEntry::id) != old_first
             || self.rows.len() < old_count
@@ -945,7 +992,7 @@ impl AgentPane {
             for entry in &self.transcript.entries {
                 match entry {
                     AgentEntry::User { id, markdown, .. }
-                    | AgentEntry::Assistant { id, markdown }
+                    | AgentEntry::Assistant { id, markdown, .. }
                     | AgentEntry::Reasoning { id, markdown, .. }
                     | AgentEntry::Plan { id, markdown } => {
                         timeline.synchronize_markdown(
@@ -955,13 +1002,7 @@ impl AgentPane {
                             cx,
                         );
                     }
-                    AgentEntry::Tool(tool) => timeline.synchronize_tool_content(
-                        tool.id,
-                        tool.location.clone(),
-                        tool.input.clone(),
-                        tool.output.clone(),
-                        cx,
-                    ),
+                    AgentEntry::Tool(_) => {}
                 }
             }
         });
@@ -1830,6 +1871,7 @@ impl AgentPane {
             .map(|request| PendingPermission {
                 request_id: request.request_id,
                 title: request.title.clone(),
+                questions: request.questions.clone(),
                 options: request
                     .options
                     .iter()
@@ -1864,6 +1906,7 @@ impl AgentPane {
                     .unwrap_or("This agent needs your permission")
                     .to_owned(),
                 options: permission_choices(&payload),
+                questions: permission_questions(&payload),
             });
         }
         requests
@@ -1948,21 +1991,24 @@ impl AgentPane {
         .into_any_element()
     }
 
+    fn can_answer(&self, request_id: u64, cx: &App) -> bool {
+        let connection = self.connection.read(cx);
+        connection.connected
+            && !connection.core.attached_read_only()
+            && !self.permission_answered.contains(&request_id)
+            && self
+                .pending_permissions(cx)
+                .iter()
+                .any(|request| request.request_id == request_id)
+    }
+
     fn respond_permission(
         &mut self,
         request_id: u64,
         option_id: Option<String>,
         cx: &mut Context<Self>,
     ) {
-        let connection = self.connection.read(cx);
-        if !connection.connected
-            || connection.core.attached_read_only()
-            || self.permission_answered.contains(&request_id)
-            || !self
-                .pending_permissions(cx)
-                .iter()
-                .any(|request| request.request_id == request_id)
-        {
+        if !self.can_answer(request_id, cx) {
             return;
         }
         self.permission_answered.insert(request_id);
@@ -1979,18 +2025,266 @@ impl AgentPane {
         cx.notify();
     }
 
+    fn answer_question(
+        &mut self,
+        request_id: u64,
+        answers: Vec<AgentQuestionAnswer>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.can_answer(request_id, cx) {
+            return false;
+        }
+        self.permission_answered.insert(request_id);
+        self.connection.update(cx, |connection, cx| {
+            connection.send(
+                ProtocolMessage::AgentAnswerQuestion {
+                    pane: self.pane,
+                    request_id,
+                    answers,
+                },
+                cx,
+            );
+        });
+        true
+    }
+
+    fn synchronize_question_card(
+        &mut self,
+        head: Option<&PendingPermission>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let head = head.filter(|request| !request.questions.is_empty());
+        let current = self.question.as_ref().map(QuestionCardState::request_id);
+        if current == head.map(|request| request.request_id) {
+            return;
+        }
+        if self
+            .question
+            .as_ref()
+            .is_some_and(|card| card.editing(window, cx))
+        {
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        self.question = head.map(|request| {
+            QuestionCardState::new(
+                request.request_id,
+                request.questions.clone(),
+                window,
+                cx,
+                Self::on_question_input,
+            )
+        });
+    }
+
+    fn on_question_input(
+        &mut self,
+        question: usize,
+        event: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(card) = self.question.as_mut() else {
+            return;
+        };
+        match event {
+            InputEvent::Change => {
+                if card.input_changed(question, cx) {
+                    cx.notify();
+                }
+            }
+            InputEvent::Focus => {
+                if card.card.focus(question) {
+                    cx.notify();
+                }
+            }
+            InputEvent::PressEnter { .. } => {
+                let step = card.card.submit();
+                self.apply_question_step(step, window, cx);
+            }
+            _ => {}
+        }
+    }
+
+    fn question_action(
+        &mut self,
+        action: QuestionCardAction,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(card) = self.question.as_mut() else {
+            return;
+        };
+        let step = card.action(action, window, cx);
+        self.apply_question_step(step, window, cx);
+    }
+
+    fn apply_question_step(
+        &mut self,
+        step: QuestionCardStep,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let Some(request_id) = self.question.as_ref().map(QuestionCardState::request_id) else {
+            return false;
+        };
+        let editing = self
+            .question
+            .as_ref()
+            .is_some_and(|card| card.editing(window, cx));
+        let answered = match step {
+            QuestionCardStep::Stay => return false,
+            QuestionCardStep::Handled | QuestionCardStep::Other(_) => false,
+            QuestionCardStep::Submit(answers) => self.answer_question(request_id, answers, cx),
+            QuestionCardStep::Dismiss => {
+                let open = self.can_answer(request_id, cx);
+                self.respond_permission(request_id, None, cx);
+                open
+            }
+        };
+        if answered && editing {
+            self.input.read(cx).focus_handle(cx).focus(window, cx);
+        }
+        cx.notify();
+        true
+    }
+
+    fn render_status(
+        &self,
+        state: &zz_protocol::AgentPaneWire,
+        connected: bool,
+        writable: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let status = if connected {
+            match state.phase {
+                AgentConnectionPhase::Running => AgentPaneStatus::Running,
+                AgentConnectionPhase::AwaitingPermission => AgentPaneStatus::Waiting,
+                AgentConnectionPhase::Failed { .. } => AgentPaneStatus::Exited,
+                AgentConnectionPhase::Starting | AgentConnectionPhase::Ready => return None,
+            }
+        } else {
+            AgentPaneStatus::Offline
+        };
+        let phase = if status == AgentPaneStatus::Running {
+            zz_ui::agent::presentation::spinner_phase(cx.entity_id(), cx)
+        } else {
+            0.0
+        };
+        let restart = (status == AgentPaneStatus::Exited && writable && !self.lifecycle_pending)
+            .then(|| {
+                let entity = cx.entity();
+                Rc::new(move |_: &mut Window, cx: &mut App| {
+                    entity.update(cx, |this, cx| this.lifecycle_command(None, cx));
+                }) as Rc<dyn Fn(&mut Window, &mut App)>
+            });
+        Some(
+            agent_status_pill(
+                ("web-agent-status", self.pane.0),
+                status,
+                phase,
+                restart,
+                cx,
+            )
+            .into_any_element(),
+        )
+    }
+
+    fn open_output(&self, tool: &AgentToolEntry, cx: &mut Context<Self>) {
+        let cwd = self.descriptor.cwd.clone().unwrap_or_default();
+        let Some(args) = zz_client::agent_output::output_pane_args(
+            self.pane,
+            &cwd,
+            &tool.label,
+            tool.exit_code,
+            &tool_output_text(tool),
+        ) else {
+            return;
+        };
+        self.connection.update(cx, |connection, cx| {
+            connection.command("split-window", args, cx);
+        });
+    }
+
+    fn current_plan(&self, running: bool) -> Option<String> {
+        let source = self
+            .transcript
+            .entries
+            .iter()
+            .rev()
+            .find_map(|entry| match entry {
+                AgentEntry::Plan { markdown, .. } => Some(markdown.full_text()),
+                _ => None,
+            })?;
+        let (done, total, _) = zz_ui::agent::plan_progress(&source);
+        (total > 0 && (done < total || running)).then_some(source)
+    }
+
+    fn task_action(&mut self, action: TaskTrayAction, cx: &mut Context<Self>) {
+        match action {
+            TaskTrayAction::Toggle(panel) => {
+                self.tray_open = (self.tray_open != Some(panel)).then_some(panel);
+            }
+            TaskTrayAction::Stop(task_id) => {
+                let pane = self.pane;
+                self.connection.update(cx, |connection, cx| {
+                    connection.send(ProtocolMessage::AgentStopTask { pane, task_id }, cx);
+                });
+            }
+            TaskTrayAction::Reveal(tool_call_id) => {
+                if let Some(row) = self.tool_row(&tool_call_id) {
+                    self.stick.reveal(&self.scroll, row);
+                }
+            }
+        }
+        cx.notify();
+    }
+
+    fn tool_row(&self, tool_call_id: &str) -> Option<usize> {
+        let entry = self.transcript.model.tool_entry(tool_call_id)?;
+        let index = self
+            .transcript
+            .entries
+            .iter()
+            .position(|candidate| candidate.id() == entry)?;
+        self.entry_to_row.get(index).copied()
+    }
+
     fn permission_key_down(
         &mut self,
         event: &gpui::KeyDownEvent,
-        window: &Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let modifiers = event.keystroke.modifiers;
         if modifiers.platform || modifiers.alt || modifiers.control || modifiers.function {
             return;
         }
+        let head = self.current_permission(cx);
+        self.synchronize_question_card(head.as_ref(), window, cx);
+        if let Some(card) = self.question.as_mut() {
+            let key = event.keystroke.key.as_str();
+            if card.editing(window, cx) {
+                if key == "escape" {
+                    self.input.read(cx).focus_handle(cx).focus(window, cx);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+                return;
+            }
+            let input = self.input.read(cx);
+            if !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window) {
+                return;
+            }
+            let step = card.key(key, modifiers.shift, window, cx);
+            if self.apply_question_step(step, window, cx) {
+                cx.stop_propagation();
+            }
+            return;
+        }
         let input = self.input.read(cx);
-        if !input.value().trim().is_empty() && input.focus_handle(cx).is_focused(window) {
+        let composer_focused = input.focus_handle(cx).is_focused(window);
+        if !input.value().trim().is_empty() && composer_focused {
             return;
         }
         let Some(permission) = self.current_permission(cx) else {
@@ -1998,6 +2292,7 @@ impl AgentPane {
         };
         let options = permission.options;
         match event.keystroke.key.as_str() {
+            "enter" if composer_focused => return,
             "escape" => self.respond_permission(permission.request_id, None, cx),
             "up" if !options.is_empty() => {
                 self.permission_selected = self
@@ -2219,12 +2514,45 @@ impl Render for AgentPane {
             self.permission_request_id = permission_id;
             self.permission_selected = 0;
         }
+        self.synchronize_question_card(permissions.first(), window, cx);
+        if state.tasks.is_empty() && self.tray_open == Some(TrayPanel::Tasks) {
+            self.tray_open = None;
+        }
         self.stick.set_bottom_padding(COMPOSER_OUTER_PADDING);
         self.drive_stick(window, cx);
         let show_jump = !self.rows.is_empty() && self.stick.shows_jump_button();
         let mut prefix = Vec::new();
         if let Some(index) = current_permission {
-            prefix.push(self.permissions(permissions[index].clone(), index, permissions.len(), cx));
+            let request_id = permissions[index].request_id;
+            if let Some(card) = self
+                .question
+                .as_ref()
+                .filter(|card| card.request_id() == request_id)
+            {
+                let entity = cx.entity();
+                prefix.push(
+                    card.render(
+                        &format!("web-agent-question-{}-{request_id}", self.pane.0),
+                        (permissions.len() > 1)
+                            .then(|| format!("{}/{}", index + 1, permissions.len()).into()),
+                        writable,
+                        move |action, window, cx| {
+                            entity.update(cx, |this, cx| {
+                                this.question_action(action, window, cx);
+                            });
+                        },
+                        cx,
+                    )
+                    .into_any_element(),
+                );
+            } else {
+                prefix.push(self.permissions(
+                    permissions[index].clone(),
+                    index,
+                    permissions.len(),
+                    cx,
+                ));
+            }
         }
         if state.queued_prompts > 0 {
             prefix.push(
@@ -2253,6 +2581,28 @@ impl Render for AgentPane {
                     .into_any_element(),
             );
         }
+        let plan = self.current_plan(running);
+        let entity = cx.entity();
+        let phase = if state.tasks.is_empty() {
+            0.0
+        } else {
+            zz_ui::agent::presentation::spinner_phase(entity.entity_id(), cx)
+        };
+        prefix.extend(
+            task_tray(
+                &format!("web-agent-{}", self.pane.0),
+                plan.as_deref(),
+                &state.tasks,
+                self.tray_open,
+                writable,
+                phase,
+                move |action, _, cx| {
+                    entity.update(cx, |this, cx| this.task_action(action, cx));
+                },
+                cx,
+            )
+            .map(IntoElement::into_any_element),
+        );
         prefix.extend(self.render_error(&state, cx));
         prefix.extend(self.render_completions(cx));
         let has_content =
@@ -2507,7 +2857,7 @@ impl Render for AgentPane {
                     }
                 }
             } else {
-                "The ACP agent is offline.".to_owned()
+                "The agent is offline.".to_owned()
             };
             empty_state(
                 empty_message,
@@ -2520,6 +2870,31 @@ impl Render for AgentPane {
                 cx,
             )
         });
+        let timeline = AgentTimeline::new(
+            self.rows.clone(),
+            self.scroll.clone(),
+            self.timeline.clone(),
+        )
+        .active_turn(running)
+        .bottom_padding(COMPOSER_OUTER_PADDING)
+        .open_output({
+            let entity = cx.entity();
+            move |tool, _, cx| entity.update(cx, |this, cx| this.open_output(tool, cx))
+        });
+        let timeline = if self.connection.read(cx).agent_verbs_supported(pane) {
+            let rewind_view = cx.entity();
+            timeline.rewind(
+                writable
+                    && state.phase == AgentConnectionPhase::Ready
+                    && state.pending_permission.is_none()
+                    && self.settings_apply.is_none(),
+                move |message_id, _, cx| {
+                    rewind_view.update(cx, |this, cx| this.rewind_to(message_id, cx));
+                },
+            )
+        } else {
+            timeline
+        };
         div()
             .relative()
             .flex()
@@ -2545,6 +2920,7 @@ impl Render for AgentPane {
                     .flat_map(|session| &session.windows)
                     .any(|window| window.active_pane == self.pane),
                 header_controls,
+                self.render_status(&state, connected, writable, cx),
                 zz_ui::h_flex()
                     .gap(px(zz_ui::CHROME_GAP))
                     .children(
@@ -2611,16 +2987,7 @@ impl Render for AgentPane {
                     .overflow_hidden()
                     .children(empty)
                     .when(!self.rows.is_empty(), |area| {
-                        area.child(
-                            AgentTimeline::new(
-                                self.rows.clone(),
-                                self.scroll.clone(),
-                                self.timeline.clone(),
-                            )
-                            .active_turn(running)
-                            .bottom_padding(COMPOSER_OUTER_PADDING),
-                        )
-                        .child(
+                        area.child(timeline).child(
                             div()
                                 .absolute()
                                 .top_0()
@@ -2671,6 +3038,7 @@ struct PendingPermission {
     request_id: u64,
     title: String,
     options: Vec<PermissionChoice>,
+    questions: Vec<AgentQuestion>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2707,6 +3075,13 @@ fn permission_choices(payload: &Value) -> Vec<PermissionChoice> {
             })
         })
         .collect()
+}
+
+fn permission_questions(payload: &Value) -> Vec<AgentQuestion> {
+    payload
+        .get("questions")
+        .and_then(|questions| serde_json::from_value(questions.clone()).ok())
+        .unwrap_or_default()
 }
 
 fn decode_transcript_image(format: &str, data: Vec<u8>) -> Option<Arc<gpui::Image>> {
@@ -2798,11 +3173,13 @@ impl Transcript {
         let changed = self.model.changed_entries(self.revision);
         let indices = changed.unwrap_or_else(|| (0..self.model.entries().len()).collect());
         for index in indices {
-            let entry = ui_entry_with_markdown(
-                &self.model.entries()[index],
-                &mut self.markdown,
-                &mut self.tool_payloads,
-            );
+            let source = &self.model.entries()[index];
+            let parent = self
+                .model
+                .tool_parent(source.id())
+                .and_then(|parent| self.model.tool_entry(parent));
+            let entry =
+                ui_entry_with_markdown(source, parent, &mut self.markdown, &mut self.tool_payloads);
             if index < self.entries.len() {
                 self.entries[index] = entry;
             } else {
@@ -2856,7 +3233,12 @@ impl Transcript {
                     serde_json::from_value(tool.clone()),
                     serde_json::from_value(options.clone()),
                 ) {
-                    self.model.request_permission(request_id, tool, options);
+                    self.model.request_questions(
+                        request_id,
+                        tool,
+                        options,
+                        permission_questions(item),
+                    );
                 }
             }
             "permissionResolved" => {
@@ -2914,6 +3296,7 @@ fn replaced_markdown(
 
 fn ui_entry_with_markdown(
     entry: &AgentThreadEntry<Arc<gpui::Image>>,
+    parent: Option<u64>,
     markdown_sources: &mut HashMap<u64, AgentMarkdown>,
     tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
 ) -> AgentEntry {
@@ -2922,14 +3305,25 @@ fn ui_entry_with_markdown(
             id,
             markdown,
             images,
+            ..
         } => AgentEntry::User {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
             images: images.clone().into(),
+            rewind_id: entry.rewind_id().map(gpui::SharedString::from),
         },
-        AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
+        AgentThreadEntry::Assistant {
+            id,
+            markdown,
+            aside,
+            ..
+        } => AgentEntry::Assistant {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
+            aside: aside.map(|aside| zz_ui::agent::AgentAside {
+                side: aside.side,
+                reply_to: aside.reply_to,
+            }),
         },
         AgentThreadEntry::Reasoning {
             id,
@@ -2951,6 +3345,7 @@ fn ui_entry_with_markdown(
             input,
             output,
             default_expanded,
+            exit_code,
             ..
         } => {
             tool_payloads.retain(|(entry_id, slot), _| {
@@ -2995,6 +3390,8 @@ fn ui_entry_with_markdown(
                     .collect::<Vec<_>>()
                     .into(),
                 default_expanded: *default_expanded,
+                parent,
+                exit_code: *exit_code,
             })
         }
         AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
@@ -3184,6 +3581,135 @@ mod tests {
         };
         assert_eq!(tool.status, AgentToolStatus::Canceled);
         assert!(transcript.model.permissions().is_empty());
+    }
+
+    #[test]
+    fn question_cards_ride_the_stream_and_the_parked_state() {
+        let questions = json!([{
+            "id": "fruit", "question": "Which fruit?", "header": "Snack",
+            "options": [{"label": "apple"}, {"label": "pear", "description": "green"}],
+            "multiSelect": true, "allowOther": true,
+        }]);
+        let mut transcript = Transcript::default();
+        transcript.apply(1, &json!({"item":"permissionRequested","request_id":9,
+            "tool_call":{"toolCallId":"ask","title":"Which fruit?"},"options":[],"questions":questions}));
+        let pending = transcript.model.permissions();
+        let asked = &pending[0].questions[0];
+        assert_eq!(asked.header.as_deref(), Some("Snack"));
+        assert_eq!(asked.options[1].description.as_deref(), Some("green"));
+        assert!(asked.multi_select && asked.allow_other);
+        assert_eq!(
+            permission_questions(
+                &json!({"toolCall":{"toolCallId":"ask"},"options":[],"questions":questions})
+            ),
+            pending[0].questions,
+            "a late client reads the same card from the parked request"
+        );
+        assert!(permission_questions(&json!({"toolCall":{},"options":[]})).is_empty());
+    }
+
+    #[test]
+    fn subagent_steps_carry_their_agents_entry_into_the_fold() {
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}}),
+        );
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"meanwhile"}}}),
+        );
+        transcript.apply(
+            3,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs","kind":"read",
+            "_meta":{"zz":{"parent":"agent-1"}}}}),
+        );
+        let agent = transcript.entries[0].id();
+        let parents = transcript
+            .entries
+            .iter()
+            .map(zz_ui::agent::timeline_parent)
+            .collect::<Vec<_>>();
+        assert_eq!(parents, [None, None, Some(agent)]);
+        assert_eq!(
+            fold_timeline_rows(&transcript.entries).entry_to_row,
+            [0, 0, 0],
+            "the agent, the message and the step share the turn's row"
+        );
+    }
+
+    #[test]
+    fn a_step_that_arrives_before_its_agent_learns_its_parent_later() {
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs","kind":"read",
+            "_meta":{"zz":{"parent":"agent-1"}}}}),
+        );
+        assert_eq!(zz_ui::agent::timeline_parent(&transcript.entries[0]), None);
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}}),
+        );
+        assert_eq!(
+            zz_ui::agent::timeline_parent(&transcript.entries[0]),
+            Some(transcript.entries[1].id())
+        );
+    }
+
+    #[test]
+    fn a_step_that_arrives_before_its_agent_leaves_its_place_for_the_agents_row() {
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"read-1","title":"Read a.rs","kind":"read",
+            "_meta":{"zz":{"parent":"agent-1"}}}}),
+        );
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"meanwhile"}}}),
+        );
+        transcript.apply(
+            3,
+            &json!({"item":"update","update":{
+            "sessionUpdate":"tool_call","toolCallId":"agent-1","title":"Survey","kind":"think"}}),
+        );
+        assert_eq!(
+            fold_timeline_rows(&transcript.entries).entry_to_row,
+            [0, 0, 0],
+            "a step that came before its agent still lands in the turn's row"
+        );
+    }
+
+    #[test]
+    fn prompt_rows_carry_their_rewind_id_into_the_timeline() {
+        let prompt = |id: &str, text: &str| json!({"sessionUpdate":"user_message_chunk","messageId":id,"content":{"type":"text","text":text}});
+        let mut transcript = Transcript::default();
+        transcript.apply(
+            1,
+            &json!({"item":"sessionSwitched","replay":[prompt("u-1", "first"), prompt("zz-command-1-in", "/btw why")]}),
+        );
+        transcript.local_prompt("second", &[]);
+        transcript.apply(
+            2,
+            &json!({"item":"update","update":prompt("u-2", "second")}),
+        );
+        let rewind_ids = transcript
+            .entries
+            .iter()
+            .map(|entry| match entry {
+                AgentEntry::User { rewind_id, .. } => rewind_id.as_deref(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(rewind_ids, [Some("u-1"), None, Some("u-2")]);
     }
 
     #[test]

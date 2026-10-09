@@ -64,7 +64,7 @@ available for readers in the sourced file. Each actual reader chooses whether to
 | sink | commands | what the payload becomes | bytes |
 |---|---|---|---|
 | `Argument` | `load-buffer -`, `send-text -`, `agent-send -` | the command's own text argument, appended after the argument boundary | `load-buffer` binary, the other two UTF-8 |
-| `Config` | `source-file -` | a configuration file named `-`, parsed and applied in place, its diagnostics spelled against `-` | UTF-8 |
+| `Config` | `source-file -` | a configuration file named `-`, parsed and applied in place, its diagnostics spelled against `-` | binary |
 | `PaneInput` | `display-message -I`, `split-window -I` | bytes written into a PTY-free pane's parser as they arrive, as if a child had printed them | binary, streamed |
 
 # The six things
@@ -78,8 +78,14 @@ pin's two writers - `cmdq_print` or a raw `file_write` on `-` - owned the stream
 knows whether to add the terminating newline. `save-buffer -` is a raw claim.
 
 **Binary bytes** survive in both directions because `RawText` is the carrier in both directions.
-The `Config` sink is the one that refuses them, because a configuration file is text; the reader
-rejects a non-UTF-8 payload for that sink with the same message it uses for `send-text`.
+The `Config` sink takes them: its payload goes through the same byte parser a sourced file gets
+(`parse_config_buffer_bytes`, which reads 0xff as end of line the way the pin's signed `getc`
+does), and each argument reaches its command as `RawText`. `show-buffer` writes the buffer's bytes
+unchanged to a command client, which is the pin's `file_write` on `-`; a control client gets them
+through the `cmdq_print_data` rule: the buffer up to its first NUL, with one `utf8_sanitize` over
+it unless the client raised `CLIENT_UTF8`. `show-buffer` shapes this output itself for the client
+that runs it, so a `show-buffer` inserted by `if-shell` or replayed from a sourced file prints the
+same way as a direct one.
 
 **Backpressure** takes two forms, one per read shape.
 

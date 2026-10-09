@@ -59,7 +59,8 @@ prompt. A program's own later OSC 0/2 title wins while it runs. Each hook title 
 private `OSC 2626`, so `EngineFilter` counts only unmarked OSC 0/2 writes in
 `TerminalFacts::program_title_writes`; the daemon's pane watcher passes whether that count moved, and
 a title set with `select-pane -T` or `split-window -T` ignores hook titles until an unmarked write
-lands. Shell resources are embedded in the
+lands. The same filter reads [OSC 7501 program status](/terminal/program-status.md) reports,
+answers its support query, and drops records on OSC 133;A and RIS. Shell resources are embedded in the
 binary and materialized into a versioned private cache on every spawn, never once per process: the
 cache root is a purgeable OS cache directory, and a daemon that memoized it would hand later panes an
 `ENV` path that no longer exists, leaving Bash in `--posix` with no startup files at all. Unsupported

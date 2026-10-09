@@ -550,3 +550,111 @@ fn a_control_client_streaming_output_adds_no_threads() {
     );
     assert!(after.iter().all(|name| !name.starts_with("zz-control")));
 }
+
+fn guard_and_rename_order(message: ProtocolMessage, order: &mut Vec<&'static str>) {
+    match message {
+        ProtocolMessage::Batch(batch) => {
+            for message in batch.messages().expect("batch messages") {
+                guard_and_rename_order(message, order);
+            }
+        }
+        ProtocolMessage::Event(Event { payload, .. }) => match payload {
+            EventPayload::ControlCommandGuard { .. }
+            | EventPayload::ControlCommandGuardRaw { .. } => {
+                order.push("guard");
+            }
+            EventPayload::HookEvent { name, .. } if name == "window-renamed" => {
+                order.push("window-renamed");
+            }
+            EventPayload::PaneOutputState { paused: true, .. } => order.push("pause"),
+            _ => {}
+        },
+        ProtocolMessage::CommandResponse(_) => order.push("reply"),
+        _ => {}
+    }
+}
+
+#[test]
+fn an_inserted_command_holds_its_notifications_until_its_own_guard_closes() {
+    let shared = Arc::new(Shared::new(1));
+    shared
+        .execute(
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("new-session", ["-d", "-s", "inserted-order"]),
+        )
+        .unwrap();
+    let (client, mailbox) = control(&shared);
+    let mut context = ExecutionContext::default();
+    shared
+        .execute(
+            client,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new("attach-session", ["-t", "inserted-order"]),
+        )
+        .unwrap();
+    take_reliable_messages(&mailbox);
+    let command = CommandInvocation::new(
+        "run-shell",
+        ["-C", "rename-window -t inserted-order:0 renamed"],
+    )
+    .with_source(SourceSpan {
+        source: "<control>".to_owned(),
+        line: 1,
+        column: 1,
+    });
+    shared.execute_command_request(client, ClientKind::Control, &mut context, 1, &command);
+    let mut order = Vec::new();
+    for message in take_reliable_messages(&mailbox) {
+        guard_and_rename_order(message, &mut order);
+    }
+    assert_eq!(order, ["guard", "window-renamed"], "{order:?}");
+}
+
+#[test]
+fn a_pause_inside_nested_inserted_commands_follows_the_earlier_notification() {
+    let shared = Arc::new(Shared::new(1));
+    shared
+        .execute(
+            ClientId(u64::MAX),
+            ClientKind::Command,
+            &mut ExecutionContext::default(),
+            &CommandInvocation::new("new-session", ["-d", "-s", "nested-order"]),
+        )
+        .unwrap();
+    let (_, pane, _) = session(&shared, "nested-order");
+    let (client, mailbox) = control(&shared);
+    let mut context = ExecutionContext::default();
+    shared
+        .execute(
+            client,
+            ClientKind::Control,
+            &mut context,
+            &CommandInvocation::new("attach-session", ["-t", "nested-order"]),
+        )
+        .unwrap();
+    take_reliable_messages(&mailbox);
+    let inner = format!(
+        "run-shell -C {{ rename-window -t nested-order:0 renamed ; refresh-client -A '{pane}:pause' }}"
+    );
+    let command =
+        CommandInvocation::new("run-shell", ["-C", inner.as_str()]).with_source(SourceSpan {
+            source: "<control>".to_owned(),
+            line: 1,
+            column: 1,
+        });
+    shared.execute_command_request(client, ClientKind::Control, &mut context, 1, &command);
+    let mut order = Vec::new();
+    for message in take_reliable_messages(&mailbox) {
+        guard_and_rename_order(message, &mut order);
+    }
+    let renamed = order.iter().position(|seen| *seen == "window-renamed");
+    let paused = order.iter().position(|seen| *seen == "pause");
+    assert!(
+        renamed.is_some() && paused.is_some() && renamed < paused,
+        "{order:?}"
+    );
+    assert_eq!(order.last(), Some(&"pause"), "{order:?}");
+}

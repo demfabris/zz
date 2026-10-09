@@ -43,6 +43,8 @@ pub(crate) const MESSAGE_COMMAND_STYLE_DEFAULT: &str = "bg=themeblack,fg=themeye
 pub(crate) const MESSAGE_FORMAT_DEFAULT: &str =
     "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}";
 pub(crate) const MESSAGE_STYLE_DEFAULT: &str = "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}";
+pub(crate) const FILL_CHARACTER_DEFAULT: &str =
+    "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}";
 pub(crate) const PANE_SCROLLBARS_STYLE_DEFAULT: &str =
     "bg=themedarkgrey,fg=themelightgrey,width=1,pad=0";
 const COMMAND_ALIAS_DEFAULTS: &[&str] = &[
@@ -142,7 +144,7 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#[norange default]",
     ),
     concat!(
-        "#[align=left]#{R: ,#{n:#{session_name}}}P: ",
+        "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: ",
         "#[norange default]",
         "#[list=on align=#{status-justify}]",
         "#[list=left-marker]<#[list=right-marker]>#[list=on]",
@@ -153,7 +155,8 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#[push-default]",
         "#{T:window-pane-status-format}",
         "#[pop-default]",
-        "#[norange list=on default]  ",
+        "#[norange list=on default]",
+        "#{?loop_last_flag,,#{E:window-status-separator}}",
         ",",
         "#[range=pane|#{pane_id} list=focus ",
         "#{?#{!=:#{E:pane-status-current-style},default},",
@@ -164,11 +167,12 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#[push-default]",
         "#{T:window-pane-current-status-format}",
         "#[pop-default]",
-        "#[norange list=on default] ",
+        "#[norange list=on default]",
+        "#{?loop_last_flag,,#{E:window-status-separator}}",
         "}",
     ),
     concat!(
-        "#[align=left]#{R: ,#{n:#{session_name}}}S: ",
+        "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: ",
         "#[norange default]",
         "#[list=on align=#{status-justify}]",
         "#[list=left-marker]<#[list=right-marker]>#[list=on]",
@@ -177,7 +181,7 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#{E:session-status-style}",
         "]",
         "#[push-default]",
-        "#S#{session_alert}",
+        "#S#{q/h:session_alert}",
         "#[pop-default]",
         "#[norange list=on default]  ",
         ",",
@@ -188,7 +192,7 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "}",
         "]",
         "#[push-default]",
-        "#S*#{session_alert}",
+        "#S*#{q/h:session_alert}",
         "#[pop-default]",
         "#[norange list=on default] ",
         "}",
@@ -323,7 +327,7 @@ pub(crate) fn tmux_stored_scalar(name: &str) -> Option<TmuxStoredScalar> {
         "light-theme-blue" => ("#{?#{e|>=:#{client_colours},256},steelblue,blue}", Colour),
         "light-theme-cyan" => ("#{?#{e|>=:#{client_colours},256},darkcyan,cyan}", Colour),
         "light-theme-magenta" => ("#{?#{e|>=:#{client_colours},256},purple4,magenta}", Colour),
-        "exit-empty" => ("on", Flag),
+        "clear-on-attach" | "exit-empty" => ("on", Flag),
         "exit-unattached" | "focus-follows-mouse" | "set-titles" => ("off", Flag),
         "destroy-unattached" => ("off", Choice(&["off", "on", "keep-last", "keep-group"])),
         "detach-on-destroy" => (
@@ -363,9 +367,10 @@ pub(crate) fn tmux_stored_scalar(name: &str) -> Option<TmuxStoredScalar> {
         "mode-style" => ("noattr,bg=themeyellow,fg=themeblack", Style),
         "pane-active-border-style" => (
             concat!(
-                "fg=#{?pane_marked,thememagenta,",
+                "fg=#{?pane_modal_flag,themeblue,",
+                "#{?pane_marked,thememagenta,",
                 "#{?synchronize-panes,themered,",
-                "#{?pane_in_mode,themeyellow,themegreen}}}",
+                "#{?pane_in_mode,themeyellow,themegreen}}}}",
             ),
             Style,
         ),
@@ -385,9 +390,11 @@ pub(crate) fn tmux_stored_scalar(name: &str) -> Option<TmuxStoredScalar> {
         ),
         "pane-border-style" => ("fg=themelightgrey", Style),
         "pane-status-current-style" | "session-status-current-style" => ("underscore", Style),
-        "pane-status-style" | "session-status-style" | "window-active-style" | "window-style" => {
-            ("default", Style)
-        }
+        "copy-mode-current-line-style"
+        | "pane-status-style"
+        | "session-status-style"
+        | "window-active-style"
+        | "window-style" => ("default", Style),
         "remain-on-exit-format" => (
             concat!(
                 "Pane is dead (#{?#{!=:#{pane_dead_status},},",
@@ -398,7 +405,9 @@ pub(crate) fn tmux_stored_scalar(name: &str) -> Option<TmuxStoredScalar> {
             String,
         ),
         "switch-mode-match-style" => ("bg=cyan fg=black", Style),
-        "tree-mode-border-style" => ("bg=themedarkgrey,fg=themelightgrey", Style),
+        "display-panes-border-style" | "tree-mode-border-style" => {
+            ("bg=themedarkgrey,fg=themelightgrey", Style)
+        }
         "tree-mode-preview-format" => (
             "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}",
             String,
@@ -436,7 +445,6 @@ pub(crate) const HOOK_NAMES: &[&str] = &[
     "after-new-window",
     "after-paste-buffer",
     "after-pipe-pane",
-    "after-queue",
     "after-refresh-client",
     "after-rename-session",
     "after-rename-window",
@@ -455,12 +463,15 @@ pub(crate) const HOOK_NAMES: &[&str] = &[
     "after-show-messages",
     "after-show-options",
     "after-split-window",
+    "after-swap-window",
     "after-unbind-key",
     "alert-activity",
     "alert-bell",
     "alert-silence",
     "client-active",
     "client-attached",
+    "client-created",
+    "client-closed",
     "client-detached",
     "client-focus-in",
     "client-focus-out",
@@ -469,28 +480,48 @@ pub(crate) const HOOK_NAMES: &[&str] = &[
     "client-light-theme",
     "client-dark-theme",
     "command-error",
+    "marked-pane-changed",
+    "pane-activity",
+    "pane-bell",
+    "pane-command-finished",
+    "pane-command-started",
+    "pane-created",
     "pane-died",
     "pane-exited",
     "pane-focus-in",
     "pane-focus-out",
     "pane-mode-changed",
+    "pane-mode-entered",
+    "pane-mode-exited",
+    "pane-moved",
+    "pane-prompt-closed",
+    "pane-prompt-opened",
+    "pane-resized",
     "pane-set-clipboard",
+    "pane-shell-prompt",
     "pane-title-changed",
     "session-closed",
     "session-created",
+    "session-added-to-group",
     "session-renamed",
+    "session-removed-from-group",
     "session-window-changed",
+    "window-created",
+    "window-closed",
     "window-layout-changed",
     "window-linked",
     "window-pane-changed",
     "window-renamed",
     "window-resized",
+    "window-unzoomed",
+    "window-zoomed",
     "window-unlinked",
 ];
 
 const SERVER_OPTIONS: &[&str] = &[
     "backspace",
     "buffer-limit",
+    "clear-on-attach",
     "codepoint-widths",
     "command-alias",
     "copy-command",
@@ -557,7 +588,6 @@ const SESSION_OPTIONS: &[&str] = &[
     "after-new-window",
     "after-paste-buffer",
     "after-pipe-pane",
-    "after-queue",
     "after-refresh-client",
     "after-rename-session",
     "after-rename-window",
@@ -576,6 +606,7 @@ const SESSION_OPTIONS: &[&str] = &[
     "after-show-messages",
     "after-show-options",
     "after-split-window",
+    "after-swap-window",
     "after-unbind-key",
     "alert-activity",
     "alert-bell",
@@ -585,6 +616,8 @@ const SESSION_OPTIONS: &[&str] = &[
     "bell-action",
     "client-active",
     "client-attached",
+    "client-closed",
+    "client-created",
     "client-dark-theme",
     "client-detached",
     "client-focus-in",
@@ -609,6 +642,7 @@ const SESSION_OPTIONS: &[&str] = &[
     "key-table",
     "lock-after-time",
     "lock-command",
+    "marked-pane-changed",
     "message-command-style",
     "message-format",
     "message-line",
@@ -622,8 +656,10 @@ const SESSION_OPTIONS: &[&str] = &[
     "prompt-cursor-style",
     "renumber-windows",
     "repeat-time",
+    "session-added-to-group",
     "session-closed",
     "session-created",
+    "session-removed-from-group",
     "session-renamed",
     "session-window-changed",
     "set-titles",
@@ -660,6 +696,7 @@ const WINDOW_OPTIONS: &[&str] = &[
     "clock-mode-colour",
     "clock-mode-style",
     "copy-mode-current-line-number-style",
+    "copy-mode-current-line-style",
     "copy-mode-current-match-style",
     "copy-mode-line-number-style",
     "copy-mode-line-numbers",
@@ -667,6 +704,7 @@ const WINDOW_OPTIONS: &[&str] = &[
     "copy-mode-match-style",
     "copy-mode-position-style",
     "copy-mode-selection-style",
+    "display-panes-border-style",
     "fill-character",
     "main-pane-height",
     "main-pane-width",
@@ -697,6 +735,8 @@ const WINDOW_OPTIONS: &[&str] = &[
     "tree-mode-border-style",
     "tree-mode-preview-style",
     "tree-mode-selection-style",
+    "window-closed",
+    "window-created",
     "window-layout-changed",
     "window-pane-changed",
     "window-pane-current-status-format",
@@ -712,6 +752,8 @@ const WINDOW_OPTIONS: &[&str] = &[
     "window-status-last-style",
     "window-status-separator",
     "window-status-style",
+    "window-unzoomed",
+    "window-zoomed",
     "wrap-search",
     "xterm-keys",
 ];
@@ -725,18 +767,30 @@ const WINDOW_PANE_OPTIONS: &[&str] = &[
     "cursor-colour",
     "cursor-style",
     "pane-active-border-style",
+    "pane-activity",
+    "pane-bell",
     "pane-border-format",
     "pane-border-lines",
     "pane-border-status",
     "pane-border-style",
     "pane-colours",
+    "pane-command-finished",
+    "pane-command-started",
+    "pane-created",
     "pane-died",
     "pane-exited",
     "pane-focus-in",
     "pane-focus-out",
     "pane-mode-changed",
+    "pane-mode-entered",
+    "pane-mode-exited",
+    "pane-moved",
+    "pane-prompt-closed",
+    "pane-prompt-opened",
+    "pane-resized",
     "pane-scrollbars-style",
     "pane-set-clipboard",
+    "pane-shell-prompt",
     "pane-title-changed",
     "remain-on-exit",
     "remain-on-exit-format",
@@ -764,6 +818,7 @@ const ALIASES: &[(&str, &str)] = &[
 const OPTION_TABLE_ORDER: &[&str] = &[
     "backspace",
     "buffer-limit",
+    "clear-on-attach",
     "command-alias",
     "codepoint-widths",
     "copy-command",
@@ -824,6 +879,7 @@ const OPTION_TABLE_ORDER: &[&str] = &[
     "destroy-unattached",
     "detach-on-destroy",
     "display-panes-active-colour",
+    "display-panes-border-style",
     "display-panes-colour",
     "display-panes-format",
     "display-panes-time",
@@ -890,6 +946,7 @@ const OPTION_TABLE_ORDER: &[&str] = &[
     "copy-mode-position-style",
     "copy-mode-selection-style",
     "copy-mode-current-line-number-style",
+    "copy-mode-current-line-style",
     "copy-mode-line-number-style",
     "copy-mode-line-numbers",
     "fill-character",
@@ -1063,11 +1120,11 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         "copy-command"
         | "cursor-colour"
         | "default-command"
-        | "fill-character"
         | "history-file"
         | "prompt-command-cursor-colour"
         | "prompt-cursor-colour" => TmuxOptionDefault::String(""),
         "default-size" => TmuxOptionDefault::String("80x24"),
+        "fill-character" => TmuxOptionDefault::String(FILL_CHARACTER_DEFAULT),
         "default-shell" => TmuxOptionDefault::String("/bin/sh"),
         "display-panes-time" | "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "history-limit" => TmuxOptionDefault::Scalar("2000"),
@@ -1231,7 +1288,7 @@ mod tests {
     #[test]
     fn catalog_is_complete_and_unique() {
         let options = tmux_options().collect::<Vec<_>>();
-        assert_eq!(options.len(), 248);
+        assert_eq!(options.len(), 272);
         assert_eq!(
             options
                 .iter()
@@ -1362,7 +1419,7 @@ mod tests {
             .filter(|option| option.is_array)
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();
-        assert_eq!(arrays.len(), 76);
+        assert_eq!(arrays.len(), 97);
         for name in [
             "command-alias",
             "codepoint-widths",
@@ -1397,13 +1454,13 @@ mod tests {
             .filter(|option| tmux_option_is_hook(option.name))
             .map(|option| option.name)
             .collect::<BTreeSet<_>>();
-        assert_eq!(hooks.len(), 68);
+        assert_eq!(hooks.len(), 89);
         assert_eq!(hooks, HOOK_NAMES.iter().copied().collect());
     }
 
     #[test]
     fn listing_order_covers_every_non_hook_table_option_once() {
-        assert_eq!(OPTION_TABLE_ORDER.len(), 180);
+        assert_eq!(OPTION_TABLE_ORDER.len(), 183);
         assert_eq!(
             OPTION_TABLE_ORDER.iter().copied().collect::<BTreeSet<_>>(),
             tmux_options()
@@ -1416,7 +1473,7 @@ mod tests {
                 .iter()
                 .map(|name| tmux_option_table_order(name))
                 .collect::<Vec<_>>(),
-            (180..248).collect::<Vec<_>>()
+            (183..272).collect::<Vec<_>>()
         );
     }
 
@@ -1425,7 +1482,7 @@ mod tests {
         let named = tmux_options()
             .filter(|option| !tmux_option_is_hook(option.name))
             .collect::<Vec<_>>();
-        assert_eq!(named.len(), 180);
+        assert_eq!(named.len(), 183);
         assert!(named.iter().all(|option| {
             if option.is_array {
                 tmux_stored_array(option.name).is_some()
@@ -1501,7 +1558,10 @@ mod tests {
             ("prompt-cursor-style", TmuxOptionDefault::Scalar("default")),
             ("clock-mode-colour", TmuxOptionDefault::String("themeblue")),
             ("clock-mode-style", TmuxOptionDefault::Scalar("24")),
-            ("fill-character", TmuxOptionDefault::String("")),
+            (
+                "fill-character",
+                TmuxOptionDefault::String(FILL_CHARACTER_DEFAULT),
+            ),
             (
                 "pane-border-indicators",
                 TmuxOptionDefault::Scalar("colour"),

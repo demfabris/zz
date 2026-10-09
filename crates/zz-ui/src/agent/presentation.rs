@@ -56,17 +56,21 @@ pub fn error_card(error: &str, cx: &App) -> Div {
         .child(rendered_error(error))
 }
 
+pub fn spinner_phase(view: EntityId, cx: &mut App) -> f32 {
+    ease_in_out(pulse_phase(Duration::from_millis(800), view, cx))
+}
+
+pub fn spinner(phase: f32) -> Icon {
+    Icon::new(IconName::Loader).transform(Transformation::rotate(percentage(phase)))
+}
+
 pub fn empty_state(
     message: impl Into<SharedString>,
     busy: bool,
     view: EntityId,
     cx: &mut App,
 ) -> Div {
-    let phase = if busy {
-        ease_in_out(pulse_phase(Duration::from_millis(800), view, cx))
-    } else {
-        0.0
-    };
+    let phase = if busy { spinner_phase(view, cx) } else { 0.0 };
     v_flex()
         .w_full()
         .py(px(48.0))
@@ -76,10 +80,9 @@ pub fn empty_state(
         .text_color(cx.theme().foreground.muted())
         .when(busy, |column| {
             column.child(
-                Icon::new(IconName::Loader)
+                spinner(phase)
                     .small()
-                    .text_color(cx.theme().foreground.muted())
-                    .transform(Transformation::rotate(percentage(phase))),
+                    .text_color(cx.theme().foreground.muted()),
             )
         })
         .child(message.into())

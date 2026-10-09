@@ -837,6 +837,18 @@ fn agent_option_strings_are_bounded(message: &ProtocolMessage) -> bool {
         } => bounded(option_id) && bounded(value),
         ProtocolMessage::AgentSetMode { mode_id, .. } => bounded(mode_id),
         ProtocolMessage::AgentAuthenticate { method_id, .. } => bounded(method_id),
+        ProtocolMessage::AgentStopTask { task_id, .. } => bounded(task_id),
+        ProtocolMessage::AgentAnswerQuestion { answers, .. } => {
+            answers.len() <= crate::MAX_AGENT_QUESTION_ANSWERS
+                && answers.iter().all(|answer| {
+                    bounded(&answer.id)
+                        && answer.answers.len() <= crate::MAX_AGENT_QUESTION_ANSWERS
+                        && answer
+                            .answers
+                            .iter()
+                            .all(|text| text.len() <= crate::MAX_AGENT_ANSWER_BYTES)
+                })
+        }
         _ => true,
     }
 }
@@ -1982,6 +1994,12 @@ mod tests {
                 additions: 21,
                 deletions: 8,
             }),
+            tasks: vec![crate::AgentTaskWire {
+                id: "b1".to_owned(),
+                kind: "shell".to_owned(),
+                description: "cargo test".to_owned(),
+                tool_call_id: Some("call-1".to_owned()),
+            }],
         }
     }
 

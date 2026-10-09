@@ -1,0 +1,9 @@
+corpus: none
+# tmux 3.8 removed the active-pane client flag (1ce00006). server_client_set_flags
+# skips a name it does not know, so attach-session -f and refresh-client -f
+# take active-pane without an error, and #{client_flags} never reports it while
+# ignore-size and no-detach-on-destroy still set and clear around it.
+stage: fixtures/client-flags-active-pane.py ~/client-flags-active-pane.py
+out: set-environment -gu CLIENT_FLAGS_ACTIVE_PANE
+run-shell 'python3 ~/client-flags-active-pane.py'
+out: show-environment -g CLIENT_FLAGS_ACTIVE_PANE

@@ -12,6 +12,10 @@ tags:
 timestamp: 2026-08-17T00:00:00-03:00
 ---
 
+Claude Code panes no longer use the ACP adapter: the daemon drives the `claude` CLI directly
+through the same runner path ([native agent drivers](/designs/native-agent-drivers.md)). Everything
+below still holds for the ACP driver and for the host, fanout, and journal both drivers share.
+
 # Goal
 
 An agent pane's ACP adapter is spawned and owned by the daemon, exactly as PTYs are. A running

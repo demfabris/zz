@@ -337,7 +337,10 @@ impl PaneActor {
         let engine_knobs = spawn.knobs;
         let pending_copy_source: Option<Box<CapturedCopySource>> = None;
         let pane_search: Option<CopyModeSearch> = None;
-        let engine_filter = EngineFilter::default();
+        let engine_filter = EngineFilter {
+            replies: Some(Rc::clone(&effects)),
+            ..EngineFilter::default()
+        };
         let engine_renames = Vec::new();
         let engine_bar: Option<ProgressBar> = None;
         let engine_last_command_status: Option<CommandStatusUpdate> = None;
@@ -531,9 +534,14 @@ impl PaneActor {
         if let Some(bar) = self.engine_bar.take() {
             self.publisher.set_progress_bar(bar);
         }
+        if let Some(status) = self.engine_filter.take_program_status() {
+            self.publisher.set_program_status(status);
+        }
         if let Some(status) = self.engine_last_command_status.take() {
             self.publisher.set_last_command_status(status.code());
         }
+        self.publisher
+            .push_shell_marks(self.engine_filter.take_shell_marks());
         let synchronized_output_deadline = self.frames.synchronized_output_deadline;
         let synchronized_output_due =
             synchronized_output_deadline.is_some_and(|deadline| now >= deadline);
@@ -613,6 +621,7 @@ impl PaneActor {
         for name in self.engine_renames.drain(..) {
             self.publisher.rename_window(name)?;
         }
+
         if !self.output_pending {
             settle_unwatched(
                 &mut self.terminal,
@@ -1244,6 +1253,11 @@ impl PaneActor {
             Command::CaptureCopySource { reply } => {
                 let _ = reply.send(
                     capture_copy_source(&mut self.terminal)
+                        .inspect(|source| {
+                            source.revision.stamp_output_rows(|| {
+                                self.engine_filter.output_rows(&self.terminal)
+                            });
+                        })
                         .map_err(|_| TerminalCaptureError::ActorStopped),
                 );
                 self.compression.rearm();
@@ -1417,6 +1431,7 @@ impl PaneActor {
                             &mut self.pane_search,
                         ))?
                     };
+                    stamp_copy_mode_marks(&self.terminal, &self.engine_filter, &self.active_views);
                     self.publisher
                         .publish_search_string(self.pane_search.as_ref());
                     let is_in_copy_mode = self
@@ -1504,7 +1519,9 @@ impl PaneActor {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                if let Some(capture) = CaptureWork::start(&self.terminal, mode, *request) {
+                if let Some(capture) =
+                    CaptureWork::start(&self.terminal, mode, &self.engine_filter, *request)
+                {
                     self.captures.push_back(capture);
                 }
                 self.compression.rearm();
@@ -2031,7 +2048,7 @@ impl PaneActor {
             engine_knobs,
             pending_copy_source,
             pane_search,
-            engine_filter,
+            mut engine_filter,
             mut engine_last_command_status,
             mut active_views,
             mut inactive_views,
@@ -2074,6 +2091,11 @@ impl PaneActor {
         publisher.set_facts(engine_filter.facts(&terminal)?);
         if let Some(status) = engine_last_command_status.take() {
             publisher.set_last_command_status(status.code());
+        }
+        publisher.push_shell_marks(engine_filter.take_shell_marks());
+        engine_filter.program_status_changed |= engine_filter.program_status.program_left();
+        if let Some(status) = engine_filter.take_program_status() {
+            publisher.set_program_status(status);
         }
         let status = exit_status.take().expect("checked above");
         let signal = status.signal().and_then(signal_number);
@@ -2197,7 +2219,9 @@ impl DeadPane {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                if let Some(capture) = CaptureWork::start(&self.surface.terminal, mode, *request) {
+                if let Some(capture) =
+                    CaptureWork::start(&self.surface.terminal, mode, &self.engine_filter, *request)
+                {
                     self.surface.captures.push_back(capture);
                 }
                 complete_dead_notice_command(&self.slot);
@@ -2243,7 +2267,14 @@ impl DeadPane {
         {
             surface.pending_commands.push(Command::Wake);
         }
-        surface_actor::SurfaceActor::new(self.control_rx, self.slot, self.publisher, surface, false)
-            .map(Some)
+        surface_actor::SurfaceActor::new(
+            self.control_rx,
+            self.slot,
+            self.publisher,
+            surface,
+            self.engine_filter,
+            false,
+        )
+        .map(Some)
     }
 }

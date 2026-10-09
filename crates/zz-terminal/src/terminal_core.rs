@@ -14,6 +14,8 @@ mod model;
 mod paste;
 #[cfg(all(feature = "session", target_os = "macos"))]
 pub mod posix_spawn;
+#[cfg(feature = "session")]
+mod program_status;
 #[cfg(all(feature = "session", unix))]
 mod pty_types;
 #[cfg(feature = "session")]
@@ -53,6 +55,10 @@ pub use model::{
     shared_default_presentation, shared_empty_kitty_placements, shared_empty_overlays,
 };
 pub use paste::{PastePreparationError, prepare_paste_buffer};
+#[cfg(feature = "session")]
+pub use program_status::{
+    MAX_PROGRAM_STATUS_RECORDS, ProgramBlockKind, ProgramState, ProgramStatus, ProgramStatusRecord,
+};
 #[cfg(all(feature = "session", target_os = "linux"))]
 pub use session::disable_transparent_huge_pages;
 #[cfg(all(feature = "session", unix))]
@@ -61,11 +67,12 @@ pub use session::release_held_wakes;
 pub use session::{
     CaptureBoundary, CaptureOptions, CapturedCopySource, CopyModeFacts, CopyModeSelectionFacts,
     DeferredTerminalEvent, EngineKnobs, KittyImage, KittyImageRequestError, LastCommandCapture,
-    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, OutputWake, PointerContext, ProgressBar,
-    ProgressBarState, RoundTripGuard, TerminalCaptureError, TerminalCopyReady, TerminalEvent,
-    TerminalEvents, TerminalFacts, TerminalFrameSink, TerminalProcessExit, TerminalRequest,
-    TerminalRequestError, TerminalSession, TerminalSessionDiagnostics, TerminalSize, TerminalSpawn,
-    ViewFrame, ViewStream, WakeHold, allow_actor_round_trips, forbid_actor_round_trips,
-    hold_actor_wakes, run_pty_exec_mode,
+    MAX_LAST_COMMAND_BYTES, MAX_LAST_COMMAND_LINES, OutputWake, PRIVATE_MODE_NUMBERS,
+    PaneOutputFacts, PointerContext, ProgressBar, ProgressBarState, RoundTripGuard, ShellMark,
+    ShellMarkKind, TerminalCaptureError, TerminalCopyReady, TerminalEvent, TerminalEvents,
+    TerminalFacts, TerminalFrameSink, TerminalProcessExit, TerminalRequest, TerminalRequestError,
+    TerminalSession, TerminalSessionDiagnostics, TerminalSize, TerminalSpawn, ViewFrame,
+    ViewStream, WakeHold, allow_actor_round_trips, forbid_actor_round_trips, hold_actor_wakes,
+    run_pty_exec_mode,
 };
 pub use word::{DEFAULT_WORD_SEPARATORS, WordSeparators};

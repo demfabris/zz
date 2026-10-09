@@ -103,7 +103,7 @@ impl AgentWorkspaceEnvironment {
         }
     }
 
-    fn entries(&self) -> impl Iterator<Item = (&'static str, &str)> {
+    pub(crate) fn entries(&self) -> impl Iterator<Item = (&'static str, &str)> {
         [
             ("ZZ_PANE", self.pane.as_deref()),
             ("ZZ_SESSION", self.session.as_deref()),
@@ -169,6 +169,22 @@ const CLAUDE_CODE_EXECUTABLE: &str = "CLAUDE_CODE_EXECUTABLE";
 fn installed_claude(path: Option<&str>) -> Option<std::path::PathBuf> {
     std::env::split_paths(path?)
         .map(|directory| directory.join("claude"))
+        .find(|candidate| is_executable_file(candidate))
+}
+
+pub(crate) fn agent_path() -> Option<&'static str> {
+    executable_path()
+}
+
+pub(crate) fn find_executable(program: &str) -> Option<std::path::PathBuf> {
+    let candidate = std::path::Path::new(program);
+    if candidate.components().count() > 1 {
+        return is_executable_file(candidate).then(|| candidate.to_path_buf());
+    }
+    let inherited = std::env::var("PATH").ok();
+    let path = executable_path().or(inherited.as_deref())?;
+    std::env::split_paths(path)
+        .map(|directory| directory.join(program))
         .find(|candidate| is_executable_file(candidate))
 }
 

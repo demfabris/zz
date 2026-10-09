@@ -1,6 +1,6 @@
 ---
 type: Protocol
-title: zz wire protocol (v107)
+title: zz wire protocol (v108)
 description: The versioned, little-endian length-prefixed, postcard-encoded control protocol whose ProtocolMessage enum carries the entire client/daemon conversation over local IPC or an SSH tunnel.
 resource: crates/zz-protocol/src/framing.rs
 tags: [protocol, wire, framing, postcard, versioning]
@@ -15,7 +15,7 @@ daemon through an OpenSSH `ssh -L` Unix-socket forward. iOS instead carries the 
 through `zz proxy` over an in-process `russh` SSH channel.
 Every message is wrapped in a fixed envelope carrying a `u32` little-endian length prefix, a
 one-byte **lane** tag, a **flags** byte, and a `u16` **protocol version**. The current wire version is
-**`PROTOCOL_VERSION = 107`** (`crates/zz-protocol/src/message.rs`).
+**`PROTOCOL_VERSION = 108`** (`crates/zz-protocol/src/message.rs`).
 
 The version is a gate, not a negotiation: a frame whose envelope version differs from the running
 build's is rejected outright. Before disconnecting, a daemon makes a best-effort
@@ -64,7 +64,7 @@ Relevant constants (`framing.rs`): `MAX_FRAME_BYTES = 64 * 1024 * 1024`, `ENVELO
 | length | 0..4 | `u32` LE | Bytes following the prefix (`4 + payload`) |
 | lane | 4 | `u8` | `0` = Control, `1` = Terminal |
 | flags | 5 | `u8` | `0x00` only; every other value is rejected |
-| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (107) |
+| version | 6..8 | `u16` LE | `PROTOCOL_VERSION` (108) |
 | payload | 8.. | bytes | `postcard(ProtocolMessage)` (Control) or packed terminal sections |
 
 # Schema . `ProtocolMessage` (Control lane)
@@ -109,9 +109,9 @@ fields in declaration order.
 | `PreparedCommandList { request_id, commands }` | request identity plus one `PreparedCommand` per input | Daemon → client: return the immutable invocation, optional canonical identity, `alias_matched`, and `Ready` or a typed `ServerError`. Multi-command and empty aliases return their opaque invocation with `canonical_name: None`, `alias_matched: true`, and `Ready`. The echoed request ID lets a client ignore stale replies while notifications share the stream |
 | `SetTerminalPreview { enabled }` | `enabled: bool` | An attached Interactive client enables or disables passive terminal delivery for every window in its attached session. Foreground visibility, input, history, and PTY geometry remain unchanged |
 
-## Subscribed control state in v107
+## Subscribed control state in v108
 
-The campaign keeps v107 unreleased. After a wire-changing merge, rebuild clients and restart old
+The campaign keeps v108 unreleased. After a wire-changing merge, rebuild clients and restart old
 dev daemons. `crates/zz-protocol/src/control.rs` defines the compact handshake and state grouping;
 `tree_delta.rs` defines the tree changes.
 
@@ -298,8 +298,8 @@ name plus its format variables and the control front-end alone knows the `%`-lin
 `PaneOutput { pane, bytes }` (v66) is the raw pane-output tap (the same tap `pipe-pane` uses) that
 becomes `%output`; `PaneOutputState { pane, paused }` and `PaneOutputAged { pane, age_ms, bytes }`
 (v67) carry flow-control pause/resume and age-stamped output for `%extended-output`;
-`ControlFlags { wait_exit, pause_after_ms, no_output }` (v67) echoes the client's
-`refresh-client -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
+`ControlFlags { wait_exit, pause_after_ms, no_output, new_layouts }` (v67, `new_layouts`
+appended in v108) echoes the client's `refresh-client -f` and `attach -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
 (v68) reports a `refresh-client -B` format subscription's value change. v71 appends
 `TimedClientMessageCleared { message_id }` at tag 46 — the daemon's explicit clear for one
 timed message, produced by the client-message deadline on the `zz-daemon-timers` thread when a
@@ -422,7 +422,7 @@ remain unchanged.
 Deferred event hooks clear the Control target and remain separate. Command replay retains the
 caller cwd for sourced hooks; Control hook framing clears the replay client, so sourced-hook cwd is
 a Control-only gap. Event-hook cwd and the three missing pane-event producers stay under their
-named gaps. Pinned `after-queue` is explicit-only and needs no automatic producer.
+named gaps. The 3.8 pin removed `after-queue` and zz no longer registers it.
 
 Command and Interactive replay transcripts closed without another wire field. Each source invocation
 appends its complete verbose batch, replay output, and buffered command-name or parser diagnostics in
@@ -760,7 +760,7 @@ holes in previews larger than 512 cells. The separate `MAX_KITTY_IMAGE_REMOVALS`
 remains 512 IDs per control message, and the daemon splits larger removal sets into
 ordered batches.
 
-v107 is unreleased as of 2026-09-27. It appends `EventPayload::KeyTableActive { table:
+v107 shipped in zz 0.15.0. It appends `EventPayload::KeyTableActive { table:
 Option<String>, repeat: bool }` after `CommandClientExit`, sent to one client when the key table
 it is inside changes: `prefix` or a `switch-client -T` table, never copy-mode, and never the
 session's own `key-table`. `repeat` is true while a `-r` window holds the table. The daemon also
@@ -791,11 +791,57 @@ string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch 
 `MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
 tags.
 
+v108 also carries tmux 3.8's JSON v2 layout strings (catch-up item `pin.layout-v2`).
+`WindowSnapshot.layout_dump` and `visible_layout_dump` hold the v2 form
+(`{"V":2,"L":{...}}`, with each leaf's active flag, last-pane index, pane index and pane id), and
+`EventPayload::ControlFlags` appends `new_layouts: bool` with `#[serde(default)]`. A control client
+prints `%layout-change` from the snapshot through `zz_mux::legacy_layout`, the v1 compat copy,
+unless the daemon reported `new_layouts`. Formats only produce v2; under the same rule the daemon
+rewrites the output of a command such a client runs with `zz_mux::legacy_layouts_in` before it
+returns. Status lines, snapshots and `refresh-client -B`
+subscriptions stay v2 (3.8's `monitor.c` evaluates subscriptions with no client).
+
+v108 is unreleased as of 2026-10-07. Claude Code agent panes stop going through the
+`claude-agent-acp` adapter: `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` becomes `claude`, and the daemon
+drives the user's own binary over Claude Code's stream-json protocol
+([design](/designs/native-agent-drivers.md)). `ProtocolMessage` gains two variants after
+`TtyInputClosed`: `AgentAnswerQuestion { pane, request_id, answers: Vec<AgentQuestionAnswer { id,
+answers: Vec<String> }> }`, which answers a question card (at most `MAX_AGENT_QUESTION_ANSWERS`
+(32) questions and choices, each answer at most `MAX_AGENT_ANSWER_BYTES` (16 KiB)), and
+`AgentStopTask { pane, task_id }`. `AgentPaneWire` appends `tasks: Vec<AgentTaskWire { id, kind,
+description, tool_call_id }>`, the pane's background work, at most `MAX_AGENT_TASKS` (64).
+`agent_question_and_task_messages_append_at_the_wire_tail_and_round_trip` pins the tags. The JSON
+agent stream adds `questions` to `PermissionRequested` (omitted when empty), a `tasksChanged`
+item, and an `activity` item for turns the agent starts itself; the parked permission payload carries `questions` too, so a late client sees the card.
+A prompt `/btw`, `/side`, `/steer`, `/fork`, or `/rewind` is a zz command when the pane's `Ready`
+capabilities set `verbs` (`zz_protocol::agent_stream::AGENT_VERBS`); every other `/` command goes to
+the vendor. A zz command's reply carries `_meta.zz.reply`, the message id of the command's echoed
+prompt row, and a tool update may carry `_meta.zz.exitCode`.
+
+v108 also carries `refresh-client -l` for the raw TUI. `EventPayload` appends the unit variant
+`ClipboardQuery` after `ControlCommandStarted`: the daemon asks the target client to send its outer
+terminal an OSC 52 query (`\e]52;;?\a`, `tty_clipboard_query`) and keeps the query pending for
+5 s. `InputMessage` appends `ClipboardReply { data: Vec<u8> }` after `ClientTerminalSizeV2`: the
+decoded bytes of the terminal's OSC 52 answer. The daemon stores them as a new automatic buffer, as
+`tty_keys_clipboard` does with `paste_add`, only while a query to that client is pending; a reply
+outside that window is dropped. Clients that do not answer OSC 52 ignore the query.
+
+v108 also carries the raw TUI's terminal negotiation (2026-10-09). `EventPayload` appends
+`TerminalNegotiation { features: Vec<String>, user_keys: Vec<String> }` after
+`ClipboardQuery`. The daemon sends it to an interactive client with a terminal at attach
+and again whenever `user-keys`, `terminal-features` or `terminal-overrides` changes: `features`
+is the roster behind `#{client_termfeatures}` (the client's `TERM`, `COLORTERM`, both arrays and
+what it reported), and `user_keys` is the `user-keys` array by index, empty for an unset slot.
+The TUI raises its colour depth and arms extended keys from `features` and decodes each sequence
+in `user_keys` before the built-in keys. `zz_terminal::KeyCode` appends `User(u16)`, which
+`input_key_name` spells `UserN`; a pane writes nothing for it.
+
 # Versioning & compatibility
 
-- **`PROTOCOL_VERSION: u16 = 107`** is stamped into every frame's envelope and re-checked inside
+- **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside
   `Hello` and `Welcome` (`validate_control_message` rejects an inner-version mismatch even if the envelope
   version passed).
+- v108 requires updated clients and daemon together, including the daemon on every ssh host.
 - v107 requires updated clients and daemon together, including the daemon on every ssh host.
 - v106 requires updated clients and daemon together. A v105 daemon retains the old
   placement limit even after the GUI is rebuilt; restarting only the GUI cannot fix

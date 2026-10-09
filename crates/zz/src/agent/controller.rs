@@ -18,8 +18,9 @@ use zz_daemon::{
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentGitSummary, AgentPaneWire, AgentProvider,
-    AgentSessionOpKind, MAX_AGENT_AUTH_METHODS, MAX_AGENT_AVAILABLE_COMMANDS, MAX_AGENT_MODES,
-    MAX_AGENT_QUEUED_PROMPTS, PaneId,
+    AgentQuestionAnswer, AgentSessionOpKind, AgentTaskWire, MAX_AGENT_AUTH_METHODS,
+    MAX_AGENT_AVAILABLE_COMMANDS, MAX_AGENT_MODES, MAX_AGENT_QUEUED_PROMPTS, PaneId,
+    agent_stream::AgentQuestion,
 };
 
 use crate::{
@@ -89,7 +90,7 @@ pub(crate) use zz_client::agent_transcript::{
     AgentPermissionKind, AgentPermissionRequest, AgentToolKindModel, AgentToolStatusModel,
     ToolPayload,
 };
-use zz_client::agent_transcript::{AgentTranscript, capped};
+use zz_client::agent_transcript::{AgentTranscript, capped, is_zz_command};
 pub(crate) type AgentThreadEntry = zz_client::agent_transcript::AgentThreadEntry<Arc<Image>>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,7 +112,7 @@ pub(crate) use zz_client::agent_config::{AgentConfigCategory, AgentConfigOption,
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[allow(
     clippy::struct_excessive_bools,
-    reason = "ACP exposes these six independent capabilities"
+    reason = "ACP exposes these seven independent capabilities"
 )]
 pub(crate) struct AgentSessionCapabilities {
     pub(crate) load: bool,
@@ -122,6 +123,7 @@ pub(crate) struct AgentSessionCapabilities {
     /// A prompt capability rather than a session one, but it arrives in the
     /// same handshake and gates the composer the same way.
     pub(crate) images: bool,
+    pub(crate) verbs: bool,
 }
 
 pub(crate) use zz_protocol::agent_stream::AgentSessionSummary;
@@ -155,6 +157,7 @@ pub(crate) struct AgentPaneState {
     pub(crate) available_commands: Arc<[AgentCommand]>,
     pub(crate) usage: Option<(u64, u64)>,
     pub(crate) git: Option<AgentGitSummary>,
+    pub(crate) tasks: Arc<[AgentTaskWire]>,
     /// Text `agent-send` routed here, waiting for the pane's view to fold it
     /// into the composer draft.
     pub(crate) pending_composer: Option<Arc<str>>,
@@ -178,6 +181,7 @@ struct AgentThread {
     available_commands: Arc<[AgentCommand]>,
     usage: Option<(u64, u64)>,
     git: Option<AgentGitSummary>,
+    tasks: Arc<[AgentTaskWire]>,
     cwd: PathBuf,
     session_id: Option<Arc<str>>,
     session_capabilities: AgentSessionCapabilities,
@@ -213,6 +217,7 @@ impl AgentThread {
             available_commands: Arc::from([]),
             usage: None,
             git: None,
+            tasks: Arc::from([]),
             cwd,
             session_id: session_id.map(Arc::from),
             session_capabilities: AgentSessionCapabilities::default(),
@@ -246,6 +251,7 @@ impl AgentThread {
             available_commands: self.available_commands.clone(),
             usage: self.usage,
             git: self.git.clone(),
+            tasks: self.tasks.clone(),
             pending_composer: None,
             queued_prompts: 0,
         }
@@ -267,6 +273,7 @@ impl AgentThread {
         self.available_commands = Arc::from([]);
         self.usage = None;
         self.git = None;
+        self.tasks = Arc::from([]);
         self.session_history.loading = false;
         self.settings_busy = false;
         self.preference_reconcile_skips.clear();
@@ -441,6 +448,7 @@ enum RuntimeEvent {
         request_id: u64,
         tool_call: ToolCallUpdate,
         options: Vec<PermissionOption>,
+        questions: Vec<AgentQuestion>,
     },
     PermissionResolved {
         pane: PaneId,
@@ -1084,10 +1092,12 @@ impl AgentController {
         if let Some(refusal) = thread.image_refusal(!images.is_empty()) {
             return Err(refusal);
         }
-        let queueing = thread.connection.has_active_turn();
-        if !queueing && let Some(refusal) = thread.prompt_refusal(!images.is_empty()) {
+        let command = thread.session_capabilities.verbs && is_zz_command(&text);
+        let active = thread.connection.has_active_turn();
+        if !active && let Some(refusal) = thread.prompt_refusal(!images.is_empty()) {
             return Err(refusal);
         }
+        let queueing = active && !command;
         if queueing && self.queued_count(pane) >= MAX_AGENT_QUEUED_PROMPTS {
             return Err(Arc::from(
                 "finish or unqueue one of the four queued prompts first",
@@ -1108,6 +1118,9 @@ impl AgentController {
             }
             cx.notify();
             return Err(Arc::from("agent daemon is not connected"));
+        }
+        if command {
+            return Ok(());
         }
         if queueing {
             // The daemon publishes the queue depth; showing it immediately keeps
@@ -1236,6 +1249,54 @@ impl AgentController {
             return true;
         }
         false
+    }
+
+    pub(crate) fn answer_question(
+        &mut self,
+        pane: PaneId,
+        request_id: u64,
+        answers: Vec<AgentQuestionAnswer>,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.send(
+            pane,
+            AgentRequest::AnswerQuestion {
+                request_id,
+                answers,
+            },
+            cx,
+        ) {
+            return false;
+        }
+        if let Some(thread) = self.panes.get_mut(&pane) {
+            thread.transcript.resolve_permission(request_id, false);
+        }
+        cx.notify();
+        true
+    }
+
+    pub(crate) fn stop_task(
+        &mut self,
+        pane: PaneId,
+        task_id: String,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        let known = self
+            .panes
+            .get(&pane)
+            .is_some_and(|thread| thread.tasks.iter().any(|task| task.id == task_id));
+        known && self.send(pane, AgentRequest::StopTask { task_id }, cx)
+    }
+
+    pub(crate) fn tool_parent_entry(&self, pane: PaneId, entry_id: u64) -> Option<u64> {
+        let transcript = &self.panes.get(&pane)?.transcript;
+        transcript
+            .tool_parent(entry_id)
+            .and_then(|parent| transcript.tool_entry(parent))
+    }
+
+    pub(crate) fn tool_entry(&self, pane: PaneId, tool_call_id: &str) -> Option<u64> {
+        self.panes.get(&pane)?.transcript.tool_entry(tool_call_id)
     }
 
     pub(crate) fn authenticate(&mut self, pane: PaneId, method_id: String, cx: &mut Context<Self>) {
@@ -1587,6 +1648,9 @@ impl AgentController {
         }
         thread.title = state.title.as_deref().map(Arc::from);
         thread.git.clone_from(&state.git);
+        if *thread.tasks != *state.tasks {
+            thread.tasks = state.tasks.clone().into();
+        }
         if state.auth_methods.is_empty() {
             thread.auth_methods = Arc::from([]);
         } else if let Some(methods) =
@@ -1605,11 +1669,15 @@ impl AgentController {
         }
         thread.transcript.clear_permissions();
         if let Some(permission) = &state.pending_permission
-            && let Some((tool_call, options)) = decode_permission_payload(&permission.payload)
+            && let Some((tool_call, options, questions)) =
+                decode_permission_payload(&permission.payload)
         {
-            thread
-                .transcript
-                .request_permission(permission.request_id, tool_call, options);
+            thread.transcript.request_questions(
+                permission.request_id,
+                tool_call,
+                options,
+                questions,
+            );
         }
         if state.config_options.is_empty() && state.modes.is_empty() {
             thread.config_options = Arc::from([]);
@@ -1697,6 +1765,7 @@ impl AgentController {
                     delete: capabilities.delete,
                     additional_directories: capabilities.additional_directories,
                     images: capabilities.images,
+                    verbs: capabilities.verbs,
                 },
             },
             AgentStreamPayload::SessionReset { restoring } => {
@@ -1712,7 +1781,10 @@ impl AgentController {
                 modes: decode_json(modes),
                 config_options: decode_json(config_options),
             },
-            AgentStreamPayload::StateSynced { .. } | AgentStreamPayload::PromptAccepted { .. } => {
+            AgentStreamPayload::StateSynced { .. }
+            | AgentStreamPayload::PromptAccepted { .. }
+            | AgentStreamPayload::TasksChanged { .. }
+            | AgentStreamPayload::Activity { .. } => {
                 return None;
             }
             AgentStreamPayload::SessionsListed {
@@ -1774,11 +1846,13 @@ impl AgentController {
                 request_id,
                 tool_call,
                 options,
+                questions,
             } => RuntimeEvent::PermissionRequested {
                 pane,
                 request_id,
                 tool_call: decode_value(tool_call)?,
                 options: decode_value(options)?,
+                questions,
             },
             AgentStreamPayload::PermissionResolved {
                 request_id,
@@ -2135,11 +2209,12 @@ impl AgentController {
                 request_id,
                 tool_call,
                 options,
+                questions,
             } => {
                 if let Some(thread) = self.panes.get_mut(&pane) {
                     thread
                         .transcript
-                        .request_permission(request_id, tool_call, options);
+                        .request_questions(request_id, tool_call, options, questions);
                     changed_pane = Some(pane);
                 }
             }
@@ -2414,11 +2489,17 @@ fn decode_state_blob<T: serde::de::DeserializeOwned>(blob: &str) -> Option<T> {
         .ok()
 }
 
-fn decode_permission_payload(payload: &str) -> Option<(ToolCallUpdate, Vec<PermissionOption>)> {
+fn decode_permission_payload(
+    payload: &str,
+) -> Option<(ToolCallUpdate, Vec<PermissionOption>, Vec<AgentQuestion>)> {
     let value = decode_state_blob::<serde_json::Value>(payload)?;
     let tool_call = decode_value(value.get("toolCall")?.clone())?;
     let options = decode_value(value.get("options")?.clone())?;
-    Some((tool_call, options))
+    let questions = match value.get("questions") {
+        Some(questions) => decode_value(questions.clone())?,
+        None => Vec::new(),
+    };
+    Some((tool_call, options, questions))
 }
 
 impl EventEmitter<AgentControllerEvent> for AgentController {}
@@ -3439,6 +3520,7 @@ mod tests {
                                     "Allow once",
                                     PermissionOptionKind::AllowOnce,
                                 )]),
+                                questions: Vec::new(),
                             },
                         ),
                         item(
@@ -3892,6 +3974,7 @@ mod tests {
                         additions: 21,
                         deletions: 8,
                     }),
+                    tasks: Vec::new(),
                 };
 
                 controller.apply_pane_state(pane, &state, cx);
@@ -3925,6 +4008,7 @@ mod tests {
                         modes: String::new(),
                         pending_permission: None,
                         git: None,
+                        tasks: Vec::new(),
                     },
                     cx,
                 );
@@ -3935,6 +4019,200 @@ mod tests {
                 assert!(pane_state.config_options.is_empty());
                 assert!(pane_state.pending_permissions.is_empty());
                 assert_eq!(pane_state.git, None);
+            });
+        });
+    }
+
+    fn asked(id: &str, labels: &[&str], multi_select: bool) -> AgentQuestion {
+        AgentQuestion {
+            id: id.to_owned(),
+            question: format!("{id}?"),
+            options: labels
+                .iter()
+                .map(|label| zz_protocol::agent_stream::AgentQuestionOption {
+                    label: (*label).to_owned(),
+                    description: None,
+                })
+                .collect(),
+            multi_select,
+            allow_other: true,
+            ..AgentQuestion::default()
+        }
+    }
+
+    fn reply(id: &str, answers: &[&str]) -> AgentQuestionAnswer {
+        AgentQuestionAnswer {
+            id: id.to_owned(),
+            answers: answers.iter().map(|answer| (*answer).to_owned()).collect(),
+        }
+    }
+
+    #[gpui::test]
+    fn a_question_card_answers_through_its_own_request(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(8);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![item(
+                        1,
+                        AgentStreamPayload::PermissionRequested {
+                            request_id: 21,
+                            tool_call: serde_json::json!({
+                                "toolCallId": "ask-1",
+                                "title": "Claude has questions",
+                            }),
+                            options: serde_json::json!([]),
+                            questions: vec![
+                                asked("fruit", &["apple", "pear"], false),
+                                asked("tools", &["saw", "drill"], true),
+                            ],
+                        },
+                    )],
+                    cx,
+                );
+                let pending = controller
+                    .pane_state(pane)
+                    .expect("the pane is registered")
+                    .pending_permissions;
+                assert_eq!(pending[0].questions.len(), 2);
+                assert!(pending[0].options.is_empty());
+
+                let answers = vec![
+                    reply("fruit", &["pear"]),
+                    reply("tools", &["saw", "chisel"]),
+                ];
+                assert!(controller.answer_question(pane, 21, answers.clone(), cx));
+                assert!(
+                    controller
+                        .pane_state(pane)
+                        .expect("the pane is registered")
+                        .pending_permissions
+                        .is_empty(),
+                    "an answered card leaves this client at once"
+                );
+                assert_eq!(
+                    sink.borrow().as_slice(),
+                    &[(
+                        pane,
+                        AgentRequest::AnswerQuestion {
+                            request_id: 21,
+                            answers,
+                        }
+                    )]
+                );
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn published_tasks_and_a_parked_card_reach_the_pane(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(9);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let questions = vec![asked("fruit", &["apple"], true)];
+                let state = AgentPaneWire {
+                    phase: AgentConnectionPhase::AwaitingPermission,
+                    pending_permission: Some(zz_protocol::AgentPermissionWire {
+                        request_id: 4,
+                        payload: serde_json::json!({
+                            "toolCall": {"toolCallId": "ask-2", "title": "fruit?"},
+                            "options": [],
+                            "questions": questions,
+                        })
+                        .to_string(),
+                    }),
+                    tasks: vec![AgentTaskWire {
+                        id: "b1".to_owned(),
+                        kind: "shell".to_owned(),
+                        description: "cargo build".to_owned(),
+                        tool_call_id: Some("bash-1".to_owned()),
+                    }],
+                    ..AgentPaneWire::default()
+                };
+
+                controller.apply_pane_state(pane, &state, cx);
+
+                let pane_state = controller.pane_state(pane).expect("the pane is registered");
+                assert_eq!(
+                    pane_state.pending_permissions[0].questions, questions,
+                    "a client that attaches mid-card still sees every question"
+                );
+                assert_eq!(pane_state.tasks.as_ref(), state.tasks.as_slice());
+                assert!(
+                    !controller.stop_task(pane, "gone".to_owned(), cx),
+                    "only a listed task stops"
+                );
+                assert!(controller.stop_task(pane, "b1".to_owned(), cx));
+                assert_eq!(
+                    sink.borrow().as_slice(),
+                    &[(
+                        pane,
+                        AgentRequest::StopTask {
+                            task_id: "b1".to_owned()
+                        }
+                    )]
+                );
+
+                controller.apply_pane_state(
+                    pane,
+                    &AgentPaneWire {
+                        phase: AgentConnectionPhase::Ready,
+                        ..AgentPaneWire::default()
+                    },
+                    cx,
+                );
+                let pane_state = controller.pane_state(pane).expect("the pane is registered");
+                assert!(pane_state.tasks.is_empty());
+                assert!(pane_state.pending_permissions.is_empty());
+            });
+        });
+    }
+
+    #[gpui::test]
+    fn subagent_tool_rows_resolve_to_their_agents_entry(cx: &mut TestAppContext) {
+        let (controller, _sink) = proxy_controller(cx);
+        let pane = PaneId(10);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                controller.apply_stream_items(
+                    pane,
+                    vec![
+                        item(
+                            1,
+                            AgentStreamPayload::Update {
+                                update: serde_json::json!({
+                                    "sessionUpdate": "tool_call",
+                                    "toolCallId": "agent-1",
+                                    "title": "Survey",
+                                    "kind": "think",
+                                }),
+                            },
+                        ),
+                        item(
+                            2,
+                            AgentStreamPayload::Update {
+                                update: serde_json::json!({
+                                    "sessionUpdate": "tool_call",
+                                    "toolCallId": "read-1",
+                                    "title": "Read a.rs",
+                                    "kind": "read",
+                                    "_meta": {"zz": {"parent": "agent-1"}},
+                                }),
+                            },
+                        ),
+                    ],
+                    cx,
+                );
+                let agent = controller.tool_entry(pane, "agent-1").expect("agent row");
+                let step = controller.tool_entry(pane, "read-1").expect("step row");
+                assert_eq!(controller.tool_parent_entry(pane, step), Some(agent));
+                assert_eq!(controller.tool_parent_entry(pane, agent), None);
             });
         });
     }
@@ -4272,6 +4550,52 @@ mod tests {
                 },
                 AgentRequest::Unqueue,
             ]
+        );
+    }
+
+    #[gpui::test]
+    fn a_zz_command_opens_no_turn_and_joins_no_queue(cx: &mut TestAppContext) {
+        let (controller, sink) = proxy_controller(cx);
+        let pane = PaneId(7);
+        cx.update(|cx| {
+            controller.update(cx, |controller, cx| {
+                ready_pane(controller, pane);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.session_capabilities.verbs = true;
+                controller
+                    .prompt(pane, "/rewind u-1", Vec::new(), cx)
+                    .expect("the command is sent");
+                let thread = &controller.panes[&pane];
+                assert_eq!(thread.connection, AgentConnectionState::Ready);
+                assert!(
+                    thread.transcript.entries().is_empty(),
+                    "the daemon echoes the command itself"
+                );
+                controller
+                    .prompt(pane, "first", Vec::new(), cx)
+                    .expect("first prompt");
+                controller
+                    .prompt(pane, "/steer faster", Vec::new(), cx)
+                    .expect("a command goes out mid-turn");
+                assert_eq!(controller.queued_count(pane), 0);
+                let thread = controller.panes.get_mut(&pane).expect("pane");
+                thread.session_capabilities.verbs = false;
+                controller
+                    .prompt(pane, "/steer later", Vec::new(), cx)
+                    .expect("a plain prompt is queued");
+                assert_eq!(controller.queued_count(pane), 1);
+            });
+        });
+
+        assert_eq!(
+            sink.borrow()
+                .iter()
+                .map(|(_, request)| match request {
+                    AgentRequest::Prompt { text, .. } => text.as_str(),
+                    _ => "",
+                })
+                .collect::<Vec<_>>(),
+            ["/rewind u-1", "first", "/steer faster", "/steer later"]
         );
     }
 

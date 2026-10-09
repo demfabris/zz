@@ -119,7 +119,7 @@ done
 probe_failure unsupported-attach-then-unknown \
     'command attach-session: unknown flag -0' attach-session -x -0
 probe_failure unsupported-capture-then-unknown \
-    'command capture-pane: unknown flag -0' capture-pane -F -0
+    'command capture-pane: unknown flag -0' capture-pane -P -0
 probe_failure unsupported-move-then-unknown \
     'command move-pane: unknown flag -0' move-pane -M -0
 probe_failure unsupported-required-then-unknown \
@@ -169,11 +169,11 @@ if ! cmp -s "$work/pane.before" "$work/pane.after" ||
 fi
 
 if [ "$canonical_count" -ne 89 ] || [ "$alias_count" -ne 75 ] ||
-    [ "$required_count" -ne 84 ] || [ "$failure_probe_count" -ne 543 ] ||
-    [ "$success_probe_count" -ne 3 ] || [ "$probe_count" -ne 546 ]; then
+    [ "$required_count" -ne 85 ] || [ "$failure_probe_count" -ne 544 ] ||
+    [ "$success_probe_count" -ne 3 ] || [ "$probe_count" -ne 547 ]; then
     failed=1
 fi
 
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g COMMAND_FLAG_ERRORS clean:546
+    main_client set-environment -g COMMAND_FLAG_ERRORS clean:547
 fi

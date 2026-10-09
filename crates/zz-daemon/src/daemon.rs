@@ -76,8 +76,9 @@ use zz_mux::{
     TmuxSortOrder, WindowSize, canonical_command, command_block_body,
     copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, parse_tmux_colour, sanitize_client_output, send_keys_is_read_only_safe,
-    send_keys_target_client, validate_static_command_chain,
+    if_shell_truthy, legacy_layouts_in, parse_tmux_colour, sanitize_client_output,
+    send_keys_is_read_only_safe, send_keys_target_client, utf8_sanitize,
+    validate_static_command_chain,
 };
 #[cfg(windows)]
 use zz_protocol::read_protocol_message_into;
@@ -97,12 +98,12 @@ use zz_protocol::{
     MAX_STARTUP_CONFIG_CAUSE_BYTES, MAX_STARTUP_CONFIG_CAUSES, MAX_STARTUP_CONFIG_CAUSES_BYTES,
     MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
     MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
-    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PasteUploadPurpose, PastedImageFormat,
-    PatchTail, PopupAction, PopupBorderLines, PopupPointer, PopupPointerButton, PopupState,
-    PreparedCommand, PreparedCommandResult, ProtocolError, ProtocolMessage, RawText,
-    SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
-    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
-    encode_protocol_message_into, encode_terminal_patch_event_into,
+    PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PaneStatus, PaneStatusKind, PaneStatusState,
+    PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction, PopupBorderLines, PopupPointer,
+    PopupPointerButton, PopupState, PreparedCommand, PreparedCommandResult, ProtocolError,
+    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_patch_event_into,
     encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
     menu_row_width, resolve_command,
 };
@@ -110,11 +111,11 @@ use zz_terminal::{
     AppearanceColor, AppearanceConfigDisposition, AppearanceLoad, AppearanceProvenance,
     CaptureBoundary, CaptureOptions, ClipboardTarget, Color, ColourClass, CursorBlinkPolicy,
     CursorStyle, DeferredTerminalEvent, EngineKnobs, LastCommandCapture, PasteBufferAction,
-    ProgressBarState, TerminalAppearance, TerminalCaptureError, TerminalColorScheme,
-    TerminalDiffScratch, TerminalEvent, TerminalEvents, TerminalMode, TerminalPalette,
-    TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn, TerminalViewId,
-    TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides, parse_x11_color,
-    prepare_paste_buffer,
+    ProgramBlockKind, ProgramState, ProgramStatus, ProgressBarState, TerminalAppearance,
+    TerminalCaptureError, TerminalColorScheme, TerminalDiffScratch, TerminalEvent, TerminalEvents,
+    TerminalMode, TerminalPalette, TerminalPatchRef, TerminalSession, TerminalSize, TerminalSpawn,
+    TerminalViewId, TerminalViewport, ViewStream, WordSeparators, apply_appearance_overrides,
+    parse_x11_color, prepare_paste_buffer,
 };
 
 #[cfg(feature = "agent")]
@@ -493,6 +494,8 @@ fn terminal_current_command(terminal: &TerminalSession) -> String {
 #[cfg(test)]
 mod edge_facts_tests;
 
+const CLIPBOARD_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+
 fn unix_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -564,6 +567,128 @@ struct WindowAlertNotification {
     message: Option<OwnedClientMessagePublication>,
     retired: Option<ActiveClientMessage>,
     deadline: Option<ClientMessageDeadline>,
+}
+
+fn client_lifecycle_event(
+    inner: &ServerState,
+    name: &'static str,
+    client: ClientId,
+) -> Option<PendingHookEvent> {
+    let kind = inner.client(client).and_then(|c| c.kind)?;
+    if !matches!(kind, ClientKind::Interactive | ClientKind::Control) {
+        return None;
+    }
+    let registered = inner.client(client);
+    let origin = registered
+        .and_then(|c| c.origin)
+        .or_else(|| {
+            let environment = registered.and_then(|c| c.environment.as_ref())?;
+            ["TMUX_PANE", "ZZ_PANE"]
+                .into_iter()
+                .find_map(|name| environment.map().get(name)?.as_str().parse().ok())
+        })
+        .and_then(|pane| ExecutionContext::for_pane(&inner.engine.state, pane));
+    let context = client_attached_session(inner, client).map_or_else(
+        || {
+            if let Some(origin) = origin {
+                return origin;
+            }
+            inner.engine.state.most_recent_context().map_or_else(
+                ExecutionContext::default,
+                |(session, window, pane)| {
+                    ExecutionContext::new(Some(session), Some(window), Some(pane))
+                },
+            )
+        },
+        |session| hook_events::live_session_context(&inner.engine.state, session),
+    );
+    let client_name = client_format_name(inner, client);
+    let mut event = PendingHookEvent::client(name, context, client, Some(client_name.as_str()));
+    if let Some(session) = event.context.session {
+        event
+            .variables
+            .insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
+        if let Some(state) = inner.engine.state.sessions.get(&session) {
+            event.variables.insert(
+                HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                state.name.clone(),
+            );
+        }
+    }
+    if let Some(window) = event.context.window {
+        event
+            .variables
+            .insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+        if let Some(state) = inner.engine.state.windows.get(&window) {
+            event.variables.insert(
+                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                state.name.clone(),
+            );
+            event
+                .variables
+                .insert("hook_window_index".to_owned(), state.index.to_string());
+        }
+    }
+    if let Some(pane) = event.context.pane {
+        event
+            .variables
+            .insert(HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string());
+    }
+    Some(event)
+}
+
+fn add_command_payload(
+    inner: &ServerState,
+    event: &mut PendingHookEvent,
+    pane: PaneId,
+    facts: &zz_terminal::PaneOutputFacts,
+) {
+    if let Some(index) = inner
+        .engine
+        .state
+        .window_for_pane(pane)
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .map(|window| window.index)
+    {
+        event
+            .variables
+            .insert("hook_window_index".to_owned(), index.to_string());
+    }
+    if let Some(status) = facts.command_status {
+        event
+            .variables
+            .insert("hook_command_status".to_owned(), status.to_string());
+    }
+    if facts.command_start_time != 0 {
+        event.variables.insert(
+            "hook_command_start_time".to_owned(),
+            facts.command_start_time.to_string(),
+        );
+    }
+    if facts.command_end_time != 0 {
+        event.variables.insert(
+            "hook_command_end_time".to_owned(),
+            facts.command_end_time.to_string(),
+        );
+    }
+    if let Some(duration) = facts.command_duration(unix_timestamp()) {
+        event
+            .variables
+            .insert("hook_command_duration".to_owned(), duration.to_string());
+    }
+}
+
+fn pane_event_if_hooked(
+    inner: &ServerState,
+    name: &'static str,
+    pane: PaneId,
+) -> Option<PendingHookEvent> {
+    let event = PendingHookEvent::live_pane(name, pane, &inner.engine)?;
+    inner
+        .engine
+        .event_hook_commands(&event.context, name)
+        .is_some_and(|commands| !commands.is_empty())
+        .then_some(event)
 }
 
 fn window_alert_notifications(
@@ -4241,6 +4366,15 @@ const INSPECT_FIELDS: &[&str] = &[
     "pane_last_command_status",
     "pane_pb_state",
     "pane_pb_progress",
+    "pane_status",
+    "pane_status_kind",
+    "pane_status_progress",
+    "pane_status_app",
+    "pane_status_title",
+    "pane_status_message",
+    "pane_status_raw_title",
+    "pane_status_raw_message",
+    "pane_status_reported",
     "agent_state",
     "agent_pending_permission",
     "permission",
@@ -4566,6 +4700,7 @@ struct PendingHookEvent {
     context: ExecutionContext,
     variables: BTreeMap<String, String>,
     exclude_client: Option<ClientId>,
+    control_notified: bool,
 }
 
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
@@ -4596,6 +4731,8 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "alert-silence",
     "client-active",
     "client-attached",
+    "client-closed",
+    "client-created",
     "client-dark-theme",
     "client-detached",
     "client-focus-in",
@@ -4604,23 +4741,38 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "client-resized",
     "client-session-changed",
     "command-error",
+    "marked-pane-changed",
+    "pane-activity",
+    "pane-bell",
+    "pane-command-finished",
+    "pane-command-started",
+    "pane-created",
     "pane-died",
     "pane-exited",
     "pane-focus-in",
     "pane-focus-out",
     "pane-mode-changed",
+    "pane-mode-entered",
+    "pane-mode-exited",
+    "pane-moved",
+    "pane-resized",
     "pane-set-clipboard",
+    "pane-shell-prompt",
     "pane-title-changed",
     "session-closed",
     "session-created",
     "session-renamed",
     "session-window-changed",
+    "window-closed",
+    "window-created",
     "window-layout-changed",
     "window-linked",
     "window-pane-changed",
     "window-renamed",
     "window-resized",
     "window-unlinked",
+    "window-unzoomed",
+    "window-zoomed",
 ];
 
 mod hook_events;
@@ -4638,6 +4790,7 @@ struct HookSessionState {
 #[derive(Clone)]
 struct HookWindowState {
     session: SessionId,
+    index: u32,
     name: String,
     active_pane: PaneId,
     zoomed_pane: Option<PaneId>,
@@ -4727,6 +4880,7 @@ impl PendingHookEvent {
             name,
             context: ExecutionContext::new(Some(session), Some(window), Some(pane)),
             exclude_client: None,
+            control_notified: false,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
@@ -4756,6 +4910,7 @@ impl PendingHookEvent {
             context,
             variables,
             exclude_client: (name == "client-detached").then_some(client),
+            control_notified: false,
         }
     }
 
@@ -4764,6 +4919,7 @@ impl PendingHookEvent {
             name,
             context: ExecutionContext::new(None, None, None),
             exclude_client: None,
+            control_notified: false,
             variables: BTreeMap::from([
                 (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
                 ("hook_paste_buffer".to_owned(), buffer),
@@ -4807,6 +4963,7 @@ impl MuxHookSnapshot {
             window,
             HookWindowState {
                 session: state.session,
+                index: state.index,
                 name: state.name.clone(),
                 active_pane: state.active_pane,
                 zoomed_pane: state.zoomed_pane,
@@ -6726,7 +6883,10 @@ impl Shared {
             }
             return false;
         }
-        if !self.publish_effective_mux_options_to(client, outbound) || !outbound.is_open() {
+        if !self.publish_effective_mux_options_to(client, outbound)
+            || !self.publish_terminal_negotiation_to(client, outbound)
+            || !outbound.is_open()
+        {
             if let Some(output_id) = startup_delivery.command_output() {
                 self.retire_command_output_if_exact(client, output_id);
             }
@@ -6769,7 +6929,18 @@ impl Shared {
         (client, hello)
     }
 
+    fn client_lifecycle_hook(self: &Arc<Self>, name: &'static str, client: ClientId) {
+        let event = {
+            let inner = self.inner.lock();
+            client_lifecycle_event(&inner, name, client)
+        };
+        if let Some(event) = event {
+            self.run_event_hooks(vec![event]);
+        }
+    }
+
     fn unregister(self: &Arc<Self>, client: ClientId) {
+        let closed = client_lifecycle_event(&self.inner.lock(), "client-closed", client);
         let (detached, _) = self.detach_client_state(client, false);
         if detached {
             self.publish_snapshot_after_detach(client);
@@ -6919,6 +7090,8 @@ impl Shared {
         }
         if shutdown {
             self.request_shutdown_without_hooks();
+        } else if let Some(event) = closed {
+            self.run_event_hooks(vec![event]);
         }
     }
 
@@ -7613,7 +7786,15 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
-        self.execution_item()
+        let legacy = !prints_stored_bytes(&command.name)
+            && control_reads_legacy_layouts(
+                &self.inner.lock(),
+                format_provenance_client(context, client),
+            );
+        let previous_legacy = context.legacy_layouts();
+        context.set_legacy_layouts(legacy);
+        let result = self
+            .execution_item()
             .execute_with_mux_source_routed_for_terminal_in_queue_in_item(
                 client,
                 kind,
@@ -7622,7 +7803,14 @@ impl Shared {
                 mux_source,
                 client_terminal,
                 queue_execution,
-            )
+            );
+        context.set_legacy_layouts(previous_legacy);
+        result.map(|mut execution| {
+            if legacy {
+                legacy_command_output(&mut execution);
+            }
+            execution
+        })
     }
 
     fn execute_with_mux_source_routed_for_terminal_in_queue_in_item(
@@ -8227,6 +8415,7 @@ impl Shared {
                     }
                     DaemonCommandDispatch::Buffer => self.buffer_command_for_client(
                         Some(client),
+                        kind,
                         context,
                         canonical,
                         &command.args,
@@ -8690,14 +8879,13 @@ impl Shared {
             return String::new();
         };
         self.wake_control_queue(client, kind);
-        self.run_hook_commands(
-            client,
-            kind,
-            context,
-            commands,
-            &hook_format_variables(command, hook),
-            parent_queue,
-        )
+        let mut variables = context.format_variables.clone();
+        variables.insert(
+            "command".to_owned(),
+            canonical_command(&command.name).to_owned(),
+        );
+        variables.extend(hook_format_variables(command, hook));
+        self.run_hook_commands(client, kind, context, commands, &variables, parent_queue)
     }
 
     fn run_hook_commands(
@@ -9000,6 +9188,58 @@ impl Shared {
         state: &mut EventQueueFrame,
         event: PendingHookEvent,
     ) -> Option<InsertedQueueChild> {
+        if state.publish_control && !event.control_notified {
+            state
+                .notifications
+                .push(self.event_control_notification(&event));
+        }
+        if self
+            .command_item
+            .as_ref()
+            .is_some_and(|item| item.lock().hook_notifications_only)
+        {
+            return None;
+        }
+        let (context, commands) = {
+            let inner = self.inner.lock();
+            let mut context = event.context.clone();
+            inner.engine.repair_event_context(&mut context);
+            context.set_no_client();
+            context.set_replay_client(None);
+            context.set_control_command_target(None);
+            let commands = inner.engine.event_hook_commands(&context, event.name);
+            (context, commands)
+        };
+        let commands = commands.filter(|commands| !commands.is_empty())?;
+        let draining =
+            self.shutdown_pending.load(Ordering::Acquire) && !state.shutdown_already_blocked;
+        let mut variables = event.variables;
+        variables
+            .entry("hook_event".to_owned())
+            .or_insert_with(|| event.name.to_owned());
+        Some(InsertedQueueChild {
+            context,
+            source: InsertedCommandSource::Hooks(Box::new(HookQueueSource {
+                commands: RefCell::new(commands),
+                variables,
+                skip_resolution_errors: true,
+                initial_draining: draining,
+                replaying: false,
+            })),
+            label: "<event-hook>".to_owned(),
+            control_target: None,
+            mux_source: MuxOptionSource::RuntimeCommand,
+            kind: InsertedQueueChildKind::Event { draining },
+            leaf: None,
+            guard: None,
+            leaf_name: None,
+        })
+    }
+
+    fn event_control_notification(
+        &self,
+        event: &PendingHookEvent,
+    ) -> (EventPayload, Option<ClientId>, bool) {
         let attached_only = matches!(
             event.name,
             "window-layout-changed"
@@ -9025,53 +9265,22 @@ impl Shared {
                 control_variables.insert("hook_session_name".to_owned(), name);
             }
         }
-        if state.publish_control {
-            state.notifications.push((
-                EventPayload::HookEvent {
-                    name: event.name.to_owned(),
-                    variables: control_variables,
-                },
-                event.exclude_client,
-                attached_only,
-            ));
+        (
+            EventPayload::HookEvent {
+                name: event.name.to_owned(),
+                variables: control_variables,
+            },
+            event.exclude_client,
+            attached_only,
+        )
+    }
+
+    fn publish_event_control_notifications(&self, events: &mut [PendingHookEvent]) {
+        for event in events.iter_mut().filter(|event| !event.control_notified) {
+            let (payload, exclude_client, attached_only) = self.event_control_notification(event);
+            self.publish_to_control_clients(payload, exclude_client, attached_only);
+            event.control_notified = true;
         }
-        if self
-            .command_item
-            .as_ref()
-            .is_some_and(|item| item.lock().hook_notifications_only)
-        {
-            return None;
-        }
-        let (context, commands) = {
-            let inner = self.inner.lock();
-            let mut context = event.context.clone();
-            inner.engine.repair_event_context(&mut context);
-            context.set_no_client();
-            context.set_replay_client(None);
-            context.set_control_command_target(None);
-            let commands = inner.engine.event_hook_commands(&context, event.name);
-            (context, commands)
-        };
-        let commands = commands.filter(|commands| !commands.is_empty())?;
-        let draining =
-            self.shutdown_pending.load(Ordering::Acquire) && !state.shutdown_already_blocked;
-        Some(InsertedQueueChild {
-            context,
-            source: InsertedCommandSource::Hooks(Box::new(HookQueueSource {
-                commands: RefCell::new(commands),
-                variables: event.variables,
-                skip_resolution_errors: true,
-                initial_draining: draining,
-                replaying: false,
-            })),
-            label: "<event-hook>".to_owned(),
-            control_target: None,
-            mux_source: MuxOptionSource::RuntimeCommand,
-            kind: InsertedQueueChildKind::Event { draining },
-            leaf: None,
-            guard: None,
-            leaf_name: None,
-        })
     }
 
     fn finish_event_queue_notifications(
@@ -9177,6 +9386,7 @@ impl Shared {
         let mut activity_requeues = Vec::new();
         let mut silence_schedules = Vec::new();
         let mut monitor_silence_changed = false;
+        let mut client_terminal_changed = false;
         let mut attach = None;
         let mut detach = None;
         let mut import_tmux_config = None;
@@ -9203,7 +9413,10 @@ impl Shared {
             let monitors_before = inner.engine.has_format_monitors();
             let refresh_before = (!read_only).then(|| copy_mode_refresh_needed(&inner));
             let clock_before = (!read_only).then(|| clock_mode_timer_needed(&inner));
-            let hook_scope = captures.then(|| hook_events::HookScope::open(&mut inner.engine));
+            let hook_scope = captures.then(|| {
+                hook_events::HookScope::open(&mut inner.engine)
+                    .watching_borders(&inner.engine, command_name)
+            });
             let pane_focus_before = (event_hooks_enabled && captures).then(|| {
                 hook_events::FocusProbeScope::open_within(
                     &mut inner,
@@ -9609,9 +9822,7 @@ impl Shared {
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
                             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                        let command = if empty {
-                            command.clone()
-                        } else if let Some(command) =
+                        let start_command = if let Some(command) =
                             command.clone().filter(|command| !command.is_empty())
                         {
                             Some(command)
@@ -9619,10 +9830,17 @@ impl Shared {
                             let default = inner.engine.default_command_for_session(pane_session)?;
                             (!default.is_empty()).then(|| vec![default.to_owned()])
                         };
+                        let command = if empty {
+                            command.clone()
+                        } else {
+                            start_command.clone()
+                        };
                         inner
                             .engine
-                            .set_pane_start_command(*pane, command.clone().unwrap_or_default())?;
-                        let shell = Some(terminal_shell_for_session(&inner.engine, pane_session)?);
+                            .set_pane_start_command(*pane, start_command.unwrap_or_default())?;
+                        let shell = terminal_shell_for_session(&inner.engine, pane_session)?;
+                        inner.engine.set_pane_shell(*pane, shell.clone())?;
+                        let shell = Some(shell);
                         let env = if empty {
                             Vec::new()
                         } else {
@@ -9793,9 +10011,11 @@ impl Shared {
                             .filter(|command| !command.is_empty())
                             .or_else(|| previous.command.clone());
                         let shell = match previous.shell.clone() {
-                            Some(shell) => Some(shell),
-                            None => Some(terminal_shell_for_session(&inner.engine, pane_session)?),
+                            Some(shell) => shell,
+                            None => terminal_shell_for_session(&inner.engine, pane_session)?,
                         };
+                        inner.engine.set_pane_shell(*pane, shell.clone())?;
+                        let shell = Some(shell);
                         let mut env =
                             terminal_environment_for_session(&inner.engine, pane_session)?;
                         env.extend([
@@ -9930,7 +10150,9 @@ impl Shared {
                         kind: PaneKindSnapshot::Browser(_) | PaneKindSnapshot::Picker,
                         ..
                     }
-                    | MuxEffect::SuppressAfterHook => {}
+                    | MuxEffect::SuppressAfterHook
+                    | MuxEffect::PaneMovedInWindow { .. }
+                    | MuxEffect::ZoomCycled { .. } => {}
                     MuxEffect::PaneWaitForExit { pane } => {
                         if let Some(terminal) = inner.terminals.get(pane).cloned() {
                             let entry = inner
@@ -10041,6 +10263,7 @@ impl Shared {
                             inner.name_checks.remove(pane);
                             inner.pane_read_observations.remove(pane);
                             inner.control_activity_pending.remove(pane);
+                            inner.program_status_panes.remove(pane);
                             #[cfg(all(feature = "agent", unix))]
                             inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
@@ -11173,6 +11396,7 @@ impl Shared {
                         }
                     }
                     MuxEffect::MonitorSilenceChanged => monitor_silence_changed = true,
+                    MuxEffect::ClientTerminalChanged => client_terminal_changed = true,
                     MuxEffect::StatusFormatsChanged { session } => match session {
                         Some(session) => {
                             status_refresh_sessions.insert(*session);
@@ -11405,8 +11629,18 @@ impl Shared {
                 let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
                 let anchor = pending_hook_events.len();
                 {
+                    let transitions = std::mem::take(&mut inner.pane_mode_transitions);
                     let mut diff = scope.finish(&inner.engine, command_name);
+                    hook_events::apply_operation_events(
+                        &inner.engine,
+                        &execution.effects,
+                        &mut diff.events,
+                    );
                     pending_hook_events.append(&mut diff.events);
+                    pending_hook_events.extend(hook_events::server_mode_hook_events(
+                        &inner.engine,
+                        transitions,
+                    ));
                     for session in diff.closed_sessions(&inner.engine.state) {
                         if let Some(clients) = inner.attached.get(&session) {
                             for attached_client in clients {
@@ -11435,6 +11669,7 @@ impl Shared {
                     splice_pane_focus_events(&mut pending_hook_events, anchor, focus);
                 }
             }
+            inner.pane_mode_transitions.clear();
             debug_assert!(
                 !read_only || pending_hook_events.len() == hook_events_before,
                 "read-only {command_name} raised hook events"
@@ -11481,6 +11716,13 @@ impl Shared {
 
         for (name, commands, context) in immediate_hooks {
             let mut variables = context.format_variables.clone();
+            if name.starts_with('@')
+                && variables.get("hook_event") == Some(&name)
+                && client != ClientId(u64::MAX)
+            {
+                let client_name = client_format_name(&self.inner.lock(), client);
+                variables.insert("hook_client".to_owned(), client_name);
+            }
             variables.insert("hook".to_owned(), name);
             let hook_output = self.run_hook_commands(
                 client,
@@ -11751,6 +11993,9 @@ impl Shared {
             self.cancel_pane_files(pane);
             self.publish(EventPayload::PaneRemoved(pane));
         }
+        if client_terminal_changed {
+            self.publish_terminal_negotiation();
+        }
         if mux_options_event {
             self.publish_effective_mux_options(None);
         } else if !mux_option_refresh_sessions.is_empty() {
@@ -11943,6 +12188,7 @@ impl Shared {
                             replay_client: (source_client != ClientId(u64::MAX))
                                 .then_some(source_client),
                             suppress_replay_output: suppress_source_replay_output,
+                            command_client: source_kind == ClientKind::Command,
                         },
                     });
                     continue;
@@ -12030,6 +12276,7 @@ impl Shared {
                         replay_client: (source_client != ClientId(u64::MAX))
                             .then_some(source_client),
                         suppress_replay_output: suppress_source_replay_output,
+                        command_client: source_kind == ClientKind::Command,
                     },
                 });
             }
@@ -12157,7 +12404,11 @@ impl Shared {
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&pending.path, &error)
                     } else {
-                        source_glob_error_warning(&pending.path, &error.to_string())
+                        client_source_read_error_warning(
+                            source_kind == ClientKind::Command,
+                            &pending.path,
+                            &error,
+                        )
                     };
                     if let Some(target) = control_target {
                         self.publish_control_source_read_error(
@@ -12228,7 +12479,11 @@ impl Shared {
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&path, &error)
                     } else {
-                        source_glob_error_warning(&path, &error.to_string())
+                        client_source_read_error_warning(
+                            source_kind == ClientKind::Command,
+                            &path,
+                            &error,
+                        )
                     };
                     if !options.suppress_replay_output {
                         if let Some(target) = control_target {
@@ -12402,6 +12657,7 @@ impl Shared {
         if notifications_only {
             self.run_event_hooks(pending_hook_events);
         } else if let Some(queue_execution) = queue_execution {
+            self.publish_event_control_notifications(&mut pending_hook_events);
             queue_execution
                 .pending_event_hooks
                 .borrow_mut()
@@ -12661,8 +12917,9 @@ impl Shared {
                 effects: Vec::new(),
             });
         }
+        let no_links = parsed.options.hyperlinks && output.is_empty();
         let mut data = output.into_bytes();
-        if !unavailable_alternate {
+        if !unavailable_alternate && !no_links {
             data.push(b'\n');
         }
         let events = {
@@ -12717,10 +12974,63 @@ impl Shared {
         kind: ClientKind,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_buffer_command_args("wait-for", args, &[], &['L', 'S', 'U'])?;
+        let parsed = parse_buffer_command_args("wait-for", args, &['w'], &['L', 'S', 'U', 'l'])?;
         let [name] = parsed.positional.as_slice() else {
             return Err(ServerError::CommandParse(WAIT_FOR_USAGE.to_owned()).into());
         };
+        if parsed.has('l') {
+            let inner = self.inner.lock();
+            let lines = inner
+                .wait_channels
+                .get(name)
+                .map(|channel| {
+                    channel
+                        .waiters
+                        .iter()
+                        .chain(&channel.lockers)
+                        .map(|item| client_format_name(&inner, item.client) + "\n")
+                        .collect::<String>()
+                })
+                .unwrap_or_default();
+            return Ok(Execution {
+                output: lines.into(),
+                ..Execution::default()
+            });
+        }
+        if let Some(waiter) = parsed.value('w') {
+            let wake = {
+                let mut inner = self.inner.lock();
+                let names = inner.wait_channels.get(name).map(|channel| {
+                    (
+                        channel
+                            .waiters
+                            .iter()
+                            .position(|item| client_format_name(&inner, item.client) == waiter),
+                        channel
+                            .lockers
+                            .iter()
+                            .position(|item| client_format_name(&inner, item.client) == waiter),
+                    )
+                });
+                let channel = inner.wait_channels.get_mut(name);
+                let item = match (channel, names) {
+                    (Some(channel), Some((Some(index), _))) => channel.waiters.remove(index),
+                    (Some(channel), Some((None, Some(index)))) => channel.lockers.remove(index),
+                    _ => None,
+                };
+                if inner.wait_channels.get(name).is_some_and(|channel| {
+                    !channel.locked
+                        && !channel.woken
+                        && channel.waiters.is_empty()
+                        && channel.lockers.is_empty()
+                }) {
+                    inner.wait_channels.remove(name);
+                }
+                item.map(|item| item.continuation)
+            };
+            self.wake_wait_items(wake);
+            return Ok(Execution::default());
+        }
         if parsed.has('S') {
             self.signal_wait_channel(name);
             return Ok(Execution::default());
@@ -16491,6 +16801,12 @@ impl Shared {
             }
         }
         let pane = self.resolve_agent_pane(context, parsed.target.as_deref())?;
+        if parsed.notify {
+            #[cfg(feature = "agent")]
+            return self.submit_agent_prompt_and_notify(context, pane, payload, kind);
+            #[cfg(not(feature = "agent"))]
+            return Err(ServerError::PaneExited(pane).into());
+        }
         if parsed.wait {
             if !matches!(kind, ClientKind::Command | ClientKind::Control) {
                 return Err(ServerError::InvalidCommand(
@@ -18015,9 +18331,9 @@ impl Shared {
                     .client_entry(client)
                     .control_output
                     .get_or_insert_default();
-                let before = (output.wait_exit, output.pause_after_ms, output.no_output);
+                let before = control_flag_state(output);
                 apply_control_client_flags(output, flags);
-                let after = (output.wait_exit, output.pause_after_ms, output.no_output);
+                let after = control_flag_state(output);
                 (before, after)
             };
             sync_control_feed(&inner, client, &self.control_wake);
@@ -18031,6 +18347,7 @@ impl Shared {
                         wait_exit: after.0,
                         pause_after_ms: after.1,
                         no_output: after.2,
+                        new_layouts: after.3,
                     },
                 )
             })
@@ -18061,11 +18378,11 @@ impl Shared {
                 .client_entry(client)
                 .control_output
                 .get_or_insert_default();
-            let before = (output.wait_exit, output.pause_after_ms, output.no_output);
+            let before = control_flag_state(output);
             if let Some(requested) = requested {
                 apply_control_client_flags(output, requested);
             }
-            let after = (output.wait_exit, output.pause_after_ms, output.no_output);
+            let after = control_flag_state(output);
             sync_control_feed(&inner, client, &self.control_wake);
             (before != after).then(|| {
                 (
@@ -18077,6 +18394,7 @@ impl Shared {
                         wait_exit: after.0,
                         pause_after_ms: after.1,
                         no_output: after.2,
+                        new_layouts: after.3,
                     },
                 )
             })
@@ -18130,18 +18448,10 @@ impl Shared {
                 }
                 sync_control_feed(&inner, client, &self.control_wake);
             }
-            paused.map(|paused| {
-                (
-                    inner
-                        .client(client)
-                        .and_then(|c| c.subscriber.as_ref())
-                        .cloned(),
-                    EventPayload::PaneOutputState { pane, paused },
-                )
-            })
+            paused.map(|paused| EventPayload::PaneOutputState { pane, paused })
         };
-        if let Some((Some(subscriber), payload)) = event {
-            Self::send_event(&subscriber, payload);
+        if let Some(payload) = event {
+            self.publish_to_client(client, payload);
         }
     }
 
@@ -18244,12 +18554,15 @@ impl Shared {
             || parsed.has('R')
             || parsed.has('U')
             || !parsed.positional.is_empty()
-            || parsed.has('l')
         {
             return Err(ServerError::UnsupportedCommand(
                 "refresh-client interactive behavior".to_owned(),
             )
             .into());
+        }
+        if parsed.has('l') {
+            self.query_client_clipboard(target);
+            return Ok(Execution::default());
         }
         let mut handled_flags = false;
         for flags in parsed.values('F') {
@@ -19523,12 +19836,19 @@ impl Shared {
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        self.buffer_command_for_client(None, context, canonical_command(name), args)
+        self.buffer_command_for_client(
+            None,
+            ClientKind::Command,
+            context,
+            canonical_command(name),
+            args,
+        )
     }
 
     fn buffer_command_for_client(
         self: &Arc<Self>,
         invoking_client: Option<ClientId>,
+        kind: ClientKind,
         context: &ExecutionContext,
         name: &str,
         args: &[RawText],
@@ -19547,7 +19867,7 @@ impl Shared {
                     self.refresh_choose_buffers();
                     return Ok(Execution::default());
                 }
-                let [data] = parsed.positional.as_slice() else {
+                let (1, Some(data)) = (parsed.positional.len(), args.last()) else {
                     return Err(ServerError::CommandParse(
                         "set-buffer requires exactly one data argument".to_owned(),
                     )
@@ -19557,7 +19877,7 @@ impl Shared {
                     return Ok(Execution::default());
                 }
                 let requested_name = parsed.value('b');
-                validate_paste_buffer_size(data.len())?;
+                validate_paste_buffer_size(data.byte_len())?;
                 if let Some(name) = requested_name {
                     validate_paste_buffer_name(name)?;
                 }
@@ -19602,22 +19922,40 @@ impl Shared {
             "show-buffer" | "showb" => {
                 let parsed = parse_buffer_command_args(name, args, &['b'], &[])?;
                 require_no_positionals(name, &parsed)?;
-                let (buffer_name, data, utf8) = {
+                let (data, control, utf8) = {
                     let inner = self.inner.lock();
                     let buffer =
                         resolve_buffer(&inner, parsed.value('b'), BufferMissing::NoBuffer)?;
-                    (buffer.name.clone(), Arc::clone(&buffer.data), buffer.utf8)
+                    let printer = invoking_client
+                        .filter(|client| *client != ClientId(u64::MAX))
+                        .map(|client| (client, kind))
+                        .or_else(|| {
+                            context
+                                .control_command_target()
+                                .map(|(client, _)| client)
+                                .or_else(|| context.replay_client())
+                                .map(|client| {
+                                    let kind = inner.client(client).and_then(|c| c.kind);
+                                    (client, kind.unwrap_or(ClientKind::Command))
+                                })
+                        });
+                    let control = printer.is_some_and(|(_, kind)| kind == ClientKind::Control);
+                    let utf8 = printer
+                        .is_some_and(|(client, _)| inner.client(client).is_some_and(|c| c.utf8));
+                    (Arc::clone(&buffer.data), control, utf8)
                 };
-                if !utf8 {
-                    return Err(ServerError::InvalidCommand(format!(
-                        "buffer {buffer_name} contains non-UTF-8 bytes; use save-buffer"
-                    ))
-                    .into());
-                }
-                let output = String::from_utf8(data.as_ref().to_vec())
-                    .expect("paste-buffer UTF-8 validity is cached at insertion");
+                let output = if control {
+                    let printed = data.split(|byte| *byte == 0).next().unwrap_or_default();
+                    if utf8 {
+                        RawText::from_bytes(printed)
+                    } else {
+                        RawText::from(utf8_sanitize(printed))
+                    }
+                } else {
+                    RawText::from_bytes(data.as_ref())
+                };
                 Ok(Execution {
-                    output: output.into(),
+                    output,
                     effects: Vec::new(),
                 })
             }
@@ -21085,6 +21423,7 @@ impl Shared {
                     )?;
                 }
                 InputMessage::DismissClientMessage => {}
+                InputMessage::ClipboardReply { data } => self.store_clipboard_reply(client, data),
                 InputMessage::ResizeCommandOutput {
                     columns,
                     rows,
@@ -23072,6 +23411,19 @@ impl Shared {
         pane: PaneId,
         input: PaneModeInput<'_>,
     ) -> bool {
+        let handled = self.pane_mode_input_inner(client, context, pane, input);
+        let events = take_pane_mode_hook_events(&mut self.inner.lock());
+        self.run_event_hooks(events);
+        handled
+    }
+
+    fn pane_mode_input_inner(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        input: PaneModeInput<'_>,
+    ) -> bool {
         let Some(mode) = self
             .inner
             .lock()
@@ -23218,6 +23570,8 @@ impl Shared {
             self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
             self.publish_snapshot();
         }
+        let events = take_pane_mode_hook_events(&mut self.inner.lock());
+        self.run_event_hooks(events);
         self.publish_mux_snapshots();
     }
 
@@ -23573,9 +23927,10 @@ impl Shared {
         client: ClientId,
         pane: PaneId,
         input: &zz_terminal::KeyInput,
+        bytes: &[u8],
     ) -> Option<u64> {
         let inner = self.inner.lock();
-        if client_active_pane(&inner, client) != Some(pane) {
+        if client_active_pane(&inner, client) != Some(pane) || inner.engine.user_key_claims(bytes) {
             return None;
         }
         plain_key_generation_locked(&inner, client, pane, input)
@@ -27742,6 +28097,7 @@ impl Shared {
             zz_terminal::SessionStatus::Failed(_) => (true, None, None),
             zz_terminal::SessionStatus::Starting | zz_terminal::SessionStatus::Running => return,
         };
+        self.raise_shell_marks(pane, terminal);
         let pipe = {
             let mut inner = self.inner.lock();
             inner
@@ -27907,6 +28263,9 @@ impl Shared {
         current_command: &str,
         bar_state: ProgressBarState,
     ) {
+        if terminal.program_status().reported() {
+            return;
+        }
         let value = match bar_state {
             ProgressBarState::Indeterminate => "working",
             ProgressBarState::Hidden => "idle",
@@ -27949,6 +28308,74 @@ impl Shared {
             }
         }
         self.write_pane_agent_state(pane, value);
+    }
+
+    fn synchronize_pane_program_status(
+        self: &Arc<Self>,
+        pane: PaneId,
+        terminal: &Arc<TerminalSession>,
+        status: &ProgramStatus,
+        worked: bool,
+    ) {
+        let headline = status.headline().map(|record| PaneStatus {
+            state: match record.state {
+                ProgramState::Idle => PaneStatusState::Idle,
+                ProgramState::Working => PaneStatusState::Working,
+                ProgramState::Done => PaneStatusState::Done,
+                ProgramState::Blocked => PaneStatusState::Blocked,
+                ProgramState::Error => PaneStatusState::Error,
+            },
+            kind: record.kind.map(|kind| match kind {
+                ProgramBlockKind::Permission => PaneStatusKind::Permission,
+                ProgramBlockKind::Question => PaneStatusKind::Question,
+                ProgramBlockKind::Auth => PaneStatusKind::Auth,
+            }),
+            progress: record.progress,
+            app: record.app,
+            title: record.title,
+            message: record.message,
+        });
+        let reported = status.reported();
+        let (changed, agent_state) = {
+            let mut inner = self.inner.lock();
+            if !inner
+                .terminals
+                .get(&pane)
+                .is_some_and(|current| Arc::ptr_eq(current, terminal))
+            {
+                return;
+            }
+            let owned = if reported {
+                !inner.program_status_panes.insert(pane)
+            } else {
+                inner.program_status_panes.remove(&pane)
+            };
+            #[cfg(all(feature = "agent", unix))]
+            if owned != reported {
+                inner.claude_peer_states.remove(&pane);
+            }
+            let agent_state = (reported || owned).then(|| {
+                match headline.as_ref().map(|headline| headline.state) {
+                    Some(PaneStatusState::Working) => "working",
+                    Some(PaneStatusState::Blocked) => "blocked",
+                    Some(PaneStatusState::Error) => "failed",
+                    Some(PaneStatusState::Idle | PaneStatusState::Done) | None => "idle",
+                }
+            });
+            (
+                inner.engine.state.set_pane_status(pane, headline),
+                agent_state,
+            )
+        };
+        if changed {
+            self.publish_snapshot();
+        }
+        if let Some(value) = agent_state {
+            if worked && value == "idle" {
+                self.write_pane_agent_state(pane, "working");
+            }
+            self.write_pane_agent_state(pane, value);
+        }
     }
 
     fn write_pane_agent_state(self: &Arc<Self>, pane: PaneId, value: &str) {
@@ -28110,7 +28537,7 @@ impl Shared {
         terminal: &Arc<TerminalSession>,
         now: Instant,
     ) {
-        let (check, silence_schedule, alert_window, refresh_activity_choosers) = {
+        let (check, silence_schedule, alert_window, refresh_activity_choosers, activity_hook) = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -28119,6 +28546,7 @@ impl Shared {
             {
                 return;
             }
+            let activity_hook = pane_event_if_hooked(&inner, "pane-activity", pane);
             let mut silence_schedule = None;
             let mut alert_window = None;
             terminal_reads::pane_changed(&mut inner, pane);
@@ -28160,8 +28588,13 @@ impl Shared {
                 silence_schedule,
                 alert_window,
                 refresh_activity_choosers,
+                activity_hook,
             )
         };
+        if let Some(hook) = activity_hook {
+            self.run_event_hooks(vec![hook]);
+        }
+        self.raise_shell_marks(pane, terminal);
         if let Some(deadline) = silence_schedule {
             let _ = self.timer_tx.send(timers::TimerInput::Silence(
                 SilenceDeadlineCommand::Schedule(deadline),
@@ -28283,13 +28716,8 @@ impl Shared {
                 .cloned()
                 .unwrap_or_default();
             let current_path = live_path.unwrap_or_else(|| previous.start_path.clone());
-            let current_command = if current_command.is_empty() {
-                previous.current_command.clone()
-            } else {
-                current_command.to_owned()
-            };
             let runtime = PaneRuntimeFacts {
-                current_command,
+                current_command: current_command.to_owned(),
                 current_path,
                 dead_signal: previous.dead_signal,
                 reported_path: previous.reported_path,
@@ -28978,15 +29406,17 @@ impl Shared {
         if layout_hook {
             self.publish_compact_trees();
         }
-        let message = Self::event(payload);
+        let capture_item = matches!(&payload, EventPayload::HookEvent { .. })
+            .then(|| self.command_item.as_ref().map(|item| item.lock().id))
+            .flatten();
         let subscribers = {
-            let inner = self.inner.lock();
-            inner
+            let mut inner = self.inner.lock();
+            let recipients = inner
                 .clients
                 .iter()
-                .filter_map(|(id, client)| client.subscriber.as_ref().map(|value| (id, value)))
-                .filter(|(client, _)| {
-                    inner.client(**client).and_then(|c| c.kind) == Some(ClientKind::Control)
+                .filter(|(client, state)| {
+                    state.subscriber.is_some()
+                        && inner.client(**client).and_then(|c| c.kind) == Some(ClientKind::Control)
                         && Some(**client) != exclude
                         && (!attached_only
                             || inner
@@ -28994,9 +29424,29 @@ impl Shared {
                                 .values()
                                 .any(|attached| attached.contains(client)))
                 })
-                .map(|(_, subscriber)| Arc::clone(subscriber))
-                .collect::<Vec<_>>()
+                .map(|(client, _)| *client)
+                .collect::<Vec<_>>();
+            let mut subscribers = Vec::with_capacity(recipients.len());
+            for client in recipients {
+                if let Some(item) = capture_item
+                    && let Some(capture) = inner
+                        .control_command_event_captures
+                        .get_mut(&(client, item))
+                        .and_then(|captures| captures.last_mut())
+                {
+                    capture.events.push(payload.clone());
+                    continue;
+                }
+                if let Some(subscriber) = inner.client(client).and_then(|c| c.subscriber.as_ref()) {
+                    subscribers.push(Arc::clone(subscriber));
+                }
+            }
+            subscribers
         };
+        if subscribers.is_empty() {
+            return;
+        }
+        let message = Self::event(payload);
         let Ok(encoded) = zz_protocol::encode_protocol_message(&message).map(Arc::<[u8]>::from)
         else {
             return;
@@ -29068,6 +29518,8 @@ impl Shared {
             &payload,
             EventPayload::ControlCommandGuard { .. }
                 | EventPayload::ControlCommandGuardRaw { .. }
+                | EventPayload::HookEvent { .. }
+                | EventPayload::PaneOutputState { .. }
                 | EventPayload::ControlSourceFile { .. }
                 | EventPayload::ControlCommandOutput { .. }
                 | EventPayload::ControlConfigError { .. }
@@ -29880,6 +30332,38 @@ impl Shared {
         true
     }
 
+    fn publish_terminal_negotiation(&self) {
+        let recipients = {
+            let mut inner = self.inner.lock();
+            let clients = inner
+                .clients
+                .iter()
+                .filter_map(|(id, client)| client.subscriber.as_ref().map(|_| *id))
+                .collect::<Vec<_>>();
+            clients
+                .into_iter()
+                .filter_map(|client| {
+                    take_terminal_negotiation(&mut inner, client).map(|payload| (client, payload))
+                })
+                .collect::<Vec<_>>()
+        };
+        for (client, payload) in recipients {
+            self.publish_to_client(client, payload);
+        }
+    }
+
+    fn publish_terminal_negotiation_to(
+        &self,
+        client: ClientId,
+        outbound: &Arc<OutboundMailbox>,
+    ) -> bool {
+        let mut inner = self.inner.lock();
+        let Some(payload) = take_terminal_negotiation(&mut inner, client) else {
+            return outbound.is_open();
+        };
+        outbound.enqueue_reliable(&Self::event(payload))
+    }
+
     fn refresh_published_appearance(&self) {
         let update = {
             let mut inner = self.inner.lock();
@@ -30086,8 +30570,8 @@ impl Shared {
                 0
             };
             let mode_event = mode_changed
-                .then(|| PendingHookEvent::live_pane("pane-mode-changed", pane, &inner.engine))
-                .flatten();
+                .then(|| hook_events::copy_mode_exit_hook_events(pane, &inner.engine))
+                .filter(|events| !events.is_empty());
             (
                 subscriber,
                 kind,
@@ -30137,9 +30621,9 @@ impl Shared {
                 }
             }
         }
-        if let Some(event) = mode_event {
+        if let Some(events) = mode_event {
             self.nudge_client_timers();
-            self.run_event_hooks(vec![event]);
+            self.run_event_hooks(events);
         }
     }
 
@@ -30279,7 +30763,41 @@ impl Shared {
         }
     }
 
+    fn raise_shell_marks(self: &Arc<Self>, pane: PaneId, terminal: &TerminalSession) {
+        let marks = terminal.take_shell_marks();
+        if marks.is_empty() {
+            return;
+        }
+        let events = {
+            let inner = self.inner.lock();
+            marks
+                .into_iter()
+                .filter_map(|mark| {
+                    let name = match mark.kind {
+                        zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
+                        zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
+                        zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
+                    };
+                    pane_event_if_hooked(&inner, name, pane).map(|mut event| {
+                        if mark.kind != zz_terminal::ShellMarkKind::Prompt {
+                            add_command_payload(&inner, &mut event, pane, &mark.facts);
+                        }
+                        event
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        self.run_event_hooks(events);
+    }
+
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
+        let pane_hook = {
+            let inner = self.inner.lock();
+            pane_event_if_hooked(&inner, "pane-bell", pane)
+        };
+        if let Some(hook) = pane_hook {
+            self.run_event_hooks(vec![hook]);
+        }
         let (snapshot_changed, hook, notifications) = {
             let mut inner = self.inner.lock();
             let Some(window) = inner.engine.state.window_for_pane(pane) else {
@@ -30619,6 +31137,47 @@ impl Shared {
 
     fn clear_pane_bell(&self, pane: PaneId) -> bool {
         self.inner.lock().engine.state.set_pane_bell(pane, false)
+    }
+
+    fn query_client_clipboard(&self, client: ClientId) {
+        let now = Instant::now();
+        {
+            let mut inner = self.inner.lock();
+            let Some(registered) = inner.client_mut(client) else {
+                return;
+            };
+            if registered.kind != Some(ClientKind::Interactive)
+                || registered
+                    .clipboard_query
+                    .is_some_and(|deadline| deadline > now)
+            {
+                return;
+            }
+            registered.clipboard_query = Some(now + CLIPBOARD_QUERY_TIMEOUT);
+        }
+        self.publish_to_client(client, EventPayload::ClipboardQuery);
+    }
+
+    fn store_clipboard_reply(self: &Arc<Self>, client: ClientId, data: Vec<u8>) {
+        let events = {
+            let mut inner = self.inner.lock();
+            let pending = inner
+                .client_mut(client)
+                .and_then(|registered| registered.clipboard_query.take())
+                .is_some_and(|deadline| deadline > Instant::now());
+            if !pending {
+                return;
+            }
+            match insert_paste_buffer(&mut inner, None, "buffer", data, true) {
+                Ok(events) => events,
+                Err(error) => {
+                    log::warn!("could not store the client clipboard: {error}");
+                    return;
+                }
+            }
+        };
+        self.run_event_hooks(events);
+        self.refresh_choose_buffers();
     }
 
     fn store_copy_buffer(self: &Arc<Self>, data: String, action: PasteBufferAction) {
@@ -32194,6 +32753,7 @@ impl Shared {
                     control_target: options.control_target,
                     replay_client: options.replay_client,
                     suppress_replay_output: options.suppress_replay_output,
+                    command_client: options.command_client,
                 };
                 for source in sources {
                     pending_sources.push(PendingConfigFile {
@@ -32234,7 +32794,11 @@ impl Shared {
                         {
                             source_read_error_warning(&pending.path, &error)
                         } else {
-                            source_glob_error_warning(&pending.path, &error.to_string())
+                            client_source_read_error_warning(
+                                options.command_client,
+                                &pending.path,
+                                &error,
+                            )
                         };
                         log::warn!("{warning}");
                         report.note_located_source_error(
@@ -32635,7 +33199,7 @@ impl Shared {
             let warning = if options.control_target.is_some() || source_invocations.is_startup() {
                 source_read_error_warning(path, &error)
             } else {
-                source_glob_error_warning(path, &error.to_string())
+                client_source_read_error_warning(options.command_client, path, &error)
             };
             log::warn!("{warning}");
             report.note_located_source_error(
@@ -32962,6 +33526,7 @@ impl Shared {
                         .pane_runtime_facts(pane)
                         .and_then(|runtime| runtime.pid)
                         != pid
+                    || inner.program_status_panes.contains(&pane)
                 {
                     continue;
                 }
@@ -32990,7 +33555,7 @@ impl Shared {
             if self.loop_active.load(Ordering::Acquire) {
                 let _ = self
                     .timer_tx
-                    .send(timers::TimerInput::PeerSample { pane, value });
+                    .send(timers::TimerInput::PeerSample { pane, pid, value });
             } else {
                 self.write_pane_agent_state(pane, &value);
             }
@@ -33140,6 +33705,15 @@ impl Shared {
             let PaneKind::Agent(agent) = &model.kind else {
                 return;
             };
+            if agent.provider == zz_protocol::AgentProvider::ClaudeCode
+                && crate::agent::claude::ClaudeCommand::parse(
+                    &inner.engine.agent_options().claude_code_command,
+                )
+                .is_some()
+            {
+                peers.remove(&pane);
+                return;
+            }
             let Some(window) = inner.engine.state.window_for_pane(pane) else {
                 return;
             };
@@ -33326,6 +33900,15 @@ impl Shared {
                     option_id,
                 },
             },
+            ProtocolMessage::AgentAnswerQuestion {
+                request_id,
+                answers,
+                ..
+            } => HostCommand::AnswerQuestion {
+                request_id,
+                answers,
+            },
+            ProtocolMessage::AgentStopTask { task_id, .. } => HostCommand::StopTask { task_id },
             ProtocolMessage::AgentSetConfigOption {
                 option_id, value, ..
             } => HostCommand::SetConfigOption { option_id, value },
@@ -33382,6 +33965,78 @@ impl Shared {
                     images: Vec::new(),
                 },
             )
+        })
+    }
+
+    /// Submit to `pane` and, when its turn ends, hand the reply back to the
+    /// agent pane that asked, queued behind whatever that pane is doing.
+    #[cfg(feature = "agent")]
+    fn submit_agent_prompt_and_notify(
+        self: &Arc<Self>,
+        context: &ExecutionContext,
+        pane: PaneId,
+        text: String,
+        kind: ClientKind,
+    ) -> Result<Execution, DaemonError> {
+        let caller = context
+            .pane
+            .filter(|caller| *caller != pane)
+            .filter(|caller| {
+                matches!(
+                    self.inner
+                        .lock()
+                        .engine
+                        .state
+                        .pane(*caller)
+                        .map(|pane| &pane.kind),
+                    Some(PaneKind::Agent(_))
+                )
+            })
+            .ok_or_else(|| {
+                ServerError::InvalidCommand(
+                    "agent-send --notify runs from inside another agent pane".to_owned(),
+                )
+            })?;
+        let runtime = self.agent_runtime().ok_or(ServerError::PaneExited(pane))?;
+        let shared = Arc::downgrade(&self.server_owner());
+        let waiter = crate::agent::host::AgentTurnWaiter {
+            reply: crate::daemon::cmdq::Reply::new(move |result| {
+                let Some(shared) = shared.upgrade() else {
+                    return;
+                };
+                let message = agent_notify_message(pane, result);
+                let spawned = std::thread::Builder::new()
+                    .name("zz-agent-notify".to_owned())
+                    .spawn(move || {
+                        if !shared.submit_agent_prompt(caller, message) {
+                            log::warn!(target: "zz::agent", "could not tell {caller} that {pane} finished");
+                        }
+                    });
+                if let Err(error) = spawned {
+                    log::warn!(target: "zz::agent", "could not report {pane} back to {caller}: {error}");
+                }
+            }),
+            on_block: AgentBlockPolicy::Wait,
+            audit: Arc::default(),
+        };
+        if !runtime.prompt_with_waiter(
+            pane,
+            AgentPrompt {
+                owner: ClientInstanceId(u64::MAX),
+                text,
+                images: Vec::new(),
+            },
+            Some(waiter),
+        ) {
+            return Err(ServerError::PaneExited(pane).into());
+        }
+        Ok(Execution {
+            output: if kind == ClientKind::Interactive {
+                RawText::default()
+            } else {
+                pane.to_string().into()
+            },
+            effects: Vec::new(),
         })
     }
 
@@ -33870,7 +34525,9 @@ fn agent_message_pane(message: &ProtocolMessage) -> Result<PaneId, ServerError> 
         | ProtocolMessage::AgentAuthenticate { pane, .. }
         | ProtocolMessage::AgentSessionOp { pane, .. }
         | ProtocolMessage::AgentReplay { pane, .. }
-        | ProtocolMessage::AgentAcknowledgePromptRestore { pane, .. } => Ok(*pane),
+        | ProtocolMessage::AgentAcknowledgePromptRestore { pane, .. }
+        | ProtocolMessage::AgentAnswerQuestion { pane, .. }
+        | ProtocolMessage::AgentStopTask { pane, .. } => Ok(*pane),
         _ => Err(ServerError::InvalidCommand(
             "not an agent message".to_owned(),
         )),
@@ -33927,6 +34584,7 @@ struct SourceFileLoadOptions {
     control_target: Option<(ClientId, u8)>,
     replay_client: Option<ClientId>,
     suppress_replay_output: bool,
+    command_client: bool,
 }
 
 struct PendingConfigFile {
@@ -33963,7 +34621,7 @@ impl<'a> ConfigInput<'a> {
 
 struct ConfigEnvironmentEntry {
     name: String,
-    value: String,
+    value: RawText,
     hidden: bool,
 }
 
@@ -33982,7 +34640,7 @@ impl ConfigParse {
                 .into_iter()
                 .map(|assignment| ConfigEnvironmentEntry {
                     name: assignment.name,
-                    value: assignment.value,
+                    value: assignment.value.into(),
                     hidden: assignment.hidden,
                 })
                 .collect(),
@@ -33996,13 +34654,8 @@ impl ConfigParse {
             let blocks = (0..command.args.len())
                 .filter(|index| command.argument_is_command_block(*index))
                 .collect::<Vec<_>>();
-            let name = String::from_utf8(command.name).ok()?;
-            let args = command
-                .args
-                .into_iter()
-                .map(String::from_utf8)
-                .collect::<Result<Vec<_>, _>>()
-                .ok()?;
+            let name = String::from_utf8_lossy(&command.name).into_owned();
+            let args = command.args.into_iter().map(RawText::from_bytes);
             let invocation = CommandInvocation::new(name, args).with_command_blocks(blocks);
             commands.push(match command.source {
                 Some(source) => invocation.with_source(source),
@@ -34013,7 +34666,7 @@ impl ConfigParse {
         for assignment in parsed.environment {
             environment.push(ConfigEnvironmentEntry {
                 name: String::from_utf8(assignment.name).ok()?,
-                value: String::from_utf8(assignment.value).ok()?,
+                value: RawText::from_bytes(assignment.value),
                 hidden: assignment.hidden,
             });
         }
@@ -34845,19 +35498,17 @@ struct PendingCommittedText {
 struct ClientFlagState {
     read_only: bool,
     ignore_size: bool,
-    active_pane: bool,
     no_detach_on_destroy: bool,
 }
 
 impl ClientFlagState {
     const fn is_empty(self) -> bool {
-        !self.read_only && !self.ignore_size && !self.active_pane && !self.no_detach_on_destroy
+        !self.read_only && !self.ignore_size && !self.no_detach_on_destroy
     }
 
     fn reconnect_flags(self) -> String {
         [
             ("ignore-size", self.ignore_size),
-            ("active-pane", self.active_pane),
             ("no-detach-on-destroy", self.no_detach_on_destroy),
         ]
         .into_iter()
@@ -34908,7 +35559,6 @@ impl ClientFlags {
             match flag {
                 "read-only" if !clear => state.read_only = true,
                 "ignore-size" => state.ignore_size = !clear,
-                "active-pane" => state.active_pane = !clear,
                 "no-detach-on-destroy" => state.no_detach_on_destroy = !clear,
                 _ => {}
             }
@@ -35029,6 +35679,7 @@ struct Client {
     terminal_preview: bool,
     visible_agents: Option<BTreeSet<PaneId>>,
     published_mux_options: Option<MuxOptions>,
+    published_terminal_negotiation: Option<TerminalNegotiation>,
     command_output: Option<CommandOutputSession>,
     command_streams: Option<CommandStreams>,
     subscriber: Option<Arc<OutboundMailbox>>,
@@ -35040,6 +35691,7 @@ struct Client {
     ctrl_layout: Option<(u64, u64)>,
     ctrl_attachment: Option<u64>,
     ctrl_initializing: bool,
+    clipboard_query: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -35071,6 +35723,7 @@ struct ServerState {
     scheduled_name_check: Option<Instant>,
     pane_read_observations: BTreeMap<PaneId, Weak<terminal_reads::Observation>>,
     control_activity_pending: BTreeSet<PaneId>,
+    program_status_panes: BTreeSet<PaneId>,
     #[cfg(all(feature = "agent", unix))]
     claude_peer_states: BTreeMap<PaneId, String>,
     terminal_spawns: BTreeMap<PaneId, TerminalSpawn>,
@@ -35098,6 +35751,7 @@ struct ServerState {
     /// `window_pane_reset_mode` runs.
     copy_kill_panes: Vec<PaneId>,
     pane_modes: BTreeMap<PaneId, Vec<PaneModeRequest>>,
+    pane_mode_transitions: Vec<PaneModeTransition>,
     pane_mode_zooms: BTreeSet<PaneId>,
     pane_mode_kill_panes: Vec<PaneId>,
     silence_deadlines: BTreeMap<WindowId, SilenceDeadline>,
@@ -35299,6 +35953,7 @@ struct ControlClientOutput {
     panes: BTreeMap<PaneId, ControlPaneOutput>,
     no_output: bool,
     wait_exit: bool,
+    new_layouts: bool,
     pause_after_ms: Option<u64>,
     geometry: Option<TerminalGeometry>,
     window_geometries: BTreeMap<WindowId, TerminalGeometry>,
@@ -38114,7 +38769,6 @@ struct PasteBuffer {
     data: Arc<[u8]>,
     created: SystemTime,
     automatic: bool,
-    utf8: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -39957,15 +40611,15 @@ fn format_client_flags_from_source(inner: &ClientFormatSource<'_>, client: Clien
         if output.wait_exit {
             flags.push("wait-exit".to_owned());
         }
+        if output.new_layouts {
+            flags.push("new-layouts".to_owned());
+        }
         if let Some(pause_after_ms) = output.pause_after_ms {
             flags.push(format!("pause-after={}", pause_after_ms / 1000));
         }
     }
     if requested.read_only {
         flags.push("read-only".to_owned());
-    }
-    if requested.active_pane {
-        flags.push("active-pane".to_owned());
     }
     if client_uses_utf8_from_source(inner, client) {
         flags.push("UTF-8".to_owned());
@@ -40102,6 +40756,45 @@ fn client_feature_mask_from_source(inner: &ClientFormatSource<'_>, client: Clien
         features |= terminal_feature_mask(term.requested_features());
     }
     features
+}
+
+type TerminalNegotiation = (Vec<String>, Vec<String>);
+
+fn client_terminal_negotiation(
+    inner: &ServerState,
+    client: ClientId,
+) -> Option<TerminalNegotiation> {
+    let source = ClientFormatSource::from_inner(inner);
+    client_colour_count_from_source(&source, client)?;
+    let features = terminal_features_list(client_feature_mask_from_source(&source, client));
+    Some((
+        features
+            .split(',')
+            .filter(|feature| !feature.is_empty())
+            .map(str::to_owned)
+            .collect(),
+        inner.engine.user_keys_option(),
+    ))
+}
+
+fn take_terminal_negotiation(inner: &mut ServerState, client: ClientId) -> Option<EventPayload> {
+    let negotiation = client_terminal_negotiation(inner, client)?;
+    if inner
+        .client(client)
+        .and_then(|c| c.published_terminal_negotiation.as_ref())
+        == Some(&negotiation)
+    {
+        return None;
+    }
+    inner
+        .client_entry(client)
+        .published_terminal_negotiation
+        .replace(negotiation.clone());
+    let (features, user_keys) = negotiation;
+    Some(EventPayload::TerminalNegotiation {
+        features,
+        user_keys,
+    })
 }
 
 fn client_colour_count_with_from_source(
@@ -41409,10 +42102,12 @@ fn prepare_command_request(
 /// `control_write` for a control client and `file_print_buffer` for
 /// everyone else. `save-buffer` always writes `file_write`, a real path and
 /// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
-/// has a session of its own or is a control client, so it is sanitized for
-/// a control client but falls through to the same raw `file_write` for a
-/// session-less command client, which is the only shape zz's `Command`
-/// kind has.
+/// has a session of its own or is a control client, and it shapes its own
+/// output for the client that runs it, so an inserted or sourced
+/// `show-buffer` is printed the same way as a direct one: a control client
+/// gets the buffer up to its first NUL, sanitized as one message unless it
+/// raised `CLIENT_UTF8`, and a session-less command client, the only shape
+/// zz's `Command` kind has, gets the raw `file_write` bytes.
 fn sanitizes_output_for(
     inner: &ServerState,
     client: ClientId,
@@ -41422,12 +42117,17 @@ fn sanitizes_output_for(
     if !matches!(kind, ClientKind::Command | ClientKind::Control) {
         return false;
     }
-    match canonical_command(command) {
-        "capture-pane" | "save-buffer" => return false,
-        "show-buffer" if kind == ClientKind::Command => return false,
-        _ => {}
+    if prints_stored_bytes(command) {
+        return false;
     }
     !inner.client(client).is_some_and(|c| c.utf8)
+}
+
+fn prints_stored_bytes(command: &str) -> bool {
+    matches!(
+        canonical_command(command),
+        "capture-pane" | "save-buffer" | "show-buffer"
+    )
 }
 
 fn detach_is_inert(inner: &ServerState, client: ClientId) -> bool {
@@ -44203,7 +44903,8 @@ fn command_prompt_edit_key(
         | zz_terminal::KeyCode::PageUp
         | zz_terminal::KeyCode::PageDown
         | zz_terminal::KeyCode::Function(_)
-        | zz_terminal::KeyCode::Unidentified => PromptKeyAction::Handled,
+        | zz_terminal::KeyCode::Unidentified
+        | zz_terminal::KeyCode::User(_) => PromptKeyAction::Handled,
     }
 }
 
@@ -46314,7 +47015,8 @@ fn read_only_blocks_input(input: &InputMessage) -> bool {
         | InputMessage::CancelPrefix { .. }
         | InputMessage::ClientSuspendState { .. }
         | InputMessage::ClientTerminalSize { .. }
-        | InputMessage::ClientFocus { .. } => false,
+        | InputMessage::ClientFocus { .. }
+        | InputMessage::ClipboardReply { .. } => false,
     }
 }
 
@@ -46545,7 +47247,50 @@ fn buffer_format_facts(buffer: &PasteBuffer) -> BufferFormatFacts {
     }
 }
 
-fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeRequest) -> bool {
+struct PaneModeTransition {
+    pane: PaneId,
+    entered: bool,
+    previous: Option<&'static str>,
+    current: Option<&'static str>,
+}
+
+fn pane_mode_name(mode: &PaneModeRequest) -> &'static str {
+    match mode {
+        PaneModeRequest::Clock => "clock-mode",
+        PaneModeRequest::Customize(_) => "options-mode",
+        PaneModeRequest::Switch(_) => "switch-mode",
+    }
+}
+
+fn top_pane_mode_name(inner: &ServerState, pane: PaneId) -> Option<&'static str> {
+    inner
+        .pane_modes
+        .get(&pane)
+        .and_then(|modes| modes.last())
+        .map(pane_mode_name)
+}
+
+fn take_pane_mode_hook_events(inner: &mut ServerState) -> Vec<PendingHookEvent> {
+    let transitions = std::mem::take(&mut inner.pane_mode_transitions);
+    hook_events::server_mode_hook_events(&inner.engine, transitions)
+}
+
+fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mode: PaneModeRequest) -> bool {
+    let previous = top_pane_mode_name(inner, pane);
+    let current = pane_mode_name(&mode);
+    let pushed = push_pane_mode_entry(inner, pane, mode);
+    if pushed {
+        inner.pane_mode_transitions.push(PaneModeTransition {
+            pane,
+            entered: true,
+            previous,
+            current: Some(current),
+        });
+    }
+    pushed
+}
+
+fn push_pane_mode_entry(inner: &mut ServerState, pane: PaneId, mut mode: PaneModeRequest) -> bool {
     let modes = inner.pane_modes.entry(pane).or_default();
     let existing = modes
         .iter()
@@ -46592,6 +47337,15 @@ fn pop_pane_mode(inner: &mut ServerState, pane: PaneId) -> bool {
     if modes.is_empty() {
         inner.pane_modes.remove(&pane);
     }
+    if let Some(popped) = mode.as_ref() {
+        let current = top_pane_mode_name(inner, pane);
+        inner.pane_mode_transitions.push(PaneModeTransition {
+            pane,
+            entered: false,
+            previous: Some(pane_mode_name(popped)),
+            current,
+        });
+    }
     if let Some((kill_source, _)) = mode
         .as_ref()
         .filter(|mode| !matches!(mode, PaneModeRequest::Clock))
@@ -46636,6 +47390,13 @@ fn consume_pane_mode_mouse(
         if modes.is_empty() {
             inner.pane_modes.remove(&pane);
         }
+        let current = top_pane_mode_name(inner, pane);
+        inner.pane_mode_transitions.push(PaneModeTransition {
+            pane,
+            entered: false,
+            previous: Some("clock-mode"),
+            current,
+        });
     }
     true
 }
@@ -47151,8 +47912,26 @@ impl StatusFactSelection {
                 | "mouse_any_flag"
                 | "cursor_flag"
                 | "pane_last_command_status"
+                | "pane_output_generation"
+                | "pane_last_output_time"
+                | "pane_last_prompt_time"
+                | "pane_command_start_time"
+                | "pane_command_end_time"
+                | "pane_command_running"
+                | "pane_command_duration"
+                | "pane_command_status"
+                | "pane_private_modes"
                 | "pane_pb_progress"
-                | "pane_pb_state" => selection.terminals = true,
+                | "pane_pb_state"
+                | "pane_status"
+                | "pane_status_kind"
+                | "pane_status_progress"
+                | "pane_status_app"
+                | "pane_status_title"
+                | "pane_status_message"
+                | "pane_status_raw_title"
+                | "pane_status_raw_message"
+                | "pane_status_reported" => selection.terminals = true,
                 "pane_pipe" | "pane_pipe_pid" => selection.pane_pipes = true,
                 "session_attached" | "session_attached_list" | "session_many_attached" => {
                     selection.session_attachments = true;
@@ -47552,7 +48331,7 @@ fn resolve_buffer<'a>(
 #[path = "daemon/wait_queue.rs"]
 mod wait_queue;
 
-const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
+const WAIT_FOR_USAGE: &str = "usage: wait-for [-ELSUlv] [-F format] [-w waiter] name";
 
 fn remove_wait_channel_if_unused(channels: &mut BTreeMap<String, WaitChannel>, name: &str) {
     if channels
@@ -48797,6 +49576,36 @@ fn control_subscription_targets(
     }
 }
 
+const fn control_flag_state(output: &ControlClientOutput) -> (bool, Option<u64>, bool, bool) {
+    (
+        output.wait_exit,
+        output.pause_after_ms,
+        output.no_output,
+        output.new_layouts,
+    )
+}
+
+fn control_reads_legacy_layouts(inner: &ServerState, client: Option<ClientId>) -> bool {
+    client
+        .and_then(|client| inner.client(client))
+        .is_some_and(|client| {
+            client.kind == Some(ClientKind::Control)
+                && !client
+                    .control_output
+                    .as_ref()
+                    .is_some_and(|output| output.new_layouts)
+        })
+}
+
+fn legacy_command_output(execution: &mut Execution) {
+    let Ok(text) = std::str::from_utf8(execution.output.as_bytes()) else {
+        return;
+    };
+    if let Cow::Owned(converted) = legacy_layouts_in(text) {
+        execution.output = RawText::from(converted);
+    }
+}
+
 fn apply_control_client_flags(output: &mut ControlClientOutput, flags: &str) {
     for raw in flags.split(',') {
         let (clear, flag) = raw
@@ -48808,6 +49617,7 @@ fn apply_control_client_flags(output: &mut ControlClientOutput, flags: &str) {
                 output.panes.clear();
             }
             "wait-exit" => output.wait_exit = !clear,
+            "new-layouts" => output.new_layouts = !clear,
             "pause-after" => {
                 output.pause_after_ms = (!clear).then_some(0);
             }
@@ -48892,8 +49702,7 @@ impl CommandStdinSink {
     pub const fn accepts_binary(self) -> bool {
         match self {
             Self::Argument { binary } => binary,
-            Self::Config => false,
-            Self::PaneInput | Self::ConfigReplay => true,
+            Self::Config | Self::PaneInput | Self::ConfigReplay => true,
         }
     }
 
@@ -49159,7 +49968,6 @@ fn insert_paste_buffer(
         (name, true)
     };
 
-    let utf8 = std::str::from_utf8(&data).is_ok();
     inner.paste_buffers.retain(|buffer| {
         if buffer.name == name {
             if replacement_delete {
@@ -49180,7 +49988,6 @@ fn insert_paste_buffer(
             data: Arc::from(data),
             created: SystemTime::now(),
             automatic,
-            utf8,
         },
     );
     events.push(PendingHookEvent::paste_buffer("paste-buffer-changed", name));
@@ -49344,7 +50151,7 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         "capture-pane",
         args,
         &['b', 'E', 'S', 't'],
-        &['a', 'C', 'e', 'J', 'L', 'M', 'N', 'p', 'T', 'q'],
+        &['a', 'C', 'e', 'F', 'H', 'J', 'L', 'M', 'N', 'p', 'T', 'q'],
     )?;
     require_no_positionals("capture-pane", &args)?;
     let options = CaptureOptions {
@@ -49353,6 +50160,8 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         escape_nonprintable: args.has('C'),
         join_wrapped: args.has('J'),
         number_lines: args.has('L'),
+        line_flags: args.has('F'),
+        hyperlinks: args.has('H'),
         mode: args.has('M'),
         preserve_trailing: args.has('J') || args.has('N'),
         trim_positions: args.has('T'),
@@ -49536,6 +50345,7 @@ struct ParsedAgentSend {
     target: Option<String>,
     submit: bool,
     wait: bool,
+    notify: bool,
     timeout: Option<Duration>,
     context: Option<ContextReference>,
     text: Vec<String>,
@@ -50553,6 +51363,47 @@ pub fn agent_send_reads_stdin(args: &[RawText]) -> bool {
     parse_agent_send_args(args).is_ok_and(|parsed| parsed.text.is_empty())
 }
 
+#[cfg(feature = "agent")]
+const MAX_AGENT_NOTIFY_BYTES: usize = 64 * 1024;
+
+#[cfg(feature = "agent")]
+fn agent_notify_message(
+    pane: PaneId,
+    result: Option<crate::agent::host::AgentTurnResult>,
+) -> String {
+    use crate::agent::host::AgentTurnFailure;
+
+    let reply = |reply: &crate::agent::host::AgentTurnReply| {
+        let text = if reply.final_text.trim().is_empty() {
+            &reply.text
+        } else {
+            &reply.final_text
+        };
+        let mut start = text.len().saturating_sub(MAX_AGENT_NOTIFY_BYTES);
+        while !text.is_char_boundary(start) {
+            start += 1;
+        }
+        text[start..].trim().to_owned()
+    };
+    match result {
+        Some(Ok(done)) => format!("[zz] Agent {pane} finished:\n\n{}", reply(&done)),
+        Some(Err(AgentTurnFailure::Stopped {
+            reason,
+            reply: done,
+        })) => format!("[zz] Agent {pane} stopped ({reason}):\n\n{}", reply(&done)),
+        Some(Err(AgentTurnFailure::Blocked { .. })) => {
+            format!("[zz] Agent {pane} is waiting for a permission answer.")
+        }
+        Some(Err(AgentTurnFailure::Failed(message))) => {
+            format!("[zz] Agent {pane} failed: {message}")
+        }
+        Some(Err(AgentTurnFailure::Cancelled)) => format!("[zz] Agent {pane} was stopped."),
+        Some(Err(AgentTurnFailure::Reclaimed | AgentTurnFailure::Closed)) | None => {
+            format!("[zz] Agent {pane} did not take the message.")
+        }
+    }
+}
+
 fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerError> {
     let mut parsed = ParsedAgentSend::default();
     let mut on_block_set = false;
@@ -50581,6 +51432,12 @@ fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerErro
         if argument == "--wait" {
             parsed.submit = true;
             parsed.wait = true;
+            index += 1;
+            continue;
+        }
+        if argument == "--notify" {
+            parsed.submit = true;
+            parsed.notify = true;
             index += 1;
             continue;
         }
@@ -50638,6 +51495,11 @@ fn parse_agent_send_args(args: &[RawText]) -> Result<ParsedAgentSend, ServerErro
     if parsed.json && parsed.final_only {
         return Err(ServerError::CommandParse(
             "agent-send --json and --final cannot be combined".to_owned(),
+        ));
+    }
+    if parsed.notify && parsed.wait {
+        return Err(ServerError::CommandParse(
+            "agent-send --notify and --wait cannot be combined".to_owned(),
         ));
     }
     if progress
@@ -50880,7 +51742,8 @@ for one JSON object per row in the same order as text output. Keys are the forma
 variable names for that entity; values are strings with the same expansion as
 `#{name}`, including empty strings for unavailable values. Pane rows include
 `pane_kind`, `agent_state`, `agent_pending_permission`, `browser_url`,
-`pane_pb_state`, and `pane_pb_progress`. Use `show-options --json` for one object
+`pane_pb_state`, `pane_pb_progress`, and the `pane_status*` program status
+variables. Use `show-options --json` for one object
 mapping option names to value strings in the selected scope. Combining `-F` and
 `--json` is a usage error.
 
@@ -50909,14 +51772,14 @@ Commands that set an explicit exit code keep that code.
 Split a pane to start an agent; `-t %N` chooses the pane to split and `-c DIR` sets the new pane's cwd.
 Print nothing unless `-P` requests the new pane ID; `-F` changes its format.
 
-The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-window --kind agent --provider <provider>`. Each provider is an ACP adapter the daemon spawns through the `agent-command` or `agent-claude-code-command` option. The bundled adapters pin `claude-agent-acp@0.76.0` and `codex-acp@1.11.0`. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
+The providers are `codex` and `claude-code` (`claude` accepted). Choose one with `zz split-window --kind agent --provider <provider>`. The daemon spawns each provider through the `agent-command` or `agent-claude-code-command` option. Claude Code runs the user's own `claude` over its stream-json protocol and Codex runs the user's own `codex` through `codex app-server`; a command whose program is neither runs as an ACP adapter. The model, reasoning effort, and approval policy come from the adapter's own configuration: `~/.codex/config.toml` for Codex or Claude Code's own settings. `zz` does not set them.
 
-### `zz agent-send [-t %N] [--submit | --wait [--progress] [--timeout SECS] [--on-block wait|fail|allow|deny] [--json | --final]] [--context PATH[:START[-END]]] [TEXT]`
+### `zz agent-send [-t %N] [--submit | --notify | --wait [--progress] [--timeout SECS] [--on-block wait|fail|allow|deny] [--json | --final]] [--context PATH[:START[-END]]] [TEXT]`
 
 Draft into another Agent pane's composer for its user to review.
 Print `appended to the composer in %N` when drafted. An omitted or non-agent target routes to that window's most recently focused Agent pane. Read stdin when TEXT is omitted: `git diff | zz agent-send`. `--context` adds a file/line header and fences the payload; text is capped at 1 MiB.
 
-`--submit` sends now and prints the chosen pane; a busy pane queues the prompt. `--wait` submits, waits for that turn, and prints its reply on stdout (pane ID on stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeout defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running. `--json` prints one object with turn facts, `final_text`, and `transcript`. `--final` prints only the text after the last tool call or tool update. Both require `--wait`; combining them is a usage error. `--on-block wait` waits for permission. `--on-block fail` prints the pending permission JSON and exits 3 while the turn continues. `--on-block allow` answers tool permissions, preferring allow-once, and waits for user questions. `--on-block deny` rejects permissions, including user questions.
+`--submit` sends now and prints the chosen pane; a busy pane queues the prompt. `--notify` submits from inside an agent pane and, when the target's turn ends, posts its reply back into the calling pane as a prompt, queued behind that pane's own turn. `--wait` submits, waits for that turn, and prints its reply on stdout (pane ID on stderr). Failure, cancellation, hand-back, or timeout exits non-zero. The timeout defaults to 600 seconds; `0` waits forever. A timeout leaves the turn running. `--json` prints one object with turn facts, `final_text`, and `transcript`. `--final` prints only the text after the last tool call or tool update. Both require `--wait`; combining them is a usage error. `--on-block wait` waits for permission. `--on-block fail` prints the pending permission JSON and exits 3 while the turn continues. `--on-block allow` answers tool permissions, preferring allow-once, and waits for user questions. `--on-block deny` rejects permissions, including user questions.
 
 Turn facts: `final_text` contains message text after the last tool call or tool update. `tool_calls` counts tool calls the pane saw, including runtime-approved reads; permission counters count only requests that reached the pane. Each buffer keeps its tail when capped: 1 MiB for the transcript and 256 KiB for final text. The JSON object has `pane`, `stop_reason`, `duration_ms`, `tool_calls`, `permissions` (`requested`, `allowed`, `denied`), `truncated`, `final_text`, and `transcript`. A blocked reply also has a nested `permission` object. Exit 0 means `end_turn`; other stop reasons exit 1 with the reply still printed, except cancellation, which keeps its existing error output. A blocked wait exits 3 and a timeout exits 124. Stderr carries the pane ID and on-block audit lines. `--progress` requires `--wait` and an explicit `-t %N`. It prints tool calls, state changes, and a heartbeat after 60 seconds without a line to stderr. Titles in progress lines stop at 120 characters. Over `-H`, it prints `agent-send: --progress is local only` and waits without the progress stream.
 
@@ -50927,13 +51790,13 @@ Use `-c` to choose its absolute working directory; otherwise use the pane's curr
 
 ### `zz restart-agent-pane [-t %N]`
 
-Restart the agent pane's ACP adapter and resume its current session.
+Restart the agent pane's agent process and resume its current session.
 Print nothing on success. Use `zz new-agent-session` for a fresh conversation.
 
 ### `zz agent-respond [-t %N] (--allow | --deny | --option ID) [REQUEST_ID]`
 
 Answer the named or oldest pending permission. Read the pending request with `zz inspect -t %N --json | jq .permission`.
-Print the chosen option ID. `--allow` prefers allow-once; `--deny` selects a reject option. Use `--option ID` to choose an advertised option by ID, including an answer to a user question.
+Print the chosen option ID. `--allow` prefers allow-once; `--deny` selects a reject option, or dismisses a question card that has none and prints `dismissed`. Use `--option ID` to choose an advertised option by ID, including an answer to a user question.
 
 ### Permissions
 
@@ -50957,7 +51820,7 @@ Read one `key: value` line per field, or use `--json` for one object with string
 zz inspect -a --json | jq -c 'select(.pane_kind=="agent") | {pane_id,agent_state}'
 ```
 
-The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
+The keys, in text output order, are `session_id`, `session_name`, `window_id`, `window_index`, `window_name`, `window_width`, `window_height`, `window_size`, `pane_id`, `pane_index`, `pane_active`, `pane_kind`, `pane_pid`, `pane_current_command`, `pane_current_path`, `pane_title`, `pane_width`, `pane_height`, `pane_dead`, `pane_dead_status`, `pane_dead_signal`, `pane_last_command_status`, `pane_pb_state`, `pane_pb_progress`, `pane_status`, `pane_status_kind`, `pane_status_progress`, `pane_status_app`, `pane_status_title`, `pane_status_message`, `pane_status_raw_title`, `pane_status_raw_message`, `pane_status_reported`, `agent_state`, `agent_pending_permission`, `permission`, `browser_url`, `verbs`, `events`.
 
 `permission` is a nested `{"request_id":7,"tool_call":{...},"options":[...]}` object or `null` in JSON output; text output prints compact JSON on the `permission:` line, or an empty value.
 
@@ -51132,6 +51995,10 @@ Run `zz tools advanced` for state subscriptions and terminal-agent integration.
 ### State and waiting
 
 Read native Agent state and permission presence through formats.
+A terminal pane whose program reports OSC 7501 program status gets its most urgent
+record mapped into `@agent_state`: `working`, `blocked`, `failed` for `error`, and
+`idle` for `idle`, `done`, or no record. Once a pane has reported, the two heuristics
+below stop writing `@agent_state` for it until a full reset.
 Terminal panes running a listed agent CLI get `working`/`idle` from the OSC 9;4
 progress bar through `#{agent_state}` and `@agent_state`. `@agent-progress-commands`
 sets the whitespace- or comma-separated list of command basenames (default `claude`).
@@ -51447,6 +52314,7 @@ fn handle_connection_message<S: TransportStream>(
     }
     shared.warm_terminfo(&hello.environment)?;
     let mut registration = ClientRegistrationGuard::new(shared, client);
+    shared.client_lifecycle_hook("client-created", client);
     log::debug!(
         target: "zz_daemon::diagnostics::connection",
         "registered client={client} kind={:?} hello={hello:#?}",
@@ -51602,9 +52470,10 @@ fn handle_connection_message<S: TransportStream>(
         let message_started = diagnostic_timer();
         log::trace!(
             target: "zz_daemon::diagnostics::connection",
-            "message begin client={client} bytes={} frame_capacity={} message={message:#?}",
+            "message begin client={client} bytes={} frame_capacity={} message={:#?}",
             inbound_frame.len(),
             inbound_frame.capacity(),
+            crate::client::TracedMessage(&message),
         );
         if shared.shutdown_pending.load(Ordering::Acquire)
             && !(hello.kind == ClientKind::Command
@@ -51880,7 +52749,9 @@ fn handle_connection_message<S: TransportStream>(
             | ProtocolMessage::AgentAuthenticate { .. }
             | ProtocolMessage::AgentSessionOp { .. }
             | ProtocolMessage::AgentReplay { .. }
-            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }) => {
+            | ProtocolMessage::AgentAcknowledgePromptRestore { .. }
+            | ProtocolMessage::AgentAnswerQuestion { .. }
+            | ProtocolMessage::AgentStopTask { .. }) => {
                 let read_only_blocked = !matches!(
                     message,
                     ProtocolMessage::AgentReplay { .. }
@@ -52396,6 +53267,17 @@ fn source_read_error_warning(path: &Path, error: &std::io::Error) -> String {
     source_glob_error_warning(path, &filesystem_error_message(error))
 }
 
+fn client_source_read_error_warning(
+    command_client: bool,
+    path: &Path,
+    error: &std::io::Error,
+) -> String {
+    if command_client && error.kind() == ErrorKind::IsADirectory {
+        return source_glob_error_warning(path, "Input/output error");
+    }
+    source_read_error_warning(path, error)
+}
+
 fn missing_source_error(path: &Path) -> String {
     format!("No such file or directory: {}", path.display())
 }
@@ -52558,7 +53440,7 @@ mod tests {
         };
         assert_eq!(
             request.operation,
-            ClientFileOperation::ReadStdin { binary: false }
+            ClientFileOperation::ReadStdin { binary: true }
         );
         assert_eq!(read_global_option(&shared, "@before"), "yes");
         assert_eq!(read_global_option(&shared, "@after"), "");
@@ -52740,7 +53622,7 @@ mod tests {
         }
         assert!(CommandStdinSink::Argument { binary: true }.accepts_binary());
         assert!(!CommandStdinSink::Argument { binary: false }.accepts_binary());
-        assert!(!CommandStdinSink::Config.accepts_binary());
+        assert!(CommandStdinSink::Config.accepts_binary());
         assert!(CommandStdinSink::PaneInput.accepts_binary());
     }
 
@@ -52749,7 +53631,12 @@ mod tests {
         let literal_scopes = [
             (
                 "cmd-display-menu.c",
-                "cmd_display_menu_get_pos",
+                "cmd_display_menu_get_menu_pos",
+                POPUP_POSITION_CONTEXT_FORMATS.as_slice(),
+            ),
+            (
+                "cmd-display-menu.c",
+                "cmd_display_menu_get_popup_pos",
                 POPUP_POSITION_CONTEXT_FORMATS.as_slice(),
             ),
             (
@@ -52761,11 +53648,6 @@ mod tests {
                 "cmd-show-messages.c",
                 "cmd_show_messages_exec",
                 crate::status::SHOW_MESSAGES_CONTEXT_FORMATS.as_slice(),
-            ),
-            (
-                "notify.c",
-                "notify_add",
-                NOTIFY_ADD_CONTEXT_FORMATS.as_slice(),
             ),
             (
                 "window-buffer.c",
@@ -52783,8 +53665,18 @@ mod tests {
                 .iter()
                 .map(|(_, _, names)| names.len())
                 .sum::<usize>(),
-            32
+            44
         );
+        let (mux_hook_payload_names, _) = zz_mux::mux_hook_payload_format_contexts();
+        for name in NOTIFY_ADD_CONTEXT_FORMATS
+            .iter()
+            .filter(|name| **name != HOOK_CONTEXT_FORMAT)
+        {
+            assert!(
+                mux_hook_payload_names.contains(name),
+                "daemon hook payload format {name} is not registered"
+            );
+        }
 
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let oracle: serde_json::Value = serde_json::from_str(
@@ -52814,7 +53706,7 @@ mod tests {
                     })
             })
             .collect::<BTreeSet<_>>();
-        assert_eq!(oracle_literals.len(), 153);
+        assert_eq!(oracle_literals.len(), 204);
 
         let mut non_daemon_literals = BTreeSet::new();
         for (path, function, names) in zz_mux::mux_literal_format_context_scopes()
@@ -52829,7 +53721,7 @@ mod tests {
                 )));
             }
         }
-        assert_eq!(non_daemon_literals.len(), 121);
+        assert_eq!(non_daemon_literals.len(), 160);
         assert!(non_daemon_literals.is_subset(&oracle_literals));
         let delegated_literals = oracle_literals
             .difference(&non_daemon_literals)
@@ -52920,7 +53812,7 @@ mod tests {
             oracle_hooks.len(),
             "duplicate pinned hook"
         );
-        assert_eq!(pinned_hooks.len(), 68, "pinned hook count changed");
+        assert_eq!(pinned_hooks.len(), 89, "pinned hook count changed");
 
         let command_names = zz_protocol::command_specs()
             .map(|spec| spec.name)
@@ -52935,7 +53827,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             produced_after_hooks.len(),
-            37,
+            38,
             "catalog-derived after-command hook count changed"
         );
 
@@ -52950,7 +53842,7 @@ mod tests {
         );
         assert_eq!(
             produced_non_after_hooks.len(),
-            30,
+            47,
             "explicit hook producer count changed"
         );
         assert!(
@@ -52975,8 +53867,9 @@ mod tests {
                 }
             }
         }
-        assert!(
-            tracked_hooks.is_empty(),
+        assert_eq!(
+            tracked_hooks.len(),
+            4,
             "runtime hook gap roster changed: {tracked_hooks:?}"
         );
 
@@ -52984,38 +53877,16 @@ mod tests {
             .union(&produced_non_after_hooks)
             .cloned()
             .collect::<BTreeSet<_>>();
-        let explicit_only_hooks = ["after-queue"]
-            .into_iter()
-            .map(str::to_owned)
-            .collect::<BTreeSet<_>>();
-        assert_eq!(produced_hooks.len(), 67, "produced hook count changed");
-        assert_eq!(
-            explicit_only_hooks.len(),
-            1,
-            "explicit-only hook count changed"
-        );
-        assert!(tracked_hooks.is_empty(), "tracked hook count changed");
+        assert_eq!(produced_hooks.len(), 85, "produced hook count changed");
         assert!(
             produced_hooks.is_disjoint(&tracked_hooks),
             "produced and tracked hooks overlap"
         );
-        assert!(
-            produced_hooks.is_disjoint(&explicit_only_hooks),
-            "produced and explicit-only hooks overlap"
-        );
-        assert!(
-            explicit_only_hooks.is_disjoint(&tracked_hooks),
-            "explicit-only and tracked hooks overlap"
-        );
-        let accounted_hooks = produced_hooks
-            .union(&explicit_only_hooks)
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let partition = accounted_hooks
+        let partition = produced_hooks
             .union(&tracked_hooks)
             .cloned()
             .collect::<BTreeSet<_>>();
-        assert_eq!(partition.len(), 68, "hook partition count changed");
+        assert_eq!(partition.len(), 89, "hook partition count changed");
         assert_eq!(
             partition, pinned_hooks,
             "hook partition differs from the pin"
@@ -53080,6 +53951,86 @@ mod tests {
                         && keys == &[zz_protocol::KeyToken::Literal("x".to_owned())]
                 ))
         );
+    }
+
+    #[test]
+    fn customize_quit_fires_the_mode_exit_hooks_without_further_input() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-quit", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+            )
+            .expect("enter customize mode");
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        shared.apply_customize_result(
+            client,
+            &mut context,
+            pane,
+            mode,
+            &CustomizeResult {
+                close: true,
+                commands: Vec::new(),
+                menu: None,
+            },
+        );
+        let inner = shared.inner.lock();
+        assert!(!inner.pane_modes.contains_key(&pane));
+        assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn user_event_hook_client_is_the_invoking_client() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (attached, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "event-client", &[attached]);
+        let (command, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for args in [
+            vec!["-g", "@ping", "set -gF @pong '#{hook_client}'"],
+            vec!["-E", "@ping"],
+        ] {
+            shared
+                .execute(
+                    command,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("set-hook", args),
+                )
+                .expect("set-hook");
+        }
+        let expected = client_format_name(&shared.inner.lock(), command);
+        assert_ne!(expected, client_format_name(&shared.inner.lock(), attached));
+        let shown = shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gv", "@pong"]),
+            )
+            .expect("show the hook's write");
+        assert_eq!(shown.output.to_string().trim_end(), expected);
     }
 
     fn register_wait_clients(shared: &Shared, clients: impl IntoIterator<Item = u64>) {
@@ -56493,8 +57444,7 @@ mod tests {
                         .flat_map(|session| &session.windows)
                         .find(|candidate| candidate.id == window)
                         .is_some_and(|window| {
-                            window
-                                .layout_dump
+                            zz_mux::legacy_layout(&window.layout_dump)
                                 .ends_with(&format!("80x20,0,0,{}", pane.0))
                                 && window.panes.get(&pane).is_some_and(|pane| pane.bell)
                         })
@@ -56506,8 +57456,7 @@ mod tests {
             .find(|candidate| candidate.id == window)
             .expect("peer focus window");
         assert!(
-            peer_window
-                .layout_dump
+            zz_mux::legacy_layout(&peer_window.layout_dump)
                 .ends_with(&format!("80x20,0,0,{}", pane.0)),
             "{}",
             peer_window.layout_dump
@@ -57300,9 +58249,245 @@ mod tests {
         }
 
         assert!(!shared.sanitizes_output_for(plain, ClientKind::Command, "show-buffer"));
-        assert!(shared.sanitizes_output_for(plain, ClientKind::Control, "show-buffer"));
+        assert!(!shared.sanitizes_output_for(plain, ClientKind::Control, "show-buffer"));
 
         assert!(!shared.sanitizes_output_for(plain, ClientKind::Interactive, "display-message"));
+    }
+
+    #[test]
+    fn show_buffer_hands_binary_bytes_to_each_client_shape_the_way_the_pin_does() {
+        let shared = Arc::new(Shared::new(1));
+        let plain = ClientId(1);
+        let utf8 = ClientId(2);
+        shared.inner.lock().client_entry(utf8).utf8 = true;
+        let mut context = ExecutionContext::default();
+        let stored = b"a\xfeb\nc\x01d".to_vec();
+        shared
+            .execute(
+                plain,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("binary"),
+                        RawText::from_bytes(stored.clone()),
+                    ],
+                ),
+            )
+            .expect("binary buffer");
+        let show = CommandInvocation::new("show-buffer", ["-b", "binary"]);
+        let mut shown = |client, kind| match shared.execute_command_request(
+            client,
+            kind,
+            &mut context,
+            1,
+            &show,
+        ) {
+            CommandResponse::Success {
+                output,
+                exit_code: 0,
+                stdout_claim,
+                ..
+            } => (output.as_bytes().to_vec(), stdout_claim),
+            other => panic!("show-buffer failed: {other:?}"),
+        };
+
+        assert_eq!(
+            shown(plain, ClientKind::Command),
+            (stored.clone(), StdoutClaim::Raw)
+        );
+        assert_eq!(
+            shown(utf8, ClientKind::Command),
+            (stored.clone(), StdoutClaim::Raw)
+        );
+        assert_eq!(shown(plain, ClientKind::Control).0, b"a_b_c_d");
+        assert_eq!(shown(utf8, ClientKind::Control).0, stored);
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut context,
+            2,
+            &CommandInvocation::new("if-shell", ["-F", "1", "show-buffer -b binary"]),
+        );
+        let guards = control_command_guards(take_reliable_messages(&mailbox));
+        assert!(
+            guards
+                .iter()
+                .any(|(output, error, _)| output == "a_b_c_d" && !error),
+            "{guards:?}"
+        );
+    }
+
+    #[test]
+    fn show_buffer_prints_for_the_control_client_that_ran_it_in_every_queue_shape() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("show.conf");
+        fs::write(&source, "show-buffer -b mixed\n").expect("show-buffer source");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "show-shapes"]),
+            )
+            .expect("session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("mixed"),
+                        RawText::from_bytes(b"a\xfeb\0c".to_vec()),
+                    ],
+                ),
+            )
+            .expect("mixed buffer");
+        let session = context.session.expect("session");
+        let shapes = [
+            control_stdin_command("show-buffer", ["-b", "mixed"]),
+            control_stdin_command("if-shell", ["-F", "1", "show-buffer -b mixed"]),
+            control_stdin_command("source-file", [source.display().to_string()]),
+        ];
+        for utf8 in [false, true] {
+            let mailbox = OutboundMailbox::new();
+            let (control, _) =
+                shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+            shared.inner.lock().client_entry(control).utf8 = utf8;
+            shared
+                .attach(control, session)
+                .expect("attach control client");
+            take_reliable_messages(&mailbox);
+            for (request_id, shape) in (1..).zip(&shapes) {
+                let mut printed = Vec::new();
+                if let CommandResponse::Success { output, .. } = shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    shape,
+                ) {
+                    printed.push(output.as_bytes().to_vec());
+                }
+                printed.extend(
+                    control_command_guards(take_reliable_messages(&mailbox))
+                        .into_iter()
+                        .map(|(output, _, _)| output.into_bytes()),
+                );
+                printed.retain(|output| !output.is_empty());
+                let expected: &[&[u8]] = if utf8 {
+                    &[b"a\xfeb", "a\u{fffd}b".as_bytes()]
+                } else {
+                    &[b"a_b"]
+                };
+                assert!(
+                    printed.len() == 1 && expected.contains(&printed[0].as_slice()),
+                    "{} utf8={utf8}: {printed:?}",
+                    shape.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn show_buffer_stops_a_control_client_at_the_first_nul_the_way_the_pin_does() {
+        let shared = Arc::new(Shared::new(1));
+        let plain = ClientId(1);
+        let utf8 = ClientId(2);
+        shared.inner.lock().client_entry(utf8).utf8 = true;
+        let mut context = ExecutionContext::default();
+        let stored = b"a\0b\xfec".to_vec();
+        shared
+            .execute(
+                plain,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("nul"),
+                        RawText::from_bytes(stored.clone()),
+                    ],
+                ),
+            )
+            .expect("buffer with a NUL");
+        let show = CommandInvocation::new("show-buffer", ["-b", "nul"]);
+        let mut shown = |client, kind| match shared.execute_command_request(
+            client,
+            kind,
+            &mut context,
+            1,
+            &show,
+        ) {
+            CommandResponse::Success {
+                output,
+                exit_code: 0,
+                ..
+            } => output.as_bytes().to_vec(),
+            other => panic!("show-buffer failed: {other:?}"),
+        };
+
+        assert_eq!(shown(plain, ClientKind::Command), stored);
+        assert_eq!(shown(plain, ClientKind::Control), b"a");
+        assert_eq!(shown(utf8, ClientKind::Control), b"a");
+    }
+
+    #[test]
+    fn source_file_stdin_applies_bytes_that_are_not_utf8() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(1);
+        let mut context = ExecutionContext::default();
+        let mut source = CommandInvocation::new("source-file", ["-"]);
+        source.set_stdin(RawText::from_bytes(
+            b"set -g @binary a\xfeb\nset-buffer -b sourced c\xfed\nBINARY_ENV=e\xfef\n".to_vec(),
+        ));
+        assert_eq!(
+            shared.execute_command_request(client, ClientKind::Command, &mut context, 1, &source),
+            CommandResponse::Success {
+                request_id: 1,
+                output: RawText::default(),
+                exit_code: 0,
+                stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
+            }
+        );
+        let mut output = |name: &str, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(name, args.iter().copied()),
+                )
+                .expect("readback")
+                .output
+                .as_bytes()
+                .to_vec()
+        };
+        let option = output("show-options", &["-gv", "@binary"]);
+        assert!(
+            option.starts_with(b"a") && option.ends_with(b"b"),
+            "{option:?}"
+        );
+        assert_eq!(output("show-buffer", &["-b", "sourced"]), b"c\xfed");
+        assert_eq!(
+            output("show-environment", &["-g", "BINARY_ENV"]),
+            b"BINARY_ENV=e\xfef"
+        );
     }
 
     #[test]
@@ -57849,8 +59034,7 @@ mod tests {
                         .flat_map(|session| &session.windows)
                         .find(|candidate| candidate.id == window)
                         .is_some_and(|window| {
-                            window
-                                .layout_dump
+                            zz_mux::legacy_layout(&window.layout_dump)
                                 .ends_with(&format!("80x20,0,0,{}", pane.0))
                                 && window.panes.get(&pane).is_some_and(|pane| pane.bell)
                         })
@@ -57862,8 +59046,7 @@ mod tests {
             .find(|candidate| candidate.id == window)
             .expect("peer focus window");
         assert!(
-            peer_window
-                .layout_dump
+            zz_mux::legacy_layout(&peer_window.layout_dump)
                 .ends_with(&format!("80x20,0,0,{}", pane.0)),
             "{}",
             peer_window.layout_dump
@@ -62641,6 +63824,9 @@ mod tests {
                     | "client-attached"
                     | "window-renamed"
                     | "pane-title-changed"
+                    | "pane-created"
+                    | "window-created"
+                    | "client-created"
             )),
             "unexpected control hook sequence: {hook_names:?}"
         );
@@ -63887,6 +65073,7 @@ mod tests {
                     wait_exit: true,
                     pause_after_ms: Some(2000),
                     no_output: true,
+                    new_layouts: false,
                 },
                 ..
             })
@@ -63914,6 +65101,347 @@ mod tests {
             format_client_flags(&shared.inner.lock(), control),
             "attached,focused,control-mode"
         );
+    }
+
+    #[test]
+    fn control_clients_read_v1_layouts_until_they_set_new_layouts() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("layouts")
+            .expect("layouts session");
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("interactive".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(control, session).expect("attach control");
+        shared
+            .attach(interactive, session)
+            .expect("attach interactive");
+        take_reliable_messages(&control_mailbox);
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let layouts = |client: ClientId, kind: ClientKind, context: &mut ExecutionContext| {
+            let shown = shared
+                .execute(
+                    client,
+                    kind,
+                    context,
+                    &CommandInvocation::new(
+                        "display-message",
+                        ["-p", "#{window_layout} #{window_visible_layout}"],
+                    ),
+                )
+                .expect("display layouts")
+                .output
+                .to_string();
+            let listed = shared
+                .execute(
+                    client,
+                    kind,
+                    context,
+                    &CommandInvocation::new("list-windows", ["-t", "layouts"]),
+                )
+                .expect("list windows")
+                .output
+                .to_string();
+            (shown, listed)
+        };
+        let v1 = "b25d,80x24,0,0,0";
+        let v2 = r#"{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"a":true,"i":0,"I":"%0"}}"#;
+        let (shown, listed) = layouts(control, ClientKind::Control, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v1} {v1}"));
+        assert!(listed.contains(&format!("[layout {v1}]")), "{listed}");
+        let (shown, listed) = layouts(interactive, ClientKind::Interactive, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v2} {v2}"));
+        assert!(listed.contains(&format!("[layout {v2}]")), "{listed}");
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-f", "new-layouts"]),
+            )
+            .expect("set new-layouts");
+        assert_eq!(
+            format_client_flags(&shared.inner.lock(), control),
+            "attached,focused,control-mode,new-layouts"
+        );
+        assert!(
+            take_reliable_messages(&control_mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::ControlFlags {
+                            new_layouts: true,
+                            ..
+                        },
+                        ..
+                    })
+                ))
+        );
+        let (shown, listed) = layouts(control, ClientKind::Control, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v2} {v2}"));
+        assert!(listed.contains(&format!("[layout {v2}]")), "{listed}");
+
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-f", "!new-layouts"]),
+            )
+            .expect("clear new-layouts");
+        let (shown, _) = layouts(control, ClientKind::Control, &mut context);
+        assert_eq!(shown.trim_end(), format!("{v1} {v1}"));
+        let snapshot = shared.inner.lock().engine.state.snapshot();
+        assert_eq!(snapshot.sessions[0].windows[0].layout_dump, v2);
+    }
+
+    #[test]
+    fn a_control_command_leaves_other_clients_status_layouts_in_v2() {
+        let shared = Arc::new(Shared::new(1));
+        let ((_alpha, alpha_mailbox, a), _) = two_session_pair(&shared);
+        shared
+            .execute(
+                ClientId(91),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("set-option", ["-g", "status-right", "#{window_layout}"]),
+            )
+            .expect("layout status");
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared.attach(control, a).expect("attach control");
+        shared.refresh_status();
+        take_reliable_messages(&alpha_mailbox);
+        let mut context = ExecutionContext::new(Some(a), None, None);
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-d", "-t", "a", QUIET_PANE_COMMAND]),
+            )
+            .expect("control split");
+        let rights = take_reliable_messages(&alpha_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::StatusChanged { status },
+                    ..
+                }) => Some(status.right),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(!rights.is_empty());
+        assert!(
+            rights
+                .iter()
+                .all(|right| right.contains(r#"{"V":2,"L":{"t":"v""#)),
+            "{rights:?}"
+        );
+    }
+
+    #[test]
+    fn a_control_clients_show_buffer_keeps_stored_layout_bytes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("stored")
+            .expect("stored session");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).expect("attach control");
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let stored = r#"{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"a":true,"i":0,"I":"%0"}}"#;
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "kept", stored]),
+            )
+            .expect("store layout bytes");
+        let shown = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("show-buffer", ["-b", "kept"]),
+            )
+            .expect("show buffer")
+            .output
+            .to_string();
+        assert_eq!(shown, stored);
+        take_reliable_messages(&mailbox);
+        shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut context,
+            2,
+            &CommandInvocation::new("if-shell", ["-F", "1", "show-buffer -b kept"]),
+        );
+        let guards = control_command_guards(take_reliable_messages(&mailbox));
+        assert!(
+            guards
+                .iter()
+                .any(|(output, error, _)| output == stored && !error),
+            "{guards:?}"
+        );
+        let displayed = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "#{window_layout}"]),
+            )
+            .expect("display layout")
+            .output
+            .to_string();
+        assert_eq!(displayed.trim_end(), "b25d,80x24,0,0,0");
+    }
+
+    #[test]
+    fn a_control_command_leaves_another_clients_chooser_layouts_in_v2() {
+        let shared = Arc::new(Shared::new(1));
+        let ((alpha, alpha_mailbox, a), _) = two_session_pair(&shared);
+        let (window, pane) = {
+            let inner = shared.inner.lock();
+            let window = inner.engine.state.sessions[&a].active_window;
+            (window, inner.engine.state.windows[&window].active_pane)
+        };
+        let mut context = ExecutionContext::new(Some(a), Some(window), Some(pane));
+        for args in [
+            &["set-buffer", "-b", "one", "value"][..],
+            &["choose-buffer", "-F", "#{window_layout}"][..],
+        ] {
+            shared
+                .execute(
+                    alpha,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("open layout chooser");
+        }
+        take_reliable_messages(&alpha_mailbox);
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        shared.attach(control, a).expect("attach control");
+        let mut control_context = ExecutionContext::new(Some(a), Some(window), Some(pane));
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut control_context,
+                &CommandInvocation::new("set-buffer", ["-b", "two", "value"]),
+            )
+            .expect("control set-buffer");
+        let rows = take_reliable_messages(&alpha_mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooseBuffer {
+                            state: Some(state), ..
+                        },
+                    ..
+                }) => Some(state.items),
+                _ => None,
+            })
+            .flatten()
+            .map(|item| item.text)
+            .collect::<Vec<_>>();
+        assert!(rows.len() >= 2, "{rows:?}");
+        assert!(
+            rows.iter().all(|row| row.starts_with(r#"{"V":2,"L":"#)),
+            "{rows:?}"
+        );
+    }
+
+    #[test]
+    fn subscriptions_print_v2_layouts_whatever_the_new_layouts_flag_says() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("subscribed")
+            .expect("subscribed session");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("subscriber".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).expect("attach control");
+        take_reliable_messages(&mailbox);
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let run = |context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    control,
+                    ClientKind::Control,
+                    context,
+                    &CommandInvocation::new("refresh-client", args.iter().copied()),
+                )
+                .expect("refresh-client");
+        };
+        let values = |mailbox: &OutboundMailbox| {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::SubscriptionChanged { name, value, .. },
+                        ..
+                    }) if name == "lay" => Some(value),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let v2 = r#"{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"a":true,"i":0,"I":"%0"}}"#;
+        run(&mut context, &["-B", "lay::#{window_layout}"]);
+        shared.refresh_control_subscriptions();
+        assert_eq!(values(&mailbox), [v2]);
+        run(&mut context, &["-f", "new-layouts"]);
+        shared.refresh_control_subscriptions();
+        run(&mut context, &["-f", "!new-layouts"]);
+        shared.refresh_control_subscriptions();
+        assert!(values(&mailbox).is_empty());
     }
 
     #[test]
@@ -64149,7 +65677,7 @@ mod tests {
                     message,
                     ProtocolMessage::Event(Event { payload: EventPayload::Snapshot(snapshot), .. })
                         if snapshot.sessions.iter().flat_map(|session| &session.windows)
-                            .any(|state| state.id == window && state.layout_dump.contains("100x30"))
+                            .any(|state| state.id == window && state.layout_dump.contains(r#""w":100,"h":30"#))
                 )
             })
             .expect("live 100x30 snapshot");
@@ -64215,7 +65743,7 @@ mod tests {
             message,
             ProtocolMessage::Attached { session, snapshot, .. }
                 if *session == second && snapshot.sessions.iter().flat_map(|session| &session.windows)
-                    .any(|window| window.id == second_window && window.layout_dump.contains("100x30"))
+                    .any(|window| window.id == second_window && window.layout_dump.contains(r#""w":100,"h":30"#))
         )).expect("new attachment carries resized layout");
         let session_changed = messages.iter().position(|message| matches!(
             message,
@@ -64602,6 +66130,99 @@ mod tests {
             }));
         }
         assert_eq!(CONTROL_SUBSCRIPTION_INTERVAL, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn refresh_client_l_stores_the_client_clipboard_reply_while_the_query_is_pending() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("clipboard")
+            .unwrap();
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("tty".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let queries = || {
+            take_reliable_messages(&mailbox)
+                .iter()
+                .filter(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ClipboardQuery,
+                            ..
+                        })
+                    )
+                })
+                .count()
+        };
+        let buffers = || {
+            shared
+                .inner
+                .lock()
+                .paste_buffers
+                .iter()
+                .map(|buffer| (buffer.name.clone(), buffer.data.clone(), buffer.automatic))
+                .collect::<Vec<_>>()
+        };
+        let reply = |context: &mut ExecutionContext, data: &[u8]| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::ClipboardReply {
+                        data: data.to_vec(),
+                    },
+                )
+                .unwrap();
+        };
+        let refresh = |context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new("refresh-client", ["-l"]),
+                )
+                .unwrap();
+        };
+
+        reply(&mut context, b"unasked");
+        assert!(buffers().is_empty());
+        queries();
+        refresh(&mut context);
+        refresh(&mut context);
+        assert_eq!(queries(), 1);
+        reply(&mut context, &[0, 0xff, b'x']);
+        reply(&mut context, b"late");
+        let stored = buffers();
+        assert_eq!(stored.len(), 1, "{stored:?}");
+        assert!(stored[0].0.starts_with("buffer"), "{stored:?}");
+        assert_eq!(
+            (&stored[0].1[..], stored[0].2),
+            (&[0, 0xff, b'x'][..], true)
+        );
+        refresh(&mut context);
+        assert_eq!(queries(), 1);
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-U"]),
+            ),
+            Err(DaemonError::Server(ServerError::UnsupportedCommand(_)))
+        ));
     }
 
     #[test]
@@ -65693,6 +67314,54 @@ mod tests {
                 }) if text.contains("source-file from standard input is not supported")
             )
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn source_file_of_a_directory_answers_the_command_client_read_error() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().display().to_string();
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        for (request_id, args) in [
+            (1, vec![path.clone()]),
+            (2, vec!["-q".to_owned(), path.clone()]),
+        ] {
+            let response = shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                request_id,
+                &CommandInvocation::new("source-file", args),
+            );
+            let text = format!("{response:?}");
+            assert!(
+                text.contains(&format!("Input/output error: {path}")),
+                "{text}"
+            );
+            assert!(!text.contains("os error"), "{text}");
+        }
+        let nested = directory.path().join("nested.conf");
+        fs::write(&nested, format!("source-file '{path}'\n")).expect("nested source");
+        let response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            3,
+            &CommandInvocation::new("source-file", [nested.display().to_string()]),
+        );
+        let text = format!("{response:?}");
+        assert!(
+            text.contains(&format!("Input/output error: {path}")),
+            "{text}"
+        );
+        assert!(!text.contains("os error"), "{text}");
+        let directory_error = || std::io::Error::from_raw_os_error(libc::EISDIR);
+        assert_eq!(
+            client_source_read_error_warning(false, directory.path(), &directory_error()),
+            format!("Is a directory: {path}")
+        );
     }
 
     #[test]
@@ -71001,18 +72670,18 @@ set-option -g @alias-mixed-next yes
             ),
         )
         .expect("unknown root source");
-        let invalid_utf8 = directory.path().join("invalid-utf8.conf");
-        fs::write(&invalid_utf8, b"display-message -p \x80\n").expect("invalid UTF-8 source");
-        let invalid_utf8_root = directory.path().join("invalid-utf8-root.conf");
+        let unreadable = directory.path().join("unreadable.conf");
+        fs::create_dir(&unreadable).expect("unreadable source");
+        let unreadable_root = directory.path().join("unreadable-root.conf");
         fs::write(
-            &invalid_utf8_root,
+            &unreadable_root,
             format!(
                 "if-shell -F 1 'source-file {}'\n\
-                 display-message -p AFTER_INVALID_UTF8\n",
-                tmux_path(&invalid_utf8),
+                 display-message -p AFTER_UNREADABLE\n",
+                tmux_path(&unreadable),
             ),
         )
-        .expect("invalid UTF-8 root source");
+        .expect("unreadable root source");
 
         let shared = Arc::new(Shared::new(78));
         let command = ClientId(u64::from(u16::MAX));
@@ -71102,16 +72771,13 @@ set-option -g @alias-mixed-next yes
             ),
             (
                 31,
-                &invalid_utf8_root,
+                &unreadable_root,
                 1,
                 vec![
                     "guard:false:false:".to_owned(),
                     "guard:false:false:".to_owned(),
-                    format!(
-                        "error:stream did not contain valid UTF-8: {}",
-                        invalid_utf8.display()
-                    ),
-                    "guard:false:false:AFTER_INVALID_UTF8".to_owned(),
+                    format!("read-error:Is a directory: {}", unreadable.display()),
+                    "guard:false:false:AFTER_UNREADABLE".to_owned(),
                 ],
             ),
         ] {
@@ -71157,6 +72823,13 @@ set-option -g @alias-mixed-next yes
                             },
                         ..
                     }) => Some(format!("error:{text}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::ReadError(text),
+                            },
+                        ..
+                    }) => Some(format!("read-error:{text}")),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -72386,7 +74059,7 @@ set-option -g @alias-mixed-next yes
         let grouped = directory.path().join("grouped.conf");
         let separate = directory.path().join("separate.conf");
         let mixed_read = directory.path().join("mixed-read.conf");
-        let invalid_utf8 = directory.path().join("invalid-utf8.conf");
+        let unreadable = directory.path().join("unreadable.conf");
         fs::write(&grouped, "source-file missing-a.conf missing-b.conf\n")
             .expect("grouped nested source fixture");
         fs::write(
@@ -72394,13 +74067,12 @@ set-option -g @alias-mixed-next yes
             "source-file missing-c.conf\nsource-file missing-d.conf\n",
         )
         .expect("separate nested source fixture");
-        fs::write(&invalid_utf8, b"display-message -p \x80\n")
-            .expect("invalid UTF-8 source fixture");
+        fs::create_dir(&unreadable).expect("unreadable source fixture");
         fs::write(
             &mixed_read,
             format!(
-                "source-file '{}' missing-after-invalid-utf8.conf\n",
-                invalid_utf8.display()
+                "source-file '{}' missing-after-unreadable.conf\n",
+                unreadable.display()
             ),
         )
         .expect("mixed nested source fixture");
@@ -72408,12 +74080,8 @@ set-option -g @alias-mixed-next yes
         let missing_b = "No such file or directory: missing-b.conf";
         let missing_c = "No such file or directory: missing-c.conf";
         let missing_d = "No such file or directory: missing-d.conf";
-        let invalid_utf8_error = format!(
-            "stream did not contain valid UTF-8: {}",
-            invalid_utf8.display()
-        );
-        let missing_after_invalid_utf8 =
-            "No such file or directory: missing-after-invalid-utf8.conf";
+        let unreadable_error = format!("Is a directory: {}", unreadable.display());
+        let missing_after_unreadable = "No such file or directory: missing-after-unreadable.conf";
 
         let shared = Arc::new(Shared::new(66));
         let command = ClientId(u64::from(u16::MAX));
@@ -72523,10 +74191,8 @@ set-option -g @alias-mixed-next yes
                     ..
                 }),
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::ClientMessage {
-                        kind: ClientMessageKind::Error,
-                        text,
-                        ..
+                    payload: EventPayload::ControlSourceFile {
+                        event: ControlSourceFileEvent::ReadError(text),
                     },
                     ..
                 }),
@@ -72542,7 +74208,7 @@ set-option -g @alias-mixed-next yes
                     },
                     ..
                 }),
-            ] if output == missing_after_invalid_utf8 && text == &invalid_utf8_error
+            ] if output == missing_after_unreadable && text == &unreadable_error
         ));
 
         let response = shared.execute_command_request(
@@ -72550,7 +74216,7 @@ set-option -g @alias-mixed-next yes
             ClientKind::Control,
             &mut control_context,
             41,
-            &control_stdin_command("source-file", [invalid_utf8.display().to_string()]),
+            &control_stdin_command("source-file", [unreadable.display().to_string()]),
         );
         assert_eq!(
             response,
@@ -72566,10 +74232,8 @@ set-option -g @alias-mixed-next yes
             take_reliable_messages(&control_mailbox).as_slice(),
             [
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::ClientMessage {
-                        kind: ClientMessageKind::Error,
-                        text,
-                        ..
+                    payload: EventPayload::ControlSourceFile {
+                        event: ControlSourceFileEvent::ReadError(text),
                     },
                     ..
                 }),
@@ -72579,18 +74243,17 @@ set-option -g @alias-mixed-next yes
                     },
                     ..
                 }),
-            ] if text == &invalid_utf8_error
+            ] if text == &unreadable_error
         ));
 
         #[cfg(unix)]
         {
-            let colon_invalid_utf8 = directory.path().join("a: b");
+            let colon_unreadable = directory.path().join("a: b");
             let colon_read = directory.path().join("colon-read.conf");
-            fs::write(&colon_invalid_utf8, b"display-message -p \x80\n")
-                .expect("colon-space invalid UTF-8 fixture");
+            fs::create_dir(&colon_unreadable).expect("colon-space unreadable fixture");
             fs::write(
                 &colon_read,
-                format!("source-file '{}'\n", colon_invalid_utf8.display()),
+                format!("source-file '{}'\n", colon_unreadable.display()),
             )
             .expect("colon-space source fixture");
 
@@ -72625,10 +74288,8 @@ set-option -g @alias-mixed-next yes
                         ..
                     }),
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Error,
-                            text,
-                            ..
+                        payload: EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ReadError(text),
                         },
                         ..
                     }),
@@ -72646,8 +74307,8 @@ set-option -g @alias-mixed-next yes
                     }),
                 ] if output.is_empty()
                     && text == &format!(
-                        "stream did not contain valid UTF-8: {}",
-                        colon_invalid_utf8.display()
+                        "Is a directory: {}",
+                        colon_unreadable.display()
                     )
             ));
         }
@@ -74533,6 +76194,98 @@ set-option -g @alias-mixed-next yes
             ServerError::CommandParse(message)
                 if message == "capture-pane -S requires a value"
         ));
+    }
+
+    #[test]
+    fn capture_pane_parser_takes_line_flags_and_hyperlinks() {
+        let parsed = parse_capture_pane_args(&["-pFH".into()]).expect("capture args");
+        assert!(parsed.options.line_flags);
+        assert!(parsed.options.hyperlinks);
+        let parsed = parse_capture_pane_args(&["-p".into()]).expect("capture args");
+        assert!(!parsed.options.line_flags);
+        assert!(!parsed.options.hyperlinks);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_pane_prints_line_flags_and_each_new_link_like_tmux() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        let run = |context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+                .output
+        };
+        run(
+            &mut context,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "links",
+                "-x",
+                "20",
+                "-y",
+                "6",
+                "printf 'plain\\r\\n\\033]133;C\\007out\\r\\n\\033]8;;http://a\\007aa\\033]8;;\\007 \\033]8;;http://b\\007bb\\033]8;;\\007\\r\\nzz-ready'; exec /bin/cat",
+            ],
+        );
+        let target = context.pane.expect("links pane").to_string();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !run(&mut context, &["capture-pane", "-p", "-t", &target]).contains("zz-ready") {
+            assert!(Instant::now() < deadline, "the pane never printed");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            run(
+                &mut context,
+                &["capture-pane", "-pF", "-S", "0", "-E", "3", "-t", &target]
+            ),
+            "- plain\nO out\nH aa bb\n- zz-ready\n"
+        );
+        assert_eq!(
+            run(&mut context, &["capture-pane", "-pH", "-t", &target]),
+            "http://a http://b\n"
+        );
+        assert_eq!(
+            run(
+                &mut context,
+                &["capture-pane", "-pH", "-E", "1", "-t", &target]
+            ),
+            "\n"
+        );
+        run(
+            &mut context,
+            &["capture-pane", "-H", "-b", "links", "-t", &target],
+        );
+        run(
+            &mut context,
+            &[
+                "capture-pane",
+                "-H",
+                "-b",
+                "nolinks",
+                "-E",
+                "1",
+                "-t",
+                &target,
+            ],
+        );
+        assert_eq!(
+            run(&mut context, &["list-buffers", "-F", "#{buffer_name}"]),
+            "links"
+        );
+        assert_eq!(
+            run(&mut context, &["show-buffer", "-b", "links"]),
+            "http://a http://b\n"
+        );
     }
 
     #[cfg(unix)]
@@ -79644,6 +81397,43 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn agent_send_notify_submits_and_refuses_wait() {
+        let parsed = parse_agent_send_args(&["-t", "%2", "--notify", "go"].map(RawText::from))
+            .expect("parse");
+        assert!(parsed.notify && parsed.submit && !parsed.wait);
+        assert!(parse_agent_send_args(&["--notify", "--wait", "go"].map(RawText::from)).is_err());
+        assert!(
+            parse_agent_send_args(&["--notify", "--timeout", "5", "go"].map(RawText::from))
+                .is_err()
+        );
+    }
+
+    #[cfg(feature = "agent")]
+    #[test]
+    fn agent_notify_messages_carry_the_reply_or_why_there_is_none() {
+        use crate::agent::host::{AgentTurnFailure, AgentTurnReply};
+
+        let pane = PaneId(5);
+        let reply = AgentTurnReply {
+            text: "thinking... done".to_owned(),
+            final_text: "done".to_owned(),
+            ..AgentTurnReply::default()
+        };
+        assert_eq!(
+            agent_notify_message(pane, Some(Ok(reply))),
+            "[zz] Agent %5 finished:\n\ndone"
+        );
+        assert_eq!(
+            agent_notify_message(pane, Some(Err(AgentTurnFailure::Cancelled))),
+            "[zz] Agent %5 was stopped."
+        );
+        assert_eq!(
+            agent_notify_message(pane, None),
+            "[zz] Agent %5 did not take the message."
+        );
+    }
+
+    #[test]
     fn agent_send_parser_reads_target_context_and_trailing_text() {
         let args = [
             "-t%4",
@@ -80018,6 +81808,15 @@ set-option -g @alias-mixed-next yes
                 "pane_last_command_status",
                 "pane_pb_state",
                 "pane_pb_progress",
+                "pane_status",
+                "pane_status_kind",
+                "pane_status_progress",
+                "pane_status_app",
+                "pane_status_title",
+                "pane_status_message",
+                "pane_status_raw_title",
+                "pane_status_raw_message",
+                "pane_status_reported",
                 "agent_state",
                 "agent_pending_permission",
                 "permission",
@@ -80733,7 +82532,7 @@ set-option -g @alias-mixed-next yes
         }
         assert_eq!(spellings, 164);
         assert_eq!(diagnostic_cases, 656);
-        assert_eq!(required_cases, 431);
+        assert_eq!(required_cases, 444);
 
         let mut prefix_cases = 0;
         for spec in &specs {
@@ -81658,6 +83457,162 @@ set-option -g @alias-mixed-next yes
                     .contains_key(&format!("@agent_state@{pane}"))
             );
         }
+        shared.request_shutdown();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn program_status_reports_reach_formats_the_tree_and_agent_state() {
+        let shared = Arc::new(Shared::new(1));
+        let (pane, command) = progress_bar_pane(&shared);
+        let target = pane.to_string();
+        let run = |args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(1),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+        };
+        let settle = |format: &str, expected: &str| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            loop {
+                let output = run(&["display-message", "-p", "-t", &target, format]).output;
+                if output.trim() == expected {
+                    return;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{format} stayed {output:?}, wanted {expected:?}"
+                );
+                thread::sleep(Duration::from_millis(10));
+            }
+        };
+        let tree_status = || {
+            shared.inner.lock().engine.state.snapshot().sessions[0].windows[0].panes[&pane]
+                .status
+                .clone()
+        };
+        let peer_sample = |pid: &str| {
+            run(&[
+                "if-shell",
+                "-F",
+                "-t",
+                &target,
+                &format!("#{{?pane_status_reported,,#{{==:#{{pane_pid}},{pid}}}}}"),
+                &format!("set-option -p -t {target} @agent_state working"),
+            ]);
+        };
+        let pane_pid = || {
+            run(&["display-message", "-p", "-t", &target, "#{pane_pid}"])
+                .output
+                .trim()
+                .to_owned()
+        };
+        run(&[
+            "set-option",
+            "-p",
+            "-t",
+            &target,
+            "@agent-progress-commands",
+            &command,
+        ]);
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]7501;state=working:app=tf\\007\\033]7501;state=blocked:id=plan:kind=permission:progress=40:title=UGxhbg:msg=QXBwbHkgIzE/\\007'",
+            "Enter",
+        ]);
+        settle(
+            "#{pane_status}|#{pane_status_kind}|#{pane_status_progress}|#{pane_status_app}|#{pane_status_title}|#{pane_status_message}|#{pane_status_raw_message}|#{pane_status_reported}|#{agent_state}",
+            "blocked|permission|40|tf|Plan|Apply ##1?|Apply #1?|1|blocked",
+        );
+        assert_eq!(
+            tree_status(),
+            Some(PaneStatus {
+                state: PaneStatusState::Blocked,
+                kind: Some(PaneStatusKind::Permission),
+                progress: Some(40),
+                app: "tf".to_owned(),
+                title: "Plan".to_owned(),
+                message: "Apply #1?".to_owned(),
+            })
+        );
+
+        let old_pid = pane_pid();
+        peer_sample(&old_pid);
+        settle("#{agent_state}", "blocked");
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]9;4;0\\007\\033]7501;state=done:id=plan\\007\\033]0;yielded\\007'",
+            "Enter",
+        ]);
+        settle(
+            "#{pane_title}|#{pane_status}|#{agent_state}",
+            "yielded|working|working",
+        );
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]133;A\\007'",
+            "Enter",
+        ]);
+        settle(
+            "#{pane_status}|#{pane_status_app}|#{agent_state}",
+            "done||idle",
+        );
+        assert_eq!(
+            tree_status().map(|status| status.state),
+            Some(PaneStatusState::Done)
+        );
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]7501;state=working\\007'",
+            "Enter",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "working|working");
+        run(&["send-keys", "-t", &target, "printf '\\033c'", "Enter"]);
+        settle(
+            "#{pane_status}|#{pane_status_reported}|#{agent_state}",
+            "|0|idle",
+        );
+        assert_eq!(tree_status(), None);
+
+        run(&[
+            "send-keys",
+            "-t",
+            &target,
+            "printf '\\033]7501;state=blocked\\007'",
+            "Enter",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "blocked|blocked");
+        run(&["respawn-pane", "-k", "-t", &target]);
+        settle("#{pane_status}|#{agent_state}", "|idle");
+        assert_eq!(tree_status(), None);
+        peer_sample(&old_pid);
+        settle("#{agent_state}", "idle");
+
+        run(&[
+            "agent-send",
+            "-t",
+            &target,
+            "--wait",
+            "--timeout",
+            "10",
+            "printf '\\033]7501;state=working\\007\\033]7501;state=done\\007'",
+        ]);
+        settle("#{pane_status}|#{agent_state}", "done|idle");
         shared.request_shutdown();
     }
 
@@ -86682,7 +88637,7 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn capture_pane_parser_rejects_unimplemented_flags() {
-        for flag in ["-F", "-H", "-P", "-R"] {
+        for flag in ["-P", "-R"] {
             let error = parse_capture_pane_args(&[flag.into()]).expect_err("unsupported flag");
             assert!(matches!(error, ServerError::CommandParse(_)), "{flag}");
         }
@@ -86830,18 +88785,18 @@ set-option -g @alias-mixed-next yes
             assert!(!buffer.automatic);
         }
 
-        let error = shared
-            .buffer_command(
-                &context,
-                "show-buffer",
-                &["-b", "binary"].map(RawText::from),
-            )
-            .expect_err("binary output cannot cross the text command response");
-        assert!(matches!(
-            error,
-            DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.contains("non-UTF-8") && message.contains("save-buffer")
-        ));
+        assert_eq!(
+            shared
+                .buffer_command(
+                    &context,
+                    "show-buffer",
+                    &["-b", "binary"].map(RawText::from),
+                )
+                .expect("show binary buffer")
+                .output
+                .as_bytes(),
+            bytes
+        );
 
         shared
             .buffer_command(
@@ -86887,7 +88842,13 @@ set-option -g @alias-mixed-next yes
         mailbox.close();
 
         let error = shared
-            .buffer_command_for_client(Some(client), &context, "save-buffer", &args)
+            .buffer_command_for_client(
+                Some(client),
+                ClientKind::Command,
+                &context,
+                "save-buffer",
+                &args,
+            )
             .expect_err("a closed writer cannot take the write");
         assert!(matches!(
             error,
@@ -94233,7 +96194,6 @@ bind - split-window -v -c "#{pane_current_path}"
                 data: Arc::from(b"first line\nsecond line".as_slice()),
                 created: UNIX_EPOCH + Duration::from_secs(20),
                 automatic: false,
-                utf8: true,
             },
             PasteBuffer {
                 name: "older".to_owned(),
@@ -94246,7 +96206,6 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
                 created: UNIX_EPOCH + Duration::from_secs(10),
                 automatic: false,
-                utf8: true,
             },
         ];
         let mut chooser = ChooseBufferSession::new(
@@ -94686,7 +96645,6 @@ bind - split-window -v -c "#{pane_current_path}"
                 data: Arc::from(format!("payload {index}").into_bytes()),
                 created: UNIX_EPOCH + Duration::from_secs(100 + index),
                 automatic: false,
-                utf8: true,
             })
             .collect::<Vec<_>>();
         let facts = FormatHookFacts::default();
@@ -94935,14 +96893,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 data: Arc::from(b"new".as_slice()),
                 created: UNIX_EPOCH + Duration::from_secs(20),
                 automatic: false,
-                utf8: true,
             },
             PasteBuffer {
                 name: "older".to_owned(),
                 data: Arc::from(b"old".as_slice()),
                 created: UNIX_EPOCH + Duration::from_secs(10),
                 automatic: false,
-                utf8: true,
             },
         ];
         let filtered = ChooseBufferSession::new(
@@ -94985,7 +96941,6 @@ bind - split-window -v -c "#{pane_current_path}"
             data: Arc::from(b"match".as_slice()),
             created: UNIX_EPOCH + Duration::from_secs(30),
             automatic: false,
-            utf8: true,
         });
         fallback.rebuild(&engine, &buffers, Some(z), &facts);
         assert_eq!(fallback.names, ["missing"]);
@@ -95724,8 +97679,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let peer_snapshot = latest_reliable_snapshot(&peer_messages);
         assert_eq!(peer_snapshot.generation, published_generation);
         assert!(
-            peer_snapshot.sessions[0].windows[0]
-                .layout_dump
+            zz_mux::legacy_layout(&peer_snapshot.sessions[0].windows[0].layout_dump)
                 .ends_with(&format!("100x60,0,0,{}", pane.0)),
             "{}",
             peer_snapshot.sessions[0].windows[0].layout_dump
@@ -95880,8 +97834,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let peer_snapshot = latest_reliable_snapshot(&peer_messages);
         assert_eq!(peer_snapshot.generation, mouse_published_generation);
         assert!(
-            peer_snapshot.sessions[0].windows[0]
-                .layout_dump
+            zz_mux::legacy_layout(&peer_snapshot.sessions[0].windows[0].layout_dump)
                 .ends_with(&format!("100x60,0,0,{}", pane.0)),
             "{}",
             peer_snapshot.sessions[0].windows[0].layout_dump
@@ -97781,7 +99734,9 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("display-message")
             .output;
         assert!(
-            layout.contains("119x23,0,0{108x23,0,0,") && layout.contains(",10x23,109,0,"),
+            layout.contains(
+                r#"{"t":"h","w":119,"h":23,"x":0,"y":0,"c":[{"t":"p","w":108,"h":23,"x":0,"y":0,"#
+            ) && layout.contains(r#"{"t":"p","w":10,"h":23,"x":109,"y":0,"#),
             "{layout}"
         );
     }
@@ -102636,7 +104591,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 "0",
                 "111",
                 "56",
-                "attached,focused,read-only,active-pane,UTF-8",
+                "attached,focused,read-only,UTF-8",
                 "43",
                 "copy-mode",
                 "format-last",
@@ -103118,13 +105073,10 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("attach with requested flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "attached,focused,ignore-size,no-detach-on-destroy,read-only"
         );
         let flags = shared.inner.lock().client_flags.get(client);
-        assert_eq!(
-            flags.reconnect_flags(),
-            "ignore-size,active-pane,no-detach-on-destroy"
-        );
+        assert_eq!(flags.reconnect_flags(), "ignore-size,no-detach-on-destroy");
         let messages = take_reliable_messages(&mailbox);
         assert!(messages.iter().any(|message| matches!(
             message,
@@ -103132,7 +105084,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 read_only: true,
                 client_flags,
                 ..
-            } if client_flags == "ignore-size,active-pane,no-detach-on-destroy"
+            } if client_flags == "ignore-size,no-detach-on-destroy"
         )));
         assert!(client_ignores_size(&shared.inner.lock(), client));
 
@@ -103153,12 +105105,12 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.detach(client);
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "focused,ignore-size,no-detach-on-destroy,read-only"
         );
         shared.attach(client, a).expect("plain reattach");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,ignore-size,no-detach-on-destroy,read-only,active-pane"
+            "attached,focused,ignore-size,no-detach-on-destroy,read-only"
         );
 
         shared
@@ -103231,7 +105183,7 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("control attach flags");
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,control-mode,ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3,read-only,active-pane"
+            "attached,focused,control-mode,ignore-size,no-detach-on-destroy,no-output,wait-exit,pause-after=3,read-only"
         );
 
         shared
@@ -103328,14 +105280,21 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-s", "fresh", "-f", "active-pane"],
+                    ["-s", "fresh", "-f", "no-detach-on-destroy"],
                 ),
             ),
             Err(DaemonError::Server(ServerError::InvalidCommand(message)))
                 if message == "open terminal failed: not a terminal"
         ));
         assert_eq!(shared.inner.lock().engine.state.sessions.len(), sessions);
-        assert!(!shared.inner.lock().client_flags.get(client).active_pane);
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .client_flags
+                .get(client)
+                .no_detach_on_destroy
+        );
 
         shared
             .execute(
@@ -103344,11 +105303,18 @@ bind - split-window -v -c "#{pane_current_path}"
                 &mut context,
                 &CommandInvocation::new(
                     "new-session",
-                    ["-d", "-s", "detached", "-f", "active-pane"],
+                    ["-d", "-s", "detached", "-f", "no-detach-on-destroy"],
                 ),
             )
             .expect("detached creation ignores client flags");
-        assert!(!shared.inner.lock().client_flags.get(client).active_pane);
+        assert!(
+            !shared
+                .inner
+                .lock()
+                .client_flags
+                .get(client)
+                .no_detach_on_destroy
+        );
     }
 
     #[test]
@@ -103669,10 +105635,9 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("create and attach with flags");
         let flags = shared.inner.lock().client_flags.get(client);
         assert!(flags.ignore_size);
-        assert!(flags.active_pane);
         assert_eq!(
             format_client_flags(&shared.inner.lock(), client),
-            "attached,focused,ignore-size,active-pane"
+            "attached,focused,ignore-size"
         );
     }
 
@@ -110299,7 +112264,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 &CommandInvocation::new("set-buffer", ["-b", "hook-row", "value"]),
             )
             .expect("daemon-preempted hook body");
-        assert_eq!(hook_output.output, "after-set-buffer|list-buffers");
+        assert_eq!(hook_output.output, "after-set-buffer|set-buffer");
 
         for (args, value) in [
             (
@@ -111946,7 +113911,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert!(matches!(
             error,
             DaemonError::Server(ServerError::InvalidCommand(message))
-                if message == "invalid layout: bogus"
+                if message == "malformed layout header: bogus"
         ));
         {
             let inner = shared.inner.lock();

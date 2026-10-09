@@ -1181,6 +1181,7 @@ struct ControlState {
     last_windows: BTreeMap<SessionId, WindowId>,
     self_name: Option<String>,
     wait_exit: bool,
+    new_layouts: bool,
     return_code: u8,
     pending_return: Option<PendingReturn>,
     parked_queue_released: bool,
@@ -1336,7 +1337,7 @@ fn handle_protocol<W: Write>(
                 output.pane_output(&render_pane_output(pane, &bytes))?;
             }
             EventPayload::PaneOutputState { pane, paused } => {
-                output.notify_in_block(
+                output.notify(
                     format!("%{} {pane}", if paused { "pause" } else { "continue" }).as_bytes(),
                 )?;
             }
@@ -1347,7 +1348,14 @@ fn handle_protocol<W: Write>(
             } => {
                 output.pane_output(&render_pane_output_aged(pane, age_ms, &bytes))?;
             }
-            EventPayload::ControlFlags { wait_exit, .. } => state.wait_exit = wait_exit,
+            EventPayload::ControlFlags {
+                wait_exit,
+                new_layouts,
+                ..
+            } => {
+                state.wait_exit = wait_exit;
+                state.new_layouts = new_layouts;
+            }
             EventPayload::SubscriptionChanged {
                 name,
                 session,
@@ -1489,10 +1497,17 @@ fn render_hook(
             }
             let window_id = value("hook_window")?;
             let (session, window) = state.window(window_id)?;
+            let layout = |dump: &str| {
+                if state.new_layouts {
+                    dump.to_owned()
+                } else {
+                    zz_mux::legacy_layout(dump)
+                }
+            };
             Some(format!(
                 "%layout-change {window_id} {} {} {}",
-                window.layout_dump,
-                window.visible_layout_dump,
+                layout(&window.layout_dump),
+                layout(&window.visible_layout_dump),
                 state.raw_window_flags(session, window)
             ))
         }
@@ -2297,15 +2312,6 @@ impl<W: Write> ControlWriter<W> {
             self.output.flush()?;
         }
         Ok(())
-    }
-
-    /// `control_pause_pane` and `control_continue_pane` reach `control_write`
-    /// straight from `refresh-client`, so their line lands inside the running
-    /// command's guard; the notify queue's own lines drain after it instead.
-    fn notify_in_block(&mut self, line: &[u8]) -> io::Result<()> {
-        self.output.write_all(line)?;
-        self.output.write_all(b"\n")?;
-        self.output.flush()
     }
 
     fn notify(&mut self, line: &[u8]) -> io::Result<()> {
@@ -5020,11 +5026,11 @@ mod tests {
             assert_eq!(
                 writer.output,
                 b"%output %7 before\n\
-                  %begin 21 1 1\n%pause %7\n%continue %7\nbody\n%end 21 1 1\n\
-                  %window-add @3\n\
+                  %begin 21 1 1\nbody\n%end 21 1 1\n\
+                  %pause %7\n%window-add @3\n\
                   %begin 22 2 1\ndiagnostic\n%error 22 2 1\n\
                   %begin 23 3 0\nguard\n%end 23 3 0\n\
-                  source\ncommand\n%exit\n"
+                  source\ncommand\n%continue %7\n%exit\n"
             );
         }
     }
@@ -5237,6 +5243,7 @@ mod tests {
                 wait_exit: true,
                 pause_after_ms: Some(1000),
                 no_output: false,
+                new_layouts: true,
             },
         ] {
             assert_eq!(
@@ -5253,6 +5260,7 @@ mod tests {
             );
         }
         assert!(state.wait_exit);
+        assert!(state.new_layouts);
         assert_eq!(writer.output, b"%pause %7\n%continue %7\n");
     }
 
@@ -5519,6 +5527,7 @@ mod tests {
                     active_border_colour: None,
                     border_status_text: String::new(),
                     mode: None,
+                    status: None,
                 },
             )]),
             layout_dump: "abcd,80x24,0,0,5".to_owned(),
@@ -5562,6 +5571,28 @@ mod tests {
         assert_eq!(
             render_hook(&state, "window-layout-changed", &variables).as_deref(),
             Some("%layout-change @3 abcd,80x24,0,0,5 ef01,80x24,0,0,5 !*-Z")
+        );
+    }
+
+    #[test]
+    fn layout_notifications_print_v1_until_the_client_sets_new_layouts() {
+        let mut state = layout_notification_state();
+        let layout = r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"l":0,"i":0,"I":"%0"},{"t":"p","w":39,"h":24,"x":41,"y":0,"a":true,"i":1,"I":"%5"}]}}"#;
+        let visible = r#"{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"a":true,"i":1,"I":"%5"}}"#;
+        let window = &mut state.snapshot.sessions[0].windows[0];
+        window.layout_dump = layout.to_owned();
+        window.visible_layout_dump = visible.to_owned();
+        let variables = BTreeMap::from([("hook_window".to_owned(), "@3".to_owned())]);
+        assert_eq!(
+            render_hook(&state, "window-layout-changed", &variables).as_deref(),
+            Some(
+                "%layout-change @3 8207,80x24,0,0{40x24,0,0,0,39x24,41,0,5} b262,80x24,0,0,5 !*-Z"
+            )
+        );
+        state.new_layouts = true;
+        assert_eq!(
+            render_hook(&state, "window-layout-changed", &variables),
+            Some(format!("%layout-change @3 {layout} {visible} !*-Z"))
         );
     }
 

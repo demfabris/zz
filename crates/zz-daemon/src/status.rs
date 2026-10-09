@@ -27,7 +27,8 @@ use zz_protocol::{
     RawText, SessionId, StatusLine, TmuxColour, WindowId,
 };
 use zz_terminal::{
-    CellWidth, CopyModeFacts, ProgressBar, TerminalColorScheme, TerminalSession, TerminalViewport,
+    CellWidth, CopyModeFacts, PRIVATE_MODE_NUMBERS, ProgramBlockKind, ProgramStatusRecord,
+    ProgressBar, TerminalColorScheme, TerminalFacts, TerminalSession, TerminalViewport,
 };
 
 use crate::{
@@ -657,6 +658,15 @@ pub(crate) fn status_cache_callbacks(request: &StatusRequest) -> Option<Vec<Stri
                     | "agent_pending_permission"
                     | "browser_url"
                     | "pane_last_command_status"
+                    | "pane_status"
+                    | "pane_status_kind"
+                    | "pane_status_progress"
+                    | "pane_status_app"
+                    | "pane_status_title"
+                    | "pane_status_message"
+                    | "pane_status_raw_title"
+                    | "pane_status_raw_message"
+                    | "pane_status_reported"
             )
             || COPY_MODE_CONTEXT_FORMATS.contains(&name)
             || LIST_CLIENTS_CONTEXT_FORMATS.contains(&name)
@@ -2116,6 +2126,53 @@ fn render(
     }
 }
 
+fn unix_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+#[cfg(test)]
+const PANE_OUTPUT_FORMATS: &[&str] = &[
+    "pane_command_duration",
+    "pane_command_end_time",
+    "pane_command_running",
+    "pane_command_start_time",
+    "pane_command_status",
+    "pane_last_output_time",
+    "pane_last_prompt_time",
+    "pane_output_generation",
+    "pane_private_modes",
+];
+
+/// `format_cb_pane_output_generation`, the OSC 133 command callbacks and
+/// `format_cb_pane_private_modes`: a time or status the pane never recorded
+/// answers null, as the pin's callbacks do.
+fn pane_output_variable(name: &str, facts: &TerminalFacts, now: u64) -> Option<String> {
+    let output = &facts.output;
+    let time = |value: u64| (value != 0).then(|| value.to_string());
+    match name {
+        "pane_output_generation" => Some(output.output_generation.to_string()),
+        "pane_last_output_time" => time(output.last_output_time),
+        "pane_last_prompt_time" => time(output.last_prompt_time),
+        "pane_command_start_time" => time(output.command_start_time),
+        "pane_command_end_time" => time(output.command_end_time),
+        "pane_command_running" => Some(u8::from(output.command_running).to_string()),
+        "pane_command_duration" => output.command_duration(now).map(|value| value.to_string()),
+        "pane_command_status" => output.command_status.map(|status| status.to_string()),
+        "pane_private_modes" => {
+            let modes = PRIVATE_MODE_NUMBERS
+                .iter()
+                .enumerate()
+                .filter(|(bit, _)| facts.private_modes & (1 << bit) != 0)
+                .map(|(_, number)| number.to_string())
+                .collect::<Vec<_>>();
+            (!modes.is_empty()).then(|| modes.join(","))
+        }
+        _ => None,
+    }
+}
+
 /// The pin's window-scope availability rule: `format_cb_window_cell_width` and
 /// its height twin answer null unless a window is in the format's context.
 fn window_scoped(context: &StatusContext) -> bool {
@@ -2566,7 +2623,17 @@ impl DaemonFormatHooks<'_> {
     }
 }
 
+/// `get_timer`'s millisecond clock for `format_cycle`, anchored at first use.
+fn cycle_clock_ms() -> u64 {
+    static ANCHOR: LazyLock<std::time::Instant> = LazyLock::new(std::time::Instant::now);
+    u64::try_from(ANCHOR.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
 impl StatusHooks for DaemonFormatHooks<'_> {
+    fn cycle_clock(&mut self) -> Option<u64> {
+        self.status_client.map(|_| cycle_clock_ms())
+    }
+
     fn stable_option_lookups(&self) -> bool {
         true
     }
@@ -2995,6 +3062,24 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     _ => u8::from(facts.mouse_tracking).to_string(),
                 })
             }
+            "pane_output_generation"
+            | "pane_last_output_time"
+            | "pane_last_prompt_time"
+            | "pane_command_start_time"
+            | "pane_command_end_time"
+            | "pane_command_running"
+            | "pane_command_duration"
+            | "pane_command_status"
+            | "pane_private_modes" => {
+                let pane = context.pane_id.parse().ok()?;
+                let facts = self
+                    .facts
+                    .terminals()
+                    .get(&pane)
+                    .map(|terminal| terminal.facts())
+                    .unwrap_or_default();
+                pane_output_variable(name, &facts, unix_now())
+            }
             "pane_last_command_status" => Some(
                 context
                     .pane_id
@@ -3014,6 +3099,35 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     .state
                     .as_str()
                     .to_owned(),
+            ),
+            "pane_status_reported" => Some(
+                u8::from(pane_program_status_reported(self.facts, &context.pane_id)).to_string(),
+            ),
+            "pane_status"
+            | "pane_status_kind"
+            | "pane_status_progress"
+            | "pane_status_app"
+            | "pane_status_title"
+            | "pane_status_message"
+            | "pane_status_raw_title"
+            | "pane_status_raw_message" => Some(
+                pane_program_status(self.facts, &context.pane_id)
+                    .map(|record| match name {
+                        "pane_status" => record.state.as_str().to_owned(),
+                        "pane_status_kind" => {
+                            record.kind.map_or("", ProgramBlockKind::as_str).to_owned()
+                        }
+                        "pane_status_progress" => record
+                            .progress
+                            .map(|progress| progress.to_string())
+                            .unwrap_or_default(),
+                        "pane_status_app" => record.app,
+                        "pane_status_title" => record.title.replace('#', "##"),
+                        "pane_status_message" => record.message.replace('#', "##"),
+                        "pane_status_raw_title" => record.title,
+                        _ => record.message,
+                    })
+                    .unwrap_or_default(),
             ),
             "window_active_clients" => Some(
                 self.facts
@@ -3095,6 +3209,21 @@ fn pane_progress_bar(facts: &dyn FormatFactSource, pane: &str) -> Option<Progres
             .map(|terminal| terminal.progress_bar())
             .unwrap_or_default(),
     )
+}
+
+fn pane_program_status_reported(facts: &dyn FormatFactSource, pane: &str) -> bool {
+    pane.parse()
+        .ok()
+        .and_then(|pane| facts.terminals().get(&pane))
+        .is_some_and(|terminal| terminal.program_status().reported())
+}
+
+fn pane_program_status(facts: &dyn FormatFactSource, pane: &str) -> Option<ProgramStatusRecord> {
+    facts
+        .terminals()
+        .get(&pane.parse().ok()?)?
+        .program_status()
+        .headline()
 }
 
 fn buffer_full(data: &[u8]) -> String {
@@ -3556,7 +3685,7 @@ mod tests {
     #[test]
     fn daemon_delegated_format_consumers_match_mux_inventory() {
         let delegated = zz_mux::delegated_format_variable_names().collect::<Vec<_>>();
-        assert_eq!(delegated.len(), 57);
+        assert_eq!(delegated.len(), 66);
 
         let session = SessionId(1);
         let pane = PaneId(1);
@@ -3602,10 +3731,58 @@ mod tests {
         let mut hooks = DaemonFormatHooks::command(&facts);
         for name in delegated {
             assert!(
-                hooks.variable(name, &context).is_some(),
+                hooks.variable(name, &context).is_some() || PANE_OUTPUT_FORMATS.contains(&name),
                 "daemon format hook does not consume {name}"
             );
         }
+        let recorded = TerminalFacts {
+            output: zz_terminal::PaneOutputFacts {
+                output_generation: 3,
+                last_output_time: 100,
+                last_prompt_time: 90,
+                command_start_time: 95,
+                command_end_time: 99,
+                command_running: false,
+                command_status: Some(2),
+            },
+            private_modes: 0b1_0100,
+            ..TerminalFacts::default()
+        };
+        for name in PANE_OUTPUT_FORMATS {
+            assert!(
+                pane_output_variable(name, &recorded, 200).is_some(),
+                "{name}"
+            );
+        }
+        assert_eq!(
+            pane_output_variable("pane_private_modes", &recorded, 200).as_deref(),
+            Some("7,25")
+        );
+        assert_eq!(
+            pane_output_variable("pane_command_duration", &recorded, 200).as_deref(),
+            Some("4")
+        );
+        let running = TerminalFacts {
+            output: zz_terminal::PaneOutputFacts {
+                command_running: true,
+                command_end_time: 0,
+                command_status: None,
+                ..recorded.output
+            },
+            ..recorded
+        };
+        assert_eq!(
+            pane_output_variable("pane_command_duration", &running, 200).as_deref(),
+            Some("105")
+        );
+        assert_eq!(
+            pane_output_variable("pane_command_status", &running, 200),
+            None
+        );
+        assert_eq!(
+            pane_output_variable("pane_last_prompt_time", &TerminalFacts::default(), 200),
+            None
+        );
     }
 
     #[test]
@@ -4349,7 +4526,10 @@ mod tests {
         assert_eq!(context.pane_index, 2);
         assert_eq!(
             context.window_layout,
-            engine.state.windows[&window].layout.dump()
+            engine.state.windows[&window].layout_string(
+                zz_mux::LayoutFormat::V2,
+                engine.state.pane_base_index(window)
+            )
         );
     }
 

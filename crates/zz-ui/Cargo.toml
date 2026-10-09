@@ -38,7 +38,6 @@ rust-embed = { version = "8.12", features = ["include-exclude"] }
 merman.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-similar = "2.7.0"
 smallvec.workspace = true
 # Cross-platform monotonic clock for the scrollbar's fade timing; zero-cost on
 # native, backed by web APIs under WASM.

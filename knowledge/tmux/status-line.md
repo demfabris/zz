@@ -244,8 +244,8 @@ Variables resolve against the client's attached session, focused window, and act
 session row backfills its active window and pane. A window row backfills its active pane. The
 `session_format`, `window_format`, and `pane_format` flags retain the row type from before that
 backfill. `display-message` resolves its target first and uses a pane row, matching tmux's
-`FORMAT_TYPE_PANE`. The `window_layout` value is the checksummed cell tree that `select-layout <string>`
-accepts. While zoomed, it remains the saved tiled tree and `window_visible_layout` reports the
+`FORMAT_TYPE_PANE`. The `window_layout` value is tmux 3.8's JSON v2 layout string (the checksummed v1 tree for a
+control client without `new-layouts`), and `select-layout <string>` accepts both. While zoomed, it remains the saved tiled tree and `window_visible_layout` reports the
 one-pane zoom tree. On the status line, `window_active` and `pane_active` read `1` and `#F` includes `*`.
 The four geometry variables always answer from the cell-authoritative layout tree: a headless
 window is born at tmux's `default-size` 80x24 and reports its exact allocations, a drawn window
@@ -274,7 +274,7 @@ the [divergence matrix](/tmux/divergences.md#format-variables-that-remain-unback
 | Daemon runtime feed | `pane_current_command`, `pane_current_path`, `pane_path`, `pane_start_path`, `pane_pid`, `pane_tty`, `pane_dead_signal`, `pane_dead_time`, `pane_pipe`, `pane_pipe_pid`, `pane_pb_progress`, `pane_pb_state` (the pane worker's OSC 9;4 progress bar), `session_created` |
 | Terminal worker facts through daemon hooks | `history_size`, `cursor_x`, `cursor_y`, `alternate_on` (primary history survives alternate entry; pending-wrap cursor column equals pane width), `cursor_flag` (0 while the pane hides its cursor, as an empty pane does from the start) |
 | Daemon buffer hook | `buffer_created`, `buffer_full`, `buffer_name`, `buffer_sample`, `buffer_size` |
-| Daemon superset hook (`DaemonFormatHooks::variable` answers before the pinned table, so neither name is in `FORMAT_VARIABLES` or the oracle diff) | `pane_kind` (`terminal`, `agent`, `browser`, `editor`, `picker` — what `list-panes -F` needs to find the agent), and every `@name` user option, read pane → the pane's window → session → global window → global session → server, the way tmux's `#{@name}` reads |
+| Daemon superset hook (`DaemonFormatHooks::variable` answers before the pinned table, so none of these names is in `FORMAT_VARIABLES` or the oracle diff) | `pane_kind` (`terminal`, `agent`, `browser`, `editor`, `picker` — what `list-panes -F` needs to find the agent), the pane's most urgent [OSC 7501 program status](/terminal/program-status.md) record as `pane_status`, `pane_status_kind`, `pane_status_progress`, `pane_status_app`, `pane_status_title` and `pane_status_message` (`#` doubled), their raw twins `pane_status_raw_title` and `pane_status_raw_message`, `pane_status_reported`, and every `@name` user option, read pane → the pane's window → session → global window → global session → server, the way tmux's `#{@name}` reads |
 | Pinned tmux default, enabled | `wrap_flag` |
 | Per-client daemon hook (every attached client context carries one `ClientFormatFacts` record) | `client_activity`, `client_cell_height`, `client_cell_width`, `client_colours`, `client_control_mode`, `client_created`, `client_discarded`, `client_flags`, `client_height`, `client_key_table`, `client_last_session`, `client_name`, `client_pid`, `client_prefix`, `client_readonly`, `client_session`, `client_termfeatures`, `client_termname`, `client_termtype`, `client_theme`, `client_tty`, `client_uid`, `client_user`, `client_utf8`, `client_width`, `client_written` |
 | Daemon session-attachment hook | `session_last_attached` |

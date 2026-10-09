@@ -60,7 +60,7 @@ cleanup() {
         wait "$pid" >/dev/null 2>&1
     done
     for name in CP_ANSWER CP_CHAIN CP_AFTER CP_FORMAT CP_CANCEL CP_BACKGROUND \
-        CP_SECOND CP_READONLY CP_NOCLIENT; do
+        CP_SECOND CP_READONLY CP_NOCLIENT CP_QUOTE; do
         main_client set-environment -gu "$name" >/dev/null 2>&1
     done
     exit "$cleanup_status"
@@ -179,6 +179,33 @@ check_equal answer-exit 0 "$(cat "$work/answer.exit" 2>/dev/null)"
 check_equal answer-substituted said-hello "$(value CP_ANSWER)"
 check_equal chain-continued after "$(value CP_AFTER)"
 
+# %% is meant for single quotes, so cmd_template_replace writes a ' in the
+# answer as '\'' and the quoted word survives it; %%% is for double quotes and
+# escapes only its own list, leaving the ' alone.
+main_client set-environment -g CP_QUOTE pending
+(
+    main_client command-prompt -t "$client" -p 'quote ' \
+        "set-environment -g CP_QUOTE 'q-%%'"
+) &
+quote_pid=$!
+sleep 1.0
+drive "keys 697427730d"
+sleep 1.2
+await_pid "$quote_pid" quote-parked
+check_equal single-quote-escaped "q-it's" "$(value CP_QUOTE)"
+
+main_client set-environment -g CP_QUOTE pending
+(
+    main_client command-prompt -t "$client" -p 'dquote ' \
+        'set-environment -g CP_QUOTE "d-%%%"'
+) &
+dquote_pid=$!
+sleep 1.0
+drive "keys 697427730d"
+sleep 1.2
+await_pid "$dquote_pid" dquote-parked
+check_equal double-quote-left-alone "d-it's" "$(value CP_QUOTE)"
+
 # A target that matches no client is cmd_find_client's own diagnostic.
 rm -f "$work/miss.err"
 miss_rc=0
@@ -295,11 +322,11 @@ else
     check_equal readonly-ran-nothing pending "$(value CP_READONLY)"
 fi
 
-if [ "$check_count" -ne 23 ]; then
+if [ "$check_count" -ne 25 ]; then
     record_failure total-checks
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g COMMAND_PROMPT_TARGET clean:23
+    main_client set-environment -g COMMAND_PROMPT_TARGET clean:25
 else
     sed "s/^/command-prompt-target-$side: /" "$work/failures"
 fi

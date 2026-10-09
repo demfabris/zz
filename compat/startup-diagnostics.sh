@@ -2,8 +2,9 @@
 set -eEuo pipefail
 set +B
 
-PIN="d77c9dc6aa021e4bc61f0da128c591af695e6466"
-TMUX_VERSION="tmux next-3.8"
+TAG="3.8"
+PIN="7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53"
+TMUX_VERSION="tmux 3.8"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 TMUX_FETCH_SCRIPT="$ROOT_DIR/compat/fetch-tmux.sh"
 TMUX_BUILD_STAMP="$ROOT_DIR/compat/.cache/tmux-build.stamp"
@@ -88,8 +89,8 @@ if ! FETCH_CHECKSUM="$(cksum <"$TMUX_FETCH_SCRIPT")" || \
   printf 'error: failed to checksum the tmux fetch recipe or binary\n' >&2
   exit 2
 fi
-EXPECTED_STAMP="$(printf 'commit=%s\nversion=%s\nscript-cksum=%s\nbinary-cksum=%s\n' \
-  "$PIN" "$TMUX_VERSION" "$FETCH_CHECKSUM" "$BINARY_CHECKSUM")"
+EXPECTED_STAMP="$(printf 'tag=%s\ncommit=%s\nversion=%s\nscript-cksum=%s\nbinary-cksum=%s\n' \
+  "$TAG" "$PIN" "$TMUX_VERSION" "$FETCH_CHECKSUM" "$BINARY_CHECKSUM")"
 if ! ACTUAL_STAMP="$(cat "$TMUX_BUILD_STAMP")"; then
   printf 'error: tmux build stamp is unreadable: %s\n' "$TMUX_BUILD_STAMP" >&2
   exit 2

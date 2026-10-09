@@ -43,6 +43,7 @@ enum MainEvent {
     },
     Frames(u64),
     KittyImages(u64),
+    ClipboardQuery(u64),
     Terminal(Result<TerminalEvent, String>),
     Disconnected {
         connection: u64,
@@ -594,6 +595,7 @@ pub(crate) fn run(
     model.update_snapshot(Arc::clone(lock_core(&core).snapshot()));
     model.begin_client_focus_attach();
     let mut event_loop = EventLoop::new(&client).map_err(|error| error.to_string())?;
+    event_loop.adopt_negotiation(&core);
     if terminal.kitty_probe_sent() {
         event_loop.await_graphics_reply();
     }
@@ -720,6 +722,7 @@ pub(crate) fn run(
                                         | CoreEvent::KeyTablesChanged
                                 ) {
                                     refresh_terminal_options(&mut model, &core, &escape_time);
+                                    event_loop.adopt_negotiation(&core);
                                 }
                                 let popup_lifecycle_changed = matches!(
                                     &*event,
@@ -791,6 +794,15 @@ pub(crate) fn run(
                     });
                 }
                 paint_pending(paint, &mut model, &client, &mut browser, &mut renderer)?;
+            }
+            MainEvent::ClipboardQuery(event_connection) => {
+                if event_connection == connection_id {
+                    event_loop.await_clipboard_reply();
+                    renderer.queue_control(clipboard::QUERY.to_vec());
+                    renderer
+                        .paint(&model, false)
+                        .map_err(|error| error.to_string())?;
+                }
             }
             MainEvent::Terminal(Ok(event)) => {
                 let probe_update = kitty_probe.observe(&event);
@@ -1425,6 +1437,9 @@ fn forward_protocol_message(
 ) -> bool {
     let mut core = lock_core(core);
     core.handle_message(message);
+    if core.take_clipboard_query() && events.send(MainEvent::ClipboardQuery(connection)).is_err() {
+        return false;
+    }
     while let Some(outbound) = core.poll_outbound() {
         if let Err(error) = send_outbound(outbound) {
             log::warn!("failed to synchronize the terminal client: {error}");
@@ -2281,6 +2296,7 @@ mod tests {
                     active_border_colour: None,
                     border_status_text: String::new(),
                     mode: None,
+                    status: None,
                 },
             );
         }
@@ -3125,6 +3141,7 @@ mod tests {
                 active_border_colour: None,
                 border_status_text: String::new(),
                 mode: None,
+                status: None,
             },
         );
         model.update_snapshot(Arc::new(snapshot));

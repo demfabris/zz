@@ -4,7 +4,7 @@ title: tmux compatibility philosophy
 description: "The contract for a tmux-compatible zz CLI: tmux spellings keep tmux meaning or fail loudly, native GUI behavior uses zz-only verbs, and compatibility is measured against one pinned upstream commit."
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, compatibility, philosophy, reimplementation, cli]
-timestamp: 2026-08-24T00:00:00-03:00
+timestamp: 2026-10-09T00:00:00-03:00
 last_updated: 2026-09-16
 ---
 
@@ -31,8 +31,8 @@ tmux config ambiguous.
 
 # Pinned reference
 
-The reference commit is tmux `d77c9dc6aa021e4bc61f0da128c591af695e6466`
-(`next-3.8`). Important upstream ownership areas include:
+The reference commit is tmux `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`
+(the `3.8` release tag). Important upstream ownership areas include:
 
 | Behavior | Upstream files consulted |
 | --- | --- |
@@ -48,18 +48,21 @@ The reference commit is tmux `d77c9dc6aa021e4bc61f0da128c591af695e6466`
 
 The pin is an oracle, not a dependency. Updating it is a separate compatibility event.
 
-Oracle schema 5 records 92 commands, 78 aliases, and 572 accepted command-flag shapes: 318
-valueless, 246 required-value, and 8 optional-value. Each command also carries positional minimum
-and maximum metadata. It parses nine custom `args_parse` callbacks used by 14 commands and reduces
-them to six effective rules. The remaining inventories contain 180 options, 198 global format-table
-names, 31 literal context-producer scopes with 153 scoped pairs and 108 unique names, 10 derived
-context families, five propagation records, 36 format modifiers, 68 hooks, and 303 default bindings
-across five tables. The 198 global names divide into 99 values resolved directly by the mux, 44
-delegated to daemon `StatusHooks`, and 55 constant-backed names that remain active `format:` gaps.
-The literal scoped pairs divide into 73 resolved by the mux, 32 delegated, 39 accepted-native, and
-9 active gaps. The derived families divide into nine mux families and one delegated family,
-`run-shell-position`, with no active gap left; the modifier vocabulary is implemented in full at
-all 36 tokens. `formats.command-item-context` closed on 2026-08-24 when the shared `command` name
+Oracle schema 6 records 92 commands, 78 aliases, and 593 accepted command-flag shapes: 332
+valueless, 253 required-value, and 8 optional-value. Each command also carries positional minimum
+and maximum metadata. It parses eight custom `args_parse` callbacks used by 14 commands and reduces
+them to six effective rules. The remaining inventories contain 183 options, each with its scope and
+the default a fresh 3.8 server prints, 214 global format-table names, 37 literal context-producer
+scopes with 204 scoped pairs and 122 unique names, five derived context families, the event payload
+vocabulary that 3.8 turns into `hook_<key>` formats (43 keys and three generated key patterns from
+`events-payload.c` and `hooks.c`), five propagation records, 37 format modifiers, 89 hooks, and 308
+default bindings across five tables. The 214 global names divide into 99 values resolved directly by
+the mux, 57 delegated to daemon `StatusHooks`, and 58 constant-backed names that remain active
+`format:` gaps. The literal scoped pairs divide into 76 resolved by the mux, 44 delegated, 37
+accepted-native, and 47 active gaps. The derived families divide into four mux families and one
+delegated family, `run-shell-position`. Of the 49 `hook_` payload names zz resolves 10 and all three
+patterns; the other 39 are one `pin.hooks-events` item. The modifier vocabulary is implemented at 36
+of 37 tokens; `A` is an active gap. `formats.command-item-context` closed on 2026-08-24 when the shared `command` name
 became a command-queue-item fact that every command the mux engine runs carries.
 
 The same command-item hooks reach the five arguments that tmux expands: both rename names, both
@@ -67,10 +70,10 @@ show-option names, and `select-pane -T`. Each handler expands after target resol
 target context. Directional `select-pane -T` reads the original pane and writes the expanded title
 to the destination pane.
 
-Schema 5 registers source producers and modifier tokens. It does not establish context-value or
+Schema 6 registers source producers, event payload keys, option scopes and defaults, and modifier tokens. It does not establish context-value or
 modifier-runtime parity. Those semantics remain with the successor groups described below.
 
-The canonical check recaptures the inventory from a `tmux next-3.8` binary at the root of a clean
+The canonical check recaptures the inventory from a `tmux 3.8` binary at the root of a clean
 source checkout at the exact pin. The companion build stamp must also match the commit, version,
 fetch recipe, and binary checksum. `ZZ_COMPAT_TMUX` may select another cache produced by that
 fetcher; an unstamped checkout or an arbitrary prebuilt that reports the same version fails the
@@ -85,24 +88,27 @@ product disposition as open, blocked, or accepted. `depends_on` records delivery
 set status.
 
 `just compat check` calls `compat/check.sh`, validates the clean pinned oracle and registry, requires
-nine named mux compatibility tests in the full `zz-mux` library run, then runs three named daemon
+ten named mux compatibility tests in the full `zz-mux` library run, then runs three named daemon
 compatibility tests through `--exact`. The Rust gate reconciles upstream command and alias names,
-flag arities, positional bounds, custom argument rules, option names, global formats, literal and
-derived context producers, format modifiers, and hook names. It classifies native commands, native aliases, zz-only flags
-on tmux command names, and every zz-only default key. It derives the guarded native-name roster from
+flag arities, positional bounds, custom argument rules, option names, scopes and defaults, global
+formats, literal and derived context producers, event payload names, format modifiers, and hook
+names. It classifies native commands, native aliases, zz-only flags on tmux command names, zz-only
+hook names, and every zz-only default key. It derives the guarded native-name roster from
 the catalog minus the pinned oracle, then checks every pinned canonical prefix against the live
 resolver. It pairs every
 constant-backed format with a manifest item and tracks every missing default key across `root`,
 `prefix`, `copy-mode`, `copy-mode-vi`, and `move`. For each shared default key, it reconciles the
 rendered command and repeat bit or requires a named `binding:` divergence. The gate pins the exact
-303 pinned, 268 zz, 210 shared, 93 missing, 58 native, 45 divergent, and 165 structurally matching
-counts. The structural matches divide into 61 copy-mode, 72 copy-mode-vi, and 32 prefix entries.
+308 pinned, 367 zz, 275 shared, 33 missing, 92 native, 42 divergent, and 233 structurally matching
+counts. The structural matches divide into 67 copy-mode, 78 copy-mode-vi, 19 move, 57 prefix, and
+12 root entries.
 
-Slice 10l closes hook-producer discovery with a daemon-owned source invariant. It names 30 explicit
-event producers and derives 37 generic `after-<command>` producers whose suffix names an implemented
-command. A later pin audit classifies `after-queue` as explicit-only: ordinary queues do not
-produce it, while `set-hook -R` runs it. The current partition contains those 66 automatic hooks
-and the explicit-only hook, with no tracked hook gap left. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
+Slice 10l closes hook-producer discovery with a daemon-owned source invariant. At the 3.8 pin it
+names 47 explicit event producers and derives 38 generic `after-<command>` producers whose suffix
+names an implemented command. 3.8 removed `after-queue` and zz dropped it with catch-up item
+pin.hooks-events. The 89 pinned hooks partition into those 85 produced hooks and four tracked gaps:
+`pane-prompt-opened` and `pane-prompt-closed` under `pin.hooks-events`, and the two session-group
+hooks under `sessions.linked-groups`. It also rejects duplicate explicit names and produced-versus-tracked overlap. Slice 10m
 closes the separate key-only runtime mismatch: bare `bind-key KEY` now preserves commands and
 unspecified metadata, applies only requested `-N` and `-r` changes, and silently leaves an absent key
 unbound after ensuring its table. Structural key equality still does not prove every downstream
@@ -259,8 +265,8 @@ differential raises the accepted artifact to 101 scenarios and 1,540 steps with 
 `PASS` and SHA-256
 `afd1fdf9a79e06f449e8c43abd63b14a2a4968338110223750d4171889c34aaf`.
 
-The same audit closes `hooks.queue`: pinned `after-queue` is explicit-only and the existing
-three-step set-hook differential proves ordinary queue inactivity plus exact manual execution. The
+The same audit closed `hooks.queue` when the pin still had `after-queue`; 3.8 removed the hook and
+zz followed. The
 10aa close then moves `session_active` into direct mux backing. An explicit `FormatClient` records
 no client, an unattached client, or the attached session. Command execution keeps the raw invoking
 client separate from the current or explicitly selected target client so each producer follows the

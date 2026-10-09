@@ -499,6 +499,17 @@ bool zz_client_agent_respond_permission(zz_client *client, uint64_t pane,
                                         const char *option_id);
 bool zz_client_agent_cancel(zz_client *client, uint64_t pane);
 
+/* Answer a question card. answers_json is a JSON array with one
+ * {"id": question id, "answers": [chosen labels or typed text]} per question.
+ * Cancel a card with zz_client_agent_respond_permission and a NULL option. */
+bool zz_client_agent_answer_question(zz_client *client, uint64_t pane,
+                                     uint64_t request_id,
+                                     const char *answers_json);
+
+/* Stop one background task the pane state lists, by its id. */
+bool zz_client_agent_stop_task(zz_client *client, uint64_t pane,
+                               const char *task_id);
+
 /* One coalesced agent transcript batch. Pop the oldest with
  * zz_client_agent_updates_next (NULL when none is queued), read it with the
  * accessors below, then free it with zz_agent_updates_release. Each item is

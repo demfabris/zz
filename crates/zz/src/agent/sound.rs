@@ -8,7 +8,8 @@
 //! Chime rules: a `Request` on any transition into needs-input, a `Done` only
 //! on the exact working -> idle edge, both silent while the user is already
 //! watching that pane. A pane's first observation only seeds the baseline, so
-//! restoring a session never rings.
+//! restoring a session never rings. Playback drops a chime that comes within two
+//! seconds of the last one, so a program flipping its status cannot ring on repeat.
 //!
 //! Playback synthesizes two short PCM WAVs in code, materializes each into the
 //! temp dir once, and hands the file to the platform's own player (`afplay`,
@@ -20,7 +21,8 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     ffi::OsStr,
     path::{Path, PathBuf},
-    sync::OnceLock,
+    sync::{Mutex, OnceLock, PoisonError},
+    time::{Duration, Instant},
 };
 
 use zz_protocol::PaneId;
@@ -31,12 +33,11 @@ const BITS_PER_SAMPLE: u16 = 16;
 const CHANNELS: u16 = 1;
 const WAV_HEADER_LEN: usize = 44;
 const PLAYER_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+const MIN_CHIME_GAP: Duration = Duration::from_secs(2);
+
+static LAST_CHIME: Mutex<Option<Instant>> = Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[allow(
-    dead_code,
-    reason = "the live states are only constructed by the agent-pane build; the chrome reads them in every build"
-)]
 pub(crate) enum AgentPaneStatus {
     #[default]
     Idle,
@@ -157,7 +158,7 @@ impl<K: Copy + Ord> AgentAttentionTracker<K> {
 }
 
 pub(crate) fn play(chime: Chime) {
-    if !enabled(std::env::var_os(SOUND_ENV).as_deref()) {
+    if !enabled(std::env::var_os(SOUND_ENV).as_deref()) || !due(&LAST_CHIME, Instant::now()) {
         return;
     }
     std::thread::spawn(move || {
@@ -169,6 +170,15 @@ pub(crate) fn play(chime: Chime) {
 
 fn enabled(value: Option<&OsStr>) -> bool {
     value.is_none_or(|value| value != "0")
+}
+
+fn due(last: &Mutex<Option<Instant>>, now: Instant) -> bool {
+    let mut last = last.lock().unwrap_or_else(PoisonError::into_inner);
+    if last.is_some_and(|last| now.saturating_duration_since(last) < MIN_CHIME_GAP) {
+        return false;
+    }
+    *last = Some(now);
+    true
 }
 
 fn play_blocking(chime: Chime) -> Result<(), String> {
@@ -315,6 +325,16 @@ mod tests {
             .iter()
             .map(|&(pane, status)| (PaneId(pane), status))
             .collect()
+    }
+
+    #[test]
+    fn chimes_closer_than_the_gap_are_dropped() {
+        let last = Mutex::new(None);
+        let start = Instant::now();
+        assert!(due(&last, start));
+        assert!(!due(&last, start + MIN_CHIME_GAP / 2));
+        assert!(due(&last, start + MIN_CHIME_GAP));
+        assert!(!due(&last, start));
     }
 
     #[test]

@@ -100,6 +100,8 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "remain-on-exit",
     "focus-events",
     "extended-keys",
+    "terminal-features",
+    "user-keys",
     "allow-passthrough",
     "allow-rename",
     "allow-set-title",
@@ -347,22 +349,18 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
         "cmdq_merge_formats",
         COMMAND_ITEM_CONTEXT_FORMATS,
     ),
-    ("notify.c", "notify_hook", &[HOOK_CONTEXT_FORMAT]),
     (
-        "notify.c",
-        "notify_monitor_cb",
-        &[
-            HOOK_CONTEXT_FORMAT,
-            HOOK_LAST_CONTEXT_FORMAT,
-            HOOK_PANE_CONTEXT_FORMAT,
-            HOOK_SESSION_CONTEXT_FORMAT,
-            HOOK_SESSION_NAME_CONTEXT_FORMAT,
-            HOOK_VALUE_CONTEXT_FORMAT,
-            HOOK_WINDOW_CONTEXT_FORMAT,
-            HOOK_WINDOW_INDEX_CONTEXT_FORMAT,
-            HOOK_WINDOW_NAME_CONTEXT_FORMAT,
-        ],
+        "cmd-show-options.c",
+        "cmd_show_hooks_print_monitor",
+        SHOW_HOOKS_MONITOR_CONTEXT_FORMATS,
     ),
+    (
+        "cmd-show-options.c",
+        "cmd_show_options_print",
+        SHOW_OPTIONS_CONTEXT_FORMATS,
+    ),
+    ("hooks.c", "hooks_insert_event", &[HOOK_CONTEXT_FORMAT]),
+    ("hooks.c", "hooks_run", &[HOOK_CONTEXT_FORMAT]),
     (
         "window-copy.c",
         "window_copy_formats",
@@ -370,13 +368,52 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
-const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
-    ("current-file", &[CURRENT_FILE_CONTEXT_FORMAT], &[]),
-    ("hook", &[HOOK_CONTEXT_FORMAT], &[]),
-    ("hook-arguments", &[HOOK_ARGUMENTS_CONTEXT_FORMAT], &[]),
-    ("hook-argument", &[], &[HOOK_ARGUMENT_CONTEXT_PATTERN]),
-    ("hook-flag", &[], &[HOOK_FLAG_CONTEXT_PATTERN]),
-    ("hook-flag-value", &[], &[HOOK_FLAG_VALUE_CONTEXT_PATTERN]),
+const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] =
+    &[("current-file", &[CURRENT_FILE_CONTEXT_FORMAT], &[])];
+
+const HOOK_PAYLOAD_CONTEXT_FORMATS: &[&str] = &[
+    HOOK_ARGUMENTS_CONTEXT_FORMAT,
+    "hook_client",
+    "hook_command_duration",
+    "hook_command_end_time",
+    "hook_command_start_time",
+    "hook_command_status",
+    "hook_created_empty",
+    "hook_created_respawn",
+    "hook_current_mode",
+    "hook_event",
+    "hook_height",
+    HOOK_LAST_CONTEXT_FORMAT,
+    "hook_marked",
+    "hook_mode_entered",
+    "hook_new_name",
+    "hook_new_pane",
+    "hook_new_title",
+    "hook_new_window",
+    "hook_new_window_index",
+    "hook_new_window_name",
+    "hook_old_height",
+    "hook_old_name",
+    "hook_old_pane",
+    "hook_old_width",
+    "hook_old_window",
+    "hook_old_window_index",
+    "hook_old_window_name",
+    HOOK_PANE_CONTEXT_FORMAT,
+    "hook_paste_buffer",
+    "hook_previous_mode",
+    HOOK_SESSION_CONTEXT_FORMAT,
+    HOOK_SESSION_NAME_CONTEXT_FORMAT,
+    HOOK_VALUE_CONTEXT_FORMAT,
+    "hook_width",
+    HOOK_WINDOW_CONTEXT_FORMAT,
+    HOOK_WINDOW_INDEX_CONTEXT_FORMAT,
+    HOOK_WINDOW_NAME_CONTEXT_FORMAT,
+];
+const HOOK_PAYLOAD_CONTEXT_PATTERNS: &[&str] = &[
+    HOOK_ARGUMENT_CONTEXT_PATTERN,
+    HOOK_FLAG_CONTEXT_PATTERN,
+    HOOK_FLAG_VALUE_CONTEXT_PATTERN,
 ];
 
 const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
@@ -396,12 +433,12 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
             "mode_tree_selected",
         ],
     ),
+    ("prompt.c", "prompt_expand1", &["message"]),
     (
         "prompt.c",
-        "prompt_expand",
+        "prompt_format_tree",
         &[
             "command_prompt",
-            "message",
             "prompt_flags",
             "prompt_input",
             "prompt_type",
@@ -411,6 +448,11 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         "status.c",
         "status_message_redraw",
         &["command_prompt", "message"],
+    ),
+    (
+        "window-border.c",
+        "window_set_fill_cell",
+        &["is_inside", "is_outside"],
     ),
     (
         "window-client.c",
@@ -456,7 +498,87 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         ],
     ),
 ];
-const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[];
+const SHOW_HOOK_FIRE_CONTEXT_FORMATS: &[&str] = &["hook_fire_count", "hook_fire_time"];
+const SHOW_OPTIONS_CONTEXT_FORMATS: &[&str] = &[
+    "option_array_key",
+    "option_has_array_key",
+    "option_has_value",
+    "option_is_array",
+    "option_is_hook",
+    "option_is_parent",
+    "option_is_string",
+    "option_is_user",
+    "option_name",
+    "option_value",
+    "option_value_only",
+];
+const SHOW_HOOKS_MONITOR_CONTEXT_FORMATS: &[&str] = &[
+    "hook_monitor_format",
+    "hook_monitor_target",
+    "option_array_key",
+    "option_has_array_key",
+    "option_has_value",
+    "option_is_array",
+    "option_is_hook",
+    "option_is_parent",
+    "option_is_string",
+    "option_is_user",
+    "option_name",
+    "option_value",
+    "option_value_only",
+];
+const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
+    (
+        "cmd-show-options.c",
+        "cmd_show_hooks_print_monitor",
+        SHOW_HOOK_FIRE_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-show-options.c",
+        "cmd_show_options_print",
+        SHOW_HOOK_FIRE_CONTEXT_FORMATS,
+    ),
+    (
+        "window-client.c",
+        "window_client_draw_info",
+        &["clipboard_invalid"],
+    ),
+    (
+        "window-copy.c",
+        "window_copy_formats",
+        &["copy_line_numbers", "refresh_active"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build",
+        &["is_environment"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_environment",
+        &[
+            "environment_hidden",
+            "environment_is_global",
+            "environment_name",
+            "environment_removed",
+            "environment_scope",
+            "environment_value",
+            "is_environment",
+            "is_key",
+            "is_option",
+        ],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_keys",
+        &["is_environment"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_option",
+        &["option_is_hook", "option_is_monitor", "option_monitor"],
+    ),
+];
 const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[];
 
 #[doc(hidden)]
@@ -494,6 +616,11 @@ pub fn mux_derived_format_context_families() -> impl Iterator<
         .iter()
         .copied()
         .chain(crate::formats::derived_format_context_families())
+}
+
+#[doc(hidden)]
+pub fn mux_hook_payload_format_contexts() -> (&'static [&'static str], &'static [&'static str]) {
+    (HOOK_PAYLOAD_CONTEXT_FORMATS, HOOK_PAYLOAD_CONTEXT_PATTERNS)
 }
 
 #[doc(hidden)]
@@ -645,6 +772,82 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
     }
 }
 
+struct ShownOptionHooks<'a, H> {
+    inner: &'a mut H,
+    values: &'a [(&'static str, String)],
+}
+
+impl<H: StatusHooks> StatusHooks for ShownOptionHooks<'_, H> {
+    fn stable_option_lookups(&self) -> bool {
+        self.inner.stable_option_lookups()
+    }
+
+    fn only_tmux_options(&self) -> bool {
+        self.inner.only_tmux_options()
+    }
+
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        self.inner.option_variable(name, context)
+    }
+
+    fn tree_variable(&mut self, name: &str, context: &StatusContext) -> Option<Cow<'_, str>> {
+        match self.values.iter().find(|(key, _)| *key == name) {
+            Some((_, value)) => Some(Cow::Borrowed(value.as_str())),
+            None => self.inner.tree_variable(name, context),
+        }
+    }
+
+    fn strftime(&mut self, literal: &str) -> String {
+        self.inner.strftime(literal)
+    }
+
+    fn shell(&mut self, command: &str, tag: &FormatJobTag) -> String {
+        self.inner.shell(command, tag)
+    }
+
+    fn variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        if self.values.iter().any(|(key, _)| *key == name) {
+            None
+        } else {
+            self.inner.variable(name, context)
+        }
+    }
+
+    fn window_activity(&mut self, window: WindowId) -> u64 {
+        self.inner.window_activity(window)
+    }
+
+    fn pane_activity(&mut self, pane: PaneId) -> u64 {
+        self.inner.pane_activity(pane)
+    }
+
+    fn pane_search(
+        &mut self,
+        pane: Option<PaneId>,
+        pattern: &str,
+        regex: bool,
+        ignore_case: bool,
+    ) -> usize {
+        self.inner.pane_search(pane, pattern, regex, ignore_case)
+    }
+
+    fn client_loop_rows(&mut self, context: &StatusContext) -> Vec<FormatClientRow> {
+        self.inner.client_loop_rows(context)
+    }
+
+    fn client_environment_rows(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_environment_rows()
+    }
+
+    fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
+        self.inner.client_tty_term()
+    }
+
+    fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {
+        self.inner.client_terminal_environment()
+    }
+}
+
 #[derive(Clone, PartialEq, Eq)]
 pub struct ExecutionContext {
     pub session: Option<SessionId>,
@@ -662,6 +865,7 @@ pub struct ExecutionContext {
     invoking_mouse: Option<MouseEventTarget>,
     replay_client: Option<ClientId>,
     control_command_target: Option<(ClientId, u8)>,
+    legacy_layouts: bool,
     refuse_new_session_attach: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
@@ -767,6 +971,7 @@ impl fmt::Debug for ExecutionContext {
             .field("invoking_mouse", &self.invoking_mouse)
             .field("replay_client", &self.replay_client)
             .field("control_command_target", &self.control_command_target)
+            .field("legacy_layouts", &self.legacy_layouts)
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
             .field("no_hooks", &self.no_hooks)
             .field("format_variables", &self.format_variables)
@@ -800,6 +1005,7 @@ impl Default for ExecutionContext {
             invoking_mouse: None,
             replay_client: None,
             control_command_target: None,
+            legacy_layouts: false,
             refuse_new_session_attach: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
@@ -995,6 +1201,15 @@ impl ExecutionContext {
     }
 
     #[must_use]
+    pub fn legacy_layouts(&self) -> bool {
+        self.legacy_layouts
+    }
+
+    pub fn set_legacy_layouts(&mut self, legacy: bool) {
+        self.legacy_layouts = legacy;
+    }
+
+    #[must_use]
     pub const fn refuses_new_session_attach(&self) -> bool {
         self.refuse_new_session_attach
     }
@@ -1103,6 +1318,16 @@ pub enum MuxEffect {
         pane: PaneId,
         from: SessionId,
         to: SessionId,
+    },
+    /// `window_fire_pane_moved` for a pane `join-pane` or `move-pane` placed
+    /// again inside its own window, which no before-and-after diff can see.
+    PaneMovedInWindow {
+        pane: PaneId,
+    },
+    /// `window_push_zoom` then `window_pop_zoom` on a zoomed window: one
+    /// `window-unzoomed` and one `window-zoomed` though the zoom ends as it began.
+    ZoomCycled {
+        window: WindowId,
     },
     SendKeys {
         pane: PaneId,
@@ -1251,6 +1476,7 @@ pub enum MuxEffect {
         window: Option<WindowId>,
         pane: Option<PaneId>,
     },
+    ClientTerminalChanged,
     /// `session` scopes a session-effective write; `None` is a global write.
     MuxOptionChanged {
         option: MuxOptionKey,
@@ -1872,6 +2098,7 @@ struct FormatMonitorEntry {
     scope: FormatMonitorScope,
     format: String,
     session: Option<SessionId>,
+    notify_true: bool,
     previous: BTreeMap<FormatMonitorTarget, String>,
 }
 
@@ -2053,7 +2280,13 @@ fn parse_format_option(input: &str) -> Option<(TmuxOption, FormatOptionIndex)> {
     }
     if matches!(
         option.name,
-        "command-alias" | "pane-colours" | "status-format" | "update-environment"
+        "command-alias"
+            | "pane-colours"
+            | "status-format"
+            | "terminal-features"
+            | "terminal-overrides"
+            | "update-environment"
+            | "user-keys"
     ) {
         return Some((option, index));
     }
@@ -2149,6 +2382,7 @@ enum RemainOnExit {
     On,
     Failed,
     Key,
+    FailedKey,
 }
 
 impl RemainOnExit {
@@ -2158,6 +2392,7 @@ impl RemainOnExit {
             Self::On => "on",
             Self::Failed => "failed",
             Self::Key => "key",
+            Self::FailedKey => "failed-key",
         }
     }
 
@@ -2165,8 +2400,7 @@ impl RemainOnExit {
         match self {
             Self::Off => Self::On,
             Self::On => Self::Off,
-            Self::Failed => Self::Failed,
-            Self::Key => Self::Key,
+            other => other,
         }
     }
 }
@@ -2227,8 +2461,6 @@ pub struct MuxEngine {
     session_base_indices: BTreeMap<SessionId, u32>,
     global_renumber_windows: bool,
     session_renumber_windows: BTreeMap<SessionId, bool>,
-    global_pane_base_index: u32,
-    window_pane_base_indices: BTreeMap<WindowId, u32>,
     global_word_separators: String,
     session_word_separators: BTreeMap<SessionId, String>,
     global_mouse: bool,
@@ -2306,6 +2538,7 @@ pub struct MuxEngine {
     format_user: String,
     pane_runtime_facts: BTreeMap<PaneId, PaneRuntimeFacts>,
     pane_start_commands: BTreeMap<PaneId, Vec<String>>,
+    pane_shells: BTreeMap<PaneId, String>,
     destroyed_sessions: Vec<(SessionId, String, String)>,
     experimental_agent_pane: bool,
     experimental_editor_pane: bool,
@@ -2329,6 +2562,8 @@ pub struct MuxEngine {
 }
 
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
+
+const NEW_SESSION_GROUP_REFUSAL: &str = "new-session -t (zz has no session groups; use attach -t <session>, every client keeps its own current window)";
 
 const RUNTIME_FACT_MARKERS: [&str; 11] = [
     "pane_current_command",
@@ -2583,8 +2818,6 @@ impl Default for MuxEngine {
             session_base_indices: BTreeMap::new(),
             global_renumber_windows: DEFAULT_RENUMBER_WINDOWS,
             session_renumber_windows: BTreeMap::new(),
-            global_pane_base_index: DEFAULT_PANE_BASE_INDEX,
-            window_pane_base_indices: BTreeMap::new(),
             global_word_separators: DEFAULT_WORD_SEPARATORS.to_owned(),
             session_word_separators: BTreeMap::new(),
             global_mouse: DEFAULT_MOUSE,
@@ -2662,6 +2895,7 @@ impl Default for MuxEngine {
             format_user: String::new(),
             pane_runtime_facts: BTreeMap::new(),
             pane_start_commands: BTreeMap::new(),
+            pane_shells: BTreeMap::new(),
             destroyed_sessions: Vec::new(),
             experimental_agent_pane: true,
             experimental_editor_pane: false,
@@ -2765,6 +2999,59 @@ impl MuxEngine {
             })
             .or_else(|| self.global_window_hooks.get(option.name))
             .map(|hooks| hooks.values().cloned().collect())
+    }
+
+    fn marked_pane_changed(
+        &self,
+        context: &ExecutionContext,
+        start: PaneId,
+        old: Option<PaneId>,
+    ) -> Execution {
+        let mut execution = Execution::default();
+        if context.no_hooks {
+            return execution;
+        }
+        let marked = self.state.marked_pane();
+        let pane = marked.or(old).unwrap_or(start);
+        let Some(mut hook_context) = ExecutionContext::for_pane(&self.state, pane) else {
+            return execution;
+        };
+        let Some(commands) = self
+            .event_hook_commands(&hook_context, "marked-pane-changed")
+            .filter(|commands| !commands.is_empty())
+        else {
+            return execution;
+        };
+        let mut variables = BTreeMap::from([
+            ("hook_event".to_owned(), "marked-pane-changed".to_owned()),
+            (HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string()),
+            (
+                "hook_marked".to_owned(),
+                u8::from(marked.is_some()).to_string(),
+            ),
+        ]);
+        if let Some(window) = self.state.window_for_pane(pane) {
+            variables.insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+            if let Some(state) = self.state.windows.get(&window) {
+                variables.insert(
+                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+            }
+        }
+        if let Some(marked) = marked {
+            variables.insert("hook_new_pane".to_owned(), marked.to_string());
+        }
+        if let Some(old) = old {
+            variables.insert("hook_old_pane".to_owned(), old.to_string());
+        }
+        hook_context.format_variables = variables;
+        execution.effects.push(MuxEffect::RunHook {
+            name: "marked-pane-changed".to_owned(),
+            commands,
+            context: hook_context,
+        });
+        execution
     }
 
     fn user_hook_commands(
@@ -3035,7 +3322,13 @@ impl MuxEngine {
     fn format_option_array(&self, target: TmuxOptionTarget, name: &str) -> Option<&StringArray> {
         matches!(
             name,
-            "command-alias" | "pane-colours" | "status-format" | "update-environment"
+            "command-alias"
+                | "pane-colours"
+                | "status-format"
+                | "terminal-features"
+                | "terminal-overrides"
+                | "update-environment"
+                | "user-keys"
         )
         .then(|| {
             self.array_option_readback(target, name, true)
@@ -3182,7 +3475,13 @@ impl MuxEngine {
     ) -> bool {
         if let Some((array, _)) = matches!(
             option.name,
-            "command-alias" | "pane-colours" | "status-format" | "update-environment"
+            "command-alias"
+                | "pane-colours"
+                | "status-format"
+                | "terminal-features"
+                | "terminal-overrides"
+                | "update-environment"
+                | "user-keys"
         )
         .then(|| self.array_option_readback(target, option.name, inherited))
         .flatten()
@@ -4318,6 +4617,34 @@ impl MuxEngine {
         self.pane_start_commands.get(&pane).map(Vec::as_slice)
     }
 
+    pub fn set_pane_shell(&mut self, pane: PaneId, shell: String) -> Result<(), ServerError> {
+        if self.state.pane(pane).is_none() {
+            return Err(ServerError::MissingTarget(pane.to_string()));
+        }
+        if self.pane_shells.get(&pane) != Some(&shell) {
+            self.pane_shells.insert(pane, shell);
+            self.format_data_generation = self.format_data_generation.wrapping_add(1);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn pane_command_fallback(&self, pane: PaneId) -> String {
+        let command = self
+            .pane_start_command(pane)
+            .unwrap_or_default()
+            .iter()
+            .map(|argument| crate::formats::quote_argument(argument))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !command.is_empty() {
+            return parse_window_name(&command);
+        }
+        self.pane_shells
+            .get(&pane)
+            .map(|shell| parse_window_name(shell))
+            .unwrap_or_default()
+    }
+
     fn retain_pane_start_commands(&mut self, effects: &[MuxEffect]) {
         for effect in effects {
             match effect {
@@ -4341,6 +4668,7 @@ impl MuxEngine {
                 }
                 MuxEffect::PanesRemoved(panes) => {
                     for pane in panes {
+                        self.pane_shells.remove(pane);
                         if self.pane_start_commands.remove(pane).is_some() {
                             self.format_data_generation =
                                 self.format_data_generation.wrapping_add(1);
@@ -4380,7 +4708,12 @@ impl MuxEngine {
             .and_then(|entry| entry.value.as_ref().map(ToString::to_string))
     }
 
-    pub fn set_config_environment(&mut self, name: String, value: String, hidden: bool) {
+    pub fn set_config_environment(
+        &mut self,
+        name: String,
+        value: impl Into<RawText>,
+        hidden: bool,
+    ) {
         self.global_environment.insert(
             name.into(),
             EnvironmentEntry {
@@ -4878,10 +5211,7 @@ impl MuxEngine {
     }
 
     fn pane_base_index_for_window(&self, window: WindowId) -> u32 {
-        self.window_pane_base_indices
-            .get(&window)
-            .copied()
-            .unwrap_or(self.global_pane_base_index)
+        self.state.pane_base_index(window)
     }
 
     #[must_use]
@@ -4997,7 +5327,7 @@ impl MuxEngine {
         Ok(match self.remain_on_exit_for_pane(pane)? {
             RemainOnExit::Off => false,
             RemainOnExit::On | RemainOnExit::Key => true,
-            RemainOnExit::Failed => failed,
+            RemainOnExit::Failed | RemainOnExit::FailedKey => failed,
         })
     }
 
@@ -5006,7 +5336,7 @@ impl MuxEngine {
         self.state.pane(pane).is_some_and(|pane| pane.dead)
             && self
                 .remain_on_exit_for_pane(pane)
-                .is_ok_and(|value| value == RemainOnExit::Key)
+                .is_ok_and(|value| matches!(value, RemainOnExit::Key | RemainOnExit::FailedKey))
     }
 
     #[must_use]
@@ -5669,14 +5999,19 @@ impl MuxEngine {
             window_menu_selected_styles,
             window_menu_border_styles,
             window_menu_border_lines,
-            window_pane_base_indices,
         );
+        let before = self.state.window_pane_base_indices.len();
+        self.state
+            .window_pane_base_indices
+            .retain(|window, _| windows.contains_key(window));
+        removed |= self.state.window_pane_base_indices.len() != before;
         retain_live!(
             |pane| panes.contains(pane);
             pane_user_options,
             pane_options,
             pane_hooks,
             pane_start_commands,
+            pane_shells,
             pane_runtime_facts,
             pane_remain_on_exit,
         );
@@ -5689,7 +6024,13 @@ impl MuxEngine {
         args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("new-session", args)?;
+        let (options, positional) =
+            parse_command_options("new-session", args).map_err(|error| match error {
+                ServerError::UnsupportedCommand(message) if message == "new-session -t" => {
+                    ServerError::UnsupportedCommand(NEW_SESSION_GROUP_REFUSAL.to_owned())
+                }
+                error => error,
+            })?;
         let format_client = context.format_client();
         let active_session = context.session;
         let command = shell_command_positional(&positional);
@@ -7321,6 +7662,10 @@ impl MuxEngine {
                 window: None,
                 pane: Some(source),
             });
+        } else {
+            execution
+                .effects
+                .push(MuxEffect::PaneMovedInWindow { pane: source });
         }
         Ok(execution)
     }
@@ -7522,6 +7867,15 @@ impl MuxEngine {
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let empty = pane_spawn_empty(options, command.as_deref())?;
         let environment = spawn_environment(options);
+        if let Some(lines) = options.value("-B")
+            && !crate::tmux_option_metadata::tmux_option_metadata("pane-border-lines")
+                .choices
+                .contains(&lines)
+        {
+            return Err(ServerError::InvalidCommand(format!(
+                "pane-border-lines unknown value: {lines}"
+            )));
+        }
         let axis = if options.has("-h") {
             Axis::Horizontal
         } else {
@@ -7616,6 +7970,12 @@ impl MuxEngine {
             if let Some(style) = options.value("-R") {
                 pane_options.insert("pane-border-style", style.to_owned());
             }
+        }
+        if let Some(lines) = options.value("-B") {
+            self.pane_options
+                .entry(pane)
+                .or_default()
+                .insert(PaneOption::PaneBorderLines, lines.to_owned());
         }
         if options.has("-k") || options.value("-m").is_some() {
             self.pane_remain_on_exit.insert(pane, RemainOnExit::Key);
@@ -7787,12 +8147,13 @@ impl MuxEngine {
             if options.has("-m") && !self.pane_is_visible(start) {
                 return Ok(Execution::default());
             }
+            let old = self.state.marked_pane();
             if options.has("-M") {
                 self.state.clear_marked_pane();
             } else {
                 self.state.toggle_marked_pane(start)?;
             }
-            return Ok(Execution::default());
+            return Ok(self.marked_pane_changed(context, start, old));
         }
         let mut execution = Execution::default();
         if let Some(style) = options.value("-P") {
@@ -7933,14 +8294,33 @@ impl MuxEngine {
             .expect("resolved target pane has a window");
         let source_session = self.state.windows[&source_window].session;
         let target_session = self.state.windows[&target_window].session;
+        let zoomed_before = [source_window, target_window]
+            .map(|window| self.state.windows[&window].zoomed_pane.is_some());
         self.state
             .swap_panes(source, target, options.has("-d"), options.has("-Z"))?;
+        let zoom_cycles = [source_window, target_window]
+            .into_iter()
+            .zip(zoomed_before)
+            .enumerate()
+            .filter(|(index, (window, was_zoomed))| {
+                *was_zoomed
+                    && options.has("-Z")
+                    && (*index == 0 || *window != source_window)
+                    && self
+                        .state
+                        .windows
+                        .get(window)
+                        .is_some_and(|state| state.zoomed_pane.is_some())
+            })
+            .map(|(_, (window, _))| MuxEffect::ZoomCycled { window })
+            .collect::<Vec<_>>();
         let active = self.state.windows[&target_window].active_pane;
         let context_target = ExecutionContext::for_pane(&self.state, active)
             .expect("the target window retains an active pane after a swap");
         context.retarget(&context_target);
 
         let mut execution = Execution::default();
+        execution.effects.extend(zoom_cycles);
         if source_session != target_session && source != target {
             execution.effects.extend([
                 MuxEffect::PaneRelocated {
@@ -8467,6 +8847,18 @@ impl MuxEngine {
         args: &[RawText],
         command: &str,
     ) -> Result<Execution, ServerError> {
+        self.state.legacy_layout_saves = context.legacy_layouts();
+        let result = self.select_layout_with(context, args, command);
+        self.state.legacy_layout_saves = false;
+        result
+    }
+
+    fn select_layout_with(
+        &mut self,
+        context: &ExecutionContext,
+        args: &[RawText],
+        command: &str,
+    ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options(command, args)?;
         if positional.len() > usize::from(command == "select-layout") {
             return Err(ServerError::CommandParse(format!(
@@ -8516,7 +8908,7 @@ impl MuxEngine {
             }
             self.state.restore_previous_layout(window)?;
         } else if let Some(name) = positional.first() {
-            if let Some(preset) = parse_layout_preset(name)? {
+            if let Some(preset) = parse_layout_preset(name) {
                 self.state.select_layout(window, preset, &preset_options)?;
             } else {
                 self.state.select_layout_string(window, name)?;
@@ -8524,6 +8916,7 @@ impl MuxEngine {
         } else if let Some(last) = self.state.last_layout(window)? {
             self.state.select_layout(window, last, &preset_options)?;
         }
+        self.restore_manual_window_extents(Some(window));
         Ok(Execution::default())
     }
 
@@ -10284,6 +10677,9 @@ impl MuxEngine {
             .len()
             .saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("set-hook", &invocation.args)?;
+        if options.has("-E") {
+            return self.set_hook_event(context, &options, &positional, hooks);
+        }
         if let Some(subscription) = options.value("-B") {
             let subscription = subscription.to_owned();
             if positional.len() > 1 {
@@ -10399,6 +10795,66 @@ impl MuxEngine {
         self.set_hook_array_option(target, table_option.name, parsed.index, value, &options)
     }
 
+    fn set_hook_event(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        positional: &[RawText],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let Some(argument) = positional.first() else {
+            return Err(ServerError::InvalidCommand("missing argument".to_owned()));
+        };
+        if positional.len() != 1 {
+            return Err(ServerError::InvalidCommand("too many arguments".to_owned()));
+        }
+        let (name, target_context) = self.expand_hook_name(context, options, argument, hooks)?;
+        if !name.starts_with('@') {
+            return Err(ServerError::InvalidCommand(
+                "event name must start with @".to_owned(),
+            ));
+        }
+        let Some(commands) = self
+            .user_hook_commands(&target_context, &name)
+            .filter(|commands| !commands.is_empty())
+        else {
+            return Ok(Execution::default());
+        };
+        let mut hook_context = target_context;
+        let mut variables = BTreeMap::from([("hook_event".to_owned(), name.clone())]);
+        if let Some(session) = hook_context.session {
+            variables.insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
+            if let Some(state) = self.state.sessions.get(&session) {
+                variables.insert(
+                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+            }
+        }
+        if let Some(window) = hook_context.window
+            && let Some(state) = self.state.windows.get(&window)
+        {
+            variables.insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+            variables.insert(
+                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                state.name.clone(),
+            );
+            variables.insert(
+                HOOK_WINDOW_INDEX_CONTEXT_FORMAT.to_owned(),
+                state.index.to_string(),
+            );
+        }
+        if let Some(pane) = hook_context.pane {
+            variables.insert(HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string());
+        }
+        hook_context.format_variables = variables;
+        Ok(Execution::effect(MuxEffect::RunHook {
+            name,
+            commands,
+            context: hook_context,
+        }))
+    }
+
     fn set_hook_monitor(
         &mut self,
         context: &ExecutionContext,
@@ -10462,6 +10918,7 @@ impl MuxEngine {
             scope,
             format,
             session: context.session,
+            notify_true: options.has("-T"),
             previous: BTreeMap::new(),
         });
         Ok(execution)
@@ -10472,6 +10929,7 @@ impl MuxEngine {
         context: &ExecutionContext,
         options: &Options,
         argument: Option<&str>,
+        hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let target = self.hook_listing_target(context, options)?;
         let mut monitors = self
@@ -10483,11 +10941,9 @@ impl MuxEngine {
         let Some(argument) = argument else {
             let lines = monitors
                 .into_iter()
-                .map(|monitor| {
-                    format_monitor_display(&monitor.name, monitor.scope, &monitor.format)
-                })
+                .map(|monitor| self.shown_monitor(context, options, monitor, hooks))
                 .collect::<Vec<_>>();
-            return Ok(Execution::output(lines.join("\n")));
+            return Ok(Execution::output(printed_lines(&lines)));
         };
         let parsed = parse_tmux_option(argument)
             .map_err(|()| ServerError::InvalidCommand(format!("invalid option: {argument}")))?;
@@ -10495,11 +10951,9 @@ impl MuxEngine {
             .into_iter()
             .find(|monitor| monitor.name == parsed.name)
         {
-            return Ok(Execution::output(format_monitor_display(
-                &monitor.name,
-                monitor.scope,
-                &monitor.format,
-            )));
+            return Ok(Execution::output(printed_lines(&[
+                self.shown_monitor(context, options, monitor, hooks)
+            ])));
         }
         if parsed.name.starts_with('@') && self.user_option_at_target(target, parsed.name).is_none()
         {
@@ -10508,6 +10962,53 @@ impl MuxEngine {
             )));
         }
         Ok(Execution::default())
+    }
+
+    fn shown_monitor(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        monitor: &FormatMonitorEntry,
+        hooks: &mut impl StatusHooks,
+    ) -> String {
+        let value = format_monitor_display(&monitor.name, monitor.scope, &monitor.format);
+        let Some(template) = options.value("-F") else {
+            return value;
+        };
+        let target = match monitor.scope {
+            FormatMonitorScope::Session => String::new(),
+            FormatMonitorScope::Pane(pane) => format!("%{}", pane.0),
+            FormatMonitorScope::AllPanes => "%*".to_owned(),
+            FormatMonitorScope::Window(window) => format!("@{}", window.0),
+            FormatMonitorScope::AllWindows => "@*".to_owned(),
+        };
+        let values = [
+            ("option_name", monitor.name.clone()),
+            ("option_value", value),
+            ("option_value_only", "0".to_owned()),
+            ("option_is_parent", "0".to_owned()),
+            ("option_is_array", "0".to_owned()),
+            ("option_is_string", "1".to_owned()),
+            ("option_is_hook", "1".to_owned()),
+            ("option_is_user", "1".to_owned()),
+            ("option_has_value", "1".to_owned()),
+            ("option_array_key", String::new()),
+            ("option_has_array_key", "0".to_owned()),
+            ("hook_monitor_target", target),
+            ("hook_monitor_format", monitor.format.clone()),
+        ];
+        let (format_target, client) = self.show_options_format_target(context, options, false);
+        let mut row_hooks = ShownOptionHooks {
+            inner: hooks,
+            values: &values,
+        };
+        self.expand_pane_format(
+            template,
+            &format_target,
+            context.session,
+            client,
+            &mut row_hooks,
+        )
     }
 
     /// The live `set-hook -B` subscriptions, for the daemon's one-second tick.
@@ -10539,7 +11040,9 @@ impl MuxEngine {
             .iter_mut()
             .find(|monitor| monitor.id == id)?;
         match monitor.previous.insert(target, value.to_owned()) {
-            Some(last) if last != value => Some(last),
+            Some(last) if last != value && (!monitor.notify_true || format_true(value)) => {
+                Some(last)
+            }
             Some(_) | None => None,
         }
     }
@@ -11084,7 +11587,7 @@ impl MuxEngine {
                     whole.then_some(false),
                 ));
             }
-            return Ok(pane_colours_execution(name, stored));
+            return Ok(stored_array_execution(name, stored));
         }
         let value = value.ok_or_else(|| ServerError::InvalidCommand("empty value".to_owned()))?;
         if let Some(index) = index {
@@ -11104,7 +11607,7 @@ impl MuxEngine {
             if let Some(before) = status_format_before {
                 return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
             }
-            return Ok(pane_colours_execution(name, true));
+            return Ok(stored_array_execution(name, true));
         }
         let append = options.has("-a");
         if !append {
@@ -11128,7 +11631,7 @@ impl MuxEngine {
         if let Some(before) = status_format_before {
             return Ok(self.status_format_execution(target, before.as_ref(), Some(true)));
         }
-        Ok(pane_colours_execution(name, true))
+        Ok(stored_array_execution(name, true))
     }
 
     fn status_format_execution(
@@ -11268,6 +11771,7 @@ impl MuxEngine {
                 context,
                 &options,
                 positional.first().map(RawText::as_str),
+                hooks,
             );
         }
         if positional.len() > 1 {
@@ -11283,7 +11787,7 @@ impl MuxEngine {
                     }
                 }
             }
-            return Ok(Execution::output(lines.lines.join("\n")));
+            return Ok(self.shown_options_execution(context, &options, false, &lines, hooks));
         };
         let (argument, _) = self.expand_hook_name(context, &options, argument, hooks)?;
         let parsed = parse_tmux_option(&argument)
@@ -11302,6 +11806,9 @@ impl MuxEngine {
             }
             if let Some(target) = options.value("-t") {
                 forwarded.extend(["-t".into(), target.into()]);
+            }
+            if let Some(format) = options.value("-F") {
+                forwarded.extend(["-F".into(), format.into()]);
             }
             forwarded.extend(["--".into(), argument.into()]);
             return self.show_options(
@@ -11335,6 +11842,9 @@ impl MuxEngine {
             if let Some(target) = options.value("-t") {
                 forwarded.extend(["-t".into(), target.into()]);
             }
+            if let Some(format) = options.value("-F") {
+                forwarded.extend(["-F".into(), format.into()]);
+            }
             forwarded.extend(["--".into(), argument.into()]);
             return self.show_options(
                 context,
@@ -11353,7 +11863,7 @@ impl MuxEngine {
         let mut lines = ShownOptions::default();
         let index = parsed.index.map(ArrayIndex::parse);
         push_shown_hook(&mut lines, table_option.name, hook, index.as_ref());
-        Ok(Execution::output(lines.lines.join("\n")))
+        Ok(self.shown_options_execution(context, &options, false, &lines, hooks))
     }
 
     fn expand_hook_name(
@@ -11746,6 +12256,64 @@ impl MuxEngine {
         }
     }
 
+    fn show_options_format_target(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        force_window: bool,
+    ) -> (ExecutionContext, FormatClient) {
+        match options.value("-t") {
+            Some(target) if force_window => self
+                .resolve_window(Some(target), context.session, context.window)
+                .ok()
+                .and_then(|window| {
+                    let pane = self.state.windows.get(&window)?.active_pane;
+                    ExecutionContext::for_pane(&self.state, pane)
+                })
+                .map_or_else(
+                    || (ExecutionContext::default(), FormatClient::NoClient),
+                    |target| (target, context.target_format_client()),
+                ),
+            Some(target) => self
+                .resolve_pane(Some(target), context.window, context.pane)
+                .ok()
+                .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
+                .map_or_else(
+                    || (ExecutionContext::default(), FormatClient::NoClient),
+                    |target| (target, context.target_format_client()),
+                ),
+            None => (context.clone(), context.target_format_client()),
+        }
+    }
+
+    fn shown_options_execution(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        force_window: bool,
+        lines: &ShownOptions,
+        hooks: &mut impl StatusHooks,
+    ) -> Execution {
+        let Some(template) = options.value("-F").filter(|_| lines.values.is_none()) else {
+            return Execution::output(shown_options_output(lines));
+        };
+        let (target, client) = self.show_options_format_target(context, options, force_window);
+        let value_only = options.has("-v");
+        let output = lines
+            .rows
+            .iter()
+            .map(|row| {
+                let values = row.context(value_only);
+                let mut row_hooks = ShownOptionHooks {
+                    inner: &mut *hooks,
+                    values: &values,
+                };
+                self.expand_pane_format(template, &target, context.session, client, &mut row_hooks)
+            })
+            .collect::<Vec<_>>();
+        Execution::output(printed_lines(&output))
+    }
+
     fn show_options(
         &self,
         context: &ExecutionContext,
@@ -11822,33 +12390,18 @@ impl MuxEngine {
                     );
                 }
             }
-            return Ok(Execution::output(shown_options_output(&lines)));
+            return Ok(self.shown_options_execution(
+                context,
+                &options,
+                force_window,
+                &lines,
+                hooks,
+            ));
         };
 
         let argument = match argument_expansion {
             ShowOptionArgument::Expand => {
-                let target = match options.value("-t") {
-                    Some(target) if force_window => self
-                        .resolve_window(Some(target), context.session, context.window)
-                        .ok()
-                        .and_then(|window| {
-                            let pane = self.state.windows.get(&window)?.active_pane;
-                            ExecutionContext::for_pane(&self.state, pane)
-                        })
-                        .map_or_else(
-                            || (ExecutionContext::default(), FormatClient::NoClient),
-                            |target| (target, context.target_format_client()),
-                        ),
-                    Some(target) => self
-                        .resolve_pane(Some(target), context.window, context.pane)
-                        .ok()
-                        .and_then(|pane| ExecutionContext::for_pane(&self.state, pane))
-                        .map_or_else(
-                            || (ExecutionContext::default(), FormatClient::NoClient),
-                            |target| (target, context.target_format_client()),
-                        ),
-                    None => (context.clone(), context.target_format_client()),
-                };
+                let target = self.show_options_format_target(context, &options, force_window);
                 self.expand_pane_format(argument, &target.0, context.session, target.1, hooks)
             }
             ShowOptionArgument::AlreadyExpanded => argument.to_string(),
@@ -11874,7 +12427,13 @@ impl MuxEngine {
                 let mut lines = ShownOptions::new(options.has("--json"));
                 let name = indexed_option_name(parsed.name, parsed.index.as_deref());
                 push_shown_option(&mut lines, &name, value, true, inherited, value_only);
-                return Ok(Execution::output(shown_options_output(&lines)));
+                return Ok(self.shown_options_execution(
+                    context,
+                    &options,
+                    force_window,
+                    &lines,
+                    hooks,
+                ));
             }
             if options.has("-q") {
                 return Ok(Execution::default());
@@ -11888,7 +12447,13 @@ impl MuxEngine {
             let mut lines = ShownOptions::new(options.has("--json"));
             let name = indexed_option_name(parsed.name, parsed.index.as_deref());
             push_shown_option(&mut lines, &name, &value, is_string, false, value_only);
-            return Ok(Execution::output(shown_options_output(&lines)));
+            return Ok(self.shown_options_execution(
+                context,
+                &options,
+                force_window,
+                &lines,
+                hooks,
+            ));
         }
         let option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
@@ -11942,11 +12507,17 @@ impl MuxEngine {
                         array,
                         requested.as_ref(),
                         metadata.value == TmuxArrayValue::String,
-                        inherited,
+                        inherited && (requested.is_some() || !array.is_empty()),
                         value_only,
                     );
                 }
-                return Ok(Execution::output(shown_options_output(&lines)));
+                return Ok(self.shown_options_execution(
+                    context,
+                    &options,
+                    force_window,
+                    &lines,
+                    hooks,
+                ));
             }
             return Ok(Execution::default());
         }
@@ -11974,7 +12545,7 @@ impl MuxEngine {
             inherited,
             value_only,
         );
-        Ok(Execution::output(shown_options_output(&lines)))
+        Ok(self.shown_options_execution(context, &options, force_window, &lines, hooks))
     }
 
     fn set_environment(
@@ -12400,6 +12971,7 @@ impl MuxEngine {
                     .map(|value| (value.as_str().to_owned(), false))
                     .or_else(inherited),
                 "pane-base-index" => self
+                    .state
                     .window_pane_base_indices
                     .get(&window)
                     .map(|value| (value.to_string(), false))
@@ -12537,7 +13109,7 @@ impl MuxEngine {
             "message-limit" => self.message_limit.to_string(),
             "mode-keys" => self.global_mode_keys.as_str().to_owned(),
             "mouse" => tmux_flag(self.global_mouse).to_owned(),
-            "pane-base-index" => self.global_pane_base_index.to_string(),
+            "pane-base-index" => self.state.global_pane_base_index.to_string(),
             "prefix" => tmux_key_display(self.keys.prefix()),
             "renumber-windows" => tmux_flag(self.global_renumber_windows).to_owned(),
             "repeat-time" => self.global_repeat_time_ms.to_string(),
@@ -12870,6 +13442,43 @@ impl MuxEngine {
             .into_iter()
             .flat_map(|(array, _)| array.values().cloned())
             .collect()
+    }
+
+    pub fn user_keys_option(&self) -> Vec<String> {
+        let Some(array) = self.stored_arrays.server.get("user-keys") else {
+            return Vec::new();
+        };
+        let mut keys = Vec::new();
+        for (index, value) in array {
+            let ArrayIndex::Numeric(index) = index else {
+                continue;
+            };
+            let Ok(index) = usize::try_from(*index) else {
+                continue;
+            };
+            if index > MAX_USER_KEY {
+                continue;
+            }
+            if keys.len() <= index {
+                keys.resize(index + 1, String::new());
+            }
+            keys[index].clone_from(value);
+        }
+        keys
+    }
+
+    #[must_use]
+    pub fn user_key_claims(&self, bytes: &[u8]) -> bool {
+        self.stored_arrays
+            .server
+            .get("user-keys")
+            .is_some_and(|array| {
+                array.values().any(|value| {
+                    let sequence = value.as_bytes();
+                    !sequence.is_empty()
+                        && (bytes.starts_with(sequence) || sequence.starts_with(bytes))
+                })
+            })
     }
 
     pub fn terminal_overrides_option(&self) -> Vec<String> {
@@ -13443,7 +14052,7 @@ impl MuxEngine {
                     return already_set_or_quiet(options, "pane-base-index");
                 }
                 TmuxOptionTarget::Window(window)
-                    if self.window_pane_base_indices.contains_key(&window) =>
+                    if self.state.window_pane_base_indices.contains_key(&window) =>
                 {
                     return already_set_or_quiet(options, "pane-base-index");
                 }
@@ -13466,8 +14075,8 @@ impl MuxEngine {
                     MAX_PANE_BASE_INDEX,
                 )?
             };
-            if self.global_pane_base_index != next {
-                self.global_pane_base_index = next;
+            if self.state.global_pane_base_index != next {
+                self.state.global_pane_base_index = next;
                 self.state.bump_generation();
             }
             return Ok(Execution::default());
@@ -13478,7 +14087,7 @@ impl MuxEngine {
         };
         let previous = self.pane_base_index_for_window(window);
         if unset {
-            self.window_pane_base_indices.remove(&window);
+            self.state.window_pane_base_indices.remove(&window);
         } else {
             let next = parse_index_option(
                 value.ok_or_else(|| {
@@ -13488,7 +14097,7 @@ impl MuxEngine {
                 })?,
                 MAX_PANE_BASE_INDEX,
             )?;
-            self.window_pane_base_indices.insert(window, next);
+            self.state.window_pane_base_indices.insert(window, next);
         }
         if self.pane_base_index_for_window(window) != previous {
             self.state.bump_generation();
@@ -13693,13 +14302,7 @@ impl MuxEngine {
         }
         if unset {
             self.server_options.reset(option);
-            if option == ServerOption::Backspace {
-                return Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
-                    window: None,
-                    pane: None,
-                }));
-            }
-            return Ok(Execution::default());
+            return Ok(server_option_execution(option));
         }
         let normalized = match option {
             ServerOption::Backspace => value
@@ -13726,13 +14329,7 @@ impl MuxEngine {
         self.server_options
             .set_command(option, appended.as_deref().or(value))
             .map_err(ServerError::InvalidCommand)?;
-        if option == ServerOption::Backspace {
-            return Ok(Execution::effect(MuxEffect::TerminalKnobsChanged {
-                window: None,
-                pane: None,
-            }));
-        }
-        Ok(Execution::default())
+        Ok(server_option_execution(option))
     }
 
     fn set_session_option(
@@ -14899,12 +15496,37 @@ fn remove_option_override<K: Copy + Ord, O: Copy + Ord>(
 /// `options_push_changes` rebuilds every pane's default palette whenever
 /// `pane-colours` changes at any scope, and skips the push when an unset found
 /// nothing stored there.
-fn pane_colours_execution(name: &str, changed: bool) -> Execution {
+fn server_option_execution(option: ServerOption) -> Execution {
+    let mux_option = match option {
+        ServerOption::Backspace => {
+            return Execution::effect(MuxEffect::TerminalKnobsChanged {
+                window: None,
+                pane: None,
+            });
+        }
+        ServerOption::ExtendedKeys => MuxOptionKey::ExtendedKeys,
+        ServerOption::FocusEvents => MuxOptionKey::FocusEvents,
+        _ => return Execution::default(),
+    };
+    Execution::effect(MuxEffect::MuxOptionChanged {
+        option: mux_option,
+        session: None,
+    })
+}
+
+fn stored_array_execution(name: &str, changed: bool) -> Execution {
     if name == "pane-colours" && changed {
         return Execution::effect(MuxEffect::TerminalKnobsChanged {
             window: None,
             pane: None,
         });
+    }
+    if matches!(
+        name,
+        "user-keys" | "terminal-features" | "terminal-overrides"
+    ) && changed
+    {
+        return Execution::effect(MuxEffect::ClientTerminalChanged);
     }
     Execution::default()
 }
@@ -15145,6 +15767,44 @@ fn tmux_option_value_is_string(option: TmuxOption) -> bool {
 struct ShownOptions {
     lines: Vec<String>,
     values: Option<BTreeMap<String, String>>,
+    rows: Vec<ShownOptionRow>,
+}
+
+struct ShownOptionRow {
+    name: String,
+    array_key: Option<String>,
+    value: String,
+    is_string: bool,
+    parent: bool,
+    has_value: bool,
+}
+
+impl ShownOptionRow {
+    fn context(&self, value_only: bool) -> Vec<(&'static str, String)> {
+        let flag = |value: bool| u8::from(value).to_string();
+        let user = self.name.starts_with('@');
+        let table = exact_tmux_option(&self.name);
+        let hook = table.is_some_and(|option| tmux_option_is_hook(option.name));
+        vec![
+            ("option_name", self.name.clone()),
+            ("option_value", self.value.clone()),
+            ("option_value_only", flag(value_only)),
+            ("option_is_parent", flag(self.parent)),
+            (
+                "option_is_array",
+                flag(table.is_some_and(|option| option.is_array)),
+            ),
+            ("option_is_string", flag(self.is_string)),
+            ("option_is_hook", flag(hook)),
+            ("option_is_user", flag(user)),
+            ("option_has_value", flag(self.has_value)),
+            (
+                "option_array_key",
+                self.array_key.clone().unwrap_or_default(),
+            ),
+            ("option_has_array_key", flag(self.array_key.is_some())),
+        ]
+    }
 }
 
 impl ShownOptions {
@@ -15152,6 +15812,7 @@ impl ShownOptions {
         Self {
             lines: Vec::new(),
             values: json.then(BTreeMap::new),
+            rows: Vec::new(),
         }
     }
 
@@ -15159,6 +15820,21 @@ impl ShownOptions {
         if let Some(values) = &mut self.values {
             values.insert(name.to_owned(), value.to_owned());
         }
+    }
+
+    fn row(&mut self, name: &str, value: &str, is_string: bool, parent: bool, has_value: bool) {
+        let (name, array_key) = match name.strip_suffix(']').and_then(|name| name.split_once('[')) {
+            Some((name, key)) => (name.to_owned(), Some(key.to_owned())),
+            None => (name.to_owned(), None),
+        };
+        self.rows.push(ShownOptionRow {
+            name,
+            array_key,
+            value: value.to_owned(),
+            is_string,
+            parent,
+            has_value,
+        });
     }
 }
 
@@ -15171,6 +15847,7 @@ fn push_shown_option(
     value_only: bool,
 ) {
     lines.record(name, value);
+    lines.row(name, value, is_string, inherited, true);
     if value_only {
         lines.lines.push(value.to_owned());
         return;
@@ -15211,6 +15888,7 @@ fn push_shown_array(
     }
     if array.is_empty() {
         lines.record(name, "");
+        lines.row(name, "", is_string, inherited, false);
         if !value_only {
             lines.lines.push(if inherited {
                 format!("{name}*")
@@ -15224,6 +15902,16 @@ fn push_shown_array(
         let name = indexed_option_name(name, Some(&index.display()));
         push_shown_option(lines, &name, value, is_string, inherited, value_only);
     }
+}
+
+/// `cmdq_print` ends every line with a newline, which the output joining
+/// drops except after a final empty line.
+fn printed_lines(lines: &[String]) -> String {
+    let mut output = lines.join("\n");
+    if lines.last().is_some_and(String::is_empty) {
+        output.push('\n');
+    }
+    output
 }
 
 fn shown_options_output(lines: &ShownOptions) -> String {
@@ -15327,6 +16015,39 @@ fn tmux_clean_name(name: &str, kind: &str) -> Result<String, ServerError> {
         )));
     }
     Ok(tmux_vis(name, false))
+}
+
+pub(crate) fn parse_window_name(input: &str) -> String {
+    let mut name = input.strip_prefix('"').unwrap_or(input);
+    if let Some(end) = name.find('"') {
+        name = &name[..end];
+    }
+    name = name.strip_prefix("exec ").unwrap_or(name);
+    name = name.trim_start_matches([' ', '-']);
+    if let Some(end) = name.find(' ') {
+        name = &name[..end];
+    }
+    let bytes = name.as_bytes();
+    let mut end = bytes.len();
+    while end > 1
+        && !(bytes[end - 1].is_ascii_alphanumeric() || bytes[end - 1].is_ascii_punctuation())
+    {
+        end -= 1;
+    }
+    let Ok(name) = std::str::from_utf8(&bytes[..end]) else {
+        return String::new();
+    };
+    let name = if name.starts_with('/') {
+        let trimmed = name.trim_end_matches('/');
+        if trimmed.is_empty() {
+            "/"
+        } else {
+            trimmed.rsplit('/').next().unwrap_or(trimmed)
+        }
+    } else {
+        name
+    };
+    tmux_vis(name, false)
 }
 
 fn tmux_clean_title(title: &str) -> Option<String> {
@@ -15669,6 +16390,7 @@ fn parse_remain_on_exit(
         "on" => Ok(RemainOnExit::On),
         "failed" => Ok(RemainOnExit::Failed),
         "key" => Ok(RemainOnExit::Key),
+        "failed-key" => Ok(RemainOnExit::FailedKey),
         _ => Err(ServerError::InvalidCommand(format!(
             "unknown value: {value}"
         ))),
@@ -15913,25 +16635,18 @@ fn parse_pane_percentage(value: &str) -> Result<u8, ServerError> {
     Ok(percentage)
 }
 
-fn parse_layout_preset(value: &str) -> Result<Option<LayoutPreset>, ServerError> {
+fn parse_layout_preset(value: &str) -> Option<LayoutPreset> {
     if let Some(exact) = LayoutPreset::ALL
         .into_iter()
         .find(|preset| preset.name() == value)
     {
-        return Ok(Some(exact));
+        return Some(exact);
     }
     let mut matches = LayoutPreset::ALL
         .into_iter()
         .filter(|preset| preset.name().starts_with(value));
-    let Some(first) = matches.next() else {
-        return Ok(None);
-    };
-    if matches.next().is_some() {
-        return Err(ServerError::InvalidCommand(format!(
-            "ambiguous layout: {value}"
-        )));
-    }
-    Ok(Some(first))
+    let first = matches.next()?;
+    matches.next().is_none().then_some(first)
 }
 
 fn already_set_or_quiet(options: &Options, option: &str) -> Result<Execution, ServerError> {
@@ -16540,6 +17255,8 @@ fn canonical_named_key(value: &str) -> Option<&'static str> {
         .iter()
         .find_map(|(name, canonical)| value.eq_ignore_ascii_case(name).then_some(*canonical))
 }
+
+const MAX_USER_KEY: usize = 1000;
 
 fn parse_user_key(value: &str) -> Option<String> {
     let tail = value.strip_prefix("User")?;
@@ -18284,7 +19001,7 @@ fn command_template_replace(template: &str, input: &str, index: u8) -> String {
         }
 
         let next = bytes.get(offset + 1).copied();
-        let indexed = next == Some(b'0'.saturating_add(index));
+        let indexed = (1..=9).contains(&index) && next == Some(b'0' + index);
         let doubled = next == Some(b'%') && !replaced_double;
         if !indexed && !doubled {
             output.push(bytes[offset]);
@@ -18293,12 +19010,17 @@ fn command_template_replace(template: &str, input: &str, index: u8) -> String {
         }
         replaced_double |= doubled;
         offset += 2;
-        let quoted = bytes.get(offset) == Some(&b'%');
-        if quoted {
+        let double_quoted = bytes.get(offset) == Some(&b'%');
+        if double_quoted {
             offset += 1;
         }
+        let single_quoted = doubled && !double_quoted;
         for byte in input.bytes() {
-            if quoted && matches!(byte, b'"' | b'\\' | b'$' | b';' | b'~') {
+            if single_quoted && byte == b'\'' {
+                output.extend_from_slice(b"'\\''");
+                continue;
+            }
+            if double_quoted && matches!(byte, b'"' | b'\\' | b'$' | b';' | b'~') {
                 output.push(b'\\');
             }
             output.push(byte);
@@ -18938,6 +19660,7 @@ fn push_shown_hook_option(
     }
     if hook.is_empty() {
         lines.record(name, "");
+        lines.row(name, "", false, inherited && mark_inherited_empty, false);
         if !value_only {
             lines.lines.push(if inherited && mark_inherited_empty {
                 format!("{name}*")
@@ -18962,6 +19685,7 @@ fn push_shown_hook_option(
 pub fn hook_format_variables(command: &CommandInvocation, hook: &str) -> BTreeMap<String, String> {
     let mut variables = BTreeMap::from([
         (HOOK_CONTEXT_FORMAT.to_owned(), hook.to_owned()),
+        ("hook_event".to_owned(), hook.to_owned()),
         (
             HOOK_ARGUMENTS_CONTEXT_FORMAT.to_owned(),
             format_command_arguments(command),
@@ -20044,7 +20768,7 @@ mod tests {
                 &mut context,
                 &command(
                     "attach-session",
-                    &["-t", "target", "-f", "ignore-size", "-f", "active-pane"],
+                    &["-t", "target", "-f", "ignore-size", "-f", "read-only"],
                 ),
             )
             .unwrap();
@@ -20055,7 +20779,7 @@ mod tests {
                 detach_others: false,
                 detach_others_hangup: false,
                 read_only: false,
-                flags: Some("active-pane".to_owned()),
+                flags: Some("read-only".to_owned()),
                 update_environment: true,
             }]
         );
@@ -28369,7 +29093,7 @@ mod tests {
             ),
             (
                 &["F8", "display-message", "-?"][..],
-                "usage: display-message [-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+                "usage: display-message [-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
             ),
             (
                 &["F8", "lsk", "-O"][..],
@@ -28874,6 +29598,25 @@ mod tests {
                 .output,
             r"'printf' 'a b' 'it'\''s' '$HOME' ''"
         );
+    }
+
+    #[test]
+    fn parse_window_name_reads_a_start_command_the_way_the_pin_does() {
+        for (input, expected) in [
+            ("\"exec sleep 0.2\"", "sleep"),
+            ("\"sh -c \\\"sleep 0.1; exit 3\\\"\"", "sh"),
+            ("\"\\\"/bin/true\\\" a\"", "\\\\"),
+            ("\" true\"", "true"),
+            ("\"FOO=1 true\"", "FOO=1"),
+            ("/bin/true x \"y z\"", "true"),
+            ("-bash", "bash"),
+            ("/usr/local/bin/", "bin"),
+            ("/", "/"),
+            ("''", "''"),
+            ("/bin/sh", "sh"),
+        ] {
+            assert_eq!(parse_window_name(input), expected, "{input}");
+        }
     }
 
     #[test]
@@ -32019,7 +32762,7 @@ mod tests {
             global.lines().collect::<Vec<_>>(),
             MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalSession)
         );
-        assert_eq!(global.lines().count(), 57);
+        assert_eq!(global.lines().count(), 62);
         assert_eq!(
             global
                 .lines()
@@ -32028,6 +32771,8 @@ mod tests {
             [
                 "client-active",
                 "client-attached",
+                "client-created",
+                "client-closed",
                 "client-detached",
                 "client-focus-in",
                 "client-focus-out",
@@ -32045,7 +32790,7 @@ mod tests {
             global_window.lines().collect::<Vec<_>>(),
             MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalWindow)
         );
-        assert_eq!(global_window.lines().count(), 11);
+        assert_eq!(global_window.lines().count(), 27);
         assert_eq!(
             engine
                 .execute(&mut context, &command("show-hooks", &[]))
@@ -32297,7 +33042,7 @@ mod tests {
             .execute(&mut context, &command("show-hooks", &["-g"]))
             .unwrap()
             .output;
-        assert_eq!(session_hooks.lines().count(), 57);
+        assert_eq!(session_hooks.lines().count(), 62);
         assert!(
             !session_hooks
                 .lines()
@@ -32308,7 +33053,7 @@ mod tests {
             .execute(&mut context, &command("show-hooks", &["-g", "-w"]))
             .unwrap()
             .output;
-        assert_eq!(window_hooks.lines().count(), 11);
+        assert_eq!(window_hooks.lines().count(), 27);
         assert!(
             window_hooks
                 .lines()
@@ -32343,25 +33088,25 @@ mod tests {
             (
                 &["-g", "-H"] as &[&str],
                 TmuxOptionTarget::GlobalSession,
-                57,
+                62,
                 false,
             ),
             (
                 &["-g", "-w", "-H"],
                 TmuxOptionTarget::GlobalWindow,
-                11,
+                27,
                 false,
             ),
             (
                 &["-A", "-H"],
                 TmuxOptionTarget::Session(context.session.unwrap()),
-                57,
+                62,
                 true,
             ),
             (
                 &["-p", "-A", "-H"],
                 TmuxOptionTarget::Pane(context.pane.unwrap()),
-                7,
+                19,
                 true,
             ),
         ] {
@@ -34092,6 +34837,33 @@ mod tests {
         engine
             .execute(
                 &mut context,
+                &command("set-option", &["-p", "remain-on-exit", "failed-key"]),
+            )
+            .unwrap();
+        assert!(!engine.retain_exited_pane(pane, false).unwrap());
+        assert!(engine.retain_exited_pane(pane, true).unwrap());
+        engine.state.mark_pane_dead(pane, Some(1)).unwrap();
+        assert!(engine.dead_pane_dismisses_on_key(pane));
+        engine.state.revive_pane(pane).unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("set-option", &["-p", "remain-on-exit"]),
+            )
+            .unwrap();
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command("show-options", &["-pv", "remain-on-exit"]),
+                )
+                .unwrap()
+                .output,
+            "failed-key"
+        );
+        engine
+            .execute(
+                &mut context,
                 &command("set-option", &["-pu", "remain-on-exit"]),
             )
             .unwrap();
@@ -34587,7 +35359,11 @@ mod tests {
             ("-gv", "prompt-command-cursor-style", "default"),
             ("-gwv", "clock-mode-colour", "themeblue"),
             ("-gwv", "clock-mode-style", "24"),
-            ("-gwv", "fill-character", "\n"),
+            (
+                "-gwv",
+                "fill-character",
+                crate::tmux_options::FILL_CHARACTER_DEFAULT,
+            ),
             ("-gwv", "pane-border-indicators", "colour"),
             ("-gwv", "pane-border-lines", "single"),
             ("-gwv", "pane-scrollbars", "off"),
@@ -34790,7 +35566,7 @@ mod tests {
         let storage_only = tmux_options()
             .filter(|option| tmux_stored_scalar(option.name).is_some())
             .collect::<Vec<_>>();
-        assert_eq!(storage_only.len(), 63);
+        assert_eq!(storage_only.len(), 66);
         for option in storage_only {
             let metadata = tmux_stored_scalar(option.name).expect("storage-only metadata");
             let alternate = match metadata.kind {
@@ -35578,6 +36354,9 @@ mod tests {
                 &mut context,
                 &command("set-window-option", &["-u", "automatic-rename-format"]),
             )
+            .unwrap();
+        engine
+            .set_pane_shell(pane, "/usr/local/bin/fish".to_owned())
             .unwrap();
         assert!(
             engine
@@ -36799,7 +37578,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 149);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 151);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)
@@ -37829,7 +38608,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "pane-colours*"
+            "pane-colours"
         );
 
         engine
@@ -41889,6 +42668,14 @@ mod tests {
             MuxEngine::substitute_command_prompt_template("%%%|%1%", &["\"\\$;~"]),
             r#"\"\\\$\;\~|\"\\\$\;\~"#
         );
+        assert_eq!(
+            MuxEngine::substitute_command_prompt_template("'%%'|%1|%1%|%%", &["it's \"x\""]),
+            r#"'it'\''s "x"'|it's "x"|it's \"x\"|%%"#
+        );
+        assert_eq!(
+            MuxEngine::substitute_command_prompt_template("%%%|%%", &["a'b"]),
+            "a'b|%%"
+        );
 
         let engine = MuxEngine::default();
         let parsed =
@@ -44951,7 +45738,7 @@ mod tests {
 
         assert!(matches!(
             engine.execute(&mut context, &command("select-layout", &["main"])),
-            Err(ServerError::InvalidCommand(message)) if message.contains("ambiguous")
+            Err(ServerError::InvalidCommand(message)) if message == "malformed layout header: main"
         ));
         assert!(matches!(
             engine.execute(
@@ -44959,7 +45746,7 @@ mod tests {
                 &command("select-layout", &["b25f,80x24,0,0{40x24,0,0,0}"]),
             ),
             Err(ServerError::InvalidCommand(message))
-                if message == "invalid layout: b25f,80x24,0,0{40x24,0,0,0}"
+                if message == "invalid layout checksum: b25f,80x24,0,0{40x24,0,0,0}"
         ));
         assert!(matches!(
             engine.execute(&mut context, &command("next-layout", &["-n"])),
@@ -45000,7 +45787,7 @@ mod tests {
                 ),
             )
             .unwrap();
-        let first_dump = "6e85,120x30,0,0{50x30,0,0,0,69x30,51,0[69x14,51,0,1,69x15,51,15,2]}";
+        let first_dump = r#"{"V":2,"L":{"t":"h","w":120,"h":30,"x":0,"y":0,"c":[{"t":"p","w":50,"h":30,"x":0,"y":0,"l":1,"i":0,"I":"%0"},{"t":"v","w":69,"h":30,"x":51,"y":0,"c":[{"t":"p","w":69,"h":14,"x":51,"y":0,"l":0,"i":1,"I":"%1"},{"t":"p","w":69,"h":15,"x":51,"y":15,"a":true,"i":2,"I":"%2"}]}]}}"#;
         assert_eq!(
             engine
                 .execute(
@@ -45041,7 +45828,7 @@ mod tests {
                 &command("select-layout", &["-t", "w:0", "0000,80x24,0,0,0"],),
             ),
             Err(ServerError::InvalidCommand(
-                "invalid layout: 0000,80x24,0,0,0".to_owned()
+                "invalid layout checksum: 0000,80x24,0,0,0".to_owned()
             ))
         );
         assert_eq!(engine.state.windows[&window].layout, before);
@@ -45110,7 +45897,8 @@ mod tests {
         let generation = engine.state.generation();
         assert!(matches!(
             engine.execute(&mut context, &command("select-layout", &["bogus"])),
-            Err(ServerError::InvalidCommand(message)) if message == "invalid layout: bogus"
+            Err(ServerError::InvalidCommand(message))
+                if message == "malformed layout header: bogus"
         ));
         assert_eq!(engine.state.windows[&window].layout, layout);
         assert_eq!(engine.state.windows[&window].zoomed_pane, None);
@@ -45701,14 +46489,14 @@ mod tests {
         assert!(rows.contains(&"list-commands (lscm) [-F format] [command]"));
         assert!(rows.contains(&"start-server (start) "));
         assert!(rows.contains(
-            &"agent-send [-t target-pane] [--submit] [--wait] [--progress] [--timeout seconds] [--on-block wait|fail|allow|deny] [--json] [--final] [--context context] [text ...]"
+            &"agent-send [-t target-pane] [--submit] [--wait] [--notify] [--progress] [--timeout seconds] [--on-block wait|fail|allow|deny] [--json] [--final] [--context context] [text ...]"
         ));
         assert!(rows.contains(&"send-last-output [-t target-pane]"));
         assert!(rows.contains(&"capture-browser [-t target-pane] [-o output-path]"));
         assert!(rows.contains(&"debug-marker [note ...]"));
         assert!(rows.contains(&"tools [--skill] [section]"));
         assert!(rows.contains(
-            &"capture-pane (capturep) [-aCeJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+            &"capture-pane (capturep) [-aCeFHJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         ));
         assert!(
             rows.contains(&"if-shell (if) [-bF] [-t target-pane] shell-command command [command]")
@@ -45726,7 +46514,7 @@ mod tests {
                 .execute(&mut context, &command("list-commands", &["capturep"]))
                 .unwrap()
                 .output,
-            "capture-pane (capturep) [-aCeJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
+            "capture-pane (capturep) [-aCeFHJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]"
         );
         for name in ["if-shell", "if"] {
             assert_eq!(
@@ -45769,6 +46557,67 @@ mod tests {
                 .execute(&mut context, &command("start", &[]))
                 .unwrap(),
             Execution::default()
+        );
+    }
+
+    #[test]
+    fn show_options_format_rows_match_the_pins_print_paths() {
+        let mut engine = MuxEngine::default();
+        let (session, window, pane) = engine.state.create_session("work").unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let mut run = |args: &[&str]| {
+            engine
+                .execute(&mut context, &command(args[0], &args[1..]))
+                .unwrap()
+                .output
+        };
+        run(&["set-option", "-g", "@x", "hello"]);
+        assert_eq!(
+            run(&[
+                "show-hooks",
+                "-g",
+                "-F",
+                "#{option_name}=#{option_value}",
+                "@x"
+            ]),
+            "@x=hello"
+        );
+        assert_eq!(
+            run(&[
+                "show-hooks",
+                "-g",
+                "-F",
+                "#{option_name}=#{option_value}",
+                "status-keys"
+            ]),
+            "status-keys=emacs"
+        );
+        assert_eq!(run(&["show-options", "-g", "-F", "", "status"]), "\n");
+        assert_eq!(
+            run(&["show-options", "-g", "-F", "", "status-format"]),
+            "\n\n\n"
+        );
+        run(&["set-option", "-g", "update-environment", ""]);
+        assert_eq!(
+            run(&[
+                "show-options",
+                "-A",
+                "-F",
+                "#{option_is_parent}:#{option_has_value}",
+                "update-environment"
+            ]),
+            "0:0"
+        );
+        assert_eq!(
+            run(&["show-options", "-A", "update-environment"]),
+            "update-environment"
+        );
+        run(&["set-hook", "-B", "@watch::#{session_name}"]);
+        assert_eq!(run(&["show-hooks", "-B", "-F", "", "@watch"]), "\n");
+        assert_eq!(run(&["show-hooks", "-B", "-F", ""]), "\n");
+        assert_eq!(
+            run(&["show-hooks", "-B", "-F", "#{hook_monitor_format}", "@watch"]),
+            "#{session_name}"
         );
     }
 

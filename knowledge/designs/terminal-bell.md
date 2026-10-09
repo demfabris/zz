@@ -31,8 +31,9 @@ adds nothing.
 
 Scope guard: agent-pane lifecycle notifications (`RuntimeEvent::PromptFinished` and
 friends) are out of scope while the `agent-pane` feature stays gated. OSC 9 / OSC 777
-program notifications are blocked upstream . libghostty routes OSC 9 to `PWD_CHANGED` and
-has no notify callback in its C ABI.
+program notifications are not wired: the pinned libghostty C ABI has a
+`DESKTOP_NOTIFICATION` callback, but zz does not register it. Programs that want to say
+they are waiting or done can use [OSC 7501](/terminal/program-status.md) instead.
 
 # Behavior
 

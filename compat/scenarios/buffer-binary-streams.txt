@@ -1,0 +1,11 @@
+shim:
+# Pinned tmux 3.8, like d77c9dc6 before it, writes a show-buffer to a
+# session-less command client with file_write on `-`, so the bytes arrive raw
+# (cmd-save-buffer.c:98-108). A control client gets them through
+# cmdq_print_data, which utf8_sanitizes the whole buffer unless the client
+# raised CLIENT_UTF8 (server-client.c:3243-3258). `source-file -` parses its
+# stream with the same byte parser a file gets, so a value that is not UTF-8 is
+# applied and stored as given.
+stage: fixtures/buffer-binary-streams.sh ~/buffer-binary-streams.sh
+run-shell 'sh ~/buffer-binary-streams.sh'
+out: show-buffer -b transcript

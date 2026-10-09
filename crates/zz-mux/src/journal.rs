@@ -28,6 +28,7 @@ pub struct PaneImage {
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowImage {
     pub session: SessionId,
+    pub index: u32,
     pub name: String,
     pub active_pane: PaneId,
     pub zoomed_pane: Option<PaneId>,
@@ -172,6 +173,7 @@ impl Journaled for Window {
             key,
             value.map(|window| WindowImage {
                 session: window.session,
+                index: window.index,
                 name: window.name.clone(),
                 active_pane: window.active_pane,
                 zoomed_pane: window.zoomed_pane,

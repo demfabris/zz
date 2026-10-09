@@ -1,0 +1,23 @@
+# tmux 3.8 contract breaks that a plain scenario can see.
+# q: escapes { and } on top of the old shell list (format_quote_shell in
+# format.c, d57d75de added newline and tab, which the zz-mux unit test covers).
+set-option -g @qv 'a{b} c=d'
+fmt: #{q:@qv}
+fmt: #{q/s:@qv}
+# An offset that strtonum refuses is an error (00f3899a, cmd-find.c), never a
+# fall back to an index or a name: +foo, -0 and +0 all fail for windows and
+# panes, while a bare + or - and a valid offset still move.
+new-window -d -t w -n two
+new-window -d -t w -n three
+split-window -d -t w:0
+err: select-window -t w:+foo
+err: select-window -t w:-0
+err: select-window -t w:+0
+err: select-window -t w:+x1
+err: select-pane -t w:0.+foo
+err: select-pane -t w:0.-0
+err: select-pane -t w:0.+0
+err: display-message -p -t w:+1 #{window_index}
+err: display-message -p -t w:- #{window_index}
+err: display-message -p -t w:0.+1 #{pane_index}
+err: display-message -p -t w:0.- #{pane_index}

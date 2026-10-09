@@ -60,7 +60,10 @@ def validate(root, data, check_report=False):
     require(isinstance(data["updated_on"], str) and date.fromisoformat(data["updated_on"]).isoformat() == data["updated_on"], "updated_on must be YYYY-MM-DD")
     commit(data["tmux_commit"], "tmux_commit")
     oracle = read_json(root / "compat/tmux-oracle.json")
-    require(data["tmux_commit"] == oracle["pin"], "tmux_commit differs from the oracle pin")
+    closed = isinstance(data["items"], list) and bool(data["items"]) and all(
+        isinstance(item, dict) and item.get("status") == "verified" for item in data["items"]
+    )
+    require(closed or data["tmux_commit"] == oracle["pin"], "tmux_commit differs from the oracle pin")
     registry = read_json(root / "compat/tmux-gaps.json")
     gap_ids = {gap["id"] for gap in registry["gaps"] + registry["closed"]}
     baseline = strings(data["baseline"], "baseline", nonempty=True)

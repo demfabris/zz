@@ -147,10 +147,11 @@ editor-vim-mode = true
 experimental-agent-pane = true
 experimental-editor-pane = false
 
-# The commands Agent panes spawn, per adapter. Versions are pinned so npx
-# spawns from its cache, offline; bumps are deliberate edits here.
-agent-command = npx -y @agentclientprotocol/codex-acp@1.11.0
-agent-claude-code-command = npx -y @agentclientprotocol/claude-agent-acp@0.76.0
+# The commands Agent panes spawn: your own `codex` and `claude`. A command
+# whose program is neither runs as an ACP adapter, for example
+# `npx -y @agentclientprotocol/codex-acp@1.11.0` or `gemini --experimental-acp`.
+agent-command = codex
+agent-claude-code-command = claude
 
 # Absolute path Agent panes start in. Unset starts them in your home
 # directory.

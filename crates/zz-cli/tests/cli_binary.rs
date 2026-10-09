@@ -692,7 +692,7 @@ mod daemon_autostart {
                 .unwrap()
                 .contains(&"pane-exited".into())
         );
-        assert_eq!(row.as_object().unwrap().len(), 30);
+        assert_eq!(row.as_object().unwrap().len(), 39);
         for (key, value) in row.as_object().unwrap() {
             if matches!(key.as_str(), "verbs" | "events") {
                 assert!(
@@ -8673,14 +8673,14 @@ tmux set-option -g @plugin loaded
                         .iter()
                         .filter(|candidate| candidate.as_str() == line)
                         .count(),
-                    0
+                    1
                 );
                 assert_eq!(
                     guarded
                         .iter()
                         .filter(|candidate| candidate.as_str() == line)
                         .count(),
-                    1
+                    0
                 );
             }
         }

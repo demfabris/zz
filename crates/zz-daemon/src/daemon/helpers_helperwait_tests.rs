@@ -241,6 +241,7 @@ fn loop_completion_hooks_park_config_reads_on_execution_workers() {
         context: ExecutionContext::default(),
         variables: BTreeMap::new(),
         exclude_client: None,
+        control_notified: false,
     }]);
     let start = Instant::now();
     timers.turn(&shared, &waker).unwrap();

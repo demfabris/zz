@@ -348,7 +348,7 @@ fn pinned_tmux_layout_fixtures_parse_and_dump_exactly() {
             next_split_id += 1;
             id
         };
-        let rebuilt = parsed.into_layout(&panes, &mut ids);
+        let (rebuilt, _) = parsed.into_layout(&panes, &mut ids);
         assert_eq!(rebuilt.dump(), fixture.expected_layout, "{}", fixture.name);
     }
 }

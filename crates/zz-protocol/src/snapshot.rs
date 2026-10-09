@@ -465,6 +465,34 @@ pub struct PaneSnapshot {
     pub border_status_text: String,
     #[serde(default)]
     pub mode: Option<PaneMode>,
+    #[serde(default)]
+    pub status: Option<PaneStatus>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaneStatus {
+    pub state: PaneStatusState,
+    pub kind: Option<PaneStatusKind>,
+    pub progress: Option<u8>,
+    pub app: String,
+    pub title: String,
+    pub message: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneStatusState {
+    Idle,
+    Working,
+    Done,
+    Blocked,
+    Error,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PaneStatusKind {
+    Permission,
+    Question,
+    Auth,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

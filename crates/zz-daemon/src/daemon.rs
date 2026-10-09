@@ -18940,13 +18940,13 @@ impl Shared {
             return;
         };
         match session.target {
-            EditorTarget::Buffer(name) => {
+            EditorTarget::Buffer { name, data } => {
                 {
                     let mut inner = self.inner.lock();
                     let Some(buffer) = inner
                         .paste_buffers
                         .iter_mut()
-                        .find(|buffer| buffer.name == name)
+                        .find(|buffer| buffer.name == name && Arc::ptr_eq(&buffer.data, &data))
                     else {
                         return;
                     };
@@ -18955,10 +18955,15 @@ impl Shared {
                     {
                         text.pop();
                     }
-                    if !text.is_empty() {
-                        buffer.data = Arc::from(text);
+                    if text.is_empty() {
+                        return;
                     }
+                    buffer.data = Arc::from(text);
                 }
+                self.run_event_hooks(vec![PendingHookEvent::paste_buffer(
+                    "paste-buffer-changed",
+                    name,
+                )]);
                 self.refresh_choose_buffers();
             }
             EditorTarget::Option { pane, edit } => {
@@ -19400,7 +19405,7 @@ impl Shared {
                     items,
                     selected,
                     stay_open: parsed.stay_open,
-                    mouse_keys: parsed.mouse,
+                    mouse_keys: parsed.mouse || context.invoking_mouse().is_some(),
                 },
                 commands,
             )
@@ -21152,18 +21157,7 @@ impl Shared {
                     action: zz_terminal::TerminalViewAction::Paste(text),
                 } => {
                     self.dismiss_client_message(client);
-                    let modal_active = {
-                        let inner = self.inner.lock();
-                        inner
-                            .client(client)
-                            .is_some_and(|c| c.choose_tree.is_some())
-                            || inner
-                                .client(client)
-                                .is_some_and(|c| c.choose_buffer.is_some())
-                            || inner
-                                .client(client)
-                                .is_some_and(|c| c.display_panes.is_some())
-                    };
+                    let modal_active = chooser_holds_input(&self.inner.lock(), client);
                     let mode_owns_paste = self.read_client(client, |c| {
                         c.and_then(|c| c.copy_session.as_ref())
                             .is_some_and(|session| session.pane == pane)
@@ -21176,17 +21170,7 @@ impl Shared {
                 InputMessage::TerminalView { pane, action } => {
                     let terminal = {
                         let inner = self.inner.lock();
-                        if !read_only
-                            && (inner
-                                .client(client)
-                                .is_some_and(|c| c.choose_tree.is_some())
-                                || inner
-                                    .client(client)
-                                    .is_some_and(|c| c.choose_buffer.is_some())
-                                || inner
-                                    .client(client)
-                                    .is_some_and(|c| c.display_panes.is_some()))
-                        {
+                        if !read_only && chooser_holds_input(&inner, client) {
                             None
                         } else {
                             if !client_is_attached_to_pane(&inner, client, pane) {
@@ -22392,16 +22376,7 @@ impl Shared {
         self.dismiss_client_message(client);
         {
             let inner = self.inner.lock();
-            if inner
-                .client(client)
-                .is_some_and(|c| c.choose_tree.is_some())
-                || inner
-                    .client(client)
-                    .is_some_and(|c| c.choose_buffer.is_some())
-                || inner
-                    .client(client)
-                    .is_some_and(|c| c.display_panes.is_some())
-            {
+            if chooser_holds_input(&inner, client) {
                 return Ok(());
             }
         }
@@ -24097,7 +24072,15 @@ impl Shared {
                         inner.client_entry(client).choose_buffer.replace(chooser);
                         drop(inner);
                         if let Some((name, data)) = edit {
-                            self.spawn_editor(client, source, &data, EditorTarget::Buffer(name));
+                            self.spawn_editor(
+                                client,
+                                source,
+                                &data,
+                                EditorTarget::Buffer {
+                                    name,
+                                    data: Arc::clone(&data),
+                                },
+                            );
                         }
                         return Ok(());
                     }
@@ -37959,7 +37942,10 @@ struct EditorSession {
 }
 
 enum EditorTarget {
-    Buffer(String),
+    Buffer {
+        name: String,
+        data: Arc<[u8]>,
+    },
     Option {
         pane: PaneId,
         edit: zz_mux::CustomizeEdit,
@@ -38905,6 +38891,31 @@ fn chooser_shown(inner: &ServerState, client: ClientId) -> bool {
             .as_ref()
             .is_none_or(|output| output.parked)
         && inner.pane_modes.get(&pane).map_or(0, Vec::len) <= state.chooser_under.modes
+}
+
+fn chooser_holds_input(inner: &ServerState, client: ClientId) -> bool {
+    let Some(state) = inner.client(client) else {
+        return false;
+    };
+    if state.display_panes.is_some() {
+        return true;
+    }
+    let Some(source) = state
+        .choose_tree
+        .as_ref()
+        .map(|chooser| chooser.source_pane)
+        .or_else(|| {
+            state
+                .choose_buffer
+                .as_ref()
+                .map(|chooser| chooser.source_pane)
+        })
+    else {
+        return false;
+    };
+    client_focused_window_for_attachment(inner, client)
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .is_none_or(|window| window.active_pane == source)
 }
 
 fn chooser_takes_keys(inner: &ServerState, client: ClientId) -> bool {
@@ -63181,6 +63192,97 @@ mod tests {
                     })
                 ))
         );
+    }
+
+    #[test]
+    fn an_editor_write_back_names_its_buffer_and_skips_a_replaced_one() {
+        let shared = Arc::new(Shared::new(1));
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let context = ExecutionContext::default();
+        let set = |data: &str| {
+            shared
+                .buffer_command(
+                    &context,
+                    "set-buffer",
+                    &["-b", "edit1", data].map(RawText::from),
+                )
+                .expect("set buffer");
+        };
+        let edit = |pane: u64, text: &str| {
+            let file = tempfile::NamedTempFile::new().expect("editor file");
+            std::fs::write(file.path(), text).expect("write editor file");
+            let path = file.into_temp_path().keep().expect("keep editor file");
+            let data = {
+                let inner = shared.inner.lock();
+                Arc::clone(
+                    &inner
+                        .paste_buffers
+                        .iter()
+                        .find(|buffer| buffer.name == "edit1")
+                        .expect("edit1")
+                        .data,
+                )
+            };
+            shared.inner.lock().editors.insert(
+                PaneId(pane),
+                EditorSession {
+                    client: control,
+                    path,
+                    target: EditorTarget::Buffer {
+                        name: "edit1".to_owned(),
+                        data,
+                    },
+                },
+            );
+        };
+        let buffer = || {
+            let inner = shared.inner.lock();
+            inner
+                .paste_buffers
+                .iter()
+                .find(|buffer| buffer.name == "edit1")
+                .map(|buffer| buffer.data.to_vec())
+                .expect("edit1")
+        };
+        let changes = || {
+            take_reliable_messages(&control_mailbox)
+                .into_iter()
+                .filter(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::HookEvent { name, .. },
+                            ..
+                        }) if name == "paste-buffer-changed"
+                    )
+                })
+                .count()
+        };
+
+        set("first line");
+        changes();
+        edit(900, "first lineappended\n");
+        shared.finish_editor(PaneId(900), 0);
+        assert_eq!(buffer(), b"first lineappended");
+        assert_eq!(changes(), 1);
+
+        edit(901, "stale\n");
+        set("replaced");
+        changes();
+        shared.finish_editor(PaneId(901), 0);
+        assert_eq!(buffer(), b"replaced");
+        assert_eq!(changes(), 0);
+
+        edit(902, "failed\n");
+        shared.finish_editor(PaneId(902), 1);
+        assert_eq!(buffer(), b"replaced");
+        assert_eq!(changes(), 0);
     }
 
     #[test]

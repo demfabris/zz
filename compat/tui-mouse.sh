@@ -1927,6 +1927,8 @@ case_customize_mouse_menu_outside() {
 # every floating pane's size and position, and the active pane's id.
 # FLOAT_SABOTAGE_COLUMN moves zz's last motion of each gesture.
 FLOAT_SABOTAGE_COLUMN=""
+FLOAT_ROW_OFFSET=0
+FLOAT_PREFIX=""
 float_geometry() {
   side_command "$1" list-panes -t "=$INNER_SESSION" \
     -F '#{pane_floating_flag} #{pane_index} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}' 2>/dev/null |
@@ -1951,6 +1953,9 @@ float_gesture() {
   shift 3
   local cells=("$@") index last side column
   last=$((${#cells[@]} - 2))
+  for ((index = 1; index < ${#cells[@]}; index += 2)); do
+    cells[index]=$((cells[index] + FLOAT_ROW_OFFSET))
+  done
   for side in zz tmux; do
     send_mouse "$side" "$press" "${cells[0]}" "${cells[1]}" M
     for ((index = 2; index <= last; index += 2)); do
@@ -1969,7 +1974,7 @@ float_gesture() {
   done
 }
 float_verdict() {
-  local name="$1" floats="$2"
+  local name="$FLOAT_PREFIX$1" floats="$2"
   wait_for "the $name floats on zz" float_count_is zz "$floats"
   wait_for "the $name floats on tmux" float_count_is tmux "$floats"
   wait_for "the $name geometry settled on zz" float_geometry_settled zz
@@ -2045,12 +2050,23 @@ case_float_create_from_empty() {
   wait_for 'zz back on window 0' pane_count_is zz 1
   wait_for 'tmux back on window 0' pane_count_is tmux 1
 }
+case_float_status_top() {
+  set_on_both status-position top
+  FLOAT_ROW_OFFSET=1
+  FLOAT_PREFIX=status-top-
+  case_float_create_from_pane
+  case_float_top_border_move
+  FLOAT_ROW_OFFSET=0
+  FLOAT_PREFIX=""
+  set_on_both status-position bottom
+}
 run_float_cases() {
   case_float_create_from_pane
   case_float_move
   case_float_border_resize
   case_float_top_border_move
   case_float_create_from_empty
+  case_float_status_top
 }
 
 # --- dispositions ----------------------------------------------------------

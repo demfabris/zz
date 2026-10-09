@@ -9358,7 +9358,7 @@ impl MuxEngine {
         };
         let cells = match axis {
             Axis::Horizontal => i32::from(mouse.column) - geometry.xoff,
-            Axis::Vertical => i32::from(mouse.row) - geometry.yoff,
+            Axis::Vertical => self.mouse_window_row(pane, mouse.row) - geometry.yoff,
         };
         let cells = u16::try_from(cells).ok();
         let Some(cells) = cells.filter(|cells| *cells > 0) else {
@@ -9366,6 +9366,40 @@ impl MuxEngine {
         };
         self.state.resize_pane_to(pane, axis, cells)?;
         Ok(())
+    }
+
+    fn mouse_window_row(&self, pane: PaneId, row: u16) -> i32 {
+        let row = i32::from(row);
+        let Some(window) = self.state.window_for_pane(pane) else {
+            return row;
+        };
+        let session = self.state.windows[&window].session;
+        let lines = i32::from(self.status_rows_for_session(Some(session)));
+        if lines == 0 {
+            return row;
+        }
+        if self.status_formats_for_session(Some(session)).position == crate::StatusPosition::Top {
+            return if row >= lines { row - lines } else { row };
+        }
+        let at = i32::from(self.state.windows[&window].layout.extent().1);
+        if row >= at { at - 1 } else { row }
+    }
+
+    fn mouse_cells(&self, pane: PaneId, mouse: &MouseEventTarget) -> [(i32, i32); 3] {
+        let cell = |(x, y): (u16, u16)| (i32::from(x), self.mouse_window_row(pane, y));
+        let (lx, ly) = mouse_last_cell(mouse);
+        let (ax, ay) = mouse_anchor_cell(mouse);
+        [
+            cell((mouse.column, mouse.row)),
+            cell((
+                u16::try_from(lx).unwrap_or_default(),
+                u16::try_from(ly).unwrap_or_default(),
+            )),
+            cell((
+                u16::try_from(ax).unwrap_or_default(),
+                u16::try_from(ay).unwrap_or_default(),
+            )),
+        ]
     }
 
     fn mouse_float_geometry(&self, pane: PaneId) -> Option<CellGeometry> {
@@ -9385,8 +9419,7 @@ impl MuxEngine {
         let Some(mut cell) = self.mouse_float_geometry(pane) else {
             return Ok(false);
         };
-        let (x, y) = (i32::from(mouse.column), i32::from(mouse.row));
-        let (lx, ly) = mouse_last_cell(mouse);
+        let [(x, y), (lx, ly), _] = self.mouse_cells(pane, mouse);
         if x != lx || y != ly {
             cell.xoff += x - lx;
             cell.yoff += y - ly;
@@ -9403,8 +9436,7 @@ impl MuxEngine {
         let Some(cell) = self.mouse_float_geometry(pane) else {
             return Ok(false);
         };
-        let (x, y) = (i32::from(mouse.column), i32::from(mouse.row));
-        let (lx, ly) = mouse_last_cell(mouse);
+        let [(x, y), (lx, ly), _] = self.mouse_cells(pane, mouse);
         let (sx, sy) = (i32::from(cell.sx), i32::from(cell.sy));
         let left = cell.xoff - 1;
         let right = cell.xoff + sx;
@@ -9468,7 +9500,7 @@ impl MuxEngine {
             return Ok(false);
         }
         let border = i32::from(self.pane_lines(pane) != PaneBorderLines::None);
-        let (ax, ay) = mouse_anchor_cell(mouse);
+        let [(x, y), _, (ax, ay)] = self.mouse_cells(pane, mouse);
         let span = |at: i32, anchor: i32| {
             if at >= anchor {
                 (at - anchor + 1, anchor + border)
@@ -9477,8 +9509,8 @@ impl MuxEngine {
                 (size, anchor - size + 1 + border)
             }
         };
-        let (sx, xoff) = span(i32::from(mouse.column), ax);
-        let (sy, yoff) = span(i32::from(mouse.row), ay);
+        let (sx, xoff) = span(x, ax);
+        let (sy, yoff) = span(y, ay);
         let inner = |size: i32| {
             if border == 0 {
                 size.max(1)

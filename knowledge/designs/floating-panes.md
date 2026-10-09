@@ -335,9 +335,15 @@ Recorded by float.keys (2026-10-09).
   left.
 - The editor modal is `new-pane -O -c /tmp` with outer `-x -y -X -Y` that give the 90% content box
   and `remain-on-exit off`; `choose-buffer`'s `e` is the `edit` row of zz's `choose-buffer` table.
-- `compat/tui-floating.sh` picks the pane menu's Move item with Down and Enter: in zz a mouse release
-  that chooses a menu item whose command opens another menu leaves no menu up, where 3.8 shows the
-  second one.
+- A `display-menu` run from a mouse binding takes mouse keys, as 3.8 does when the event is valid
+  (`MENU_NOMOUSE` only without one and without `-M`), so the pane menu's Move item is chosen by a
+  mouse release and its submenu opens.
+- Mouse rows reach the drag code in window cells: the top status lines are subtracted and a row on
+  a bottom status line is clamped to the window's last row, as `cmd_resize_pane_mouse_*`,
+  `cmd_join_pane_mouse_move` and `cmd_split_window_mouse_resize` adjust `m->y` and `m->ly`.
+- The buffer editor writes back only into the buffer it opened (same name and same data), emits
+  `paste-buffer-changed`, and input reaches the editor while the buffer chooser stays open on the
+  pane beneath it.
 
 # zz-only extensions
 

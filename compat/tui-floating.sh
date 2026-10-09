@@ -463,6 +463,26 @@ both_floating_count_is() {
   wait_for "$2 on zz" floating_count_is zz "$1"
   wait_for "$2 on tmux" floating_count_is tmux "$1"
 }
+text_cell() {
+  capture_plain "$1" | python3 -c '
+import sys
+needle, skip = sys.argv[1], sys.argv[2]
+for row, line in enumerate(sys.stdin.read().split("\n")):
+    column = line.find(needle)
+    if column >= 0 and (not skip or skip not in line):
+        print(column, row)
+        break
+' "$2" "${3:-}"
+}
+click_text_on_both() {
+  local side cell
+  for side in zz tmux; do
+    cell="$(text_cell "$side" "$1" "${2:-}")"
+    [ -n "$cell" ] || die "$1 is not on the $side screen"
+    send_bytes "$side" "$(printf '\033[<0;%s;%sM' "$((${cell% *} + 1))" "$((${cell#* } + 1))")"
+    send_bytes "$side" "$(printf '\033[<0;%s;%sm' "$((${cell% *} + 1))" "$((${cell#* } + 1))")"
+  done
+}
 pane_menu_on_both() {
   local column="$1" row="$2" side
   for side in zz tmux; do
@@ -519,8 +539,7 @@ pane_menu_cases() {
   done
   read -r float_x float_y <"$SCRATCH_DIR/float-tmux"
   pane_menu_on_both "$((float_x + 2))" "$((float_y + 1))"
-  type_on_both Down
-  type_on_both Enter
+  click_text_on_both Move '&'
   both_screen_has 'Bottom Right' 'the Move menu'
   type_on_both 4
   both_screen_lacks 'Bottom Right' 'the closed Move menu'
@@ -541,7 +560,7 @@ pane_menu_cases() {
 }
 
 write_editor() {
-  printf '#!/bin/sh\nprintf "EDITOR-UP\\n"\nread answer\n[ "$answer" = ok ] || exit 3\nprintf "appended\\n" >>"$1"\nexit 0\n' \
+  printf '#!/bin/sh\nprintf "EDITOR-UP\\n"\nread answer\nprintf "appended\\n" >>"$1"\n[ "$answer" = ok ] || exit 1\nexit 0\n' \
     >"$SCRATCH_DIR/editor.sh"
   chmod +x "$SCRATCH_DIR/editor.sh"
 }
@@ -570,16 +589,27 @@ value_verdict() {
 modal_count_is() {
   [ "$(side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_modal_flag}' 2>/dev/null | grep -c 1)" -eq "$2" ]
 }
-editor_round() {
-  local name="$1" answer="$2"
+editor_open() {
+  local name="$1"
   type_on_both e
   both_screen_has EDITOR-UP "the $name editor"
   wait_for "the $name modal on zz" modal_count_is zz 1
   wait_for "the $name modal on tmux" modal_count_is tmux 1
   facts_verdict "$name-modal"
-  type_on_both "$answer" Enter
+}
+editor_closed() {
+  local name="$1"
   wait_for "the $name modal gone on zz" modal_count_is zz 0
   wait_for "the $name modal gone on tmux" modal_count_is tmux 0
+  sleep 0.5
+}
+editor_answer() {
+  type_on_both "$2" Enter
+  editor_closed "$1"
+}
+buffer_verdict() {
+  value_verdict "$1/show-buffer" \
+    "$(side_command zz show-buffer -b edit1)" "$(side_command tmux show-buffer -b edit1)"
 }
 
 editor_cases() {
@@ -592,14 +622,24 @@ editor_cases() {
   run_on_both bind-key -T prefix K customize-mode
   press_on_both B
   both_screen_has edit1 'the buffer chooser'
-  editor_round editor-buffer ok
-  wait_for 'the zz buffer edited' sh -c '[ "$('"$(printf '%q' "$ZZ_BIN")"' --socket '"$(printf '%q' "$ZZ_SOCKET")"' show-buffer -b edit1 2>/dev/null)" != "first line" ]'
-  value_verdict editor-buffer/show-buffer \
-    "$(side_command zz show-buffer -b edit1)" "$(side_command tmux show-buffer -b edit1)"
+  editor_open editor-buffer
+  editor_answer editor-buffer ok
+  buffer_verdict editor-buffer
   CASE_LABEL=editor-buffer-failed
-  editor_round editor-buffer-failed no
-  value_verdict editor-buffer-failed/show-buffer \
-    "$(side_command zz show-buffer -b edit1)" "$(side_command tmux show-buffer -b edit1)"
+  editor_open editor-buffer-failed
+  editor_answer editor-buffer-failed no
+  buffer_verdict editor-buffer-failed
+  CASE_LABEL=editor-buffer-replaced
+  editor_open editor-buffer-replaced
+  run_on_both set-buffer -b edit1 replaced
+  editor_answer editor-buffer-replaced ok
+  buffer_verdict editor-buffer-replaced
+  CASE_LABEL=editor-buffer-paste
+  editor_open editor-buffer-paste
+  send_bytes zz $'\033[200~ok\r\033[201~'
+  send_bytes tmux $'\033[200~ok\r\033[201~'
+  editor_closed editor-buffer-paste
+  buffer_verdict editor-buffer-paste
   type_on_both q
   CASE_LABEL=editor-option
   press_on_both K
@@ -607,9 +647,14 @@ editor_cases() {
   type_on_both /
   type_on_both -l status-left
   type_on_both Enter
-  editor_round editor-option ok
-  wait_for 'the zz option edited' sh -c '[ "$('"$(printf '%q' "$ZZ_BIN")"' --socket '"$(printf '%q' "$ZZ_SOCKET")"' show-options -gv status-left 2>/dev/null)" != L ]'
+  editor_open editor-option
+  editor_answer editor-option ok
   value_verdict editor-option/status-left \
+    "$(side_command zz show-options -gv status-left)" "$(side_command tmux show-options -gv status-left)"
+  CASE_LABEL=editor-option-failed
+  editor_open editor-option-failed
+  editor_answer editor-option-failed no
+  value_verdict editor-option-failed/status-left \
     "$(side_command zz show-options -gv status-left)" "$(side_command tmux show-options -gv status-left)"
 }
 

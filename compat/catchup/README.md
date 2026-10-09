@@ -16,7 +16,7 @@ Work items, status, branches: `compat/catchup/ledger.json` through `ledger.py`.
 | `lane.md` | Lane brief template. The orchestrator fills `{ID}`, `{WT}`, `{BUDGET}`, `{EXTRA}`. |
 | `review.md`, `review.sh SLOT ID` | Codex quick review of a lane branch against main. |
 | `cargo.sh` | Every cargo call goes through this: memory cap, job count and two cargo slots sized from RAM. |
-| `wt.sh` | Lane worktrees `../zz-cu-<slot>` with a reflinked `target` and `compat/.cache`: `add`, `item`, `rm`, `list`, `prune`. |
+| `wt.sh` | Lane worktrees `../zz-cu-<slot>` with a reflinked `target` and `compat/.cache`: `add`, `item` (refreshes a stale tmux cache), `cache`, `rm`, `list`, `prune`. |
 
 ## Resuming (any machine)
 
@@ -134,7 +134,11 @@ Each rule cost a campaign real time. The source is in brackets
     clause says so or fabrico ruled on it. [Cycle 4 merged three lanes that verified nothing.]
 13. **Probes live in the repo** (tests or `compat/scenarios`), never only in `/tmp`, which is RAM
     and is lost on reboot. [A gate spent an hour rebuilding lost probes, LOG.]
-14. **Leave nothing running**: kill the daemons and fixtures you started; no binary copies in `/tmp`.
+14. **Leave nothing running, and never run `rm`.** Kill the daemons and fixtures you started. An
+    `rm` in a Bash call raises an approval prompt fabrico has to click, so lanes never delete: put
+    scratch files and binary copies under `target/catchup-scratch/` in your worktree (it goes away
+    with the worktree), and refresh a stale tmux cache with
+    `/home/demfabris/dev/zz/compat/catchup/wt.sh cache <slot>` (rsync, no `rm`). [2026-10-09.]
 15. **Stay in your worktree.** Start every Bash command with `cd <your worktree> &&` or use
     absolute paths; a `cd` inside a backgrounded subshell does not carry over. [fix.tui-colour ran a
     test batch in the shared main checkout this way, 2026-10-09.]

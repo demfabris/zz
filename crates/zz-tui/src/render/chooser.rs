@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use unicode_width::UnicodeWidthChar as _;
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, ChooserPreview, ChooserPreviewSize,
-    ChooserPreviewTile, ThemeColours, TmuxAttributeState, TmuxAttributes, TmuxColour, TmuxStyle,
-    apply_style, parse_style, parse_styled_segments,
+    ChooserPreviewTile, StyledSegment, ThemeColours, TmuxAttributeState, TmuxAttributes,
+    TmuxColour, TmuxStyle, apply_style, parse_style, parse_styled_segments,
 };
 use zz_terminal::{
     CellWidth, Color, Glyph, PackedCell, PackedStyle, TerminalAppearance, TerminalViewport,
@@ -222,6 +222,21 @@ fn text_width(text: &str) -> usize {
         .sum()
 }
 
+#[cfg(test)]
+pub(super) fn cell_text(grid: &Grid, y: u16) -> String {
+    (0..grid.width)
+        .filter_map(|x| grid.index(x, y))
+        .map(|index| grid.cells[index].glyph.as_str())
+        .collect()
+}
+
+pub(super) fn segments_width(segments: &[StyledSegment]) -> usize {
+    segments
+        .iter()
+        .map(|segment| text_width(&segment.text))
+        .sum()
+}
+
 pub(super) fn markup_width(markup: &str) -> usize {
     parse_styled_segments(markup)
         .iter()
@@ -340,8 +355,27 @@ impl Grid {
         base: &TmuxStyle,
         default_colours: bool,
     ) -> u16 {
+        self.segments(
+            x,
+            y,
+            limit,
+            &parse_styled_segments(markup),
+            base,
+            default_colours,
+        )
+    }
+
+    pub(super) fn segments(
+        &mut self,
+        x: u16,
+        y: u16,
+        limit: u16,
+        segments: &[StyledSegment],
+        base: &TmuxStyle,
+        default_colours: bool,
+    ) -> u16 {
         let mut used = 0_u16;
-        for segment in parse_styled_segments(markup) {
+        for segment in segments {
             if used >= limit {
                 break;
             }

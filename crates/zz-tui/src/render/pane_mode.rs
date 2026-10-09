@@ -1,11 +1,11 @@
 use zz_protocol::{
-    PaneMode, PanesModeArea, PanesModeBorder, ThemeColours, TmuxAlign, TmuxAttributeState,
-    TmuxColour, TmuxStyle, parse_styled_segments, parse_tmux_colour,
+    PaneMode, PanesModeArea, PanesModeBorder, StyledSegment, ThemeColours, TmuxAlign,
+    TmuxAttributeState, TmuxColour, TmuxStyle, parse_styled_segments, parse_tmux_colour,
 };
 
 use super::{
     Renderer,
-    chooser::{Grid, Paint, Trailing, acs_glyph, markup_width, plain},
+    chooser::{Grid, Paint, Trailing, acs_glyph, plain, segments_width},
 };
 use crate::{layout::Rect, mode_view::resolved_style, state::Model};
 
@@ -299,18 +299,38 @@ fn panes_label(grid: &mut Grid, area: &PanesModeArea, base: &TmuxStyle) -> Optio
     if area.label.is_empty() || area.width == 0 {
         return None;
     }
-    let width = u16::try_from(markup_width(&area.label))
-        .unwrap_or(u16::MAX)
-        .min(area.width);
-    let align = parse_styled_segments(&area.label)
+    let mut sections: [Vec<StyledSegment>; 4] = Default::default();
+    for segment in parse_styled_segments(&area.label) {
+        let index = match segment.style.align {
+            Some(TmuxAlign::Centre) => 1,
+            Some(TmuxAlign::Right) => 2,
+            Some(TmuxAlign::AbsoluteCentre) => 3,
+            _ => 0,
+        };
+        sections[index].push(segment);
+    }
+    let available = area.width;
+    let [left, centre, right, absolute] = sections.each_ref().map(|section| {
+        u16::try_from(segments_width(section))
+            .unwrap_or(u16::MAX)
+            .min(available)
+    });
+    let middle = left + available.saturating_sub(right).saturating_sub(left) / 2;
+    let columns = [
+        0,
+        middle.saturating_sub(centre / 2),
+        available - right,
+        (available - absolute) / 2,
+    ];
+    for ((section, column), width) in sections
         .iter()
-        .find_map(|segment| segment.style.align);
-    let column = match align {
-        Some(TmuxAlign::Right) => area.x + area.width - width,
-        Some(TmuxAlign::Centre | TmuxAlign::AbsoluteCentre) => area.x + (area.width - width) / 2,
-        _ => area.x,
-    };
-    grid.markup(column, area.y, width, &area.label, base, false);
+        .zip(columns)
+        .zip([left, centre, right, absolute])
+    {
+        if width > 0 {
+            grid.segments(area.x + column, area.y, width, section, base, false);
+        }
+    }
     Some((area.x, area.y))
 }
 
@@ -578,6 +598,27 @@ mod tests {
             format: true,
         };
         assert_eq!(surface(&single, rect, &theme).cursor, (42, 13));
+    }
+
+    #[test]
+    fn a_panes_label_places_each_aligned_section_like_format_draw() {
+        let area = zz_protocol::PanesModeArea {
+            pane: zz_protocol::PaneId(0),
+            number: 0,
+            x: 0,
+            y: 0,
+            width: 20,
+            height: 10,
+            colour: "red".to_owned(),
+            label: "#[align=left]L#[align=centre]C#[align=right]R".to_owned(),
+            viewport: None,
+        };
+        let mut grid = Grid::new(20, 10);
+        panes_label(&mut grid, &area, &plain());
+        assert_eq!(
+            super::super::chooser::cell_text(&grid, 0),
+            "L         C        R"
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 //! Application-wide UI zoom, the browser kind.
 
-use zpui::{App, KeyBinding, Window};
 use zz_client::{ChromeAction, UI_TABLE};
+use zz_gpui::{App, KeyBinding, Window};
 use zz_ui::{ROOT_KEY_CONTEXT, UiZoom};
 
 use crate::keymap::ChromeChord;
@@ -13,7 +13,7 @@ pub const MAX_UI_ZOOM: f32 = 300.0;
 pub const UI_ZOOM_STEP: f32 = 10.0;
 const DEFAULT_UI_ZOOM: f32 = 100.0;
 
-zpui::actions!(zz, [IncreaseUiZoom, DecreaseUiZoom, ResetUiZoom]);
+zz_gpui::actions!(zz, [IncreaseUiZoom, DecreaseUiZoom, ResetUiZoom]);
 
 pub fn init(cx: &mut App) {
     crate::keymap::bind(cx, UI_TABLE, key_bindings);
@@ -113,7 +113,7 @@ fn percent_for_zoom(zoom: f32) -> f32 {
 mod tests {
     use std::any::TypeId;
 
-    use zpui::{AppContext as _, KeyContext, Keymap, Keystroke, TestAppContext};
+    use zz_gpui::{AppContext as _, KeyContext, Keymap, Keystroke, TestAppContext};
 
     use super::*;
 
@@ -174,7 +174,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn actions_step_the_shared_zoom_in_whole_percents(cx: &mut TestAppContext) {
         cx.update(|cx| {
             zz_ui::init(cx);
@@ -200,16 +200,16 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn zooming_moves_every_open_window(cx: &mut TestAppContext) {
         cx.update(|cx| {
             zz_ui::init(cx);
             init(cx);
         });
 
-        let first = cx.add_window(|_, _| zpui::Empty);
-        let second = cx.add_window(|_, _| zpui::Empty);
-        let zoom_of = |cx: &mut TestAppContext, window: zpui::WindowHandle<zpui::Empty>| {
+        let first = cx.add_window(|_, _| zz_gpui::Empty);
+        let second = cx.add_window(|_, _| zz_gpui::Empty);
+        let zoom_of = |cx: &mut TestAppContext, window: zz_gpui::WindowHandle<zz_gpui::Empty>| {
             cx.update_window(window.into(), |_, window, _| window.zoom())
                 .expect("window is open")
         };
@@ -226,7 +226,7 @@ mod tests {
         assert_eq!(zoom_of(cx, second), zoom_for_percent(160.0));
         cx.update(|cx| set_percent(150.0, cx));
 
-        let third = cx.add_window(|_, _| zpui::Empty);
+        let third = cx.add_window(|_, _| zz_gpui::Empty);
         cx.update_window(third.into(), |_, window, cx| {
             apply_to_new_window(window, cx);
         })

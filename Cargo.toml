@@ -180,10 +180,10 @@ windows-registry = "0.6.0"
 x11rb = "0.13.2"
 zeroize = "=1.9.0"
 
-zpui = { path = "crates/zpui", default-features = false }
-zpui-kit = { path = "crates/zpui-kit" }
-zpui-macros = { path = "crates/zpui-macros" }
-zpui-platform = { path = "crates/zpui-platform", default-features = false }
+zz-gpui = { path = "crates/zz-gpui", default-features = false }
+zz-gpui-kit = { path = "crates/zz-gpui-kit" }
+zz-gpui-macros = { path = "crates/zz-gpui-macros" }
+zz-gpui-platform = { path = "crates/zz-gpui-platform", default-features = false }
 
 zz = { path = "crates/zz" }
 zz-app = { path = "clients/app" }
@@ -227,7 +227,7 @@ cast_sign_loss = "allow"
 float_cmp = "allow"
 struct_excessive_bools = "allow"
 type_complexity = "allow"
-# zpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
+# zz-gpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
 # and view methods take &self for organization before they need it.
 used_underscore_binding = "allow"
 unused_self = "allow"
@@ -238,9 +238,9 @@ debug = 1
 [profile.dev.package]
 "*" = { opt-level = 2 }
 taffy = { opt-level = 3 }
-zpui = { opt-level = 3 }
-zpui-macros = { opt-level = 2 }
-zpui-platform = { opt-level = 2 }
+zz-gpui = { opt-level = 3 }
+zz-gpui-macros = { opt-level = 2 }
+zz-gpui-platform = { opt-level = 2 }
 
 [profile.release]
 opt-level = 3

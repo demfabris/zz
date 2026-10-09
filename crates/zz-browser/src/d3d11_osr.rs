@@ -3,7 +3,7 @@ use std::sync::Arc;
 use cef::AcceleratedPaintInfo;
 use parking_lot::Mutex;
 use thiserror::Error;
-use zpui::windows::{
+use zz_gpui::windows::{
     Win32::{
         Foundation::HANDLE,
         Graphics::{

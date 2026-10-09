@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc, time::Instant};
 
 use parking_lot::RwLock;
-use zpui::{
+use zz_gpui::{
     App, Bounds, Element, ElementId, ElementInputHandler, Entity, GlobalElementId,
     InspectorElementId, IntoElement, LayoutId, Pixels, RenderImage, Window,
 };

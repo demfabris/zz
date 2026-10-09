@@ -4,12 +4,12 @@ use zz_app::{app, input};
 #[cfg(target_os = "ios")]
 fn main() {
     use std::{borrow::Cow, rc::Rc};
-    use zpui::{App, Application, px};
+    use zz_gpui::{App, Application, px};
     use zz_ui::{Theme, UiZoom};
 
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
     let application = Application::with_platform(Rc::new(
-        zpui_platform::ios::IosPlatform::new().with_touch_gestures(true),
+        zz_gpui_platform::ios::IosPlatform::new().with_touch_gestures(true),
     ))
     .with_assets(zz_ui::Assets);
     let (url_sender, mut url_receiver) = futures::channel::mpsc::unbounded::<Vec<String>>();
@@ -62,8 +62,8 @@ fn main() {
 }
 
 #[cfg(target_os = "ios")]
-fn open_workspace(cx: &mut zpui::App) {
-    use zpui::{AppContext, WindowOptions};
+fn open_workspace(cx: &mut zz_gpui::App) {
+    use zz_gpui::{AppContext, WindowOptions};
     use zz_ui::Root;
 
     cx.open_window(WindowOptions::default(), |window, cx| {

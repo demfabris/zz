@@ -1,8 +1,8 @@
 use std::{collections::BTreeSet, sync::Arc};
 
 #[cfg(target_os = "macos")]
-use zpui::SystemMenuType;
-use zpui::{App, Entity, Global, Menu, MenuItem, OsAction};
+use zz_gpui::SystemMenuType;
+use zz_gpui::{App, Entity, Global, Menu, MenuItem, OsAction};
 
 #[cfg(target_os = "macos")]
 use crate::macos_app::{Hide, HideOthers, Minimize, Quit, ShowAll, Zoom};
@@ -15,7 +15,7 @@ use crate::{
     workspace::ClosePane,
 };
 
-zpui::actions!(
+zz_gpui::actions!(
     zz,
     [
         NewSession,
@@ -50,24 +50,24 @@ zpui::actions!(
 );
 
 #[cfg(not(target_os = "macos"))]
-zpui::actions!(zz, [Quit]);
+zz_gpui::actions!(zz, [Quit]);
 
 #[allow(clippy::unsafe_derive_deserialize)]
-#[derive(Clone, Debug, zpui::Action, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, zz_gpui::Action, PartialEq, Eq, serde::Deserialize)]
 #[action(namespace = zz, no_json)]
 pub(crate) struct SwitchSession {
     pub(crate) name: String,
 }
 
 #[allow(clippy::unsafe_derive_deserialize)]
-#[derive(Clone, Debug, zpui::Action, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, zz_gpui::Action, PartialEq, Eq, serde::Deserialize)]
 #[action(namespace = zz, no_json)]
 pub(crate) struct SelectPane {
     pub(crate) direction: String,
 }
 
 #[allow(clippy::unsafe_derive_deserialize)]
-#[derive(Clone, Debug, zpui::Action, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, zz_gpui::Action, PartialEq, Eq, serde::Deserialize)]
 #[action(namespace = zz, no_json)]
 pub(crate) struct OpenUrl {
     pub(crate) url: String,
@@ -248,12 +248,14 @@ fn open_url(label: &str, url: &str) -> MenuItem {
 
 #[cfg(test)]
 mod tests {
-    use zpui::AppContext as _;
+    use zz_gpui::AppContext as _;
 
     use super::*;
 
-    #[zpui::test]
-    fn session_menu_follows_replaced_snapshots_and_empty_workspaces(cx: &mut zpui::TestAppContext) {
+    #[zz_gpui::test]
+    fn session_menu_follows_replaced_snapshots_and_empty_workspaces(
+        cx: &mut zz_gpui::TestAppContext,
+    ) {
         let mux = cx.new(|cx| {
             MuxClient::new(
                 Err(zz_daemon_client::DaemonError::Thread(

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use zpui::{App, Context, EventEmitter, Task, Window, div, prelude::*};
+use zz_gpui::{App, Context, EventEmitter, Task, Window, div, prelude::*};
 use zz_protocol::{AgentDescriptor, AgentProvider, PaneId};
 use zz_ui::{ActiveTheme as _, Colorize as _};
 
@@ -52,7 +52,7 @@ impl AgentController {
         Self
     }
 
-    pub(crate) fn attach_mux(&mut self, _mux: zpui::Entity<MuxClient>) {}
+    pub(crate) fn attach_mux(&mut self, _mux: zz_gpui::Entity<MuxClient>) {}
 
     pub(crate) fn ensure_pane(
         &mut self,
@@ -81,7 +81,7 @@ impl AgentController {
         &mut self,
         _pane: PaneId,
         _text: &str,
-        _images: Vec<Arc<zpui::Image>>,
+        _images: Vec<Arc<zz_gpui::Image>>,
         _cx: &mut Context<Self>,
     ) -> Result<(), Arc<str>> {
         Err("agent panes are not included in this build".into())
@@ -102,15 +102,15 @@ impl AgentController {
 
 /// Placeholder for an agent pane this build cannot host.
 pub(crate) struct AgentView {
-    focus_handle: zpui::FocusHandle,
+    focus_handle: zz_gpui::FocusHandle,
 }
 
 impl AgentView {
     pub(crate) fn new(
         _pane: PaneId,
         _descriptor: &AgentDescriptor,
-        _controller: zpui::Entity<AgentController>,
-        _mux: zpui::Entity<MuxClient>,
+        _controller: zz_gpui::Entity<AgentController>,
+        _mux: zz_gpui::Entity<MuxClient>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -119,7 +119,7 @@ impl AgentView {
         }
     }
 
-    pub(crate) fn focus(&self, _cx: &App) -> zpui::FocusHandle {
+    pub(crate) fn focus(&self, _cx: &App) -> zz_gpui::FocusHandle {
         self.focus_handle.clone()
     }
 

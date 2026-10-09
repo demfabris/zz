@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, IntoElement, Keystroke, Modifiers, ParentElement as _, Pixels, RenderOnce,
     SharedString, Size, Styled as _, TextRun, Window, div, font, prelude::*, px,
 };
@@ -406,7 +406,7 @@ impl RenderOnce for WhichKeyView {
             .id("which-key")
             .debug_selector(|| "which-key".to_owned())
             .w_full()
-            .when_some(fit.width, zpui::Styled::max_w)
+            .when_some(fit.width, zz_gpui::Styled::max_w)
             .when_some(self.available, |element, available| {
                 element.max_h(available.height)
             })
@@ -469,7 +469,7 @@ impl RenderOnce for WhichKeyView {
 
 #[cfg(test)]
 mod tests {
-    use zpui::{Context, Entity, Render, TestAppContext};
+    use zz_gpui::{Context, Entity, Render, TestAppContext};
 
     use super::*;
     use crate::Root;
@@ -568,10 +568,10 @@ mod tests {
     }
 
     struct Host {
-        focus: zpui::FocusHandle,
+        focus: zz_gpui::FocusHandle,
         rows: Arc<[WhichKeyRow]>,
         keys: usize,
-        available: Option<zpui::Size<zpui::Pixels>>,
+        available: Option<zz_gpui::Size<zz_gpui::Pixels>>,
     }
 
     impl Render for Host {
@@ -579,7 +579,7 @@ mod tests {
             div()
                 .size_full()
                 .track_focus(&self.focus)
-                .on_key_down(cx.listener(|host, _: &zpui::KeyDownEvent, _, _| host.keys += 1))
+                .on_key_down(cx.listener(|host, _: &zz_gpui::KeyDownEvent, _, _| host.keys += 1))
                 .child(div().absolute().bottom_0().left_0().right_0().child({
                     let view = WhichKeyView::new(
                         WhichKeyHeader {
@@ -600,9 +600,9 @@ mod tests {
 
     fn host(
         rows: Arc<[WhichKeyRow]>,
-        available: Option<zpui::Size<zpui::Pixels>>,
+        available: Option<zz_gpui::Size<zz_gpui::Pixels>>,
         cx: &mut TestAppContext,
-    ) -> (Entity<Host>, &mut zpui::VisualTestContext) {
+    ) -> (Entity<Host>, &mut zz_gpui::VisualTestContext) {
         cx.update(crate::init);
         let slot = std::rc::Rc::new(std::cell::RefCell::new(None));
         let captured = std::rc::Rc::clone(&slot);
@@ -626,7 +626,7 @@ mod tests {
         (host, cx)
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn sheet_renders_rows_without_taking_focus_or_keys(cx: &mut TestAppContext) {
         let rows: Arc<[WhichKeyRow]> = Arc::from(vec![
             row("c", "New window", Some("Windows")),
@@ -671,7 +671,7 @@ mod tests {
         assert!(cx.update(|window, cx| host.read(cx).focus.is_focused(window)));
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_tall_group_splits_into_columns_that_fit_the_box(cx: &mut TestAppContext) {
         let rows: Arc<[WhichKeyRow]> = (0..40)
             .map(|index| row(&format!("f{}", index + 1), "Pane thing", Some("Panes")))
@@ -683,7 +683,7 @@ mod tests {
                 )
             }))
             .collect();
-        let available = zpui::size(px(1100.0), px(360.0));
+        let available = zz_gpui::size(px(1100.0), px(360.0));
         let (_, cx) = host(rows, Some(available), cx);
         let sheet = cx.debug_bounds("which-key").unwrap();
         assert!(sheet.size.height <= available.height, "{sheet:?}");

@@ -4,9 +4,9 @@
 doc-valid-idents = ["OpenAI", "AppKit", "KWin", ".."]
 
 disallowed-methods = [
-    { path = "zpui::rgb", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
-    { path = "zpui::rgba", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
-    { path = "zpui::hsla", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
+    { path = "zz_gpui::rgb", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
+    { path = "zz_gpui::rgba", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
+    { path = "zz_gpui::hsla", reason = "chrome colors must come from cx.theme(); see knowledge/configuration/ui-conventions doc" },
     { path = "std::process::Command::spawn", reason = "children inherit the signal mask of the spawning thread; spawn through zz_daemon_client::unmasked::SpawnUnmasked" },
     { path = "std::process::Command::output", reason = "children inherit the signal mask of the spawning thread; spawn through zz_daemon_client::unmasked::SpawnUnmasked" },
     { path = "std::process::Command::status", reason = "children inherit the signal mask of the spawning thread; spawn through zz_daemon_client::unmasked::SpawnUnmasked" },

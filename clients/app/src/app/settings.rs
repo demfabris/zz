@@ -1,6 +1,6 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, Context, Entity, FocusHandle, Focusable as _, IntoElement, Subscription,
     TextInputMode, Window, canvas, div, prelude::*, px,
 };
@@ -78,7 +78,7 @@ pub(super) fn shown(setting: Setting, phone: bool) -> bool {
 
 pub(super) fn phone() -> bool {
     #[cfg(target_os = "ios")]
-    return zpui_platform::ios::phone();
+    return zz_gpui_platform::ios::phone();
     #[cfg(not(target_os = "ios"))]
     false
 }
@@ -103,12 +103,12 @@ fn interface_zoom(preferences: &Preferences, system_scale: f32, phone: bool) -> 
 
 struct PlatformReduceMotion(bool);
 
-impl zpui::Global for PlatformReduceMotion {}
+impl zz_gpui::Global for PlatformReduceMotion {}
 
 impl Preferences {
     pub(super) fn apply(&self, connection: &Entity<Connection>, window: &mut Window, cx: &mut App) {
         #[cfg(target_os = "ios")]
-        let system = zpui_platform::ios::accessibility();
+        let system = zz_gpui_platform::ios::accessibility();
         #[cfg(target_os = "ios")]
         cx.set_global(PlatformReduceMotion(system.reduce_motion));
         if !cx.has_global::<PlatformReduceMotion>() {
@@ -128,13 +128,13 @@ impl Preferences {
         {
             cx.set_window_appearance(pinned.map(|mode| {
                 if mode.is_dark() {
-                    zpui::WindowAppearance::Dark
+                    zz_gpui::WindowAppearance::Dark
                 } else {
-                    zpui::WindowAppearance::Light
+                    zz_gpui::WindowAppearance::Light
                 }
             }));
             let mode = pinned.unwrap_or_else(|| match cx.window_appearance() {
-                zpui::WindowAppearance::Light | zpui::WindowAppearance::VibrantLight => {
+                zz_gpui::WindowAppearance::Light | zz_gpui::WindowAppearance::VibrantLight => {
                     ThemeMode::Light
                 }
                 _ => ThemeMode::Dark,
@@ -1381,7 +1381,7 @@ impl AppShell {
 fn about_page(cx: &mut Context<AppShell>) -> AnyElement {
     use zz_ui::settings::about;
 
-    static LOGOS: std::sync::LazyLock<[Arc<zpui::Image>; 2]> = std::sync::LazyLock::new(|| {
+    static LOGOS: std::sync::LazyLock<[Arc<zz_gpui::Image>; 2]> = std::sync::LazyLock::new(|| {
         let [light, dark]: [&'static [u8]; 2] = if zz_protocol::app_identity::DEVELOPMENT {
             [
                 include_bytes!("../../../../assets/zz-dev-light-512.png"),
@@ -1394,8 +1394,8 @@ fn about_page(cx: &mut Context<AppShell>) -> AnyElement {
             ]
         };
         [light, dark].map(|bytes| {
-            Arc::new(zpui::Image::from_bytes(
-                zpui::ImageFormat::Png,
+            Arc::new(zz_gpui::Image::from_bytes(
+                zz_gpui::ImageFormat::Png,
                 bytes.to_vec(),
             ))
         })
@@ -1409,7 +1409,7 @@ fn about_page(cx: &mut Context<AppShell>) -> AnyElement {
     let logo = Arc::clone(&LOGOS[usize::from(cx.theme().mode.is_dark())]);
     settings_scroll_column("settings-about")
         .child(about::about_hero(
-            zpui::img(logo).size(px(about::ABOUT_LOGO_SIZE)),
+            zz_gpui::img(logo).size(px(about::ABOUT_LOGO_SIZE)),
             cx,
         ))
         .child(about::about_build_stack(
@@ -1417,7 +1417,7 @@ fn about_page(cx: &mut Context<AppShell>) -> AnyElement {
             about::about_copy_button("settings-about-copy-build-info").on_click(
                 move |_, window, cx| {
                     use zz_ui::WindowExt as _;
-                    cx.write_to_clipboard(zpui::ClipboardItem::new_string(about::build_info(
+                    cx.write_to_clipboard(zz_gpui::ClipboardItem::new_string(about::build_info(
                         &copied,
                     )));
                     window.push_notification(
@@ -1445,7 +1445,7 @@ pub(super) fn with_control(
 }
 
 fn reset_button(
-    id: impl Into<zpui::ElementId>,
+    id: impl Into<zz_gpui::ElementId>,
     changed: bool,
     reset: impl Fn(&mut AppShell, &mut Window, &mut Context<AppShell>) + 'static,
     cx: &Context<AppShell>,
@@ -1490,7 +1490,7 @@ fn font_select(
     title: &'static str,
     placeholder: &'static str,
     cx: &App,
-) -> zpui::Div {
+) -> zz_gpui::Div {
     div().w(px(200.0)).max_w_full().flex_none().child(
         Select::new(select)
             .small()
@@ -1511,7 +1511,7 @@ fn choice_select(
         .bg(settings_control_fill(cx))
 }
 
-fn number_control(input: &Entity<InputState>, cx: &App) -> zpui::Div {
+fn number_control(input: &Entity<InputState>, cx: &App) -> zz_gpui::Div {
     let width = if zz_ui::touch::CoarsePointer::get(cx) {
         110.0
     } else {
@@ -1532,7 +1532,7 @@ pub(super) fn settings_heading(
     title: Option<&'static str>,
     description: &'static str,
     cx: &App,
-) -> Option<zpui::Div> {
+) -> Option<zz_gpui::Div> {
     let title = title?;
     Some(
         div()
@@ -1563,7 +1563,7 @@ struct TerminalPreview {
     appearance: zz_terminal::TerminalAppearance,
 }
 
-impl zpui::RenderOnce for TerminalPreview {
+impl zz_gpui::RenderOnce for TerminalPreview {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         use zz_ui::terminal::{
             RowRenderCache, TerminalRenderInput, terminal_background, terminal_font_for_style,
@@ -1586,7 +1586,7 @@ impl zpui::RenderOnce for TerminalPreview {
         let probe = window.text_system().shape_line(
             "m".into(),
             font_size,
-            &[zpui::TextRun {
+            &[zz_gpui::TextRun {
                 len: 1,
                 font: font.clone(),
                 color: cx.theme().foreground,

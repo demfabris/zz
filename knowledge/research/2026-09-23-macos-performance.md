@@ -796,7 +796,7 @@ A fifth Claude Opus 5.5 xhigh review found no runtime blocker and required the
 app change and fork pin to ship together. Source audits found no equivalent
 immediate overwrite in normal WGPU or Windows rendering: their upload APIs order
 replacement writes after earlier issued rendering. Linux and Windows runtime
-checks have not run. The independent iOS `zpui_wgpu` pin now moves with the root
+checks have not run. The independent iOS `zz_gpui_platform::wgpu` pin now moves with the root
 and web pins to avoid resolving two GPUI dependency trees.
 
 The archived follow-up evidence is under

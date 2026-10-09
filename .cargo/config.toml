@@ -1,6 +1,6 @@
 [alias]
 xtask = "run -p zz-xtask --"
-ci-test = "test --workspace --all-features --exclude zpui-platform"
+ci-test = "test --workspace --all-features --exclude zz-gpui-platform"
 
 # The Windows link is static-CRT throughout: CEF's wrapper is built with
 # CMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded and zig emits static-CRT objects

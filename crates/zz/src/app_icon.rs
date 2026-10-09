@@ -5,7 +5,7 @@ use std::{
 
 use image::{Frame, RgbaImage, imageops::FilterType};
 use smallvec::smallvec;
-use zpui::{App, RenderImage, WindowAppearance};
+use zz_gpui::{App, RenderImage, WindowAppearance};
 use zz_ui::ThemeMode;
 
 #[cfg(any(target_os = "linux", test))]

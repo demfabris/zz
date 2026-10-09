@@ -6,13 +6,13 @@ use std::{
     time::Duration,
 };
 
-use zpui::{
+use zz_client::StatusBarModel;
+use zz_gpui::{
     AnyElement, App, Bounds, Context, Corners, Entity, Focusable as _, IntoElement, Keystroke,
     ParentElement as _, PinchEvent, Pixels, ScrollDelta, ScrollHandle, ScrollWheelEvent,
     SharedString, Stateful, Styled as _, Subscription, TouchPhase, Window, div, linear_color_stop,
     linear_gradient, prelude::*, px,
 };
-use zz_client::StatusBarModel;
 use zz_protocol::{InputMessage, PaneId, PaneKindSnapshot, WindowId};
 use zz_terminal::KeyAction;
 use zz_ui::{
@@ -323,11 +323,11 @@ impl AppShell {
         if self.compact.compact_keyboard != Some(compact) {
             self.compact.compact_keyboard = Some(compact);
             #[cfg(target_os = "ios")]
-            zpui_platform::ios::set_compact_keyboard(compact);
+            zz_gpui_platform::ios::set_compact_keyboard(compact);
         }
         if !compact {
             #[cfg(target_os = "ios")]
-            zpui_platform::ios::set_status_bar_on_dark(None);
+            zz_gpui_platform::ios::set_status_bar_on_dark(None);
             zz_ui::compact::StickyModifiers::take(cx);
             if self.compact.pinch.take().is_some() {
                 self.terminal_resize_suppressed.set(false);
@@ -739,7 +739,7 @@ impl AppShell {
             .then(|| compact_pane_header(kind_icon(&pane.kind), slot.title.clone(), actions, cx));
         #[cfg(target_os = "ios")]
         if current {
-            zpui_platform::ios::set_status_bar_on_dark(Some(background.l < 0.5));
+            zz_gpui_platform::ios::set_status_bar_on_dark(Some(background.l < 0.5));
         }
         div()
             .size_full()
@@ -865,7 +865,7 @@ impl AppShell {
         overlays: Vec<AnyElement>,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Stateful<zpui::Div> {
+    ) -> Stateful<zz_gpui::Div> {
         self.prune_pane_entities(cx);
         let model = self.status_model(cx);
         let (pages, current) = pages(&model, &self.unseen_agents);
@@ -1071,8 +1071,8 @@ impl AppShell {
             .into_any_element()
         } else if lifting {
             let pane = Bounds::new(
-                zpui::point(px(0.0), px(0.0)),
-                zpui::size(px(width), window.viewport_size().height - bar - safe_bottom),
+                zz_gpui::point(px(0.0), px(0.0)),
+                zz_gpui::size(px(width), window.viewport_size().height - bar - safe_bottom),
             );
             self.overview_lift(&model, pane, top_inset, safe_bottom, window, cx)
                 .child(div().absolute().inset_0().child(screen))

@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     App, Div, ElementId, IntoElement, MouseButton, ParentElement as _, SharedString, Stateful,
     Styled as _, div, prelude::*,
 };

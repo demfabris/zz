@@ -9,11 +9,11 @@ use objc2_app_kit::{NSAutoresizingMaskOptions, NSView, NSWindowOrderingMode};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_quartz_core::{CALayer, CATransaction, kCAGravityResize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use zpui::{
+use zz_browser::{MacFramePresenter, MacIoSurface};
+use zz_gpui::{
     App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
     Pixels, Position, Style, Window,
 };
-use zz_browser::{MacFramePresenter, MacIoSurface};
 
 struct Layer(Retained<CALayer>);
 

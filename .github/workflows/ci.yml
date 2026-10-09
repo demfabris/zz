@@ -101,7 +101,7 @@ jobs:
         run: cargo ci-test ${{ runner.os == 'Windows' && '--no-fail-fast' || '' }}
 
       - name: Test the iOS input logic
-        run: cargo test -p zpui-platform --all-features --test ios
+        run: cargo test -p zz-gpui-platform --all-features --test ios
 
       - name: Test zz-mux release profile
         if: runner.os == 'Linux'
@@ -126,7 +126,7 @@ jobs:
         shell: bash
         run: |
           tree=$(cargo tree -p zz-cli -e normal --prefix none)
-          if grep -Eq '^(zpui|zpui-platform|wgpu|cef|zpui-kit|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
+          if grep -Eq '^(zz-gpui|zz-gpui-platform|wgpu|cef|zz-gpui-kit|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
             echo "zz-cli links GUI crates"
             exit 1
           fi

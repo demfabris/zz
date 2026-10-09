@@ -1,13 +1,5 @@
 use std::{cell::Cell, collections::HashSet, ops::Range, rc::Rc, sync::Arc, time::Duration};
 
-use zpui::{
-    Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners,
-    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Font, Hsla,
-    ImageSource, KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton,
-    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
-    ScrollDelta, ScrollWheelEvent, Subscription, Task, TextInputAction, TextInputConfiguration,
-    UTF16Selection, Window, anchored, canvas, deferred, div, img, prelude::*, px,
-};
 use zz_client::{
     ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, TERMINAL_TABLE,
     local_scroll::{
@@ -15,6 +7,14 @@ use zz_client::{
         LocalScrollStep, LocalScrollSync, local_scroll_available, scroll_fraction_offset,
     },
     scrollback::RetainedTerminalViewport,
+};
+use zz_gpui::{
+    Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Corners,
+    ElementInputHandler, Entity, EntityInputHandler, FocusHandle, Focusable, Font, Hsla,
+    ImageSource, KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton,
+    MouseDownEvent, MouseExitEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point, Render,
+    ScrollDelta, ScrollWheelEvent, Subscription, Task, TextInputAction, TextInputConfiguration,
+    UTF16Selection, Window, anchored, canvas, deferred, div, img, prelude::*, px,
 };
 use zz_protocol::{InputMessage, PaneId, PopupAction, TerminalUiCommand};
 use zz_terminal::{
@@ -46,7 +46,7 @@ pub(crate) struct TerminalDisplayPreferences {
     pub font_scale: f32,
 }
 
-impl zpui::Global for TerminalDisplayPreferences {}
+impl zz_gpui::Global for TerminalDisplayPreferences {}
 
 pub(crate) fn localized_font_appearance(
     core: &ClientCore,
@@ -143,7 +143,7 @@ pub struct TerminalPane {
     content_offset: Pixels,
     scroll_rows: f32,
     scroll: LocalScrollState,
-    overscroll: zpui::RubberBand,
+    overscroll: zz_gpui::RubberBand,
     geometry: Option<(GridSize, u64)>,
     cache: RowRenderCache,
     focused: bool,
@@ -285,7 +285,7 @@ impl TerminalPane {
             content_offset: Pixels::ZERO,
             scroll_rows: 0.,
             scroll: LocalScrollState::default(),
-            overscroll: zpui::RubberBand::default(),
+            overscroll: zz_gpui::RubberBand::default(),
             geometry: None,
             cache: RowRenderCache::default(),
             focused: false,
@@ -637,7 +637,7 @@ impl TerminalPane {
                 Some(ChromeAction::TerminalPaste) => {
                     #[cfg(target_os = "ios")]
                     {
-                        zpui_platform::ios::request_paste();
+                        zz_gpui_platform::ios::request_paste();
                         cx.stop_propagation();
                     }
                     return;
@@ -950,7 +950,7 @@ impl TerminalPane {
     fn mouse(
         &self,
         position: Point<Pixels>,
-        modifiers: zpui::Modifiers,
+        modifiers: zz_gpui::Modifiers,
         phase: TerminalMousePhase,
         button: Option<TerminalMouseButton>,
         count: usize,
@@ -1138,12 +1138,12 @@ impl TerminalPane {
     fn overscroll(
         &mut self,
         delta: Pixels,
-        phase: zpui::TouchPhase,
+        phase: zz_gpui::TouchPhase,
         local: bool,
         window: &Window,
         cx: &App,
     ) -> Pixels {
-        if window.gesture_tuning().overscroll != zpui::Overscroll::Bounce {
+        if window.gesture_tuning().overscroll != zz_gpui::Overscroll::Bounce {
             return delta;
         }
         let core = &self.connection.read(cx).core;
@@ -1575,7 +1575,7 @@ impl TerminalPane {
         &mut self,
         bounds: Bounds<Pixels>,
         paint: &mut Option<PaintState>,
-        hitbox: &zpui::Hitbox,
+        hitbox: &zz_gpui::Hitbox,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1590,13 +1590,13 @@ impl TerminalPane {
         {
             let view = cx.entity().downgrade();
             let press_hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &zpui::LongPressEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &zz_gpui::LongPressEvent, phase, window, cx| {
                 if !phase.bubble() {
                     return;
                 }
                 let _ = view.update(cx, |this, cx| {
                     let entity = cx.entity();
-                    if event.phase == zpui::TouchPhase::Started {
+                    if event.phase == zz_gpui::TouchPhase::Started {
                         if window.default_prevented()
                             || !press_hitbox.is_hovered_at(event.start_position, window)
                         {
@@ -1613,12 +1613,12 @@ impl TerminalPane {
             });
             let view = cx.entity().downgrade();
             let drag_hitbox = hitbox.clone();
-            window.on_mouse_event(move |event: &zpui::TouchDragEvent, phase, window, cx| {
+            window.on_mouse_event(move |event: &zz_gpui::TouchDragEvent, phase, window, cx| {
                 if !phase.bubble() {
                     return;
                 }
                 let _ = view.update(cx, |this, cx| {
-                    if event.phase == zpui::TouchPhase::Started {
+                    if event.phase == zz_gpui::TouchPhase::Started {
                         let tracking = this
                             .viewport(&this.connection.read(cx).core)
                             .is_some_and(|viewport| viewport.mouse_tracking);
@@ -1632,7 +1632,7 @@ impl TerminalPane {
                             &MouseDownEvent {
                                 button: MouseButton::Left,
                                 position: event.start_position,
-                                modifiers: zpui::Modifiers::default(),
+                                modifiers: zz_gpui::Modifiers::default(),
                                 click_count: 1,
                                 first_mouse: false,
                             },
@@ -1644,27 +1644,27 @@ impl TerminalPane {
                         || this.pressed_buttons.contains(&MouseButton::Left)
                     {
                         match event.phase {
-                            zpui::TouchPhase::Moved => this.on_mouse_move(
+                            zz_gpui::TouchPhase::Moved => this.on_mouse_move(
                                 &MouseMoveEvent {
                                     position: event.position,
                                     pressed_button: Some(MouseButton::Left),
-                                    modifiers: zpui::Modifiers::default(),
+                                    modifiers: zz_gpui::Modifiers::default(),
                                 },
                                 window,
                                 cx,
                             ),
-                            zpui::TouchPhase::Ended | zpui::TouchPhase::Cancelled => this
+                            zz_gpui::TouchPhase::Ended | zz_gpui::TouchPhase::Cancelled => this
                                 .on_mouse_up(
                                     &MouseUpEvent {
                                         button: MouseButton::Left,
                                         position: event.position,
-                                        modifiers: zpui::Modifiers::default(),
+                                        modifiers: zz_gpui::Modifiers::default(),
                                         click_count: 1,
                                     },
                                     window,
                                     cx,
                                 ),
-                            zpui::TouchPhase::Started => {}
+                            zz_gpui::TouchPhase::Started => {}
                         }
                     } else {
                         return;
@@ -1677,18 +1677,18 @@ impl TerminalPane {
 
     fn touch_selection(
         &mut self,
-        phase: zpui::TouchPhase,
+        phase: zz_gpui::TouchPhase,
         position: Point<Pixels>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         match phase {
-            zpui::TouchPhase::Started => {
+            zz_gpui::TouchPhase::Started => {
                 self.on_mouse_down(
                     &MouseDownEvent {
                         button: MouseButton::Left,
                         position,
-                        modifiers: zpui::Modifiers {
+                        modifiers: zz_gpui::Modifiers {
                             shift: true,
                             ..Default::default()
                         },
@@ -1700,29 +1700,29 @@ impl TerminalPane {
                 );
                 self.force_local_selection = true;
             }
-            zpui::TouchPhase::Moved => self.on_mouse_move(
+            zz_gpui::TouchPhase::Moved => self.on_mouse_move(
                 &MouseMoveEvent {
                     position,
                     pressed_button: Some(MouseButton::Left),
-                    modifiers: zpui::Modifiers::default(),
+                    modifiers: zz_gpui::Modifiers::default(),
                 },
                 window,
                 cx,
             ),
-            zpui::TouchPhase::Ended | zpui::TouchPhase::Cancelled => {
+            zz_gpui::TouchPhase::Ended | zz_gpui::TouchPhase::Cancelled => {
                 self.on_mouse_up(
                     &MouseUpEvent {
                         button: MouseButton::Left,
                         position,
-                        modifiers: zpui::Modifiers::default(),
+                        modifiers: zz_gpui::Modifiers::default(),
                         click_count: 1,
                     },
                     window,
                     cx,
                 );
                 #[cfg(target_os = "ios")]
-                if phase == zpui::TouchPhase::Ended {
-                    zpui_platform::ios::show_edit_menu(
+                if phase == zz_gpui::TouchPhase::Ended {
+                    zz_gpui_platform::ios::show_edit_menu(
                         f32::from(position.x) * window.zoom(),
                         f32::from(position.y) * window.zoom(),
                     );
@@ -1748,7 +1748,7 @@ impl TerminalPane {
                             input: keystroke_input(
                                 &Keystroke {
                                     key,
-                                    modifiers: zpui::Modifiers::default(),
+                                    modifiers: zz_gpui::Modifiers::default(),
                                     key_char: None,
                                 },
                                 KeyAction::Release,
@@ -1946,7 +1946,7 @@ impl Render for TerminalPane {
             .child(
                 canvas(
                     move |bounds, window, cx| {
-                        let hitbox = window.insert_hitbox(bounds, zpui::HitboxBehavior::Normal);
+                        let hitbox = window.insert_hitbox(bounds, zz_gpui::HitboxBehavior::Normal);
                         (
                             prepare.update(cx, |view, cx| view.prepare(bounds, window, cx)),
                             hitbox,
@@ -2246,7 +2246,7 @@ fn terminal_status_text(status: &SessionStatus) -> Option<String> {
     }
 }
 
-fn sticky_keystroke(text: &str, cx: &mut App) -> Option<zpui::Keystroke> {
+fn sticky_keystroke(text: &str, cx: &mut App) -> Option<zz_gpui::Keystroke> {
     let mut characters = text.chars();
     let (Some(character), None) = (characters.next(), characters.next()) else {
         return None;
@@ -2254,10 +2254,10 @@ fn sticky_keystroke(text: &str, cx: &mut App) -> Option<zpui::Keystroke> {
     if zz_ui::compact::StickyModifiers::get(cx).is_empty() {
         return None;
     }
-    let keystroke = zpui::Keystroke {
-        modifiers: zpui::Modifiers {
+    let keystroke = zz_gpui::Keystroke {
+        modifiers: zz_gpui::Modifiers {
             shift: character.is_uppercase(),
-            ..zpui::Modifiers::default()
+            ..zz_gpui::Modifiers::default()
         },
         key: if character == ' ' {
             "space".to_owned()
@@ -2334,7 +2334,7 @@ fn key_code(key: &str) -> KeyCode {
     }
 }
 
-fn wire_modifiers(modifiers: zpui::Modifiers) -> zz_terminal::Modifiers {
+fn wire_modifiers(modifiers: zz_gpui::Modifiers) -> zz_terminal::Modifiers {
     zz_terminal::Modifiers::new(
         modifiers.shift,
         modifiers.control,
@@ -2363,9 +2363,9 @@ fn accumulate_scroll(remainder: &mut f32, delta: f32) -> i32 {
 mod tests {
     use super::*;
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn shared_terminal_geometry_retries_the_same_grid_after_a_new_layout_view(
-        cx: &mut zpui::TestAppContext,
+        cx: &mut zz_gpui::TestAppContext,
     ) {
         use zz_protocol::{
             Batch, ClientView, Event, EventPayload, LayoutNode, MuxSnapshot, PaneKindSnapshot,
@@ -2527,7 +2527,7 @@ mod tests {
                 &Keystroke {
                     key: value,
                     key_char: None,
-                    modifiers: zpui::Modifiers {
+                    modifiers: zz_gpui::Modifiers {
                         shift,
                         alt,
                         ..Default::default()
@@ -2650,7 +2650,7 @@ mod tests {
         let keystroke = Keystroke {
             key: "/".into(),
             key_char: Some("?".into()),
-            modifiers: zpui::Modifiers {
+            modifiers: zz_gpui::Modifiers {
                 shift: true,
                 ..Default::default()
             },

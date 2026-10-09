@@ -8966,7 +8966,144 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29666d0abbfad1e3dc4dcf6144730dd3a3ab225bbbdac83319345b1b44ccfc1b"
 
 [[package]]
-name = "zpui"
+name = "zune-core"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-inflate"
+version = "0.2.54"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02"
+dependencies = [
+ "simd-adler32",
+]
+
+[[package]]
+name = "zune-jpeg"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+dependencies = [
+ "zune-core",
+]
+
+[[package]]
+name = "zvariant"
+version = "5.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c1d34c27cc6cdd1f458427519dd6b8612f7b7e3f7b9a0b2355d041dda9869147"
+dependencies = [
+ "endi",
+ "enumflags2",
+ "serde",
+ "serde_bytes",
+ "winnow 1.0.4",
+ "zcheapstr",
+ "zvariant_derive",
+ "zvariant_utils",
+]
+
+[[package]]
+name = "zvariant_derive"
+version = "5.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "864155e69b4352db0c7f374917bf45d1e0c8d17659c8b3dbf9795f3673f8c497"
+dependencies = [
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 3.0.5",
+ "zvariant_utils",
+]
+
+[[package]]
+name = "zvariant_utils"
+version = "4.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bad0294361a320b694a328460dc73add56c306150f5cb6bfafc44446120008a3"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 3.0.5",
+ "winnow 1.0.4",
+]
+
+[[package]]
+name = "zz-app"
+version = "0.16.0"
+dependencies = [
+ "async-channel",
+ "base64 0.23.1",
+ "block2 0.6.2",
+ "chrono",
+ "futures",
+ "image",
+ "js-sys",
+ "log",
+ "objc",
+ "percent-encoding",
+ "raw-window-handle",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "zz-client",
+ "zz-daemon-client",
+ "zz-gpui",
+ "zz-gpui-platform",
+ "zz-protocol",
+ "zz-terminal",
+ "zz-ui",
+]
+
+[[package]]
+name = "zz-client"
+version = "0.16.0"
+dependencies = [
+ "agent-client-protocol-schema",
+ "base64 0.23.1",
+ "foldhash",
+ "getrandom 0.4.3",
+ "neo_frizbee",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+ "unicode-width",
+ "url",
+ "web-time",
+ "zz-protocol",
+ "zz-terminal",
+]
+
+[[package]]
+name = "zz-daemon-client"
+version = "0.16.0"
+dependencies = [
+ "core-foundation",
+ "getrandom 0.4.3",
+ "interprocess",
+ "libc",
+ "log",
+ "parking_lot",
+ "russh",
+ "rustix",
+ "security-framework-sys",
+ "sysinfo",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
+ "zeroize",
+ "zz-protocol",
+ "zz-terminal",
+]
+
+[[package]]
+name = "zz-gpui"
 version = "0.2.2"
 dependencies = [
  "accesskit",
@@ -9035,11 +9172,11 @@ dependencies = [
  "which",
  "windows 0.62.2",
  "zed-font-kit",
- "zpui-macros",
+ "zz-gpui-macros",
 ]
 
 [[package]]
-name = "zpui-kit"
+name = "zz-gpui-kit"
 version = "0.16.0"
 dependencies = [
  "anyhow",
@@ -9061,11 +9198,11 @@ dependencies = [
  "unicode-segmentation",
  "url",
  "web-time",
- "zpui",
+ "zz-gpui",
 ]
 
 [[package]]
-name = "zpui-macros"
+name = "zz-gpui-macros"
 version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
@@ -9075,7 +9212,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui-platform"
+name = "zz-gpui-platform"
 version = "0.1.0"
 dependencies = [
  "accesskit",
@@ -9163,144 +9300,7 @@ dependencies = [
  "xkbcommon",
  "zed-font-kit",
  "zed-xim",
- "zpui",
-]
-
-[[package]]
-name = "zune-core"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
-
-[[package]]
-name = "zune-inflate"
-version = "0.2.54"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02"
-dependencies = [
- "simd-adler32",
-]
-
-[[package]]
-name = "zune-jpeg"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
-dependencies = [
- "zune-core",
-]
-
-[[package]]
-name = "zvariant"
-version = "5.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1d34c27cc6cdd1f458427519dd6b8612f7b7e3f7b9a0b2355d041dda9869147"
-dependencies = [
- "endi",
- "enumflags2",
- "serde",
- "serde_bytes",
- "winnow 1.0.4",
- "zcheapstr",
- "zvariant_derive",
- "zvariant_utils",
-]
-
-[[package]]
-name = "zvariant_derive"
-version = "5.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "864155e69b4352db0c7f374917bf45d1e0c8d17659c8b3dbf9795f3673f8c497"
-dependencies = [
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 3.0.5",
- "zvariant_utils",
-]
-
-[[package]]
-name = "zvariant_utils"
-version = "4.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bad0294361a320b694a328460dc73add56c306150f5cb6bfafc44446120008a3"
-dependencies = [
- "proc-macro2",
- "quote",
- "serde",
- "syn 3.0.5",
- "winnow 1.0.4",
-]
-
-[[package]]
-name = "zz-app"
-version = "0.16.0"
-dependencies = [
- "async-channel",
- "base64 0.23.1",
- "block2 0.6.2",
- "chrono",
- "futures",
- "image",
- "js-sys",
- "log",
- "objc",
- "percent-encoding",
- "raw-window-handle",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
- "zpui",
- "zpui-platform",
- "zz-client",
- "zz-daemon-client",
- "zz-protocol",
- "zz-terminal",
- "zz-ui",
-]
-
-[[package]]
-name = "zz-client"
-version = "0.16.0"
-dependencies = [
- "agent-client-protocol-schema",
- "base64 0.23.1",
- "foldhash",
- "getrandom 0.4.3",
- "neo_frizbee",
- "parking_lot",
- "serde",
- "serde_json",
- "thiserror 2.0.20",
- "unicode-width",
- "url",
- "web-time",
- "zz-protocol",
- "zz-terminal",
-]
-
-[[package]]
-name = "zz-daemon-client"
-version = "0.16.0"
-dependencies = [
- "core-foundation",
- "getrandom 0.4.3",
- "interprocess",
- "libc",
- "log",
- "parking_lot",
- "russh",
- "rustix",
- "security-framework-sys",
- "sysinfo",
- "tempfile",
- "thiserror 2.0.20",
- "tokio",
- "zeroize",
- "zz-protocol",
- "zz-terminal",
+ "zz-gpui",
 ]
 
 [[package]]
@@ -9343,9 +9343,9 @@ dependencies = [
  "smallvec",
  "url",
  "web-time",
- "zpui",
- "zpui-kit",
  "zz-client",
+ "zz-gpui",
+ "zz-gpui-kit",
  "zz-protocol",
  "zz-terminal",
 ]
@@ -9355,9 +9355,9 @@ name = "zz-web-client"
 version = "0.1.0"
 dependencies = [
  "wasm-bindgen",
- "zpui",
- "zpui-platform",
  "zz-app",
+ "zz-gpui",
+ "zz-gpui-platform",
  "zz-protocol",
  "zz-ui",
 ]

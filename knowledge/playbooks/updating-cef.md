@@ -25,7 +25,7 @@ the build consumes (see [build/verify a CEF bundle](/playbooks/build-cef-bundle.
    release, because the upstream build script rejects a newer archive.
 2. **Check which wgpu major the release wants.** `accelerated_osr` hands GPUI's own
    `wgpu::Device` to `cef::osr_texture_import`, so the `cef` crate's `wgpu` dependency must be the
-   *same* major as [GPUI's](/references/zpui.md) . two majors in the graph is a type
+   *same* major as [GPUI's](/references/zz-gpui.md) . two majors in the graph is a type
    mismatch at that call, not a duplicate-crate annoyance. `cef` 150.2.1 moved to wgpu 30 while Zed
    was still on 29, which is why the 151 bump also carried a gpui patch (fork commit
    `gpui: build the wgpu renderer against wgpu 30`) and a `wgpu = "=30.0.0"` workspace bump. Check

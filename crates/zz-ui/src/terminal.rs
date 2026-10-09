@@ -12,7 +12,7 @@ use crate::{
     scroll::{MIN_THUMB_SIZE, THUMB_INSET, THUMB_WIDTH, thumb_radius},
 };
 use smallvec::SmallVec;
-use zpui::{
+use zz_gpui::{
     App, BorderStyle, Bounds, ContentMask, Corners, Font, FontFallbacks, FontFeatures,
     FontSmoothing, FontStyle, FontWeight, GlyphRasterData, GlyphRenderOptions, Hsla, PaintQuad,
     Path, PathBuilder, Pixels, Point, RenderImage, Rgba, ShapedLine, StrikethroughStyle, TextAlign,
@@ -2185,7 +2185,7 @@ fn align_line_to_cells(line: &mut ShapedLine, cell_width: Pixels) {
         };
         glyph.position.x += offset;
     }
-    **line = Arc::new(zpui::LineLayout {
+    **line = Arc::new(zz_gpui::LineLayout {
         font_size: line.font_size,
         width: cell_width * columns.len(),
         ascent: line.ascent,
@@ -2617,10 +2617,11 @@ fn font_for_style(
     if configured_families.is_empty() {
         let mut font = base_font.clone();
         if style.bold {
-            font.weight = zpui::FontWeight((font.weight.0 + 300.0).min(zpui::FontWeight::BLACK.0));
+            font.weight =
+                zz_gpui::FontWeight((font.weight.0 + 300.0).min(zz_gpui::FontWeight::BLACK.0));
         }
         if style.italic {
-            font.style = zpui::FontStyle::Italic;
+            font.style = zz_gpui::FontStyle::Italic;
         }
         font
     } else {
@@ -3202,7 +3203,7 @@ fn last_visible_row_has_content(viewport: &TerminalViewport, visible_rows: u16) 
 /// be pinned without a window: pixel extent and cell metrics in, cells and the
 /// physical cell size out.
 pub fn terminal_grid_size(
-    available: zpui::Size<Pixels>,
+    available: zz_gpui::Size<Pixels>,
     cell_width: Pixels,
     line_height: Pixels,
     scale: f32,
@@ -3290,7 +3291,7 @@ mod tests {
         RowCacheSignature {
             dictionary_generation,
             scale_bits: 1.0_f32.to_bits(),
-            font: zpui::font("monospace"),
+            font: zz_gpui::font("monospace"),
             font_size: px(14.0),
             cell_width: px(8.0),
             foreground: Color::rgb(216, 222, 233),
@@ -3640,7 +3641,7 @@ mod tests {
             zz_terminal::ATTR_BOLD,
             TerminalUnderlineStyle::None,
         );
-        let font = zpui::font("monospace");
+        let font = zz_gpui::font("monospace");
         let appearance = TerminalAppearance::default();
         let mut runs = SmallVec::new();
         let mut last_style = None;
@@ -3705,15 +3706,15 @@ mod tests {
     fn line_with_glyph_positions(text: &str, positions: &[(usize, f32)]) -> ShapedLine {
         let mut line = ShapedLine::default();
         line.text = text.to_owned().into();
-        *line = Arc::new(zpui::LineLayout {
+        *line = Arc::new(zz_gpui::LineLayout {
             font_size: px(13.0),
             width: px(text.chars().count() as f32 * 7.8),
-            runs: vec![zpui::ShapedRun {
-                font_id: zpui::FontId(0),
+            runs: vec![zz_gpui::ShapedRun {
+                font_id: zz_gpui::FontId(0),
                 glyphs: positions
                     .iter()
-                    .map(|&(index, x)| zpui::ShapedGlyph {
-                        id: zpui::GlyphId(0),
+                    .map(|&(index, x)| zz_gpui::ShapedGlyph {
+                        id: zz_gpui::GlyphId(0),
                         position: point(px(x), px(0.0)),
                         index,
                         is_emoji: false,
@@ -3769,8 +3770,8 @@ mod tests {
         let layout = Arc::get_mut(&mut line).unwrap();
         layout.runs[0].glyphs[1].position.y = px(-2.0);
         let remainder = layout.runs[0].glyphs.split_off(1);
-        layout.runs.push(zpui::ShapedRun {
-            font_id: zpui::FontId(1),
+        layout.runs.push(zz_gpui::ShapedRun {
+            font_id: zz_gpui::FontId(1),
             glyphs: remainder,
         });
         let original = line.clone();
@@ -3802,7 +3803,7 @@ mod tests {
         let run = text_run(
             style,
             1,
-            &zpui::font("monospace"),
+            &zz_gpui::font("monospace"),
             foreground,
             &TerminalAppearance::default(),
             1.0,
@@ -4268,17 +4269,18 @@ mod tests {
     /// whole number of cells is exactly where the two can differ by a cell.
     #[test]
     fn a_pane_box_measures_the_cells_it_wholly_contains() {
-        let exact = terminal_grid_size(zpui::size(px(640.0), px(384.0)), px(8.0), px(16.0), 1.0);
+        let exact = terminal_grid_size(zz_gpui::size(px(640.0), px(384.0)), px(8.0), px(16.0), 1.0);
         assert_eq!(exact.columns, 80);
         assert_eq!(exact.rows, 24);
         assert_eq!(exact.cell_width_px, 8);
         assert_eq!(exact.cell_height_px, 16);
 
-        let partial = terminal_grid_size(zpui::size(px(647.0), px(399.0)), px(8.0), px(16.0), 1.0);
+        let partial =
+            terminal_grid_size(zz_gpui::size(px(647.0), px(399.0)), px(8.0), px(16.0), 1.0);
         assert_eq!(partial.columns, 80);
         assert_eq!(partial.rows, 24);
 
-        let short = terminal_grid_size(zpui::size(px(639.0), px(383.0)), px(8.0), px(16.0), 1.0);
+        let short = terminal_grid_size(zz_gpui::size(px(639.0), px(383.0)), px(8.0), px(16.0), 1.0);
         assert_eq!(short.columns, 79);
         assert_eq!(short.rows, 23);
     }
@@ -4288,21 +4290,23 @@ mod tests {
     /// physical cell size follows the scale factor the window is drawn at.
     #[test]
     fn the_measurement_tolerates_a_device_pixel_and_scales_its_cells() {
-        let scaled = terminal_grid_size(zpui::size(px(640.0), px(384.0)), px(8.0), px(16.0), 2.0);
+        let scaled =
+            terminal_grid_size(zz_gpui::size(px(640.0), px(384.0)), px(8.0), px(16.0), 2.0);
         assert_eq!(scaled.columns, 80);
         assert_eq!(scaled.rows, 24);
         assert_eq!(scaled.cell_width_px, 16);
         assert_eq!(scaled.cell_height_px, 32);
 
         let slack = terminal_grid_size(
-            zpui::size(px(640.0 - 0.001), px(384.0)),
+            zz_gpui::size(px(640.0 - 0.001), px(384.0)),
             px(8.0),
             px(16.0),
             1.0,
         );
         assert_eq!(slack.columns, 80);
 
-        let degenerate = terminal_grid_size(zpui::size(px(0.0), px(0.0)), px(8.0), px(16.0), 1.0);
+        let degenerate =
+            terminal_grid_size(zz_gpui::size(px(0.0), px(0.0)), px(8.0), px(16.0), 1.0);
         assert_eq!(degenerate.columns, 1);
         assert_eq!(degenerate.rows, 1);
     }
@@ -4557,9 +4561,9 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn extra_height_adds_rows_past_the_edge_the_grid_is_not_anchored_to(
-        cx: &mut zpui::TestAppContext,
+        cx: &mut zz_gpui::TestAppContext,
     ) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();
@@ -4613,8 +4617,10 @@ mod tests {
         });
     }
 
-    #[zpui::test]
-    fn a_pixel_offset_shifts_rows_down_and_peeks_the_ring_row_above(cx: &mut zpui::TestAppContext) {
+    #[zz_gpui::test]
+    fn a_pixel_offset_shifts_rows_down_and_peeks_the_ring_row_above(
+        cx: &mut zz_gpui::TestAppContext,
+    ) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();
         let mut viewport = filled_viewport(8, 4, 'x');
@@ -4696,8 +4702,8 @@ mod tests {
         });
     }
 
-    #[zpui::test]
-    fn rows_above_the_grid_reach_the_given_top(cx: &mut zpui::TestAppContext) {
+    #[zz_gpui::test]
+    fn rows_above_the_grid_reach_the_given_top(cx: &mut zz_gpui::TestAppContext) {
         cx.update(crate::init);
         let cx = cx.add_empty_window();
         let mut live = filled_viewport(8, 4, 'x');

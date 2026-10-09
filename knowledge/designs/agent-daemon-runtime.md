@@ -175,7 +175,7 @@ and consumes the stream vocabulary `zz-daemon`'s crate root re-exports).
   on a failed dispatch. That is the same at-least-once rule the GUI had, now enforced
   daemon-side, so a prompt survives the client that typed it.
 - Prompt images arrive as bytes+format on the wire and convert to ACP `ContentBlock`s
-  daemon-side; `zpui::Image` never crosses.
+  daemon-side; `zz_gpui::Image` never crosses.
 - Permissions: the live SDK responder parks in the host with NO timeout (a human decides).
   The pending request rides `AgentState`, so late-attaching clients see it; resolution is
   first-answer-wins; pane close or adapter death resolves it cancelled.

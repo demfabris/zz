@@ -12,12 +12,12 @@ use fff_search::FilePickerOptions;
 use fff_search::{FilePicker, FuzzySearchOptions, PaginationArgs, QueryParser};
 use ignore::WalkBuilder;
 #[cfg(any(feature = "editor-pane", test))]
-use zpui::{
+use zz_gpui::{
     App, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent, MouseButton,
     Render, ScrollStrategy, Subscription, UniformListScrollHandle, Window, div, prelude::*, px,
     uniform_list,
 };
-use zpui::{Context, SharedString, Task};
+use zz_gpui::{Context, SharedString, Task};
 #[cfg(any(feature = "editor-pane", test))]
 use zz_ui::command::palette_shortcut_hint;
 #[cfg(any(feature = "editor-pane", test))]
@@ -1177,8 +1177,8 @@ mod tests {
         assert!(!names.contains(&"a/b/c/d/e/f/g/h/i"));
     }
 
-    #[zpui::test]
-    fn streamed_rows_stay_visible_before_scan_completion(cx: &mut zpui::TestAppContext) {
+    #[zz_gpui::test]
+    fn streamed_rows_stay_visible_before_scan_completion(cx: &mut zz_gpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
         cx.update(zz_ui::init);
         let root = tempfile::tempdir().unwrap();

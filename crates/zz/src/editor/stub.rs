@@ -3,7 +3,7 @@
 // Stub methods keep the real API's `self` receivers without reading them.
 #![allow(clippy::unused_self)]
 
-use zpui::{App, Context, Window, div, prelude::*};
+use zz_gpui::{App, Context, Window, div, prelude::*};
 use zz_protocol::{EditorDescriptor, PaneId};
 use zz_ui::{ActiveTheme as _, Colorize as _};
 
@@ -13,14 +13,14 @@ pub fn init(_cx: &mut App) {}
 
 /// Placeholder for an editor pane this build cannot host.
 pub(crate) struct EditorView {
-    focus_handle: zpui::FocusHandle,
+    focus_handle: zz_gpui::FocusHandle,
 }
 
 impl EditorView {
     pub(crate) fn new(
         _pane: PaneId,
         _descriptor: &EditorDescriptor,
-        _mux: zpui::Entity<MuxClient>,
+        _mux: zz_gpui::Entity<MuxClient>,
         _window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
@@ -29,7 +29,7 @@ impl EditorView {
         }
     }
 
-    pub(crate) fn focus(&self, _cx: &App) -> zpui::FocusHandle {
+    pub(crate) fn focus(&self, _cx: &App) -> zz_gpui::FocusHandle {
         self.focus_handle.clone()
     }
 

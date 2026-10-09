@@ -3,16 +3,16 @@ use crate::{
     input::{key_input, wire_modifiers},
 };
 use std::{collections::HashSet, ops::Range, path::PathBuf, sync::Arc, time::Duration};
-use zpui::{
+use zz_client::{
+    ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, Outbound, TERMINAL_TABLE,
+};
+use zz_daemon_client::{AskpassPromptKind, AskpassReply, InteractiveClient};
+use zz_gpui::{
     Bounds, ClipboardItem, Context, ElementInputHandler, Entity, EntityInputHandler, FocusHandle,
     Focusable, IntoElement, KeyDownEvent, KeyUpEvent, MouseButton, Pixels, Point, Render,
     Subscription, Task, TextInputAction, TextInputConfiguration, UTF16Selection, Window, canvas,
     div, prelude::*, px,
 };
-use zz_client::{
-    ChromeAction, ChromeKeymap, ChromeProfile, ClientCore, CoreEvent, Outbound, TERMINAL_TABLE,
-};
-use zz_daemon_client::{AskpassPromptKind, AskpassReply, InteractiveClient};
 use zz_protocol::{InputMessage, PaneId, ProtocolMessage};
 use zz_terminal::{
     ClipboardTarget, KeyAction, KeyCode, PointerCellEvent, TerminalMouseButton, TerminalMouseInput,
@@ -289,7 +289,7 @@ impl TerminalApp {
     }
 
     fn paste_clipboard(&mut self, _: &mut Context<Self>) {
-        zpui_platform::ios::request_paste();
+        zz_gpui_platform::ios::request_paste();
     }
 
     fn answer_prompt(
@@ -330,10 +330,10 @@ impl TerminalApp {
         for key in std::mem::take(&mut self.forwarded) {
             if let Some(pane) = self.pane {
                 let input = key_input(
-                    &zpui::Keystroke {
+                    &zz_gpui::Keystroke {
                         key,
                         key_char: None,
-                        modifiers: zpui::Modifiers::default(),
+                        modifiers: zz_gpui::Modifiers::default(),
                     },
                     KeyAction::Release,
                 );
@@ -460,7 +460,7 @@ impl TerminalApp {
         &mut self,
         position: Point<Pixels>,
         phase: TerminalMousePhase,
-        modifiers: zpui::Modifiers,
+        modifiers: zz_gpui::Modifiers,
         clicks: usize,
         cx: &mut Context<Self>,
     ) {
@@ -716,7 +716,7 @@ impl Render for TerminalApp {
             .child(
                 div()
                     .id("terminal")
-                    .role(zpui::accesskit::Role::Terminal)
+                    .role(zz_gpui::accesskit::Role::Terminal)
                     .key_context("Terminal")
                     .flex_1()
                     .min_h_0()
@@ -726,7 +726,7 @@ impl Render for TerminalApp {
                     .on_key_up(cx.listener(Self::key_up))
                     .on_mouse_down(
                         MouseButton::Left,
-                        cx.listener(|this, event: &zpui::MouseDownEvent, window, cx| {
+                        cx.listener(|this, event: &zz_gpui::MouseDownEvent, window, cx| {
                             window.focus(&this.focus, cx);
                             this.drag = Some(event.position);
                             this.scroll = 0.;
@@ -748,7 +748,7 @@ impl Render for TerminalApp {
                             }
                         }),
                     )
-                    .on_mouse_move(cx.listener(|this, event: &zpui::MouseMoveEvent, _, cx| {
+                    .on_mouse_move(cx.listener(|this, event: &zz_gpui::MouseMoveEvent, _, cx| {
                         if let Some(previous) = this.drag {
                             if this.mouse_down {
                                 this.mouse(
@@ -772,7 +772,7 @@ impl Render for TerminalApp {
                     }))
                     .on_mouse_up(
                         MouseButton::Left,
-                        cx.listener(|this, event: &zpui::MouseUpEvent, _, cx| {
+                        cx.listener(|this, event: &zz_gpui::MouseUpEvent, _, cx| {
                             if this.drag.take().is_some() && std::mem::take(&mut this.mouse_down) {
                                 this.mouse(
                                     event.position,
@@ -786,7 +786,7 @@ impl Render for TerminalApp {
                     )
                     .on_mouse_up_out(
                         MouseButton::Left,
-                        cx.listener(|this, event: &zpui::MouseUpEvent, _, cx| {
+                        cx.listener(|this, event: &zz_gpui::MouseUpEvent, _, cx| {
                             if this.drag.take().is_some() && std::mem::take(&mut this.mouse_down) {
                                 this.mouse(
                                     event.position,

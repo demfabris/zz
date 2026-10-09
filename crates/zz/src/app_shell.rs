@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use zpui::{
+use zz_gpui::{
     AnyElement, AnyView, App, Context, DragMoveEvent, Entity, IntoElement, KeyUpEvent, MouseButton,
     Render, StyleRefinement, Window, div, prelude::*, px,
 };
@@ -349,10 +349,10 @@ impl Render for AppShell {
                 if cfg!(target_os = "linux")
                     && matches!(
                         window.window_decorations(),
-                        zpui::Decorations::Client { .. }
+                        zz_gpui::Decorations::Client { .. }
                     )
                 {
-                    zpui::transparent_black()
+                    zz_gpui::transparent_black()
                 } else {
                     crate::theme::chrome_background(cx)
                 },
@@ -547,16 +547,16 @@ mod tests {
         rc::Rc,
     };
 
-    use zpui::{TestAppContext, VisualTestContext, div};
     use zz_browser::BrowserError;
     use zz_daemon_client::DaemonError;
+    use zz_gpui::{TestAppContext, VisualTestContext, div};
     use zz_protocol::ClientMessageKind;
     use zz_ui::{WindowExt as _, notification::Notification};
 
     use super::*;
     use crate::mux::client::MuxClient;
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn mux_notifications_reach_the_mounted_root_layer(cx: &mut TestAppContext) {
         cx.update(zz_ui::init);
         let mux_slot = Rc::new(RefCell::new(None));

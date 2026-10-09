@@ -51,6 +51,7 @@ cleanup() {
     client delete-buffer -b binary >/dev/null 2>&1
     client delete-buffer -b sourced >/dev/null 2>&1
     client delete-buffer -b nul >/dev/null 2>&1
+    client delete-buffer -b mixed >/dev/null 2>&1
     client set-option -gu @binary >/dev/null 2>&1
     client set-environment -gu BINARY_STREAMS >/dev/null 2>&1
     exit "$cleanup_status"
@@ -80,6 +81,22 @@ record control-show-nul "$(printf 'show-buffer -b nul\n' |
 record control-show-nul-utf8 "$(printf 'show-buffer -b nul\n' |
     utf8_client -C attach 2>/dev/null | last_block | hex)"
 
+printf 'a\376b\000c' | client load-buffer -b mixed -
+source="$HOME/buffer-binary-streams-show-$side.conf"
+printf 'show-buffer -b mixed\n' >"$source"
+for shape in direct inserted sourced; do
+    case $shape in
+    direct) line='show-buffer -b mixed' ;;
+    inserted) line="if-shell -F 1 'show-buffer -b mixed'" ;;
+    sourced) line="source-file '$source'" ;;
+    esac
+    record "control-$shape-mixed" "$(printf '%s\n' "$line" |
+        client -C attach 2>/dev/null | last_block | hex)"
+    record "control-$shape-mixed-utf8" "$(printf '%s\n' "$line" |
+        utf8_client -C attach 2>/dev/null | last_block | hex)"
+done
+rm -f "$source"
+
 status=0
 message="$(printf 'set -g @binary a\376b\n' | client source-file - 2>&1)" || status=$?
 record source-stdin "$status:$message"
@@ -95,6 +112,7 @@ record source-stdin-environment "$(client show-environment -g BINARY_STREAMS | h
 client delete-buffer -b binary
 client delete-buffer -b sourced
 client delete-buffer -b nul
+client delete-buffer -b mixed
 client set-environment -gu BINARY_STREAMS
 client set-option -gu @binary
 client load-buffer -b transcript "$transcript"

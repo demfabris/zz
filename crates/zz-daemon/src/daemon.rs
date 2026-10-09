@@ -19626,15 +19626,29 @@ impl Shared {
             "show-buffer" | "showb" => {
                 let parsed = parse_buffer_command_args(name, args, &['b'], &[])?;
                 require_no_positionals(name, &parsed)?;
-                let (data, utf8) = {
+                let (data, control, utf8) = {
                     let inner = self.inner.lock();
                     let buffer =
                         resolve_buffer(&inner, parsed.value('b'), BufferMissing::NoBuffer)?;
-                    let utf8 = invoking_client
-                        .is_some_and(|client| inner.client(client).is_some_and(|c| c.utf8));
-                    (Arc::clone(&buffer.data), utf8)
+                    let printer = invoking_client
+                        .filter(|client| *client != ClientId(u64::MAX))
+                        .map(|client| (client, kind))
+                        .or_else(|| {
+                            context
+                                .control_command_target()
+                                .map(|(client, _)| client)
+                                .or_else(|| context.replay_client())
+                                .map(|client| {
+                                    let kind = inner.client(client).and_then(|c| c.kind);
+                                    (client, kind.unwrap_or(ClientKind::Command))
+                                })
+                        });
+                    let control = printer.is_some_and(|(_, kind)| kind == ClientKind::Control);
+                    let utf8 = printer
+                        .is_some_and(|(client, _)| inner.client(client).is_some_and(|c| c.utf8));
+                    (Arc::clone(&buffer.data), control, utf8)
                 };
-                let output = if kind == ClientKind::Control {
+                let output = if control {
                     let printed = data.split(|byte| *byte == 0).next().unwrap_or_default();
                     if utf8 {
                         RawText::from_bytes(printed)
@@ -57634,6 +57648,83 @@ mod tests {
                 .any(|(output, error, _)| output == "a_b_c_d" && !error),
             "{guards:?}"
         );
+    }
+
+    #[test]
+    fn show_buffer_prints_for_the_control_client_that_ran_it_in_every_queue_shape() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("show.conf");
+        fs::write(&source, "show-buffer -b mixed\n").expect("show-buffer source");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "show-shapes"]),
+            )
+            .expect("session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("mixed"),
+                        RawText::from_bytes(b"a\xfeb\0c".to_vec()),
+                    ],
+                ),
+            )
+            .expect("mixed buffer");
+        let session = context.session.expect("session");
+        let shapes = [
+            control_stdin_command("show-buffer", ["-b", "mixed"]),
+            control_stdin_command("if-shell", ["-F", "1", "show-buffer -b mixed"]),
+            control_stdin_command("source-file", [source.display().to_string()]),
+        ];
+        for utf8 in [false, true] {
+            let mailbox = OutboundMailbox::new();
+            let (control, _) =
+                shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+            shared.inner.lock().client_entry(control).utf8 = utf8;
+            shared
+                .attach(control, session)
+                .expect("attach control client");
+            take_reliable_messages(&mailbox);
+            for (request_id, shape) in (1..).zip(&shapes) {
+                let mut printed = Vec::new();
+                if let CommandResponse::Success { output, .. } = shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    shape,
+                ) {
+                    printed.push(output.as_bytes().to_vec());
+                }
+                printed.extend(
+                    control_command_guards(take_reliable_messages(&mailbox))
+                        .into_iter()
+                        .map(|(output, _, _)| output.into_bytes()),
+                );
+                printed.retain(|output| !output.is_empty());
+                let expected: &[&[u8]] = if utf8 {
+                    &[b"a\xfeb", "a\u{fffd}b".as_bytes()]
+                } else {
+                    &[b"a_b"]
+                };
+                assert!(
+                    printed.len() == 1 && expected.contains(&printed[0].as_slice()),
+                    "{} utf8={utf8}: {printed:?}",
+                    shape.name
+                );
+            }
+        }
     }
 
     #[test]

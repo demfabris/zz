@@ -7,6 +7,8 @@ mod command;
 mod compat_manifest_tests;
 mod copy_actions;
 #[cfg(test)]
+mod float_tests;
+#[cfg(test)]
 mod format_universe_tests;
 mod formats;
 mod honest_knobs;

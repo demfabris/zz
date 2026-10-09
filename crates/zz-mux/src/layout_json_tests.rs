@@ -330,16 +330,14 @@ fn select_layout_errors_match_the_pin() {
             "w",
             r#"{"V":2,"L":{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":24,"x":0,"y":0,"i":0},{"t":"p","w":20,"h":5,"x":3,"y":3,"i":1,"z":0}]}}"#,
         ]),
-        Err(ServerError::InvalidCommand(
-            r#"floating panes are not supported: {"V":2,"L":{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":24,"x":0,"y":0,"i":0},{"t":"p","w":20,"h":5,"x":3,"y":3,"i":1,"z":0}]}}"#
-                .to_owned()
-        ))
+        Ok(String::new())
     );
 }
 
 #[test]
 fn the_v2_writer_emits_floating_leaves_and_the_v1_copy_drops_them() {
-    let parsed = CellLayout::parse("8205,80x24,0,0{40x24,0,0,0,39x24,41,0,1}").unwrap();
+    let input = r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":24,"x":0,"y":0,"a":true,"i":4,"I":"%4"},{"t":"p","w":39,"h":7,"x":-3,"y":2,"i":5,"z":0,"I":"%5"}]}}"#;
+    let parsed = CellLayout::parse(input).unwrap();
     let mut next = 0;
     let (layout, _) = parsed.into_layout(&[PaneId(4), PaneId(5)], &mut || {
         next += 1;
@@ -351,16 +349,8 @@ fn the_v2_writer_emits_floating_leaves_and_the_v1_copy_drops_them() {
         index: u32::try_from(pane.0).unwrap(),
         z: (pane == PaneId(5)).then_some(0),
     };
-    assert_eq!(
-        layout.dump_as(LayoutFormat::V2, &leaf),
-        r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"a":true,"i":4,"I":"%4"},{"t":"p","w":39,"h":24,"x":41,"y":0,"i":5,"z":0,"I":"%5"}]}}"#
-    );
-    assert_eq!(layout.dump_as(LayoutFormat::V1, &leaf), "b161,40x24,0,0,4");
-    let all_floating = |pane: PaneId| LeafState {
-        z: Some(u32::try_from(pane.0).unwrap()),
-        ..LeafState::default()
-    };
-    assert_eq!(layout.dump_as(LayoutFormat::V1, &all_floating), "0000,");
+    assert_eq!(layout.dump_as(LayoutFormat::V2, &leaf), input);
+    assert_eq!(layout.dump_as(LayoutFormat::V1, &leaf), "b261,80x24,0,0,4");
 }
 
 #[test]

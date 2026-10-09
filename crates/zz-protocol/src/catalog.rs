@@ -117,19 +117,6 @@ impl CommandOptionSpec {
             native: false,
         }
     }
-
-    const fn unsupported_optional_value(name: &'static str) -> Self {
-        Self {
-            name,
-            value: None,
-            description: "unsupported tmux option",
-            completable: false,
-            attached_value: true,
-            optional_value: true,
-            unsupported: true,
-            native: false,
-        }
-    }
 }
 
 /// Syntax, completion, and canonicalization metadata for one command.
@@ -611,10 +598,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-kNZ] [-F format] [-f filter] [-t target-pane]",
     ),
     (
-        "break-pane",
-        "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",
-    ),
-    (
         "capture-pane",
         "[-aCeFHIJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
     ),
@@ -685,6 +668,10 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-AgHpqsvw] [-F format] [-t target-pane] [option]",
     ),
     ("server-access", "[-adglrw] [-t target-pane] [user|group]"),
+    (
+        "new-pane",
+        "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
+    ),
     (
         "split-window",
         "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
@@ -774,14 +761,8 @@ pub static POSITIONAL_MINIMUMS: &[(&str, usize)] = &[
     ("wait-for", 1),
 ];
 
-pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] = &[
-    "new-pane",
-    "newp",
-    "link-window",
-    "linkw",
-    "unlink-window",
-    "unlinkw",
-];
+pub static UNIMPLEMENTED_TMUX_COMMANDS: &[&str] =
+    &["link-window", "linkw", "unlink-window", "unlinkw"];
 
 static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
     CommandSpec {
@@ -799,50 +780,6 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
         ],
         positionals: &[],
         variadic: None,
-    },
-    CommandSpec {
-        name: "new-pane",
-        aliases: &["newp"],
-        description: "Unsupported tmux command",
-        usage: "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
-        options: &[
-            CommandOptionSpec::unsupported_flag("-A"),
-            CommandOptionSpec::unsupported_value("-B"),
-            CommandOptionSpec::unsupported_flag("-C"),
-            CommandOptionSpec::unsupported_flag("-D"),
-            CommandOptionSpec::unsupported_flag("-E"),
-            CommandOptionSpec::unsupported_value("-F"),
-            CommandOptionSpec::unsupported_flag("-I"),
-            CommandOptionSpec::unsupported_flag("-K"),
-            CommandOptionSpec::unsupported_flag("-L"),
-            CommandOptionSpec::unsupported_flag("-M"),
-            CommandOptionSpec::unsupported_flag("-O"),
-            CommandOptionSpec::unsupported_flag("-P"),
-            CommandOptionSpec::unsupported_value("-R"),
-            CommandOptionSpec::unsupported_value("-S"),
-            CommandOptionSpec::unsupported_value("-T"),
-            CommandOptionSpec::unsupported_flag("-W"),
-            CommandOptionSpec::unsupported_value("-X"),
-            CommandOptionSpec::unsupported_value("-Y"),
-            CommandOptionSpec::unsupported_flag("-Z"),
-            CommandOptionSpec::unsupported_flag("-b"),
-            CommandOptionSpec::unsupported_value("-c"),
-            CommandOptionSpec::unsupported_flag("-d"),
-            CommandOptionSpec::unsupported_value("-e"),
-            CommandOptionSpec::unsupported_flag("-f"),
-            CommandOptionSpec::unsupported_flag("-h"),
-            CommandOptionSpec::unsupported_flag("-k"),
-            CommandOptionSpec::unsupported_value("-l"),
-            CommandOptionSpec::unsupported_value("-m"),
-            CommandOptionSpec::unsupported_value("-p"),
-            CommandOptionSpec::unsupported_value("-s"),
-            CommandOptionSpec::unsupported_value("-t"),
-            CommandOptionSpec::unsupported_flag("-v"),
-            CommandOptionSpec::unsupported_value("-x"),
-            CommandOptionSpec::unsupported_value("-y"),
-        ],
-        positionals: &[],
-        variadic: Some(FreeForm),
     },
     CommandSpec {
         name: "unlink-window",
@@ -1838,6 +1775,56 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         variadic: Some(FreeForm),
     },
     CommandSpec {
+        name: "new-pane",
+        aliases: &["newp"],
+        description: "Create a floating pane",
+        usage: "[-AbCDdEfhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
+        options: &[
+            CommandOptionSpec::value("--kind", PaneKind, "pane kind").native(),
+            CommandOptionSpec::value("--profile", FreeForm, "browser profile").native(),
+            CommandOptionSpec::value("--provider", FreeForm, "agent provider").native(),
+            CommandOptionSpec::value("-t", Pane, "target pane"),
+            CommandOptionSpec::flag("-A", "keep the float visible over a zoomed pane"),
+            CommandOptionSpec::flag("-C", "kill the modal pane on a click outside it"),
+            CommandOptionSpec::flag("-D", "kill the modal pane on Escape or C-c"),
+            CommandOptionSpec::flag("-K", "send every key to the modal pane"),
+            CommandOptionSpec::flag("-L", "split instead of floating"),
+            CommandOptionSpec::flag("-M", "size the pane from the invoking mouse drag"),
+            CommandOptionSpec::flag("-O", "make the pane modal"),
+            CommandOptionSpec::value("-x", FreeForm, "width in cells or percent"),
+            CommandOptionSpec::value("-y", FreeForm, "height in cells or percent"),
+            CommandOptionSpec::value("-X", FreeForm, "x position in cells or percent"),
+            CommandOptionSpec::value("-Y", FreeForm, "y position in cells or percent"),
+            CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
+            CommandOptionSpec::value("-p", FreeForm, "split percentage"),
+            CommandOptionSpec::value("-c", FreeForm, "start in the current pane path"),
+            CommandOptionSpec::flag("-b", "new pane goes left or above"),
+            CommandOptionSpec::flag("-d", "keep focus on the current pane"),
+            CommandOptionSpec::flag("-f", "span the full window"),
+            CommandOptionSpec::flag("-h", "horizontal split"),
+            CommandOptionSpec::flag("-P", "print information about the new pane"),
+            CommandOptionSpec::value("-F", FreeForm, "print format"),
+            CommandOptionSpec::flag("-v", "vertical split"),
+            CommandOptionSpec::value("-e", FreeForm, "pane environment"),
+            CommandOptionSpec::flag("-E", "create an empty pane"),
+            CommandOptionSpec::flag(
+                "-I",
+                "write the caller's standard input into the new empty pane",
+            ),
+            CommandOptionSpec::flag("-k", "retain the new pane until a key is pressed"),
+            CommandOptionSpec::value("-m", FreeForm, "retained pane message"),
+            CommandOptionSpec::value("-R", FreeForm, "inactive pane border style"),
+            CommandOptionSpec::value("-s", FreeForm, "pane style"),
+            CommandOptionSpec::value("-S", FreeForm, "active pane border style"),
+            CommandOptionSpec::value("-T", FreeForm, "pane title"),
+            CommandOptionSpec::flag("-W", "wait for the pane's command to finish"),
+            CommandOptionSpec::flag("-Z", "zoom the active pane after splitting"),
+            CommandOptionSpec::value("-B", FreeForm, "new pane border lines"),
+        ],
+        positionals: &[],
+        variadic: Some(FreeForm),
+    },
+    CommandSpec {
         name: "select-pane-kind",
         aliases: &[],
         description: "Materialize a pending pane as a terminal, browser, agent, or editor",
@@ -1853,7 +1840,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "break-pane",
         aliases: &["breakp"],
         description: "Move a pane into a new window",
-        usage: "[-abdP] [-F format] [-n window-name] [-s src-pane] [-t dst-window]",
+        usage: "[-abdPW] [-F format] [-n window-name] [-s src-pane] [-t dst-window] [-x width] [-y height] [-X x-position] [-Y y-position]",
         options: &[
             CommandOptionSpec::value("-n", FreeForm, "new window name"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
@@ -1863,11 +1850,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-d", "do not select the new window"),
             CommandOptionSpec::flag("-P", "print information about the new window"),
             CommandOptionSpec::value("-F", FreeForm, "print format"),
-            CommandOptionSpec::unsupported_flag("-W"),
-            CommandOptionSpec::unsupported_value("-x"),
-            CommandOptionSpec::unsupported_value("-y"),
-            CommandOptionSpec::unsupported_value("-X"),
-            CommandOptionSpec::unsupported_value("-Y"),
+            CommandOptionSpec::flag("-W", "float the pane in its window"),
+            CommandOptionSpec::value("-x", FreeForm, "floating width in cells or percent"),
+            CommandOptionSpec::value("-y", FreeForm, "floating height in cells or percent"),
+            CommandOptionSpec::value("-X", FreeForm, "floating x position"),
+            CommandOptionSpec::value("-Y", FreeForm, "floating y position"),
         ],
         positionals: &[],
         variadic: None,
@@ -1895,7 +1882,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "move-pane",
         aliases: &["movep"],
         description: "Move a pane into another window",
-        usage: "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
+        usage: "[-bdfhv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]",
         options: &[
             CommandOptionSpec::value("-l", FreeForm, "new pane size in cells or percent"),
             CommandOptionSpec::value("-s", Pane, "source pane"),
@@ -1905,14 +1892,14 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-f", "fill target space"),
             CommandOptionSpec::flag("-h", "horizontal split"),
             CommandOptionSpec::flag("-v", "vertical split"),
-            CommandOptionSpec::unsupported_optional_value("-D"),
-            CommandOptionSpec::unsupported_optional_value("-L"),
-            CommandOptionSpec::unsupported_value("-P"),
-            CommandOptionSpec::unsupported_optional_value("-R"),
-            CommandOptionSpec::unsupported_optional_value("-U"),
-            CommandOptionSpec::unsupported_value("-X"),
-            CommandOptionSpec::unsupported_value("-Y"),
-            CommandOptionSpec::unsupported_value("-z"),
+            CommandOptionSpec::optional_value("-D", "move a floating pane down"),
+            CommandOptionSpec::optional_value("-L", "move a floating pane left"),
+            CommandOptionSpec::value("-P", FreeForm, "floating pane placement"),
+            CommandOptionSpec::optional_value("-R", "move a floating pane right"),
+            CommandOptionSpec::optional_value("-U", "move a floating pane up"),
+            CommandOptionSpec::value("-X", FreeForm, "floating x position"),
+            CommandOptionSpec::value("-Y", FreeForm, "floating y position"),
+            CommandOptionSpec::value("-z", FreeForm, "floating z-index"),
             CommandOptionSpec::unsupported_flag("-M"),
         ],
         positionals: &[],
@@ -3250,14 +3237,14 @@ mod tests {
                 usage_overrides.insert(spec.name);
             }
         }
-        assert_eq!(implemented, 89);
-        assert_eq!(aliases, 75);
-        assert_eq!(flag_shapes.values().sum::<usize>(), 551);
+        assert_eq!(implemented, 90);
+        assert_eq!(aliases, 76);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 585);
         assert_eq!(
             flag_shapes,
-            BTreeMap::from([("none", 309), ("optional", 8), ("required", 234)])
+            BTreeMap::from([("none", 327), ("optional", 8), ("required", 250)])
         );
-        assert_eq!((supported, unsupported), (519, 33));
+        assert_eq!((supported, unsupported), (566, 20));
         assert_eq!(usage_overrides.len(), 27);
         assert_eq!(
             usage_overrides,
@@ -3277,7 +3264,7 @@ mod tests {
             .into_iter()
             .map(|command| (command.name.clone(), command))
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 3);
+        assert_eq!(UNIMPLEMENTED_TMUX_COMMAND_SPECS.len(), 2);
         for spec in UNIMPLEMENTED_TMUX_COMMAND_SPECS {
             let command = &oracle[spec.name];
             assert_eq!(spec.aliases, command.aliases, "aliases for {}", spec.name);
@@ -4515,6 +4502,7 @@ mod tests {
             "swap-window",
             "find-window",
             "split-window",
+            "new-pane",
             "select-pane-kind",
             "break-pane",
             "join-pane",

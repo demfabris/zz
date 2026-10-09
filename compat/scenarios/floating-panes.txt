@@ -1,0 +1,81 @@
+# Floating panes as tmux 3.8 keeps them: flagged leaves of the window's layout
+# tree with their own geometry, z order and the v2 layout that carries them.
+new-pane
+new-pane
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+split-window -d -h -t w.0
+select-pane -t w.0
+new-pane
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+new-pane -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+break-pane -W -s w.1 -x 20 -y 6 -X 10 -Y 3
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+move-pane -P bottom-right -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+move-pane -L 2 -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+move-pane -z 1 -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+move-pane -P front -t w.2
+move-pane -P back -t w.2
+move-pane -P forward-loop -t w.3
+move-pane -P centre -t w.3
+move-pane -X 5 -Y 4 -t w.3
+move-pane -D 3 -R -t w.3
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+select-pane -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+join-pane -s w.1 -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+kill-pane -t w.3
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+select-layout -t w even-horizontal
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+resize-window -t w -x 30 -y 10
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+
+# Errors from the floating commands.
+new-session -d -s errs
+new-pane -t errs
+err: break-pane -W -s errs.1
+err: move-pane -P top-left -t errs.0
+err: move-pane -P sideways -t errs.1
+err: join-pane -s errs.0 -t errs.1
+err: split-window -L -t errs.1
+err: new-pane -L -t errs.1
+err: new-pane -L -O -t errs.0
+err: break-pane -W -s errs.0 -x 0
+err: join-pane -s errs.0 -t errs.0
+new-pane -O -t errs.0
+err: new-pane -O -t errs.0
+err: break-pane -s errs.2
+err: join-pane -s errs.2 -t errs.0
+out: list-panes -t errs -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t errs #{window_modal_pane}:#{window_flags}
+select-pane -t errs.0
+out: display-message -p -t errs #{pane_index}
+
+# A window loses its last tile and keeps living on its floats.
+new-session -d -s alone
+new-pane -t alone
+new-pane -t alone
+break-pane -W -s alone.0
+out: list-panes -t alone -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t alone #{window_layout}
+join-pane -s alone.0 -t alone.0
+out: list-panes -t alone -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t alone #{window_layout}
+kill-pane -t alone.0
+out: list-panes -t alone -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t alone #{window_layout}

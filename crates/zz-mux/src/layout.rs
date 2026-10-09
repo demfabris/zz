@@ -54,19 +54,25 @@ pub(crate) struct ParsedLeaf {
 pub(crate) struct ParsedSelection {
     pub active: Option<PaneId>,
     pub last_panes: Vec<PaneId>,
+    pub floats: Vec<PaneId>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub(crate) struct CellGeometry {
     pub sx: u16,
     pub sy: u16,
-    pub xoff: u16,
-    pub yoff: u16,
+    pub xoff: i32,
+    pub yoff: i32,
 }
 
 #[derive(Clone, PartialEq, Debug)]
 pub(crate) enum CellNode {
     Leaf {
+        pane: PaneId,
+        geometry: CellGeometry,
+        saved: Option<CellGeometry>,
+    },
+    Float {
         pane: PaneId,
         geometry: CellGeometry,
     },
@@ -86,6 +92,7 @@ pub(crate) struct CellChild {
 #[derive(Clone, PartialEq, Debug)]
 pub struct CellLayout {
     root: CellNode,
+    extent: (u16, u16),
 }
 
 #[derive(Clone, PartialEq, Debug)]
@@ -112,6 +119,7 @@ pub(crate) struct LayoutParseError(String);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum LayoutError {
+    Floating,
     LastPane,
     NoSpace,
     UnknownDivider,
@@ -144,13 +152,32 @@ impl CellGeometry {
 impl CellNode {
     fn geometry(&self) -> CellGeometry {
         match self {
-            Self::Leaf { geometry, .. } | Self::Node { geometry, .. } => *geometry,
+            Self::Leaf { geometry, .. }
+            | Self::Float { geometry, .. }
+            | Self::Node { geometry, .. } => *geometry,
         }
     }
 
     fn geometry_mut(&mut self) -> &mut CellGeometry {
         match self {
-            Self::Leaf { geometry, .. } | Self::Node { geometry, .. } => geometry,
+            Self::Leaf { geometry, .. }
+            | Self::Float { geometry, .. }
+            | Self::Node { geometry, .. } => geometry,
+        }
+    }
+
+    fn tiled(&self) -> bool {
+        match self {
+            Self::Leaf { .. } => true,
+            Self::Float { .. } => false,
+            Self::Node { children, .. } => children.iter().any(|child| child.node.tiled()),
+        }
+    }
+
+    const fn pane(&self) -> Option<PaneId> {
+        match self {
+            Self::Leaf { pane, .. } | Self::Float { pane, .. } => Some(*pane),
+            Self::Node { .. } => None,
         }
     }
 
@@ -207,15 +234,8 @@ impl CellLayout {
         let sx = sx.clamp(PANE_MINIMUM, PANE_MAXIMUM);
         let sy = sy.clamp(PANE_MINIMUM, PANE_MAXIMUM);
         let layout = Self {
-            root: CellNode::Leaf {
-                pane,
-                geometry: CellGeometry {
-                    sx,
-                    sy,
-                    xoff: 0,
-                    yoff: 0,
-                },
-            },
+            root: leaf(pane, sx, sy),
+            extent: (sx, sy),
         };
         layout.debug_validate();
         layout
@@ -231,8 +251,40 @@ impl CellLayout {
     }
 
     pub(crate) fn extent(&self) -> (u16, u16) {
+        if !self.root.tiled() {
+            return self.extent;
+        }
         let geometry = self.root.geometry();
         (geometry.sx, geometry.sy)
+    }
+
+    pub(crate) fn has_tiled(&self) -> bool {
+        self.root.tiled()
+    }
+
+    pub(crate) fn is_floating(&self, pane: PaneId) -> bool {
+        pane_cell(&self.root, pane).is_some_and(|node| matches!(node, CellNode::Float { .. }))
+    }
+
+    pub(crate) fn floating_panes(&self) -> Vec<PaneId> {
+        let mut panes = Vec::new();
+        collect_panes(&self.root, &mut panes);
+        panes.retain(|pane| self.is_floating(*pane));
+        panes
+    }
+
+    pub(crate) fn tiled_panes(&self) -> Vec<PaneId> {
+        let mut panes = Vec::new();
+        collect_panes(&self.root, &mut panes);
+        panes.retain(|pane| !self.is_floating(*pane));
+        panes
+    }
+
+    pub(crate) fn saved_float(&self, pane: PaneId) -> Option<CellGeometry> {
+        match pane_cell(&self.root, pane)? {
+            CellNode::Leaf { saved, .. } => *saved,
+            CellNode::Float { .. } | CellNode::Node { .. } => None,
+        }
     }
 
     pub(crate) fn panes_in_order(&self) -> Vec<PaneId> {
@@ -256,6 +308,9 @@ impl CellLayout {
         status: PaneBorderStatus,
     ) -> Option<CellGeometry> {
         let geometry = pane_geometry(&self.root, pane)?;
+        if self.is_floating(pane) {
+            return Some(geometry);
+        }
         Some(carve_border_row(geometry, self.root.geometry(), status))
     }
 
@@ -275,6 +330,9 @@ impl CellLayout {
         ids: &mut dyn FnMut() -> SplitId,
     ) -> Result<(), LayoutError> {
         let target_path = pane_path(&self.root, target).ok_or(LayoutError::UnknownPane)?;
+        if self.is_floating(target) {
+            return Err(LayoutError::Floating);
+        }
         let split_path = if full {
             &[][..]
         } else {
@@ -335,6 +393,7 @@ impl CellLayout {
                             node: CellNode::Leaf {
                                 pane: new_pane,
                                 geometry,
+                                saved: None,
                             },
                         },
                     );
@@ -349,6 +408,7 @@ impl CellLayout {
                             node: CellNode::Leaf {
                                 pane: new_pane,
                                 geometry,
+                                saved: None,
                             },
                         },
                     );
@@ -383,6 +443,7 @@ impl CellLayout {
                         node: CellNode::Leaf {
                             pane: new_pane,
                             geometry,
+                            saved: None,
                         },
                     },
                 );
@@ -392,6 +453,7 @@ impl CellLayout {
                     node: CellNode::Leaf {
                         pane: new_pane,
                         geometry,
+                        saved: None,
                     },
                 });
             }
@@ -406,6 +468,7 @@ impl CellLayout {
         let placeholder = CellNode::Leaf {
             pane: new_pane,
             geometry,
+            saved: None,
         };
         let mut old = std::mem::replace(cell, placeholder);
         if full {
@@ -419,6 +482,7 @@ impl CellLayout {
         let new = CellNode::Leaf {
             pane: new_pane,
             geometry: new_geometry,
+            saved: None,
         };
         let children = if before {
             vec![
@@ -458,41 +522,205 @@ impl CellLayout {
         if path.is_empty() {
             return Err(LayoutError::LastPane);
         }
+        self.extent = self.extent();
         let parent_path = &path[..path.len() - 1];
         let index = path[path.len() - 1];
-        let parent =
-            node_at_path_mut(&mut self.root, parent_path).ok_or(LayoutError::UnknownPane)?;
-        let CellNode::Node { axis, children, .. } = parent else {
+        if matches!(node_at_path(&self.root, parent_path), Some(CellNode::Node { children, .. }) if children.len() < 2)
+        {
+            return Ok(());
+        }
+        let tiled = node_at_path(&self.root, &path).is_some_and(CellNode::tiled);
+        if tiled {
+            let neighbour = {
+                let Some(CellNode::Node { children, .. }) = node_at_path(&self.root, parent_path)
+                else {
+                    return Err(LayoutError::UnknownPane);
+                };
+                cell_neighbour(children, index)
+            };
+            match neighbour {
+                Some(neighbour) => {
+                    let Some(CellNode::Node { axis, children, .. }) =
+                        node_at_path_mut(&mut self.root, parent_path)
+                    else {
+                        return Err(LayoutError::UnknownPane);
+                    };
+                    let gift = children[index].node.extent(*axis) + 1;
+                    resize_adjust(&mut children[neighbour].node, *axis, i32::from(gift));
+                }
+                None => {
+                    remove_tile(&mut self.root, parent_path);
+                }
+            }
+        }
+        let Some(CellNode::Node { children, .. }) = node_at_path_mut(&mut self.root, parent_path)
+        else {
             return Err(LayoutError::UnknownPane);
         };
-        let gift = children[index].node.extent(*axis) + 1;
-        let neighbour = if index + 1 < children.len() {
-            Some(index + 1)
-        } else {
-            index.checked_sub(1)
-        };
-        let Some(neighbour) = neighbour else {
-            return Ok(());
-        };
-        resize_adjust(&mut children[neighbour].node, *axis, i32::from(gift));
         children.remove(index);
         if let Some(first) = children.first_mut() {
             first.divider = None;
         }
         if children.len() == 1 {
             collapse_single_child(&mut self.root, parent_path);
+            if parent_path.is_empty()
+                && let CellNode::Leaf { geometry, .. } = &mut self.root
+            {
+                geometry.xoff = 0;
+                geometry.yoff = 0;
+            }
         }
         fix_offsets(&mut self.root);
         self.debug_validate();
         Ok(())
     }
 
+    pub(crate) fn float(
+        &mut self,
+        target: PaneId,
+        pane: PaneId,
+        geometry: CellGeometry,
+        ids: &mut dyn FnMut() -> SplitId,
+    ) -> Result<(), LayoutError> {
+        let mut path = pane_path(&self.root, target).ok_or(LayoutError::UnknownPane)?;
+        if path.is_empty() {
+            let root_geometry = self.root.geometry();
+            let old = std::mem::replace(&mut self.root, leaf(pane, 1, 1));
+            self.root = CellNode::Node {
+                axis: Axis::Vertical,
+                geometry: root_geometry,
+                children: vec![CellChild {
+                    divider: None,
+                    node: old,
+                }],
+            };
+            path.push(0);
+        }
+        let index = path[path.len() - 1];
+        let Some(CellNode::Node { children, .. }) =
+            node_at_path_mut(&mut self.root, &path[..path.len() - 1])
+        else {
+            return Err(LayoutError::UnknownPane);
+        };
+        children.insert(
+            index + 1,
+            CellChild {
+                divider: Some(ids()),
+                node: CellNode::Float { pane, geometry },
+            },
+        );
+        self.debug_validate();
+        Ok(())
+    }
+
+    pub(crate) fn float_tile(&mut self, pane: PaneId, geometry: CellGeometry) -> bool {
+        let Some(path) = pane_path(&self.root, pane) else {
+            return false;
+        };
+        if !matches!(node_at_path(&self.root, &path), Some(CellNode::Leaf { .. })) {
+            return false;
+        }
+        self.extent = self.extent();
+        remove_tile(&mut self.root, &path);
+        if let Some(node) = node_at_path_mut(&mut self.root, &path) {
+            *node = CellNode::Float { pane, geometry };
+        }
+        fix_offsets(&mut self.root);
+        self.debug_validate();
+        true
+    }
+
+    pub(crate) fn tile_float(&mut self, pane: PaneId) -> Result<(), LayoutError> {
+        let path = pane_path(&self.root, pane).ok_or(LayoutError::UnknownPane)?;
+        let Some(CellNode::Float { geometry, .. }) = node_at_path(&self.root, &path) else {
+            return Err(LayoutError::UnknownPane);
+        };
+        let saved = *geometry;
+        if !insert_tile(&mut self.root, &path, self.extent) {
+            return Err(LayoutError::NoSpace);
+        }
+        if let Some(node) = node_at_path_mut(&mut self.root, &path) {
+            let geometry = node.geometry();
+            *node = CellNode::Leaf {
+                pane,
+                geometry,
+                saved: Some(saved),
+            };
+        }
+        fix_offsets(&mut self.root);
+        self.debug_validate();
+        Ok(())
+    }
+
+    pub(crate) fn set_float_geometry(&mut self, pane: PaneId, geometry: CellGeometry) -> bool {
+        match pane_cell_mut(&mut self.root, pane) {
+            Some(CellNode::Float {
+                geometry: current, ..
+            }) => {
+                let changed = *current != geometry;
+                *current = geometry;
+                changed
+            }
+            _ => false,
+        }
+    }
+
+    pub(crate) fn link_floats(
+        &mut self,
+        floats: &[(PaneId, CellGeometry)],
+        ids: &mut dyn FnMut() -> SplitId,
+    ) {
+        if floats.is_empty() {
+            return;
+        }
+        if !matches!(self.root, CellNode::Node { .. }) {
+            let geometry = self.root.geometry();
+            let old = std::mem::replace(&mut self.root, leaf(PaneId(0), 1, 1));
+            self.root = CellNode::Node {
+                axis: Axis::Vertical,
+                geometry,
+                children: vec![CellChild {
+                    divider: None,
+                    node: old,
+                }],
+            };
+        }
+        if let CellNode::Node { children, .. } = &mut self.root {
+            for (pane, geometry) in floats {
+                children.push(CellChild {
+                    divider: Some(ids()),
+                    node: CellNode::Float {
+                        pane: *pane,
+                        geometry: *geometry,
+                    },
+                });
+            }
+        }
+        self.debug_validate();
+    }
+
+    pub(crate) fn keep_extent(&mut self, extent: (u16, u16)) {
+        self.extent = extent;
+    }
+
+    pub(crate) fn clamp_floats(&mut self, sx: u16, sy: u16, pad: &dyn Fn(PaneId) -> u16) {
+        clamp_floats(&mut self.root, sx, sy, pad);
+    }
+
     pub(crate) fn resize(&mut self, sx: u16, sy: u16) {
+        self.resize_with(sx, sy, &|_| 1);
+    }
+
+    pub(crate) fn resize_with(&mut self, sx: u16, sy: u16, pad: &dyn Fn(PaneId) -> u16) {
         let sx = sx.clamp(PANE_MINIMUM, PANE_MAXIMUM);
         let sy = sy.clamp(PANE_MINIMUM, PANE_MAXIMUM);
-        resize_root_axis(&mut self.root, Axis::Horizontal, sx);
-        resize_root_axis(&mut self.root, Axis::Vertical, sy);
-        fix_offsets(&mut self.root);
+        self.extent = (sx, sy);
+        if !matches!(self.root, CellNode::Float { .. }) {
+            resize_root_axis(&mut self.root, Axis::Horizontal, sx);
+            resize_root_axis(&mut self.root, Axis::Vertical, sy);
+            fix_offsets(&mut self.root);
+        }
+        clamp_floats(&mut self.root, sx, sy, pad);
         self.debug_validate();
     }
 
@@ -512,8 +740,8 @@ impl CellLayout {
         let CellNode::Node { children, .. } = parent else {
             return Err(LayoutError::UnknownPane);
         };
-        if index + 1 == children.len() {
-            let Some(previous) = index.checked_sub(1) else {
+        if last_tiled(children, index) {
+            let Some(previous) = neighbour_dir(children, index, false) else {
                 return Ok(());
             };
             index = previous;
@@ -540,7 +768,7 @@ impl CellLayout {
             return Err(LayoutError::UnknownPane);
         };
         let current = children[index].node.extent(axis);
-        let change = if index + 1 == children.len() {
+        let change = if last_tiled(children, index) {
             i32::from(current) - i32::from(size)
         } else {
             i32::from(size) - i32::from(current)
@@ -595,12 +823,29 @@ impl CellLayout {
             debug_assert!(!panes.is_empty());
             return;
         }
+        let floats = panes
+            .iter()
+            .filter_map(|pane| match pane_cell(&self.root, *pane) {
+                Some(CellNode::Float { geometry, .. }) => Some((*pane, *geometry)),
+                _ => None,
+            })
+            .collect::<BTreeMap<_, _>>();
+        let tiled = panes
+            .iter()
+            .copied()
+            .filter(|pane| !floats.contains_key(pane))
+            .collect::<Vec<_>>();
+        if !floats.is_empty() && tiled.len() <= 1 {
+            return;
+        }
         let (sx, sy) = self.extent();
         if panes.len() == 1 {
             self.root = leaf(panes[0], sx, sy);
             self.debug_validate();
             return;
         }
+        let order = panes.to_vec();
+        let panes = tiled.as_slice();
         self.root = match preset {
             LayoutPreset::EvenHorizontal => even_layout(Axis::Horizontal, sx, sy, panes, ids),
             LayoutPreset::EvenVertical => even_layout(Axis::Vertical, sx, sy, panes, ids),
@@ -614,6 +859,52 @@ impl CellLayout {
                 tiled_layout(sx, sy, panes, options.tiled_layout_max_columns, ids)
             }
         };
+        if !floats.is_empty() {
+            let CellNode::Node { children, .. } = &mut self.root else {
+                return;
+            };
+            match preset {
+                LayoutPreset::EvenHorizontal | LayoutPreset::EvenVertical => {
+                    link_floats(children, &order, &floats, ids);
+                }
+                LayoutPreset::MainHorizontal
+                | LayoutPreset::MainHorizontalMirrored
+                | LayoutPreset::MainVertical
+                | LayoutPreset::MainVerticalMirrored
+                    if tiled.len() > 2 =>
+                {
+                    let main = tiled[0];
+                    let order = order
+                        .iter()
+                        .copied()
+                        .filter(|pane| *pane != main)
+                        .collect::<Vec<_>>();
+                    if let Some(CellNode::Node { children, .. }) = children
+                        .iter_mut()
+                        .map(|child| &mut child.node)
+                        .find(|node| matches!(node, CellNode::Node { .. }))
+                    {
+                        link_floats(children, &order, &floats, ids);
+                    }
+                }
+                _ => {
+                    let order = order
+                        .iter()
+                        .copied()
+                        .filter(|pane| floats.contains_key(pane))
+                        .collect::<Vec<_>>();
+                    for pane in order {
+                        children.push(CellChild {
+                            divider: Some(ids()),
+                            node: CellNode::Float {
+                                pane,
+                                geometry: floats[&pane],
+                            },
+                        });
+                    }
+                }
+            }
+        }
         fix_offsets(&mut self.root);
         self.debug_validate();
     }
@@ -663,7 +954,11 @@ impl CellLayout {
     }
 
     pub fn project(&self) -> LayoutNode {
-        project_node(&self.root)
+        project_node(&self.root).unwrap_or_else(|| {
+            let mut panes = Vec::new();
+            collect_panes(&self.root, &mut panes);
+            LayoutNode::Pane(panes[0])
+        })
     }
 
     #[must_use]
@@ -674,7 +969,7 @@ impl CellLayout {
     #[must_use]
     pub fn dump_as(&self, format: LayoutFormat, leaf: &dyn Fn(PaneId) -> LeafState) -> String {
         match format {
-            LayoutFormat::V1 => dump_v1(tiled_copy(&self.root, &|pane| leaf(pane).z.is_some())),
+            LayoutFormat::V1 => dump_v1(tiled_copy(&self.root)),
             LayoutFormat::V2 => {
                 let mut output = String::from("{\"V\":2,\"L\":");
                 dump_v2_node(&self.root, leaf, &mut output);
@@ -686,7 +981,9 @@ impl CellLayout {
 
     pub(crate) fn validate(&self) -> Result<(), String> {
         let geometry = self.root.geometry();
-        if geometry.xoff != 0 || geometry.yoff != 0 {
+        if !matches!(self.root, CellNode::Float { .. })
+            && (geometry.xoff != 0 || geometry.yoff != 0)
+        {
             return Err("root offset is not zero".to_owned());
         }
         let mut dividers = BTreeSet::new();
@@ -776,9 +1073,16 @@ impl ParsedLayout {
                 .filter_map(|(leaf, pane)| leaf.last.map(|last| (last, *pane)))
                 .collect::<Vec<_>>();
             last.sort_by_key(|(last, _)| *last);
+            let mut floats = leaves
+                .iter()
+                .zip(&order)
+                .filter_map(|(leaf, pane)| leaf.float.map(|float| (float.z, *pane)))
+                .collect::<Vec<_>>();
+            floats.sort_by_key(|(z, _)| *z);
             let selection = ParsedSelection {
                 active,
                 last_panes: last.into_iter().map(|(_, pane)| pane).collect(),
+                floats: floats.into_iter().map(|(_, pane)| pane).collect(),
             };
             (order, Some(selection))
         };
@@ -786,7 +1090,11 @@ impl ParsedLayout {
         let root = assign_parsed_node(self.root, &mut order);
         let panes_exhausted = order.next().is_none();
         debug_assert!(panes_exhausted);
-        let mut layout = CellLayout { root };
+        let geometry = root.geometry();
+        let mut layout = CellLayout {
+            root,
+            extent: (geometry.sx, geometry.sy),
+        };
         fix_offsets(&mut layout.root);
         layout.refresh_divider_ids(ids);
         (layout, selection)
@@ -886,8 +1194,8 @@ fn parse_v2_cell(cell: &Json<'_>, active: &mut usize) -> Result<ParsedNode, Stri
     let geometry = CellGeometry {
         sx: narrow(sx),
         sy: narrow(sy),
-        xoff: narrow(xoff),
-        yoff: narrow(yoff),
+        xoff: i32::try_from(xoff).unwrap_or_default(),
+        yoff: i32::try_from(yoff).unwrap_or_default(),
     };
     let int = i64::from(i32::MAX);
     let Some(axis) = axis else {
@@ -1012,9 +1320,10 @@ fn json_object_end(text: &str) -> Option<usize> {
     None
 }
 
-fn tiled_copy(node: &CellNode, floating: &dyn Fn(PaneId) -> bool) -> Option<CellNode> {
+fn tiled_copy(node: &CellNode) -> Option<CellNode> {
     match node {
-        CellNode::Leaf { pane, .. } => (!floating(*pane)).then(|| node.clone()),
+        CellNode::Leaf { .. } => Some(node.clone()),
+        CellNode::Float { .. } => None,
         CellNode::Node {
             axis,
             geometry,
@@ -1024,7 +1333,7 @@ fn tiled_copy(node: &CellNode, floating: &dyn Fn(PaneId) -> bool) -> Option<Cell
             *geometry,
             children
                 .iter()
-                .filter_map(|child| tiled_copy(&child.node, floating))
+                .filter_map(|child| tiled_copy(&child.node))
                 .collect(),
         ),
     }
@@ -1035,6 +1344,7 @@ fn tiled_copy_parsed(node: &ParsedNode) -> Option<CellNode> {
         ParsedNode::Leaf { geometry, leaf } => leaf.float.is_none().then(|| CellNode::Leaf {
             pane: PaneId(leaf.id.unwrap_or_default()),
             geometry: *geometry,
+            saved: None,
         }),
         ParsedNode::Node {
             axis,
@@ -1087,7 +1397,7 @@ fn dump_v1(root: Option<CellNode>) -> String {
 fn dump_v2_node(node: &CellNode, leaf: &dyn Fn(PaneId) -> LeafState, output: &mut String) {
     let geometry = node.geometry();
     let kind = match node {
-        CellNode::Leaf { .. } => 'p',
+        CellNode::Leaf { .. } | CellNode::Float { .. } => 'p',
         CellNode::Node {
             axis: Axis::Vertical,
             ..
@@ -1103,7 +1413,7 @@ fn dump_v2_node(node: &CellNode, leaf: &dyn Fn(PaneId) -> LeafState, output: &mu
         geometry.sx, geometry.sy, geometry.xoff, geometry.yoff
     );
     match node {
-        CellNode::Leaf { pane, .. } => {
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => {
             let state = leaf(*pane);
             if state.active {
                 output.push_str(",\"a\":true");
@@ -1162,7 +1472,12 @@ impl<'a> LayoutParser<'a> {
         {
             return None;
         }
-        let geometry = CellGeometry { sx, sy, xoff, yoff };
+        let geometry = CellGeometry {
+            sx,
+            sy,
+            xoff: i32::from(xoff),
+            yoff: i32::from(yoff),
+        };
         if self.peek() == Some(b',') {
             let saved = self.cursor;
             self.cursor += 1;
@@ -1442,9 +1757,23 @@ fn collapse_parsed_single_child(root: &mut ParsedNode, parent_path: &[usize]) {
 
 fn assign_parsed_node(node: ParsedNode, panes: &mut impl Iterator<Item = PaneId>) -> CellNode {
     match node {
+        ParsedNode::Leaf {
+            geometry,
+            leaf: ParsedLeaf {
+                float: Some(float), ..
+            },
+        } => CellNode::Float {
+            pane: panes.next().expect("parsed pane count was checked"),
+            geometry: CellGeometry {
+                xoff: float.xoff,
+                yoff: float.yoff,
+                ..geometry
+            },
+        },
         ParsedNode::Leaf { geometry, .. } => CellNode::Leaf {
             pane: panes.next().expect("parsed pane count was checked"),
             geometry,
+            saved: None,
         },
         ParsedNode::Node {
             axis,
@@ -1474,12 +1803,13 @@ fn leaf(pane: PaneId, sx: u16, sy: u16) -> CellNode {
             xoff: 0,
             yoff: 0,
         },
+        saved: None,
     }
 }
 
 fn collect_panes(node: &CellNode, panes: &mut Vec<PaneId>) {
     match node {
-        CellNode::Leaf { pane, .. } => panes.push(*pane),
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => panes.push(*pane),
         CellNode::Node { children, .. } => {
             for child in children {
                 collect_panes(&child.node, panes);
@@ -1490,7 +1820,7 @@ fn collect_panes(node: &CellNode, panes: &mut Vec<PaneId>) {
 
 fn count_panes(node: &CellNode) -> usize {
     match node {
-        CellNode::Leaf { .. } => 1,
+        CellNode::Leaf { .. } | CellNode::Float { .. } => 1,
         CellNode::Node { children, .. } => {
             children.iter().map(|child| count_panes(&child.node)).sum()
         }
@@ -1506,7 +1836,7 @@ pub(crate) fn carve_border_row(
         PaneBorderStatus::Off => false,
         PaneBorderStatus::Top => geometry.yoff == root.yoff,
         PaneBorderStatus::Bottom => {
-            geometry.yoff.saturating_add(geometry.sy) == root.yoff.saturating_add(root.sy)
+            geometry.yoff + i32::from(geometry.sy) == root.yoff + i32::from(root.sy)
         }
     };
     if !carve {
@@ -1522,18 +1852,35 @@ pub(crate) fn carve_border_row(
 }
 
 fn pane_geometry(node: &CellNode, target: PaneId) -> Option<CellGeometry> {
+    pane_cell(node, target).map(CellNode::geometry)
+}
+
+fn pane_cell(node: &CellNode, target: PaneId) -> Option<&CellNode> {
     match node {
-        CellNode::Leaf { pane, geometry } => (*pane == target).then_some(*geometry),
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => {
+            (*pane == target).then_some(node)
+        }
         CellNode::Node { children, .. } => children
             .iter()
-            .find_map(|child| pane_geometry(&child.node, target)),
+            .find_map(|child| pane_cell(&child.node, target)),
+    }
+}
+
+fn pane_cell_mut(node: &mut CellNode, target: PaneId) -> Option<&mut CellNode> {
+    match node {
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => {
+            (*pane == target).then_some(node)
+        }
+        CellNode::Node { children, .. } => children
+            .iter_mut()
+            .find_map(|child| pane_cell_mut(&mut child.node, target)),
     }
 }
 
 fn pane_path(node: &CellNode, target: PaneId) -> Option<Vec<usize>> {
     fn find(node: &CellNode, target: PaneId, path: &mut Vec<usize>) -> bool {
         match node {
-            CellNode::Leaf { pane, .. } => *pane == target,
+            CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => *pane == target,
             CellNode::Node { children, .. } => {
                 for (index, child) in children.iter().enumerate() {
                     path.push(index);
@@ -1585,7 +1932,11 @@ fn matching_ancestor(root: &CellNode, path: &[usize], axis: Axis) -> Option<(Vec
 }
 
 fn resize_check(node: &CellNode, axis: Axis) -> u16 {
+    if !node.tiled() {
+        return 0;
+    }
     match node {
+        CellNode::Float { .. } => 0,
         CellNode::Leaf { geometry, .. } => geometry.extent(axis).saturating_sub(PANE_MINIMUM),
         CellNode::Node {
             axis: node_axis,
@@ -1596,6 +1947,7 @@ fn resize_check(node: &CellNode, axis: Axis) -> u16 {
         }),
         CellNode::Node { children, .. } => children
             .iter()
+            .filter(|child| child.node.tiled())
             .map(|child| resize_check(&child.node, axis))
             .min()
             .unwrap_or(0),
@@ -1618,15 +1970,18 @@ fn resize_adjust(node: &mut CellNode, axis: Axis, change: i32) {
         return;
     };
     if *node_axis != axis {
-        for child in children {
+        for child in children.iter_mut().filter(|child| child.node.tiled()) {
             resize_adjust(&mut child.node, axis, change);
         }
+        return;
+    }
+    if !children.iter().any(|child| child.node.tiled()) {
         return;
     }
     let mut remaining = change;
     while remaining != 0 {
         let mut changed = false;
-        for child in &mut *children {
+        for child in children.iter_mut().filter(|child| child.node.tiled()) {
             if remaining == 0 {
                 break;
             }
@@ -1677,6 +2032,9 @@ fn new_pane_size(
 }
 
 fn can_set_size(node: &CellNode, axis: Axis, size: u16) -> bool {
+    if matches!(node, CellNode::Float { .. }) {
+        return size >= PANE_MINIMUM;
+    }
     let CellNode::Node {
         axis: node_axis,
         children,
@@ -1729,14 +2087,18 @@ fn resize_child_cells(node: &mut CellNode) {
         return;
     };
     let axis = *axis;
-    let previous = children.iter().fold(
-        u32::try_from(children.len().saturating_sub(1)).unwrap_or(u32::MAX),
+    let count = children.iter().filter(|child| child.node.tiled()).count();
+    let previous = children.iter().filter(|child| child.node.tiled()).fold(
+        u32::try_from(count.saturating_sub(1)).unwrap_or(u32::MAX),
         |total, child| total + u32::from(child.node.extent(axis)),
     );
     let previous = u16::try_from(previous).unwrap_or(u16::MAX);
     let mut available = geometry.extent(axis);
-    let count = children.len();
-    for (index, child) in children.iter_mut().enumerate() {
+    for (index, child) in children
+        .iter_mut()
+        .filter(|child| child.node.tiled())
+        .enumerate()
+    {
         match axis {
             Axis::Horizontal => {
                 child.node.geometry_mut().sy = geometry.sy;
@@ -1804,10 +2166,9 @@ fn resize_siblings(children: &mut [CellChild], index: usize, axis: Axis, delta: 
             let Some(victim) = victim else {
                 break;
             };
-            let receiver = index + 1;
-            if receiver >= children.len() {
+            let Some(receiver) = neighbour_dir(children, index, true) else {
                 break;
-            }
+            };
             let moved = i64::from(resize_check(&children[victim].node, axis)).min(-needed);
             let moved = i32::try_from(moved).unwrap_or(i32::MAX);
             resize_adjust(&mut children[receiver].node, axis, moved);
@@ -1823,12 +2184,15 @@ fn resize_divider(node: &mut CellNode, divider: SplitId, ratio: f32) -> Option<b
     };
     if let Some(index) = children
         .iter()
-        .position(|child| child.divider == Some(divider))
+        .position(|child| child.divider == Some(divider) && child.node.tiled())
     {
-        let previous = index.checked_sub(1)?;
-        let remaining_borders = children.len().saturating_sub(index + 1);
-        let span = children[index..].iter().fold(
-            u32::try_from(remaining_borders).unwrap_or(u32::MAX),
+        let previous = neighbour_dir(children, index, false)?;
+        let rest = children[index..]
+            .iter()
+            .filter(|child| child.node.tiled())
+            .collect::<Vec<_>>();
+        let span = rest.iter().fold(
+            u32::try_from(rest.len().saturating_sub(1)).unwrap_or(u32::MAX),
             |total, child| total.saturating_add(u32::from(child.node.extent(*axis))),
         );
         let span = span.saturating_add(u32::from(children[previous].node.extent(*axis)));
@@ -1876,7 +2240,7 @@ fn collapse_single_child(root: &mut CellNode, parent_path: &[usize]) {
             geometry,
             children,
         } => (axis, geometry, children),
-        node @ CellNode::Leaf { .. } => {
+        node @ (CellNode::Leaf { .. } | CellNode::Float { .. }) => {
             children.insert(
                 index,
                 CellChild {
@@ -1910,6 +2274,318 @@ fn collapse_single_child(root: &mut CellNode, parent_path: &[usize]) {
     );
 }
 
+#[allow(clippy::fn_params_excessive_bools)]
+pub(crate) fn split_floating_cell(
+    old: CellGeometry,
+    window: (u16, u16),
+    border: bool,
+    horizontal: bool,
+    before: bool,
+    full: bool,
+) -> Option<(CellGeometry, CellGeometry)> {
+    let (top, bottom) = (1, i32::from(window.1) - 1);
+    let (left, right) = (3, i32::from(window.0) - 3);
+    let border = i32::from(border);
+    let (mut kept_x, mut kept_y) = (old.xoff, old.yoff);
+    let (mut kept_w, mut kept_h) = (i32::from(old.sx), i32::from(old.sy));
+    if left > kept_x - border {
+        kept_x = left + border;
+    }
+    if right < kept_x + kept_w + border {
+        kept_x = right - kept_w - border;
+    }
+    if top > kept_y - border {
+        kept_y = top + border;
+    }
+    if bottom < kept_y + kept_h + border {
+        kept_y = bottom - kept_h - border;
+    }
+    let (mut made_x, mut made_y, mut made_w, mut made_h) = (kept_x, kept_y, kept_w, kept_h);
+    if horizontal {
+        if before {
+            made_x -= kept_w + 2 * border;
+        } else {
+            made_x += kept_w + 2 * border;
+        }
+    } else if before {
+        made_y -= kept_h + 2 * border;
+    } else {
+        made_y += kept_h + 2 * border;
+    }
+    if left > made_x - border {
+        let space = kept_x + kept_w - left - 3 * border + 1;
+        let size = space / 2;
+        made_w = size;
+        kept_w = size;
+        made_x = left + border;
+        kept_x = made_x + made_w + 2 * border;
+        if space % 2 == 0 {
+            kept_w -= 1;
+        }
+    } else if right < made_x + made_w + border {
+        let space = right - kept_x - 3 * border + 1;
+        let size = space / 2;
+        made_w = size;
+        kept_w = size;
+        made_x = kept_x + kept_w + 2 * border;
+        if space % 2 == 0 {
+            made_w -= 1;
+        }
+    } else if top > made_y - border {
+        let space = kept_h + kept_y - top - 3 * border + 1;
+        let size = space / 2;
+        made_h = size;
+        kept_h = size;
+        made_y = top + border;
+        kept_y = made_y + made_h + 2 * border;
+        if space % 2 == 0 {
+            kept_h -= 1;
+        }
+    } else if bottom < made_y + made_h + border {
+        let space = bottom - kept_y - 3 * border + 1;
+        let size = space / 2;
+        made_h = size;
+        kept_h = size;
+        made_y = kept_y + kept_h + 2 * border;
+        if space % 2 == 0 {
+            made_h -= 1;
+        }
+    }
+    if full {
+        if horizontal {
+            made_y = top + border;
+            made_h = bottom - top - 2 * border;
+            if before {
+                made_x = left + border;
+                made_w = kept_x - made_x - 2 * border;
+            } else {
+                made_w = right - made_x - border;
+            }
+        } else {
+            made_x = left + border;
+            made_w = right - left - 2 * border;
+            if before {
+                made_y = top + border;
+                made_h = kept_y - made_y - 2 * border;
+            } else {
+                made_h = bottom - made_y - border;
+            }
+        }
+    }
+    let minimum = i32::from(PANE_MINIMUM);
+    if made_w < minimum || made_h < minimum || kept_w < minimum || kept_h < minimum {
+        return None;
+    }
+    let size = |value: i32| u16::try_from(value).unwrap_or(u16::MAX);
+    Some((
+        CellGeometry {
+            sx: size(kept_w),
+            sy: size(kept_h),
+            xoff: kept_x,
+            yoff: kept_y,
+        },
+        CellGeometry {
+            sx: size(made_w),
+            sy: size(made_h),
+            xoff: made_x,
+            yoff: made_y,
+        },
+    ))
+}
+
+fn link_floats(
+    children: &mut Vec<CellChild>,
+    order: &[PaneId],
+    floats: &BTreeMap<PaneId, CellGeometry>,
+    ids: &mut dyn FnMut() -> SplitId,
+) {
+    let mut dividers = children
+        .iter()
+        .filter_map(|child| child.divider)
+        .collect::<Vec<_>>()
+        .into_iter();
+    let mut tiled = std::mem::take(children).into_iter();
+    for pane in order {
+        let node = match floats.get(pane) {
+            Some(geometry) => CellNode::Float {
+                pane: *pane,
+                geometry: *geometry,
+            },
+            None => match tiled.next() {
+                Some(child) => child.node,
+                None => break,
+            },
+        };
+        let divider = if children.is_empty() {
+            None
+        } else {
+            Some(dividers.next().unwrap_or_else(&mut *ids))
+        };
+        children.push(CellChild { divider, node });
+    }
+}
+
+fn neighbour_dir(children: &[CellChild], index: usize, forward: bool) -> Option<usize> {
+    if forward {
+        ((index + 1)..children.len()).find(|candidate| children[*candidate].node.tiled())
+    } else {
+        (0..index)
+            .rev()
+            .find(|candidate| children[*candidate].node.tiled())
+    }
+}
+
+fn cell_neighbour(children: &[CellChild], index: usize) -> Option<usize> {
+    let forward = index + 1 != children.len();
+    neighbour_dir(children, index, forward).or_else(|| neighbour_dir(children, index, !forward))
+}
+
+fn last_tiled(children: &[CellChild], index: usize) -> bool {
+    children
+        .iter()
+        .rposition(|child| child.node.tiled())
+        .is_none_or(|last| last == index)
+}
+
+fn first_tiled_leaf(node: &CellNode) -> Option<&CellNode> {
+    match node {
+        CellNode::Leaf { .. } => Some(node),
+        CellNode::Float { .. } => None,
+        CellNode::Node { children, .. } => children
+            .iter()
+            .find_map(|child| first_tiled_leaf(&child.node)),
+    }
+}
+
+fn remove_tile(root: &mut CellNode, path: &[usize]) -> bool {
+    if matches!(
+        node_at_path(root, path),
+        Some(CellNode::Float { .. }) | None
+    ) {
+        return false;
+    }
+    let Some((&index, parent_path)) = path.split_last() else {
+        return true;
+    };
+    let neighbour = match node_at_path(root, parent_path) {
+        Some(CellNode::Node { children, .. }) => cell_neighbour(children, index),
+        _ => return false,
+    };
+    match neighbour {
+        None => {
+            remove_tile(root, parent_path);
+        }
+        Some(neighbour) => {
+            if let Some(CellNode::Node { axis, children, .. }) = node_at_path_mut(root, parent_path)
+            {
+                let change = i32::from(children[index].node.extent(*axis)) + 1;
+                resize_adjust(&mut children[neighbour].node, *axis, change);
+            }
+        }
+    }
+    if let Some(node) = node_at_path_mut(root, path) {
+        *node.geometry_mut() = CellGeometry::default();
+    }
+    true
+}
+
+fn insert_tile(root: &mut CellNode, path: &[usize], extent: (u16, u16)) -> bool {
+    if matches!(node_at_path(root, path), Some(CellNode::Leaf { .. }) | None) {
+        return false;
+    }
+    let Some((&index, parent_path)) = path.split_last() else {
+        *root.geometry_mut() = CellGeometry {
+            sx: extent.0,
+            sy: extent.1,
+            xoff: 0,
+            yoff: 0,
+        };
+        return true;
+    };
+    let (axis, neighbour) = match node_at_path(root, parent_path) {
+        Some(CellNode::Node { axis, children, .. }) => (*axis, cell_neighbour(children, index)),
+        _ => return false,
+    };
+    match neighbour {
+        None => {
+            insert_tile(root, parent_path, extent);
+            let Some(CellNode::Node {
+                geometry, children, ..
+            }) = node_at_path_mut(root, parent_path)
+            else {
+                return false;
+            };
+            let size = geometry.extent(axis);
+            resize_node_to(&mut children[index].node, axis, size);
+        }
+        Some(neighbour) => {
+            let Some(CellNode::Node { children, .. }) = node_at_path_mut(root, parent_path) else {
+                return false;
+            };
+            let span = children[neighbour].node.extent(axis);
+            if first_tiled_leaf(&children[neighbour].node).is_none() || span < PANE_MINIMUM * 2 + 1
+            {
+                return false;
+            }
+            let second = (span.div_ceil(2) - 1).clamp(PANE_MINIMUM, span - 2);
+            let first = span - 1 - second;
+            resize_node_to(&mut children[index].node, axis, first);
+            resize_node_to(&mut children[neighbour].node, axis, second);
+        }
+    }
+    let Some(CellNode::Node {
+        geometry, children, ..
+    }) = node_at_path_mut(root, parent_path)
+    else {
+        return false;
+    };
+    let cross = match axis {
+        Axis::Horizontal => Axis::Vertical,
+        Axis::Vertical => Axis::Horizontal,
+    };
+    let size = geometry.extent(cross);
+    resize_node_to(&mut children[index].node, cross, size);
+    true
+}
+
+fn clamp_floats(node: &mut CellNode, sx: u16, sy: u16, pad_of: &dyn Fn(PaneId) -> u16) {
+    match node {
+        CellNode::Leaf { .. } => {}
+        CellNode::Node { children, .. } => {
+            for child in children {
+                clamp_floats(&mut child.node, sx, sy, pad_of);
+            }
+        }
+        CellNode::Float { pane, geometry } => {
+            let pad = pad_of(*pane);
+            let fit = |size: u16, window: u16| {
+                let available = window.saturating_sub(2 * pad);
+                if size > available {
+                    available.max(PANE_MINIMUM)
+                } else {
+                    size
+                }
+            };
+            geometry.sx = fit(geometry.sx, sx);
+            geometry.sy = fit(geometry.sy, sy);
+            let place = |offset: i32, size: u16, window: u16| {
+                let (pad, size, window) = (i32::from(pad), i32::from(size), i32::from(window));
+                if offset + size + pad > window {
+                    if size + 2 * pad >= window {
+                        pad
+                    } else {
+                        window - size - pad
+                    }
+                } else {
+                    offset
+                }
+            };
+            geometry.xoff = place(geometry.xoff, geometry.sx, sx);
+            geometry.yoff = place(geometry.yoff, geometry.sy, sy);
+        }
+    }
+}
+
 enum SpreadCell {
     Changed,
     Unchanged,
@@ -1932,10 +2608,13 @@ fn spread_node(node: &mut CellNode) -> SpreadCell {
     if leaves <= 1 {
         return SpreadCell::Unchanged;
     }
-    if leaves != children.len() {
+    if children
+        .iter()
+        .any(|child| matches!(child.node, CellNode::Node { .. }) && child.node.tiled())
+    {
         return SpreadCell::Refused;
     }
-    let count = children.len();
+    let count = leaves;
     let size = usize::from(geometry.extent(*axis));
     if size < count - 1 {
         return SpreadCell::Unchanged;
@@ -1946,7 +2625,10 @@ fn spread_node(node: &mut CellNode) -> SpreadCell {
     }
     let mut remainder = size - (count - 1) - each * count;
     let mut changed = false;
-    for child in children {
+    for child in children
+        .iter_mut()
+        .filter(|child| matches!(child.node, CellNode::Leaf { .. }))
+    {
         let extra = usize::from(remainder > 0);
         remainder = remainder.saturating_sub(extra);
         let target = u16::try_from(each + extra).unwrap_or(u16::MAX);
@@ -2281,6 +2963,9 @@ fn layout_option_cells(value: &str, available: u16) -> Option<u16> {
 }
 
 fn fix_offsets(root: &mut CellNode) {
+    if matches!(root, CellNode::Float { .. }) {
+        return;
+    }
     root.geometry_mut().xoff = 0;
     root.geometry_mut().yoff = 0;
     fix_child_offsets(root);
@@ -2295,7 +2980,7 @@ fn fix_child_offsets(node: &mut CellNode) {
         Axis::Horizontal => geometry.xoff,
         Axis::Vertical => geometry.yoff,
     };
-    for child in children {
+    for child in children.iter_mut().filter(|child| child.node.tiled()) {
         match axis {
             Axis::Horizontal => {
                 child.node.geometry_mut().xoff = offset;
@@ -2307,15 +2992,15 @@ fn fix_child_offsets(node: &mut CellNode) {
             }
         }
         fix_child_offsets(&mut child.node);
-        offset = offset.saturating_add(child.node.extent(*axis).saturating_add(1));
+        offset = offset.saturating_add(i32::from(child.node.extent(*axis)) + 1);
     }
 }
 
 fn swap_panes(node: &mut CellNode, a: PaneId, b: PaneId) {
     match node {
-        CellNode::Leaf { pane, .. } if *pane == a => *pane = b,
-        CellNode::Leaf { pane, .. } if *pane == b => *pane = a,
-        CellNode::Leaf { .. } => {}
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } if *pane == a => *pane = b,
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } if *pane == b => *pane = a,
+        CellNode::Leaf { .. } | CellNode::Float { .. } => {}
         CellNode::Node { children, .. } => {
             for child in children {
                 swap_panes(&mut child.node, a, b);
@@ -2326,11 +3011,11 @@ fn swap_panes(node: &mut CellNode, a: PaneId, b: PaneId) {
 
 fn replace_pane(node: &mut CellNode, old: PaneId, new: PaneId) -> bool {
     match node {
-        CellNode::Leaf { pane, .. } if *pane == old => {
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } if *pane == old => {
             *pane = new;
             true
         }
-        CellNode::Leaf { .. } => false,
+        CellNode::Leaf { .. } | CellNode::Float { .. } => false,
         CellNode::Node { children, .. } => children
             .iter_mut()
             .any(|child| replace_pane(&mut child.node, old, new)),
@@ -2339,7 +3024,7 @@ fn replace_pane(node: &mut CellNode, old: PaneId, new: PaneId) -> bool {
 
 fn remap_panes(node: &mut CellNode, mapping: &BTreeMap<PaneId, PaneId>) {
     match node {
-        CellNode::Leaf { pane, .. } => {
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => {
             if let Some(mapped) = mapping.get(pane) {
                 *pane = *mapped;
             }
@@ -2354,7 +3039,9 @@ fn remap_panes(node: &mut CellNode, mapping: &BTreeMap<PaneId, PaneId>) {
 
 fn replace_panes_in_order(node: &mut CellNode, panes: &mut impl Iterator<Item = PaneId>) {
     match node {
-        CellNode::Leaf { pane, .. } => *pane = panes.next().expect("pane count was checked"),
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => {
+            *pane = panes.next().expect("pane count was checked");
+        }
         CellNode::Node { children, .. } => {
             for child in children {
                 replace_panes_in_order(&mut child.node, panes);
@@ -2384,18 +3071,25 @@ fn refresh_child_divider_ids(
     refresh_child_divider_ids(children, index + 1, ids);
 }
 
-fn project_node(node: &CellNode) -> LayoutNode {
+fn project_node(node: &CellNode) -> Option<LayoutNode> {
     match node {
-        CellNode::Leaf { pane, .. } => LayoutNode::Pane(*pane),
-        CellNode::Node { axis, children, .. } => project_children(children, *axis, 0),
+        CellNode::Leaf { pane, .. } => Some(LayoutNode::Pane(*pane)),
+        CellNode::Float { .. } => None,
+        CellNode::Node { axis, children, .. } => {
+            let tiled = children
+                .iter()
+                .filter(|child| child.node.tiled())
+                .collect::<Vec<_>>();
+            (!tiled.is_empty()).then(|| project_children(&tiled, *axis, 0))
+        }
     }
 }
 
-fn project_children(children: &[CellChild], axis: Axis, index: usize) -> LayoutNode {
+fn project_children(children: &[&CellChild], axis: Axis, index: usize) -> LayoutNode {
     if index + 1 == children.len() {
-        return project_node(&children[index].node);
+        return project_node(&children[index].node).expect("tiled child projects");
     }
-    let first = project_node(&children[index].node);
+    let first = project_node(&children[index].node).expect("tiled child projects");
     let second = project_children(children, axis, index + 1);
     let first_extent = u32::from(children[index].node.extent(axis));
     let remaining_borders = children.len() - index - 2;
@@ -2430,7 +3124,7 @@ fn dump_node(node: &CellNode, output: &mut String) {
         geometry.sx, geometry.sy, geometry.xoff, geometry.yoff
     );
     match node {
-        CellNode::Leaf { pane, .. } => {
+        CellNode::Leaf { pane, .. } | CellNode::Float { pane, .. } => {
             let _ = write!(output, ",{}", pane.0);
         }
         CellNode::Node { axis, children, .. } => {
@@ -2454,7 +3148,7 @@ fn dump_node(node: &CellNode, output: &mut String) {
 
 fn validate_node(node: &CellNode, dividers: &mut BTreeSet<SplitId>) -> Result<(), String> {
     let (axis, geometry, children) = match node {
-        CellNode::Leaf { geometry, .. } => {
+        CellNode::Leaf { geometry, .. } | CellNode::Float { geometry, .. } => {
             if geometry.sx < PANE_MINIMUM || geometry.sy < PANE_MINIMUM {
                 return Err("leaf extent is below the pane minimum".to_owned());
             }
@@ -2487,6 +3181,10 @@ fn validate_node(node: &CellNode, dividers: &mut BTreeSet<SplitId>) -> Result<()
                 return Err(format!("duplicate divider {}", divider.0));
             }
         }
+        if !child.node.tiled() {
+            validate_node(&child.node, dividers)?;
+            continue;
+        }
         let child_geometry = child.node.geometry();
         match axis {
             Axis::Horizontal => {
@@ -2509,9 +3207,9 @@ fn validate_node(node: &CellNode, dividers: &mut BTreeSet<SplitId>) -> Result<()
         validate_node(&child.node, dividers)?;
         let child_extent = child.node.extent(*axis);
         extent += u32::from(child_extent) + 1;
-        expected_offset = expected_offset.saturating_add(child_extent.saturating_add(1));
+        expected_offset = expected_offset.saturating_add(i32::from(child_extent) + 1);
     }
-    if extent - 1 != u32::from(geometry.extent(*axis)) {
+    if extent != 0 && extent - 1 != u32::from(geometry.extent(*axis)) {
         return Err("child extents do not fill parent".to_owned());
     }
     Ok(())
@@ -2913,6 +3611,7 @@ mod tests {
                     node: leaf(PaneId(0), 80, 24),
                 }],
             },
+            extent: (80, 24),
         };
         assert_eq!(malformed.remove(PaneId(0)), Ok(()));
         assert_eq!(
@@ -3568,6 +4267,7 @@ mod tests {
                     },
                 ],
             },
+            extent: (80, 24),
         };
         assert_eq!(
             layout.validate(),
@@ -3575,6 +4275,7 @@ mod tests {
         );
         let zero_leaf = CellLayout {
             root: leaf(PaneId(0), 0, 1),
+            extent: (1, 1),
         };
         assert_eq!(
             zero_leaf.validate(),

@@ -39,6 +39,33 @@
       ]
     },
     {
+      "id": "fix.tui-regressions",
+      "track": "fix",
+      "title": "Regressions the 3.8 fixture rebaseline found on main",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-tui/src",
+        "crates/zz-daemon/src",
+        "crates/zz-mux/src",
+        "compat/tui-*.sh"
+      ],
+      "gaps": [],
+      "accept": [
+        "TUI-014: with a client attached, split-window -d -h keeps an 80-column window at 80 (and -d -v keeps its rows), as the pin; the 4 TUI-014 records in tui-client-commands flip to asserted and verify-claims --run TUI-014 passes.",
+        "TUI-009: the raw TUI enables extended keys again from the terminal's reply and from -T extkeys, so C-Enter arrives; the 4 TUI-009 records in tui-caps flip and verify-claims --run TUI-009 passes. Suspect 437964164 (Hand the raw TUI's tty input to the daemon); fix.tui-colour also touched extended-keys arming, coordinate with it.",
+        "TUI-018: killing a streamed pane prints nothing on stderr (today 'zz: daemon I/O error: Broken pipe (os error 32)'); tui-command-streams passes.",
+        "TUI-005: Escape in a fresh-entry search prompt keeps '(search up)' open as the pin does, or the environment cause is found and the fixture fixed; tui-copy-mode passes.",
+        "TUI-012: the import-tmux-config message case matches the fixture (decide which side is right) and tui-superset passes.",
+        "tui-launch-diff's command-chain case writes a valid separator so the fixture can pass, and the fixture is mapped in verify-claims."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by pin.tui-fixtures; all six reproduce against both pins, so they are main regressions, not 3.8 drift. High priority: two break verified TUI obligations."
+      ]
+    },
+    {
       "id": "fix.streams",
       "track": "fix",
       "title": "Close the last two caller-stream refusals",
@@ -258,7 +285,7 @@
       "id": "pin.tui-fixtures",
       "track": "pin",
       "title": "Re-baseline the TUI fixtures at the 3.8 pin",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -278,7 +305,8 @@
       "branch": "catchup/pin.tui-fixtures",
       "sha": null,
       "notes": [
-        "2026-10-09: pin.move ran check.sh only; the TUI fixtures went red at 3.8. Gates every later lane that runs a TUI fixture."
+        "2026-10-09: pin.move ran check.sh only; the TUI fixtures went red at 3.8. Gates every later lane that runs a TUI fixture.",
+        "2026-10-09: lane done at 93b4b3d87: 10/14 fixtures green at 3.8, every 3.8 diff fixed or recorded under a pin.* gap; 4 fixtures fail identically on both pins (real regressions, see fix.tui-regressions); added semantic:customize-mode-3-8 and semantic:terminal-features-3-8 to the pin.formats-options gap (accepted by orchestrator)"
       ]
     },
     {
@@ -481,7 +509,8 @@
         "copy-mode-current-line-style styles the cursor line in the raw TUI's copy mode as 3.8 does.",
         "The A modifier animates in status and pane-border formats at 3.8's cadence without breaking the status render cache.",
         "hook_fire_count and hook_fire_time resolve; the 3.8 mode context formats (copy_line_numbers, refresh_active, clipboard_invalid and the customize-mode rows) resolve.",
-        "The pin.formats-options gap closes except pane_modal_flag and window_modal_pane, which move to pane.floating-model."
+        "The pin.formats-options gap closes except pane_modal_flag and window_modal_pane, which move to pane.floating-model.",
+        "semantic:customize-mode-3-8 (3.8's rebuilt customize tree, 132 recorded tui-client-commands cases) and semantic:terminal-features-3-8 (the DECRQM ?2026 Sync query and the show-messages Sync line) close, flipping their recorded TUI fixture cases to asserted."
       ],
       "branch": null,
       "sha": null,

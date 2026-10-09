@@ -138,7 +138,7 @@
       "id": "fix.capture-e-links",
       "track": "fix",
       "title": "capture-pane -e keeps OSC 8 hyperlinks",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "fix.capture-links"
       ],
@@ -152,10 +152,11 @@
         "A scenario or daemon test pins it against recorded pin output."
       ],
       "branch": "catchup/fix.capture-e-links",
-      "sha": null,
+      "sha": "b0217c057",
       "notes": [
         "2026-10-09: found by fix.capture-links; zz can read per-cell URIs now.",
-        "2026-10-09: Lane done at a6748bd12: -e wraps links in OSC 8 like 3.8 (escaped_capture_wraps_links_in_osc_8_like_the_pin; smoke/capture-e-links 12 steps clean; zz-terminal 452). id= links and back-to-back same-URI links stay engine limits (no link id from libghostty, no-engine-patch ruling). Follow-ups: capture-pane -M -e emits no OSC 8; capture.terminal-engine-limits reason should mention the -e effects. Review 1 running."
+        "2026-10-09: Lane done at a6748bd12: -e wraps links in OSC 8 like 3.8 (escaped_capture_wraps_links_in_osc_8_like_the_pin; smoke/capture-e-links 12 steps clean; zz-terminal 452). id= links and back-to-back same-URI links stay engine limits (no link id from libghostty, no-engine-patch ruling). Follow-ups: capture-pane -M -e emits no OSC 8; capture.terminal-engine-limits reason should mention the -e effects. Review 1 running.",
+        "2026-10-09: Codex review 1 LGTM; merge checks green (clippy zz-terminal/zz-daemon, zz-terminal 455, daemon capture tests 38)."
       ]
     },
     {
@@ -368,7 +369,7 @@
       "id": "pin.control-3-8",
       "track": "pin",
       "title": "Control-mode drift in 3.8",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.contract-breaks"
       ],
@@ -384,7 +385,7 @@
         "A read-only control client's commands are handled as 3.8 handles them (3.8 still runs them; zz refuses with 'client is read-only'): measure which commands 3.8 allows and match, or record with a reason if zz's refusal is the safer native choice and fabrico agrees.",
         "Any further 3.8 control-mode change found while doing the above (bounded replies, output discard flags) is either matched or registered."
       ],
-      "branch": null,
+      "branch": "catchup/pin.control-3-8",
       "sha": null,
       "notes": [
         "2026-10-09: found by pin.contract-breaks."

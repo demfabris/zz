@@ -1383,7 +1383,7 @@ fn handle_protocol<W: Write>(
                 if sticky_failure || (error && is_source_error_message(&text)) {
                     state.return_code = 1;
                 }
-                output.control_command_guard(&text, error, flags)?;
+                output.control_command_guard_bytes(text.as_bytes(), error, flags)?;
             }
             EventPayload::ControlCommandGuardRaw {
                 output: text,
@@ -3516,7 +3516,7 @@ mod tests {
             ProtocolMessage::Event(zz_protocol::Event {
                 sequence: 1,
                 payload: EventPayload::ControlCommandGuard {
-                    output: "ready\n".to_owned(),
+                    output: "ready\n".into(),
                     error: false,
                     sticky_failure: false,
                     flags: 1,
@@ -3673,7 +3673,7 @@ mod tests {
         let guard = ProtocolMessage::Event(zz_protocol::Event {
             sequence: 1,
             payload: EventPayload::ControlCommandGuard {
-                output: "partial".to_owned(),
+                output: "partial".into(),
                 error: false,
                 sticky_failure: false,
                 flags: 1,
@@ -4100,7 +4100,7 @@ mod tests {
                 ProtocolMessage::Event(zz_protocol::Event {
                     sequence: 1,
                     payload: EventPayload::ControlCommandGuard {
-                        output: output.to_owned(),
+                        output: output.into(),
                         error,
                         sticky_failure,
                         flags,
@@ -4131,7 +4131,7 @@ mod tests {
                 ProtocolMessage::Event(zz_protocol::Event {
                     sequence,
                     payload: EventPayload::ControlCommandGuard {
-                        output: "diagnostic".to_owned(),
+                        output: "diagnostic".into(),
                         error: false,
                         sticky_failure,
                         flags: 0,
@@ -4154,7 +4154,7 @@ mod tests {
             (
                 1,
                 EventPayload::ControlCommandGuard {
-                    output: String::new(),
+                    output: "".into(),
                     error: false,
                     sticky_failure: false,
                     flags: 1,
@@ -4177,7 +4177,7 @@ mod tests {
             (
                 4,
                 EventPayload::ControlCommandGuard {
-                    output: "AFTER".to_owned(),
+                    output: "AFTER".into(),
                     error: false,
                     sticky_failure: false,
                     flags: 1,

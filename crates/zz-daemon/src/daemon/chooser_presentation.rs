@@ -467,8 +467,10 @@ impl StatusHooks for ScopedHooks<'_> {
         String::new()
     }
 
-    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
-        self.engine.format_option_value(context, name)
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<RawText> {
+        self.engine
+            .format_option_value(context, name)
+            .map(RawText::from)
     }
 
     fn variable(&mut self, name: &str, _context: &zz_mux::StatusContext) -> Option<String> {

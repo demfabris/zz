@@ -111,7 +111,7 @@ impl LoopHooks {
         if self.enqueue(
             shared,
             context,
-            &InsertedCommandSource::Block(String::new()),
+            &InsertedCommandSource::Block(RawText::default()),
         ) {
             let queue = self.queues.back_mut().expect("enqueued peer command");
             queue.frames[0].commands = vec![command].into_iter();

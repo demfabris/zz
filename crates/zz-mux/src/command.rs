@@ -713,7 +713,7 @@ impl<H: StatusHooks> StatusHooks for RowFormatHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -794,7 +794,7 @@ impl<H: StatusHooks> StatusHooks for ShownOptionHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -1707,7 +1707,7 @@ impl StatusHooks for ConfigConditionHooks<'_> {
                 .get(name)
                 .or_else(|| self.engine.global_window_user_options.get(name))
                 .or_else(|| self.engine.global_session_user_options.get(name))
-                .cloned()
+                .map(ToString::to_string)
         } else {
             self.engine.global_tmux_option_value(name)
         };
@@ -1735,7 +1735,7 @@ impl<H: StatusHooks> StatusHooks for CommandItemHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -1821,7 +1821,7 @@ impl<H: StatusHooks> StatusHooks for ListCommandHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.inner.option_variable(name, context)
     }
 
@@ -1893,7 +1893,7 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
         self.inner.only_tmux_options()
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         let option_context = if context.session_id.is_empty()
             && context.window_id.is_empty()
             && context.pane_id.is_empty()
@@ -1908,18 +1908,18 @@ impl<H: StatusHooks> StatusHooks for ListKeyHooks<'_, H> {
             &option_context.pane_id,
             name,
         ) {
-            return Some(value);
+            return Some(value.into());
         }
         if name.starts_with('@') {
             return self
                 .user_options
-                .user_option(
+                .user_option_bytes(
                     &option_context.pane_id,
                     &option_context.window_id,
                     &option_context.session_id,
                     name,
                 )
-                .map(str::to_owned);
+                .cloned();
         }
         if self.inner.only_tmux_options()
             && *LIST_KEY_FORMAT_NAMES_ARE_NOT_OPTIONS
@@ -2186,7 +2186,7 @@ enum ShowOptionArgument {
     AlreadyExpanded,
 }
 
-type UserOptions = BTreeMap<String, String>;
+type UserOptions = BTreeMap<String, RawText>;
 
 type SharedUserOptions = Arc<UserOptions>;
 
@@ -2220,6 +2220,17 @@ impl FormatFacts {
     /// session, global window, global session, server.
     #[must_use]
     pub fn user_option(&self, pane: &str, window: &str, session: &str, name: &str) -> Option<&str> {
+        self.user_option_bytes(pane, window, session, name)
+            .map(RawText::as_str)
+    }
+
+    pub fn user_option_bytes(
+        &self,
+        pane: &str,
+        window: &str,
+        session: &str,
+        name: &str,
+    ) -> Option<&RawText> {
         let window = self.pane_windows.get(pane).map_or(window, String::as_str);
         self.panes
             .get(pane)
@@ -2233,7 +2244,6 @@ impl FormatFacts {
             .or_else(|| self.global_window.get(name))
             .or_else(|| self.global_session.get(name))
             .or_else(|| self.server.get(name))
-            .map(String::as_str)
     }
 }
 
@@ -4265,10 +4275,24 @@ impl MuxEngine {
     #[must_use]
     pub fn parse_config(&self, source: impl Into<String>, input: &str) -> crate::ParsedConfig {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_with(source, input, &mut context)
+    }
+
+    #[must_use]
+    pub fn parse_config_raw(
+        &self,
+        source: impl Into<String>,
+        input: &RawText,
+    ) -> crate::ParsedConfig {
+        match input.to_utf8() {
+            Some(text) => self.parse_config(source, text),
+            None => self
+                .parse_config_file_bytes(source, input.as_bytes())
+                .into_invocations(),
+        }
     }
 
     #[must_use]
@@ -4278,7 +4302,7 @@ impl MuxEngine {
         input: &str,
     ) -> crate::ParsedConfig {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_without_assignment_overlay(source, input, &mut context)
@@ -4291,7 +4315,7 @@ impl MuxEngine {
         input: &[u8],
     ) -> crate::ParsedConfigBytes {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_file_bytes_with_assignment_overlay(
@@ -4309,7 +4333,7 @@ impl MuxEngine {
         input: &[u8],
     ) -> crate::ParsedConfigBytes {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_file_bytes_with_assignment_overlay(
@@ -4327,7 +4351,7 @@ impl MuxEngine {
         input: &[u8],
     ) -> crate::ParsedConfigBytes {
         let mut context = (
-            |name: &str| self.global_environment_variable(name),
+            |name: &str| self.global_environment_bytes(name),
             |condition: &str| self.evaluate_config_condition(condition),
         );
         crate::parser::parse_config_buffer_bytes_with_assignment_overlay(
@@ -4344,7 +4368,14 @@ impl MuxEngine {
         source_groups: bool,
         owner: &str,
     ) -> Result<Vec<CommandInvocation>, ServerError> {
-        prepare_callback_commands_with_aliases(self, input, source_groups, owner, true, true)
+        prepare_callback_commands_with_aliases(
+            self,
+            &RawText::from(input),
+            source_groups,
+            owner,
+            true,
+            true,
+        )
     }
 
     pub fn prepare_frozen_callback_commands(
@@ -4353,7 +4384,14 @@ impl MuxEngine {
         source_groups: bool,
         owner: &str,
     ) -> Result<Vec<CommandInvocation>, ServerError> {
-        prepare_callback_commands_with_aliases(self, input, source_groups, owner, false, false)
+        prepare_callback_commands_with_aliases(
+            self,
+            &RawText::from(input),
+            source_groups,
+            owner,
+            false,
+            false,
+        )
     }
 
     pub fn prepare_frozen_callback_invocations(
@@ -4723,9 +4761,14 @@ impl MuxEngine {
 
     #[must_use]
     pub fn global_environment_variable(&self, name: &str) -> Option<String> {
+        self.global_environment_bytes(name).map(String::from)
+    }
+
+    #[must_use]
+    pub fn global_environment_bytes(&self, name: &str) -> Option<RawText> {
         self.global_environment
             .get(name)
-            .and_then(|entry| entry.value.as_ref().map(ToString::to_string))
+            .and_then(|entry| entry.value.clone())
     }
 
     pub fn set_config_environment(
@@ -10790,7 +10833,8 @@ impl MuxEngine {
                     "not an array: {argument}"
                 )));
             }
-            return self.set_user_option(context, parsed.name, value, &options, false);
+            let value = value.map(RawText::from);
+            return self.set_user_option(context, parsed.name, value.as_ref(), &options, false);
         }
         let table_option = match match_tmux_option(parsed.name) {
             Ok(Some(option)) => option,
@@ -10942,12 +10986,14 @@ impl MuxEngine {
             let already = self.user_option_at_target(target, &name).is_some();
             if !options.has("-o") || !already {
                 let value = if options.has("-a") {
-                    let old = self
+                    let mut value = self
                         .user_option_at_target(target, &name)
+                        .cloned()
                         .unwrap_or_default();
-                    format!("{old}{body}")
+                    value.push_bytes(body.as_bytes());
+                    value
                 } else {
-                    body.to_owned()
+                    RawText::from(body)
                 };
                 self.user_options_at_target_mut(target)
                     .insert(name.clone(), value);
@@ -10955,7 +11001,7 @@ impl MuxEngine {
             }
         } else if self.user_option_at_target(target, &name).is_none() {
             self.user_options_at_target_mut(target)
-                .insert(name.clone(), String::new());
+                .insert(name.clone(), RawText::default());
         }
         self.format_monitors
             .retain(|monitor| monitor.target != target || monitor.name != name);
@@ -11129,7 +11175,7 @@ impl MuxEngine {
         if value.is_empty() {
             return None;
         }
-        Some(value.to_owned())
+        Some(value.to_string())
     }
 
     /// `notify_parse_hook` with `expand` set, which `notify_monitor_add` always
@@ -12031,21 +12077,20 @@ impl MuxEngine {
             .get(1)
             .map(|value| {
                 let value = if invocation.argument_is_command_block(positional_start + 1) {
-                    normalize_typed_command_block(
+                    RawText::from(normalize_typed_command_block(
                         self,
                         crate::parser::command_block_body(value).unwrap_or(value),
-                    )?
+                    )?)
                 } else {
-                    value.to_string()
+                    value.clone()
                 };
                 Ok(if options.has("-F") {
-                    expand_format_with_hooks(&value, self, format_context, hooks).to_string()
+                    expand_format_with_hooks(&value, self, format_context, hooks)
                 } else {
                     value
                 })
             })
             .transpose()?;
-        let value = value.as_deref();
         if parsed.index.is_some() && (parsed.name.starts_with('@') || is_native_option(parsed.name))
         {
             return Err(ServerError::InvalidCommand(format!(
@@ -12053,8 +12098,15 @@ impl MuxEngine {
             )));
         }
         if parsed.name.starts_with('@') {
-            return self.set_user_option(context, parsed.name, value, &options, force_window);
+            return self.set_user_option(
+                context,
+                parsed.name,
+                value.as_ref(),
+                &options,
+                force_window,
+            );
         }
+        let value = value.as_deref();
         if is_native_option(parsed.name) {
             return self.set_native_option(parsed.name, value, &options, force_window);
         }
@@ -12198,7 +12250,7 @@ impl MuxEngine {
         &mut self,
         context: &ExecutionContext,
         option: &str,
-        value: Option<&str>,
+        value: Option<&RawText>,
         options: &Options,
         force_window: bool,
     ) -> Result<Execution, ServerError> {
@@ -12241,9 +12293,9 @@ impl MuxEngine {
         if options.has("-a")
             && let Some(current) = values.get_mut(option)
         {
-            current.push_str(value);
+            current.push_bytes(value.as_bytes());
         } else {
-            values.insert(option.to_owned(), value.to_owned());
+            values.insert(option.to_owned(), value.clone());
         }
         Ok(self.user_option_changed(context, target, option))
     }
@@ -12728,10 +12780,8 @@ impl MuxEngine {
         ))
     }
 
-    fn user_option_at_target(&self, target: TmuxOptionTarget, name: &str) -> Option<&str> {
-        self.user_options_at_target(target)?
-            .get(name)
-            .map(String::as_str)
+    fn user_option_at_target(&self, target: TmuxOptionTarget, name: &str) -> Option<&RawText> {
+        self.user_options_at_target(target)?.get(name)
     }
 
     fn user_options_at_target(&self, target: TmuxOptionTarget) -> Option<&UserOptions> {
@@ -12765,7 +12815,7 @@ impl MuxEngine {
         target: TmuxOptionTarget,
         name: &str,
         include_inherited: bool,
-    ) -> Option<(&'a str, bool)> {
+    ) -> Option<(&'a RawText, bool)> {
         if let Some(value) = self.user_option_at_target(target, name) {
             return Some((value, false));
         }
@@ -12794,7 +12844,7 @@ impl MuxEngine {
             .map(|values| {
                 values
                     .iter()
-                    .map(|(name, value)| (name.clone(), value.clone()))
+                    .map(|(name, value)| (name.clone(), value.to_string()))
                     .collect()
             })
             .unwrap_or_default()
@@ -12820,7 +12870,7 @@ impl MuxEngine {
             for (name, value) in values {
                 rows.push(FormatOptionRow {
                     name: name.clone(),
-                    value: value.clone(),
+                    value: value.to_string(),
                     is_user: true,
                     ..FormatOptionRow::default()
                 });
@@ -15815,7 +15865,7 @@ fn tmux_option_value_is_string(option: TmuxOption) -> bool {
 
 #[derive(Default)]
 struct ShownOptions {
-    lines: Vec<String>,
+    lines: Vec<RawText>,
     values: Option<BTreeMap<String, String>>,
     rows: Vec<ShownOptionRow>,
 }
@@ -15891,15 +15941,16 @@ impl ShownOptions {
 fn push_shown_option(
     lines: &mut ShownOptions,
     name: &str,
-    value: &str,
+    value: impl Into<RawText>,
     is_string: bool,
     inherited: bool,
     value_only: bool,
 ) {
-    lines.record(name, value);
-    lines.row(name, value, is_string, inherited, true);
+    let value = value.into();
+    lines.record(name, &value);
+    lines.row(name, &value, is_string, inherited, true);
     if value_only {
-        lines.lines.push(value.to_owned());
+        lines.lines.push(value);
         return;
     }
     let name = if inherited {
@@ -15908,11 +15959,11 @@ fn push_shown_option(
         name.to_owned()
     };
     let value = if is_string {
-        tmux_args_escape(value)
+        tmux_args_escape_bytes(value.as_bytes())
     } else {
-        value.to_owned()
+        value.to_string()
     };
-    lines.lines.push(format!("{name} {value}"));
+    lines.lines.push(format!("{name} {value}").into());
 }
 
 fn push_shown_array(
@@ -15940,11 +15991,14 @@ fn push_shown_array(
         lines.record(name, "");
         lines.row(name, "", is_string, inherited, false);
         if !value_only {
-            lines.lines.push(if inherited {
-                format!("{name}*")
-            } else {
-                name.to_owned()
-            });
+            lines.lines.push(
+                if inherited {
+                    format!("{name}*")
+                } else {
+                    name.to_owned()
+                }
+                .into(),
+            );
         }
         return;
     }
@@ -15964,13 +16018,15 @@ fn printed_lines(lines: &[String]) -> String {
     output
 }
 
-fn shown_options_output(lines: &ShownOptions) -> String {
+fn shown_options_output(lines: &ShownOptions) -> RawText {
     if let Some(values) = &lines.values {
-        return serde_json::to_string(values).expect("option values serialize");
+        return serde_json::to_string(values)
+            .expect("option values serialize")
+            .into();
     }
-    let mut output = lines.lines.join("\n");
-    if lines.lines.last().is_some_and(String::is_empty) {
-        output.push('\n');
+    let mut output = RawText::join(&lines.lines, b"\n");
+    if lines.lines.last().is_some_and(|line| line.is_empty()) {
+        output.push_bytes(b"\n");
     }
     output
 }
@@ -15980,18 +16036,27 @@ fn indexed_option_name(name: &str, index: Option<&str>) -> String {
 }
 
 fn tmux_args_escape(value: &str) -> String {
-    if value.is_empty() {
+    tmux_args_escape_bytes(value.as_bytes())
+}
+
+fn tmux_args_escape_bytes(bytes: &[u8]) -> String {
+    if bytes.is_empty() {
         return "''".to_owned();
     }
-    let double_quoted = value.bytes().any(|byte| b" #';${}%".contains(&byte));
-    let single_quoted = !double_quoted && value.bytes().any(|byte| b" \"".contains(&byte));
-    let bytes = value.as_bytes();
+    let double_quoted = bytes.iter().any(|byte| b" #';${}%".contains(byte));
+    let single_quoted = !double_quoted && bytes.iter().any(|byte| b" \"".contains(byte));
     if bytes.len() == 1 && bytes[0] != b' ' && (double_quoted || single_quoted || bytes[0] == b'~')
     {
         return format!("\\{}", char::from(bytes[0]));
     }
 
-    let escaped = tmux_vis(value, double_quoted);
+    let mut escaped = String::with_capacity(bytes.len());
+    for chunk in bytes.utf8_chunks() {
+        escaped.push_str(&tmux_vis(chunk.valid(), double_quoted));
+        for byte in chunk.invalid() {
+            write!(escaped, "\\{byte:03o}").expect("writing to a string cannot fail");
+        }
+    }
     if single_quoted {
         format!("'{escaped}'")
     } else if double_quoted {
@@ -17936,6 +18001,18 @@ impl MuxEngine {
         session: &str,
         name: &str,
     ) -> Option<&str> {
+        self.format_user_option_bytes(pane, window, session, name)
+            .map(RawText::as_str)
+    }
+
+    #[must_use]
+    pub fn format_user_option_bytes(
+        &self,
+        pane: &str,
+        window: &str,
+        session: &str,
+        name: &str,
+    ) -> Option<&RawText> {
         let pane = pane.parse().ok();
         let window = pane
             .and_then(|pane| self.state.window_for_pane(pane))
@@ -17956,7 +18033,6 @@ impl MuxEngine {
             .or_else(|| self.global_window_user_options.get(name))
             .or_else(|| self.global_session_user_options.get(name))
             .or_else(|| self.server_user_options.get(name))
-            .map(String::as_str)
     }
 
     #[must_use]
@@ -18846,7 +18922,7 @@ fn bound_commands(
         if let [argument] = tail {
             return prepare_callback_commands_with_aliases(
                 engine,
-                crate::parser::command_block_body(argument).unwrap_or(argument),
+                &raw_command_block_body(argument),
                 true,
                 "bind-key",
                 false,
@@ -18867,13 +18943,21 @@ fn bound_commands(
     Ok(commands)
 }
 
+fn raw_command_block_body(argument: &RawText) -> RawText {
+    argument
+        .as_bytes()
+        .strip_prefix(b"{")
+        .and_then(|rest| rest.strip_suffix(b"}"))
+        .map_or_else(|| argument.clone(), RawText::from_bytes)
+}
+
 fn parse_bound_command_string(
     engine: &MuxEngine,
-    input: &str,
+    input: &RawText,
     source_groups: bool,
     owner: &str,
 ) -> Result<Vec<CommandInvocation>, ServerError> {
-    let parsed = engine.parse_config(format!("<{owner}>"), input);
+    let parsed = engine.parse_config_raw(format!("<{owner}>"), input);
     if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
         return Err(ServerError::CommandParse(diagnostic.message));
     }
@@ -18884,7 +18968,7 @@ fn parse_bound_command_string(
 
 fn prepare_callback_commands_with_aliases(
     engine: &MuxEngine,
-    input: &str,
+    input: &RawText,
     source_groups: bool,
     owner: &str,
     command_aliases_available: bool,
@@ -18970,8 +19054,14 @@ fn prepare_expanded_callback_invocation(
     aliases_available: bool,
 ) -> Result<(), ServerError> {
     if let Some(body) = command_alias_group_body(command) {
-        let commands =
-            prepare_callback_commands_with_aliases(engine, body, true, owner, false, false)?;
+        let commands = prepare_callback_commands_with_aliases(
+            engine,
+            &RawText::from(body),
+            true,
+            owner,
+            false,
+            false,
+        )?;
         command.args[0] =
             format!("{{ {} }}", format_callback_commands_round_trip(&commands)).into();
         return validate_static_command_chain(&commands);
@@ -18997,8 +19087,7 @@ fn prepare_expanded_callback_invocation(
         if !command.argument_is_command_block(index) {
             continue;
         }
-        let value = &command.args[index];
-        let body = crate::parser::command_block_body(value).unwrap_or(value);
+        let body = raw_command_block_body(&command.args[index]);
         let item_owner = if menu_items.contains(&index) {
             "<menu-item>"
         } else {
@@ -19006,7 +19095,7 @@ fn prepare_expanded_callback_invocation(
         };
         let commands = prepare_callback_commands_with_aliases(
             engine,
-            body,
+            &body,
             true,
             item_owner,
             aliases_available,
@@ -19421,7 +19510,7 @@ fn command_round_trip_print(command: &CommandInvocation) -> String {
                     if command.argument_is_command_block(index) {
                         argument.to_string()
                     } else {
-                        tmux_args_escape(argument)
+                        tmux_args_escape_bytes(argument.as_bytes())
                     }
                 })
                 .collect::<Vec<_>>()
@@ -19724,11 +19813,14 @@ fn push_shown_hook_option(
         lines.record(name, "");
         lines.row(name, "", false, inherited && mark_inherited_empty, false);
         if !value_only {
-            lines.lines.push(if inherited && mark_inherited_empty {
-                format!("{name}*")
-            } else {
-                name.to_owned()
-            });
+            lines.lines.push(
+                if inherited && mark_inherited_empty {
+                    format!("{name}*")
+                } else {
+                    name.to_owned()
+                }
+                .into(),
+            );
         }
         return;
     }
@@ -38795,6 +38887,74 @@ mod tests {
                 .output,
             "history-trickle 2000"
         );
+    }
+
+    #[test]
+    fn user_options_keep_bytes_that_are_not_utf8() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "work"]))
+            .unwrap();
+        let mut run = |name: &str, args: Vec<RawText>| {
+            engine
+                .execute(&mut context, &CommandInvocation::new(name, args))
+                .unwrap()
+                .output
+                .as_bytes()
+                .to_vec()
+        };
+        run(
+            "set-option",
+            vec![
+                "-g".into(),
+                "@bytes".into(),
+                RawText::from_bytes(b"a\xfeb".to_vec()),
+            ],
+        );
+        run(
+            "set-option",
+            vec![
+                "-ga".into(),
+                "@bytes".into(),
+                RawText::from_bytes(b"\xfd".to_vec()),
+            ],
+        );
+        assert_eq!(
+            run("show-options", vec!["-g".into(), "@bytes".into()]),
+            b"@bytes a\\376b\\375"
+        );
+        assert_eq!(
+            run("show-options", vec!["-gv".into(), "@bytes".into()]),
+            b"a\xfeb\xfd"
+        );
+        assert_eq!(
+            run("show-options", vec!["-g".into()])
+                .split(|byte| *byte == b'\n')
+                .find(|line| line.starts_with(b"@bytes "))
+                .expect("listed"),
+            b"@bytes a\\376b\\375"
+        );
+    }
+
+    #[test]
+    fn text_config_reparses_as_bytes_for_byte_variables_and_octal_escapes() {
+        let mut engine = MuxEngine::default();
+        engine.set_config_environment(
+            "BYTES".to_owned(),
+            RawText::from_bytes(b"a\xfdb".to_vec()),
+            false,
+        );
+        let parsed = engine.parse_config(
+            "<test>",
+            "set-buffer -b one \"$BYTES\"\nset-buffer -b two \"\\303\\251\\376\"\n",
+        );
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert_eq!(parsed.commands.len(), 2);
+        assert_eq!(parsed.commands[0].args[2].as_bytes(), b"a\xfdb");
+        assert_eq!(parsed.commands[1].args[2].as_bytes(), b"\xc3\xa9\xfe");
+        let plain = engine.parse_config("<test>", "set-buffer -b three \"\\101\"\n");
+        assert_eq!(plain.commands[0].args[2], "A");
     }
 
     #[test]

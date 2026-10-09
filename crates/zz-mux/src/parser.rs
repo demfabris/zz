@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use zz_protocol::{CommandInvocation, SourceSpan};
+use zz_protocol::{CommandInvocation, RawText, SourceSpan};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigDiagnostic {
@@ -65,6 +65,37 @@ impl ParsedConfig {
 }
 
 impl ParsedConfigBytes {
+    #[must_use]
+    pub fn into_invocations(self) -> ParsedConfig {
+        ParsedConfig {
+            commands: self
+                .commands
+                .into_iter()
+                .map(|command| {
+                    let invocation = CommandInvocation::new(
+                        String::from_utf8_lossy(&command.name).into_owned(),
+                        command.args.into_iter().map(RawText::from_bytes),
+                    )
+                    .with_command_blocks(command.command_blocks);
+                    match command.source {
+                        Some(source) => invocation.with_source(source),
+                        None => invocation,
+                    }
+                })
+                .collect(),
+            environment: self
+                .environment
+                .into_iter()
+                .map(|assignment| ConfigEnvironmentAssignment {
+                    name: String::from_utf8_lossy(&assignment.name).into_owned(),
+                    value: String::from_utf8_lossy(&assignment.value).into_owned(),
+                    hidden: assignment.hidden,
+                })
+                .collect(),
+            diagnostics: self.diagnostics,
+        }
+    }
+
     fn from_encoded(parsed: ParsedConfig) -> Self {
         Self {
             commands: parsed
@@ -294,6 +325,10 @@ pub(crate) trait ConfigContext {
     fn variable(&mut self, name: &str) -> Option<String>;
     fn condition(&mut self, condition: &str) -> bool;
 
+    fn variable_bytes(&mut self, name: &str) -> Option<RawText> {
+        self.variable(name).map(RawText::from)
+    }
+
     fn user_home(&mut self, name: Option<&str>) -> Option<String> {
         user_home(name)
     }
@@ -303,13 +338,18 @@ pub(crate) trait ConfigContext {
     }
 }
 
-impl<V, C> ConfigContext for (V, C)
+impl<V, C, R> ConfigContext for (V, C)
 where
-    V: FnMut(&str) -> Option<String>,
+    V: FnMut(&str) -> Option<R>,
     C: FnMut(&str) -> bool,
+    R: Into<RawText>,
 {
     fn variable(&mut self, name: &str) -> Option<String> {
-        self.0(name)
+        self.variable_bytes(name).map(String::from)
+    }
+
+    fn variable_bytes(&mut self, name: &str) -> Option<RawText> {
+        self.0(name).map(Into::into)
     }
 
     fn condition(&mut self, condition: &str) -> bool {
@@ -334,6 +374,7 @@ struct ConfigBuilder<'a, C> {
     conditionals: Vec<ConditionalScope>,
     context: &'a mut C,
     aborted: bool,
+    needs_bytes: bool,
 }
 
 struct ConfigExpansion {
@@ -371,11 +412,24 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
     }
 
     fn variable(&mut self, name: &str) -> Option<ConfigExpansion> {
-        self.overlay
-            .get(name)
-            .cloned()
-            .map(ConfigExpansion::encoded)
-            .or_else(|| self.context.variable(name).map(ConfigExpansion::text))
+        if let Some(value) = self.overlay.get(name) {
+            return Some(ConfigExpansion::encoded(value.clone()));
+        }
+        let value = self.context.variable_bytes(name)?;
+        if value.is_utf8() {
+            return Some(ConfigExpansion::text(value.into()));
+        }
+        if self.input_kind == ConfigInputKind::Bytes {
+            return Some(ConfigExpansion::encoded(
+                value
+                    .as_bytes()
+                    .iter()
+                    .map(|byte| encode_stored_config_byte(*byte))
+                    .collect(),
+            ));
+        }
+        self.needs_bytes = true;
+        Some(ConfigExpansion::text(value.into()))
     }
 
     fn expand_variables(&self) -> bool {
@@ -703,11 +757,11 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         });
     }
 
-    fn finish(mut self, line: u32, column: u32) -> ParsedConfig {
+    fn finish(mut self, line: u32, column: u32) -> (ParsedConfig, bool) {
         if !self.aborted && !self.conditionals.is_empty() {
             self.diagnostic(line, column.saturating_add(1), "syntax error");
         }
-        self.parsed
+        (self.parsed, self.needs_bytes)
     }
 }
 
@@ -964,12 +1018,29 @@ fn parse_config_with_assignment_overlay<C: ConfigContext>(
     if is_plain_config_line(input) {
         return parse_plain_config_line(source, input);
     }
-    parse_config_characters(
-        source,
+    let (parsed, needs_bytes) = parse_config_characters(
+        source.clone(),
         ConfigCharacters::text(input),
         context,
         assignment_overlay,
+    );
+    if !needs_bytes {
+        return parsed;
+    }
+    ParsedConfigBytes::from_encoded(
+        parse_config_characters(
+            source,
+            ConfigCharacters::encoded(
+                input
+                    .bytes()
+                    .map(|byte| encode_config_byte(byte, ConfigByteInput::File)),
+            ),
+            context,
+            assignment_overlay,
+        )
+        .0,
     )
+    .into_invocations()
 }
 
 fn is_plain_config_line(input: &str) -> bool {
@@ -1049,17 +1120,20 @@ fn parse_config_bytes_with_assignment_overlay<C: ConfigContext>(
     assignment_overlay: bool,
     byte_input: ConfigByteInput,
 ) -> ParsedConfigBytes {
-    ParsedConfigBytes::from_encoded(parse_config_characters(
-        source.into(),
-        ConfigCharacters::encoded(
-            input
-                .iter()
-                .copied()
-                .map(|byte| encode_config_byte(byte, byte_input)),
-        ),
-        context,
-        assignment_overlay,
-    ))
+    ParsedConfigBytes::from_encoded(
+        parse_config_characters(
+            source.into(),
+            ConfigCharacters::encoded(
+                input
+                    .iter()
+                    .copied()
+                    .map(|byte| encode_config_byte(byte, byte_input)),
+            ),
+            context,
+            assignment_overlay,
+        )
+        .0,
+    )
 }
 
 fn parse_config_characters<C: ConfigContext>(
@@ -1067,7 +1141,7 @@ fn parse_config_characters<C: ConfigContext>(
     mut characters: ConfigCharacters<'_>,
     context: &mut C,
     assignment_overlay: bool,
-) -> ParsedConfig {
+) -> (ParsedConfig, bool) {
     let input_kind = characters.input_kind;
     let mut builder = ConfigBuilder {
         source,
@@ -1078,6 +1152,7 @@ fn parse_config_characters<C: ConfigContext>(
         conditionals: Vec::new(),
         context,
         aborted: false,
+        needs_bytes: false,
     };
     let mut words = Vec::new();
     let mut command_block_words = Vec::new();
@@ -1288,6 +1363,10 @@ fn parse_config_characters<C: ConfigContext>(
                     match value {
                         ConfigEscape::Text(value) => {
                             push_config_text_character(&mut word, value, input_kind);
+                        }
+                        ConfigEscape::RawByte(value) if input_kind == ConfigInputKind::String => {
+                            builder.needs_bytes = true;
+                            word.push(char::from(value));
                         }
                         ConfigEscape::RawByte(value) => word.push(encode_stored_config_byte(value)),
                     }
@@ -1733,10 +1812,13 @@ fn parse_escape(
             + 8 * (second as u32 - '0' as u32)
             + (third as u32 - '0' as u32);
         let value = u8::try_from(value).expect("octal config escape fits in one byte");
-        return Ok(Some(match input_kind {
-            ConfigInputKind::String => ConfigEscape::Text(char::from(value)),
-            ConfigInputKind::Bytes => ConfigEscape::RawByte(value),
-        }));
+        return Ok(Some(
+            if input_kind == ConfigInputKind::String && value.is_ascii() {
+                ConfigEscape::Text(char::from(value))
+            } else {
+                ConfigEscape::RawByte(value)
+            },
+        ));
     }
     if input_kind == ConfigInputKind::Bytes
         && let Some(value) = stored_config_byte(character)
@@ -2583,12 +2665,11 @@ set @single '\141\a\b\e\f\s\v\r\n\t\u03bb\U0001F980'"#,
     }
 
     #[test]
-    fn represents_high_octal_and_nul_escapes_as_rust_string_characters() {
+    fn stores_high_octal_escapes_as_bytes_and_truncates_at_nul_like_the_pin() {
         let parsed = parse_config("test.conf", r"set @bytes \377 \000");
         assert!(parsed.diagnostics.is_empty());
-        assert_eq!(parsed.commands[0].args[1], "\u{ff}");
-        assert_eq!(parsed.commands[0].args[2], "\0");
-        // The pin stores raw bytes (0xff and NUL truncation); Rust String requires UTF-8 and retains NUL.
+        assert_eq!(parsed.commands[0].args[1].as_bytes(), [0xff]);
+        assert_eq!(parsed.commands[0].args[2], "");
     }
 
     #[test]

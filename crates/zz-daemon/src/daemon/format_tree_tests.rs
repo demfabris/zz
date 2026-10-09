@@ -535,7 +535,6 @@ fn selected_status_explicit_fact_groups_match_complete_capture() {
         data: Arc::from(b"buffer data".as_slice()),
         created: UNIX_EPOCH + Duration::from_secs(17),
         automatic: true,
-        utf8: true,
     });
     inner
         .pane_modes
@@ -643,7 +642,6 @@ fn selected_status_modes_capture_their_own_detached_fact_dependencies() {
         data: Arc::from(b"mode data".as_slice()),
         created: UNIX_EPOCH,
         automatic: true,
-        utf8: true,
     });
     inner
         .engine

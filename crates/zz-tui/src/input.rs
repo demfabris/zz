@@ -53,6 +53,12 @@ pub(crate) fn handle(
     key_releases: bool,
     prefix: PrefixView,
 ) -> Result<InputOutcome, String> {
+    if let TerminalEvent::Clipboard(data) = event {
+        client
+            .send_input(InputMessage::ClipboardReply { data })
+            .map_err(|error| error.to_string())?;
+        return Ok(InputOutcome::None);
+    }
     crate::overlay::dismiss_client_message(model, client, &event)?;
     let menu_box = model.menu_box();
     let event = match menu_input_route(
@@ -158,9 +164,9 @@ pub(crate) fn handle(
         } => Ok(InputOutcome::Resize(
             model.size.with_cell_pixels(width_px, height_px),
         )),
-        TerminalEvent::DeviceAttributes | TerminalEvent::KittyGraphicsResponse { .. } => {
-            Ok(InputOutcome::None)
-        }
+        TerminalEvent::Clipboard(_)
+        | TerminalEvent::DeviceAttributes
+        | TerminalEvent::KittyGraphicsResponse { .. } => Ok(InputOutcome::None),
         TerminalEvent::DarkTheme | TerminalEvent::LightTheme => {
             let scheme = if matches!(event, TerminalEvent::DarkTheme) {
                 TerminalColorScheme::Dark

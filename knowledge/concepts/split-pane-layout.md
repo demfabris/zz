@@ -49,11 +49,19 @@ The tmux algorithms, with their load-bearing quirks:
   invariant) — zz sizes it; and `select-layout -E` on a parent mixing leaf and node children
   (the pin spreads only leaves over the full extent, corrupting the sums) is refused rather
   than reproduced. See [the divergence matrix](/tmux/divergences.md).
-- **layout strings**: `dump()` emits tmux's checksummed `layout-custom.c` format. `parse()` checks
-  the checksum and geometry tree, ignores the serialized pane numbers, and caps nesting at 256
-  cells. `select-layout <string>` assigns the window's `pane_order` through the parsed leaves,
-  removes extra bottom-right cells with tmux's sibling gifting, allocates new divider ids, and
-  adopts the encoded extent. The 48 pin fixtures cover both replay and parse-to-dump round trips.
+- **layout strings**: tmux 3.8 prints JSON v2 (`layout_append_v2`) and keeps the checksummed v1
+  form for control clients without the `new-layouts` flag. `CellLayout::dump_as(format, leaf)`
+  writes either; the `LeafState` callback supplies each leaf's active flag, last-pane index, pane
+  index and floating z-index (`Window::layout_string` fills it from the window; `z` stays `None`
+  until floating panes land, and the v1 writer drops any leaf that has one and collapses the
+  single-child parents, as `layout_custom_copy_layout` does). `parse()` reads both forms: v1 with
+  the pin's header, checksum and trailing-data errors, v2 through a port of tmux's `json.c` with
+  its error strings, keeping `i`, `a`, `l` and `z` per leaf (`ParsedLeaf`, floats in
+  `ParsedFloat`). `select-layout <string>` counts cells, trims extra bottom-right cells with
+  tmux's sibling gifting (a floating cell goes without a gift), checks sizes, and refuses a layout
+  that still has floating cells. v1 assigns the window's `pane_order` through the leaves; v2
+  assigns it in ascending `i`, then applies `a` as the active pane and rebuilds the last-pane
+  stack from `l`. The 48 pin fixtures cover both replay and parse-to-dump round trips.
 
 # Wire projection and divider identity
 

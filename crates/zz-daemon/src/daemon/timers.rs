@@ -1066,7 +1066,6 @@ impl Shared {
         let commands = due
             .into_iter()
             .map(|(pane, terminal)| (pane, terminal_current_command(&terminal)))
-            .filter(|(_, command)| !command.is_empty())
             .collect::<Vec<_>>();
         let (renamed, events) = {
             let mut inner = self.inner.lock();

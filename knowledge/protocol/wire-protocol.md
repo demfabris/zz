@@ -298,8 +298,8 @@ name plus its format variables and the control front-end alone knows the `%`-lin
 `PaneOutput { pane, bytes }` (v66) is the raw pane-output tap (the same tap `pipe-pane` uses) that
 becomes `%output`; `PaneOutputState { pane, paused }` and `PaneOutputAged { pane, age_ms, bytes }`
 (v67) carry flow-control pause/resume and age-stamped output for `%extended-output`;
-`ControlFlags { wait_exit, pause_after_ms, no_output }` (v67) echoes the client's
-`refresh-client -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
+`ControlFlags { wait_exit, pause_after_ms, no_output, new_layouts }` (v67, `new_layouts`
+appended in v108) echoes the client's `refresh-client -f` and `attach -f` flags; and `SubscriptionChanged { name, session, window, window_index, pane, value }`
 (v68) reports a `refresh-client -B` format subscription's value change. v71 appends
 `TimedClientMessageCleared { message_id }` at tag 46 — the daemon's explicit clear for one
 timed message, produced by the client-message deadline on the `zz-daemon-timers` thread when a
@@ -791,6 +791,16 @@ string is capped at `MAX_PATH_LIST_TEXT_BYTES` (4096) and a chunk or mark batch 
 `MAX_PATH_LIST_ENTRIES` (50,000) during deserialization. `path_picker_variants_append_at_the_wire_tails_and_round_trip` pins the
 tags.
 
+v108 also carries tmux 3.8's JSON v2 layout strings (catch-up item `pin.layout-v2`).
+`WindowSnapshot.layout_dump` and `visible_layout_dump` hold the v2 form
+(`{"V":2,"L":{...}}`, with each leaf's active flag, last-pane index, pane index and pane id), and
+`EventPayload::ControlFlags` appends `new_layouts: bool` with `#[serde(default)]`. A control client
+prints `%layout-change` from the snapshot through `zz_mux::legacy_layout`, the v1 compat copy,
+unless the daemon reported `new_layouts`. Formats only produce v2; under the same rule the daemon
+rewrites the output of a command such a client runs with `zz_mux::legacy_layouts_in` before it
+returns. Status lines, snapshots and `refresh-client -B`
+subscriptions stay v2 (3.8's `monitor.c` evaluates subscriptions with no client).
+
 v108 is unreleased as of 2026-10-07. Claude Code agent panes stop going through the
 `claude-agent-acp` adapter: `DEFAULT_AGENT_CLAUDE_CODE_COMMAND` becomes `claude`, and the daemon
 drives the user's own binary over Claude Code's stream-json protocol
@@ -807,6 +817,14 @@ A prompt `/btw`, `/side`, `/steer`, `/fork`, or `/rewind` is a zz command when t
 capabilities set `verbs` (`zz_protocol::agent_stream::AGENT_VERBS`); every other `/` command goes to
 the vendor. A zz command's reply carries `_meta.zz.reply`, the message id of the command's echoed
 prompt row, and a tool update may carry `_meta.zz.exitCode`.
+
+v108 also carries `refresh-client -l` for the raw TUI. `EventPayload` appends the unit variant
+`ClipboardQuery` after `ControlCommandStarted`: the daemon asks the target client to send its outer
+terminal an OSC 52 query (`\e]52;;?\a`, `tty_clipboard_query`) and keeps the query pending for
+5 s. `InputMessage` appends `ClipboardReply { data: Vec<u8> }` after `ClientTerminalSizeV2`: the
+decoded bytes of the terminal's OSC 52 answer. The daemon stores them as a new automatic buffer, as
+`tty_keys_clipboard` does with `paste_add`, only while a query to that client is pending; a reply
+outside that window is dropped. Clients that do not answer OSC 52 ignore the query.
 
 # Versioning & compatibility
 

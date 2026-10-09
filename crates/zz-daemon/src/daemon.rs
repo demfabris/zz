@@ -80931,6 +80931,65 @@ set-option -g @alias-mixed-next yes
     }
 
     #[test]
+    fn an_attached_waiter_sees_each_payload_while_it_waits() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, pane, _) = attached_message_fixture(&shared, "event-view", &[client]);
+        shared.inner.lock().client_entry(client).instance_id = Some(ClientInstanceId(client.0));
+        let context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            let mut context = context.clone();
+            std::thread::spawn(move || {
+                shared.execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "wait-for",
+                        [
+                            "-E",
+                            "-v",
+                            "-F",
+                            "#{||:#{pane_id},#{==:#{new_name},stop}}",
+                            "session-renamed",
+                        ],
+                    ),
+                )
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while shared.inner.lock().event_waiters.is_empty() {
+            assert!(!waiter.is_finished(), "the wait returned without parking");
+            assert!(Instant::now() < deadline, "the wait never parked");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let rename = |name: &str| {
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("rename-session", ["-t", &session.to_string(), name]),
+                )
+                .expect("rename-session");
+        };
+        rename("first");
+        assert!(
+            !waiter.is_finished(),
+            "#{{pane_id}} has no target in the filter"
+        );
+        assert_eq!(shared.inner.lock().event_waiters.len(), 1);
+        assert!(shared.read_client(client, |c| c.is_some_and(|c| c.command_output.is_some())));
+        rename("stop");
+        waiter.join().expect("waiter thread").expect("wait-for -E");
+        assert!(shared.inner.lock().event_waiters.is_empty());
+    }
+
+    #[test]
     fn pane_prompts_fire_the_prompt_events_with_their_type() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();

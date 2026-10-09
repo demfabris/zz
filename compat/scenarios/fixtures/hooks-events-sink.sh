@@ -131,6 +131,37 @@ main_client wait-for -E -w "$(main_client wait-for -E -l session-renamed | head 
 wait "$stream" || true
 seen="$seen stream-done=[$(lines "$work/stream")]"
 
+mkfifo "$work/control-in"
+control_client <"$work/control-in" >"$work/control" 2>&1 &
+control=$!
+exec 3>"$work/control-in"
+printf 'wait-for -E -v -F 0 session-renamed\n' >&3
+wait_waiters session-renamed 1
+main_client rename-session -t w hevcontrol
+attempt=0
+while [ "$attempt" -lt 40 ] && ! grep -q '^event=' "$work/control"; do
+    attempt=$((attempt + 1))
+    sleep 0.05
+done
+seen="$seen control=[$(grep -E '^(event|new_name|old_name|session)=' "$work/control" | tr '\n' ';')]"
+main_client rename-session -t hevcontrol w
+main_client wait-for -E -w "$(main_client wait-for -E -l session-renamed | head -n 1)" session-renamed
+exec 3>&-
+wait "$control" || true
+
+main_client wait-for -E -F '#{pane_id}' session-renamed >"$work/untargeted" 2>&1 &
+untargeted=$!
+wait_waiters session-renamed 1
+main_client rename-session -t w hevuntargeted
+sleep 0.3
+if kill -0 "$untargeted" 2>/dev/null; then
+    seen="$seen untargeted=parked"
+else
+    seen="$seen untargeted=woken"
+fi
+main_client rename-session -t hevuntargeted w
+finish_wait "$untargeted" session-renamed
+
 main_client set-option -t w @hevflag 0
 main_client set-hook -t w -B '@hevwatch::#{@hevflag}' "set -gF @hevwatchlog '#{hook_value}'"
 sleep 1.5

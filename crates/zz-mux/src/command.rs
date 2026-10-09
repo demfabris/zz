@@ -10978,7 +10978,13 @@ impl MuxEngine {
                 )));
             }
             let execution = self.set_user_option(context, parsed.name, value, &options, false)?;
-            if !options.has("-u") && !options.has("-U") && value.is_some() {
+            if !options.has("-u")
+                && !options.has("-U")
+                && execution
+                    .effects
+                    .iter()
+                    .any(|effect| matches!(effect, MuxEffect::UserOptionChanged { .. }))
+            {
                 self.hook_events.insert(parsed.name.to_owned());
             }
             return Ok(execution);

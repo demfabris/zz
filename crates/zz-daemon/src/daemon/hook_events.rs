@@ -1760,6 +1760,25 @@ pub(super) fn event_payload_lines(payload: &BTreeMap<String, String>) -> String 
     lines
 }
 
+enum PayloadPrint {
+    Stdout,
+    Control,
+    View(String),
+}
+
+const EVENT_VIEW_LIMIT: usize = 64 * 1024;
+
+fn trim_event_view(view: &mut String) {
+    if view.len() <= EVENT_VIEW_LIMIT {
+        return;
+    }
+    let excess = view.len() - EVENT_VIEW_LIMIT;
+    let cut = view[excess..]
+        .find('\n')
+        .map_or(view.len(), |offset| excess + offset + 1);
+    view.drain(..cut);
+}
+
 pub(super) fn take_event_waiter_wakes(
     waiters: &mut Vec<EventWaiter>,
     client: Option<ClientId>,
@@ -1785,7 +1804,11 @@ impl Shared {
             .any(|waiter| waiter.name == name)
     }
 
-    pub(super) fn feed_event_waiters(&self, name: &str, variables: &BTreeMap<String, String>) {
+    pub(super) fn feed_event_waiters(
+        self: &Arc<Self>,
+        name: &str,
+        variables: &BTreeMap<String, String>,
+    ) {
         let (woken, printed, lines) = {
             let mut inner = self.inner.lock();
             if !inner.event_waiters.iter().any(|waiter| waiter.name == name) {
@@ -1806,10 +1829,14 @@ impl Shared {
                                 &facts,
                                 Some(&payload),
                             );
+                            let mut untargeted = waiter.context.clone();
+                            untargeted.session = None;
+                            untargeted.window = None;
+                            untargeted.pane = None;
                             zz_mux::format_true(&inner.engine.expand_target_format(
                                 filter,
-                                &waiter.context,
-                                waiter.context.session,
+                                &untargeted,
+                                None,
                                 waiter.context.target_format_client(),
                                 &mut hooks,
                             ))
@@ -1823,13 +1850,17 @@ impl Shared {
             for (index, pass) in passes.into_iter().rev() {
                 let waiter = inner.event_waiters[index].client;
                 if inner.event_waiters[index].verbose {
-                    if inner.client(waiter).and_then(|client| client.kind)
-                        == Some(ClientKind::Command)
-                    {
-                        printed.push(waiter);
-                    } else {
-                        inner.event_waiters[index].output.push_str(&lines);
-                    }
+                    let print = match inner.client(waiter).and_then(|client| client.kind) {
+                        Some(ClientKind::Command) => PayloadPrint::Stdout,
+                        Some(ClientKind::Control) => PayloadPrint::Control,
+                        _ => {
+                            let view = &mut inner.event_waiters[index].output;
+                            view.push_str(&lines);
+                            trim_event_view(view);
+                            PayloadPrint::View(view.clone())
+                        }
+                    };
+                    printed.push((waiter, print));
                 }
                 if pass {
                     woken.push(inner.event_waiters.remove(index));
@@ -1839,8 +1870,21 @@ impl Shared {
             printed.reverse();
             (woken, printed, lines)
         };
-        for client in printed {
-            self.release_command_stdout(client, &mut RawText::from(lines.as_str()));
+        for (client, print) in printed {
+            match print {
+                PayloadPrint::Stdout => {
+                    self.release_command_stdout(client, &mut RawText::from(lines.as_str()));
+                }
+                PayloadPrint::Control => self.publish_to_client(
+                    client,
+                    EventPayload::CommandStdout {
+                        output: RawText::from(lines.as_str()),
+                    },
+                ),
+                PayloadPrint::View(text) => {
+                    let _ = self.open_command_output(client, None, "wait-for".to_owned(), &text);
+                }
+            }
         }
         self.resolve_event_waiters(woken);
     }
@@ -1850,10 +1894,7 @@ impl Shared {
             return;
         }
         for waiter in woken {
-            waiter.state.resolve(Ok(Execution {
-                output: waiter.output.into(),
-                ..Execution::default()
-            }));
+            waiter.state.resolve(Ok(Execution::default()));
         }
         self.accept_wake.wake();
     }

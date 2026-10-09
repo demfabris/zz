@@ -1,5 +1,6 @@
 # set-hook -E fires an @ hook only when set-hook registered that event name
-# (a user option of the same name set with set-option does not count), the
+# (a user option of the same name set with set-option does not count, and
+# set-hook has no -o or -q to register one without assigning it), the
 # registration outlives the hook, after-select-pane runs only when select-pane
 # moves the active pane, and pane-created carries pane_command and
 # pane_current_path, with a respawned shell pane naming the shell it was
@@ -15,8 +16,15 @@ set-hook -gu @reg
 set -g @reg "set -gF @regran again"
 set-hook -E -t w:0 @reg
 out: show -gv @regran
+set -g @oq "set -gF @oqran yes"
+set -g @oqran no
+set-hook -goq @oq ignored
+set-hook -E -t w:0 @oq
+out: show -gv @oqran
 set -gu @plain
 set -gu @plainran
+set -gu @oq
+set -gu @oqran
 set -gu @reg
 set -gu @regran
 split-window -d -t w:0

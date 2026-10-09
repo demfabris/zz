@@ -97,7 +97,8 @@ Each rule cost a campaign real time. The source is in brackets
 
 1. **Cargo only through `compat/catchup/cargo.sh`.** It caps memory, sets `--jobs` from RAM, and
    holds one of two cargo slots inside `flock -o`, so a killed lane's daemons cannot keep a slot
-   locked. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
+   locked. When both slots are busy it polls every slot, so a build never queues behind one slot
+   while the other is free. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
    it too when run as `PATH=$PWD/compat/catchup/bin:$PATH <script>`; always run them that way. [Five lanes OOMed alienware for hours; a leaked slot fd stalled every lane for 7 h.]
 2. **Iterate behind a filter**: `compat/catchup/cargo.sh test -p <crate> --lib <name>`. Run the full
    test package of each crate you touched once, before your final commit. Never

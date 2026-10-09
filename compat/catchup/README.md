@@ -204,5 +204,9 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: pin.move merged (338aad43a); the pin is tmux 3.8. Any checkout's
   `compat/.cache` must be refetched (`compat/fetch-tmux.sh`) before `just compat check` passes there;
   `wt.sh add` copies the main checkout's cache, so refresh that one first.
+- 2026-10-09 orchestrator: fix.capture-links gets a third, final fix pass after two reviews (output
+  marks on resize, repeated alternate-on, IL/DL) and merges without a third review; IL/DL may be
+  recorded as an engine limit if it does not fit. Zz approximates tmux's per-row output flag with
+  tracked pins, so its edge cases are bounded by budget, not chased to the end.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

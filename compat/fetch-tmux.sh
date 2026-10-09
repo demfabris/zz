@@ -9,8 +9,9 @@ SOURCE_DIR="$CACHE_DIR/tmux-src"
 TMUX_BIN="$SOURCE_DIR/tmux"
 BUILD_STAMP="$CACHE_DIR/tmux-build.stamp"
 LEGACY_BUILD_STAMP="$SOURCE_DIR/.zz-build-stamp"
-TMUX_COMMIT="d77c9dc6aa021e4bc61f0da128c591af695e6466"
-TMUX_VERSION="tmux next-3.8"
+TMUX_TAG="3.8"
+TMUX_COMMIT="7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53"
+TMUX_VERSION="tmux 3.8"
 
 log() { printf '\033[1;36m==>\033[0m %s\n' "$*" >&2; }
 die() {
@@ -32,8 +33,8 @@ build_stamp() {
 
   script_checksum="$(cksum <"${BASH_SOURCE[0]}")" || return 1
   binary_checksum="$(cksum <"$TMUX_BIN")" || return 1
-  printf 'commit=%s\nversion=%s\nscript-cksum=%s\nbinary-cksum=%s\n' \
-    "$TMUX_COMMIT" "$TMUX_VERSION" "$script_checksum" "$binary_checksum"
+  printf 'tag=%s\ncommit=%s\nversion=%s\nscript-cksum=%s\nbinary-cksum=%s\n' \
+    "$TMUX_TAG" "$TMUX_COMMIT" "$TMUX_VERSION" "$script_checksum" "$binary_checksum"
 }
 
 verify_cached_tmux() {
@@ -42,6 +43,8 @@ verify_cached_tmux() {
   verify_tmux "$TMUX_BIN" || return 1
   [ -d "$SOURCE_DIR/.git" ] || return 1
   actual_commit="$(git -C "$SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
+  [ "$actual_commit" = "$TMUX_COMMIT" ] || return 1
+  actual_commit="$(git -C "$SOURCE_DIR" rev-parse --verify --quiet "refs/tags/$TMUX_TAG^{commit}" || true)"
   [ "$actual_commit" = "$TMUX_COMMIT" ] || return 1
   dirty="$(git -C "$SOURCE_DIR" status --porcelain --untracked-files=all 2>/dev/null)" || return 1
   [ -z "$dirty" ] || return 1
@@ -103,10 +106,14 @@ if [ ! -d "$SOURCE_DIR/.git" ]; then
   git clone https://github.com/tmux/tmux "$SOURCE_DIR" >&2
 fi
 
-if ! git -C "$SOURCE_DIR" cat-file -e "$TMUX_COMMIT^{commit}" 2>/dev/null; then
-  log "fetching tmux commit $TMUX_COMMIT"
-  git -C "$SOURCE_DIR" fetch origin "$TMUX_COMMIT" >&2
+tag_commit="$(git -C "$SOURCE_DIR" rev-parse --verify --quiet "refs/tags/$TMUX_TAG^{commit}" || true)"
+if [ "$tag_commit" != "$TMUX_COMMIT" ]; then
+  log "fetching tmux tag $TMUX_TAG"
+  git -C "$SOURCE_DIR" fetch --no-tags origin "+refs/tags/$TMUX_TAG:refs/tags/$TMUX_TAG" >&2
+  tag_commit="$(git -C "$SOURCE_DIR" rev-parse --verify --quiet "refs/tags/$TMUX_TAG^{commit}" || true)"
 fi
+[ "$tag_commit" = "$TMUX_COMMIT" ] ||
+  die "tmux tag $TMUX_TAG resolves to ${tag_commit:-nothing}, expected $TMUX_COMMIT"
 
 log "checking out tmux commit $TMUX_COMMIT"
 git -C "$SOURCE_DIR" checkout --quiet --detach "$TMUX_COMMIT" >&2

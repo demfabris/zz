@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-10-04T00:00:00-03:00
+timestamp: 2026-10-09T00:00:00-03:00
 ---
 
 # Overview
@@ -15,25 +15,25 @@ timestamp: 2026-10-04T00:00:00-03:00
 dependencies, evidence paths, known scenarios, and the source-backed inventories described
 below.
 
-Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
+Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
-Tracked gap groups: **44**. Classified items: **354**.
+Tracked gap groups: **51**. Classified items: **445**.
 
-- Status: open: 2, accepted: 42.
-- Decision: adopt: 2, native: 33, never: 9.
-- Priority: now: 1, next: 1, none: 42.
+- Status: open: 9, accepted: 42.
+- Decision: adopt: 9, native: 33, never: 9.
+- Priority: now: 1, next: 8, none: 42.
 - Closed history entries: 212.
-- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 26, option: 31, format: 42, key: 28, binding: 37, native-key: 92, semantic: 53, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 39, extension-flag: 11, native-command: 26, option: 34, option-scope: 4, option-default: 4, format: 58, hook: 21, native-hook: 1, key: 33, binding: 42, native-key: 92, semantic: 68, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 10 zz-only flags on tmux command names, 26 native command names, 31 options absent from `BEHAVES`, 42 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 28 omitted default keys, 37 divergent shared default bindings, 92 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 593 command-flag shapes (332 valueless, 253 required-value, 8 optional-value), positional minimum and maximum bounds, 183 options, 214 global formats, 204 scoped literal context pairs across 37 source producers, 5 derived context families, 37 format modifiers, 89 hooks, and 308 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 39 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 11 zz-only flags on tmux command names, 26 native command names, 34 options absent from `BEHAVES`, 58 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 4 option scope mismatches, 4 option default mismatches, 21 currently documented hook-producer gaps, 1 zz-only hook names, 33 omitted default keys, 42 divergent shared default bindings, 92 zz-only default keys.
 
 ## Enforcement boundary
 
 The gate reconciles command names, aliases, flag arities, positional bounds, custom
-`args_parse` rules, option names, global formats, scoped and derived context producers,
-format modifiers, hook names,
+`args_parse` rules, option names, scopes and defaults, global formats, scoped and derived
+context producers, event payload keys, format modifiers, hook names,
 and default key presence against the clean pinned tmux source and binary. It also reconciles
 options absent from `BEHAVES`, constant-backed formats against the live registry, omitted
 and zz-only default keys against zz's key tables, rendered commands plus repeat bits for
@@ -58,6 +58,13 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `formats.pane-current-command-empty` | Answer pane_current_command on a process-less pane | adopt | open | easy | mux | scripts, daily | none |
+| `float.keys` | Create a floating pane from a Ctrl mouse drag | adopt | open | medium | client | daily, gui | none |
+| `pin.contract-breaks` | Adopt the 3.8 contract breaks | adopt | open | medium | mux | scripts | none |
+| `pin.formats-options` | Adopt the 3.8 formats, modifiers and options | adopt | open | medium | mux | daily, scripts | none |
+| `pin.keys-copy` | Adopt the 3.8 default keys, menus and copy commands | adopt | open | medium | protocol | daily | none |
+| `pin.display-panes` | Make display-panes the 3.8 pane mode | adopt | open | hard | client | daily, gui | none |
+| `pin.hooks-events` | Fire the 3.8 hooks and event payloads | adopt | open | hard | daemon | scripts | none |
+| `pin.layout-v2` | Print the 3.8 JSON v2 layout strings | adopt | open | hard | mux | scripts | none |
 
 ## None
 
@@ -318,6 +325,24 @@ Opened 2026-09-06 from the harness lens's finding that the GPUI client was never
   - `menu_key_cb's whole mouse arm, for a menu that took the mouse: a press or a motion inside the box sets md->choice to m->y - (md->py + 1) and does nothing else; a release inside the box goes to chosen, which reads md->choice, so it chooses the row the highlight already sits on and not the row it landed on; a release outside the box closes a menu that is not stay-open; and a stay-open menu instead closes on any report that is neither MOUSE_RELEASE, MOUSE_WHEEL nor MOUSE_DRAG. The desktop answers each of those through zz_client::resolve_menu_mouse, with the pointer's pixels mapped onto the same cell box menu_frame draws.`
   - `The desktop draws one menu row per cell of the box menu.c measured, because menu.c sizes a menu as count + 2 rows and the client is handed that height. A row that takes its text height instead overflows the box whenever the terminal cell is shorter than the row's line height, and FloatingSurface clips what overflows.`
   - `OPEN: mouse modality. The pin hands menu_key_cb every mouse report while the menu owns the client's overlay. The desktop intercepts a press and a release anywhere, but a motion or a wheel that lands outside the menu's own surface still reaches whatever is under it, so scrolling a pane under an open menu still scrolls the pane.`
+
+### `float.keys`: Create a floating pane from a Ctrl mouse drag
+
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item float.keys. The two bindings run a command that only exists once floating panes do, so they wait on float.core and land with the rest of the floating-pane key work.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `medium`
+- Owner: `client`
+- User impact: daily, gui
+- Items: `key:root:C-MouseDrag1Empty`, `key:root:C-MouseDrag1Pane`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:knowledge/research/2026-10-09-tmux-compat-revisit.md`
+  - `resource:crates/zz-protocol/src/key.rs`
+- Acceptance:
+  - `The 3.8 root table binds C-MouseDrag1Pane and C-MouseDrag1Empty to new-pane -M, which creates a floating pane from the drag; zz binds neither.`
 
 ### `formats.expansion-budgets`: Keep format expansion deterministic
 
@@ -622,7 +647,7 @@ Root-table mouse commands draw terminal client UI that native clients own direct
 - Priority and ease: `none` / `none`
 - Owner: `client`
 - User impact: daily, gui
-- Items: `key:root:C-MouseDown1Pane`, `key:root:C-MouseDown1Status`, `key:root:M-MouseDown3StatusLeft`, `key:root:M-MouseDrag1Border`, `key:root:M-MouseDrag1Pane`, `key:root:MouseDown1Control7`, `key:root:MouseDown1Control9`, `key:root:MouseDown1ScrollbarDown`, `key:root:MouseDown1ScrollbarUp`, `key:root:MouseDown1Status`, `key:root:MouseDown3StatusLeft`, `key:root:MouseDrag1ScrollbarSlider`
+- Items: `key:root:C-MouseDown1Status`, `key:root:M-MouseDown3StatusLeft`, `key:root:M-MouseDrag1Border`, `key:root:M-MouseDrag1Pane`, `key:root:MouseDown1Control7`, `key:root:MouseDown1Control9`, `key:root:MouseDown1ScrollbarDown`, `key:root:MouseDown1ScrollbarUp`, `key:root:MouseDown1Status`, `key:root:MouseDown3StatusLeft`, `key:root:MouseDrag1ScrollbarSlider`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-protocol/src/key.rs`
@@ -861,6 +886,133 @@ In the pin a floating pane is a mux object: `new-pane` creates one by default, `
   - ``pane_floating_flag` keeps the pin's inactive default, and zz's tiled `move-pane` extension stays a recorded superset behavior.`
   - ``editor` keeps the pin's startup seeding from VISUAL or EDITOR and its vi or emacs key-table derivation, and stays store-only beyond that because its only read in the pin spawns a floating pane.`
   - `Nested attach inside a display-popup is registered as unproved with the fixture that would prove it, so a later cycle does not mistake an inference for a measurement.`
+
+### `pin.contract-breaks`: Adopt the 3.8 contract breaks
+
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.contract-breaks. None of these show in the structural inventory, so each is a semantic item measured against a live 3.8 build when its lane lands.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `medium`
+- Owner: `mux`
+- User impact: scripts
+- Items: `semantic:client-flag-active-pane-removed`, `semantic:control-notifications-outside-command-blocks`, `semantic:format-q-escapes-braces`, `semantic:percent-template-quote-escaping`, `semantic:relative-target-validation`
+- Depends on: none
+- Evidence:
+  - `resource:knowledge/research/2026-10-09-tmux-compat-revisit.md`
+  - `resource:crates/zz-client/src/core.rs`
+  - `resource:crates/zz-cli/src/lib.rs`
+- Acceptance:
+  - `3.8 removes the active-pane client flag (1ce00006): refresh-client -f and attach -f accept only read-only, ignore-size and no-detach-on-destroy plus the control-only flags. zz still implements it in crates/zz-client/src/core.rs and crates/zz-cli/src/lib.rs.`
+  - `3.8 escapes ' as '\'' when it substitutes %% into a template (a177d0f5, cmd.c); %%%, %N% and %N are unchanged.`
+  - `3.8 q: also escapes {, }, newline and tab (d57d75de): for a{b} c the pin printed a{b}\ c and 3.8 prints a\{b\}\ c.`
+  - `3.8 rejects invalid relative targets such as +foo and -0 (00f3899a).`
+  - `3.8 queues control-mode notifications outside %begin/%end and replaces notify with events (6db5175e, d29aa121).`
+
+### `pin.display-panes`: Make display-panes the 3.8 pane mode
+
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.display-panes. display-panes became a pane mode in 3.8 (window-panes.c), which changes its flags, its target and the scope of its options together.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `hard`
+- Owner: `client`
+- User impact: daily, gui
+- Items: `extension-flag:display-panes:-b`, `flag:display-panes:-Z`, `flag:display-panes:-k`, `flag:display-panes:-s`, `option-default:display-panes-format`, `option-scope:display-panes-active-colour`, `option-scope:display-panes-colour`, `option-scope:display-panes-format`, `option-scope:display-panes-time`, `option:display-panes-border-style`, `semantic:display-panes-pane-mode`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:knowledge/research/2026-10-09-tmux-compat-revisit.md`
+  - `resource:crates/zz-protocol/src/catalog.rs`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+- Acceptance:
+  - `display-panes drops -b and gains -k, -Z and -s source-window; -t is a target pane, not a client (1a02c995). zz still accepts -b, which the registry records as a zz-only flag until this lands.`
+  - `display-panes-active-colour, display-panes-colour, display-panes-format and display-panes-time are window options in 3.8 and display-panes-border-style exists; the option scope and default items record what zz still keeps at session scope.`
+  - `The raw TUI draws the pin's pane-mode screen; the desktop keeps its native overlay.`
+
+### `pin.formats-options`: Adopt the 3.8 formats, modifiers and options
+
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `medium`
+- Owner: `mux`
+- User impact: daily, scripts
+- Items: `flag:capture-pane:-I`, `flag:display-message:-j`, `flag:show-hooks:-F`, `flag:show-options:-F`, `flag:show-window-options:-F`, `flag:split-window:-B`, `format:history_added`, `format:history_collected`, `format:history_generation`, `format:pane_command_duration`, `format:pane_command_end_time`, `format:pane_command_running`, `format:pane_command_start_time`, `format:pane_command_status`, `format:pane_last_output_time`, `format:pane_last_prompt_time`, `format:pane_modal_flag`, `format:pane_output_generation`, `format:pane_private_modes`, `format:pane_unzoomed_height`, `format:pane_unzoomed_width`, `format:window_modal_pane`, `option-default:fill-character`, `option-default:pane-active-border-style`, `option-default:status-format`, `option:clear-on-attach`, `option:copy-mode-current-line-style`, `semantic:fill-character-format-contexts`, `semantic:format-modifier-animation`, `semantic:mode-format-contexts-3-8`, `semantic:remain-on-exit-failed-key`, `semantic:show-options-format-contexts`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:knowledge/research/2026-10-09-tmux-compat-revisit.md`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-mux/src/tmux_options.rs`
+- Acceptance:
+  - `The 16 format_table names 3.8 adds resolve to real values; until then they are constant placeholders tracked as format items.`
+  - `The A modifier (animation frames) works in status and border formats.`
+  - `show-options, show-window-options and show-hooks accept -F with the option_* and hook_* contexts; display-message -j prints JSON; capture-pane -I is adopted or recorded native, since libghostty keeps no per-row time; split-window -B takes border lines.`
+  - `clear-on-attach and copy-mode-current-line-style behave instead of only being stored, remain-on-exit takes failed-key, and the 3.8 defaults of fill-character, pane-active-border-style and status-format[1] and [2] match.`
+  - `The new context formats resolve: is_inside and is_outside for fill-character, clipboard_invalid, copy_line_numbers and refresh_active, and the customize-mode environment and monitor rows.`
+
+### `pin.hooks-events`: Fire the 3.8 hooks and event payloads
+
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.hooks-events. 3.8 replaced notify with events: hook formats are now built from event payload keys (events-payload.c, hooks.c), so the oracle records the payload vocabulary instead of literal hook formats.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `hard`
+- Owner: `daemon`
+- User impact: scripts
+- Items: `flag:set-hook:-E`, `flag:set-hook:-T`, `flag:wait-for:-E`, `flag:wait-for:-F`, `flag:wait-for:-l`, `flag:wait-for:-v`, `flag:wait-for:-w`, `hook:client-closed`, `hook:client-created`, `hook:marked-pane-changed`, `hook:pane-activity`, `hook:pane-bell`, `hook:pane-command-finished`, `hook:pane-command-started`, `hook:pane-created`, `hook:pane-mode-entered`, `hook:pane-mode-exited`, `hook:pane-moved`, `hook:pane-prompt-closed`, `hook:pane-prompt-opened`, `hook:pane-resized`, `hook:pane-shell-prompt`, `hook:session-added-to-group`, `hook:session-removed-from-group`, `hook:window-closed`, `hook:window-created`, `hook:window-unzoomed`, `hook:window-zoomed`, `native-hook:after-queue`, `semantic:hook-event-payload-formats`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:knowledge/research/2026-10-09-tmux-compat-revisit.md`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+- Acceptance:
+  - `The 21 hooks 3.8 adds fire where the pin fires them; pane-command-started, pane-command-finished and pane-shell-prompt come from OSC 133. zz accepts the names today and never fires them.`
+  - `after-queue is gone from 3.8 and zz still has it, recorded as a zz-only hook until it is removed.`
+  - `Every hook_<key> name the oracle's event_payload section lists resolves in a hook context; the old names keep resolving.`
+  - `set-hook -E fires a user event, set-hook -T gates a -B monitor, and wait-for -E, -v, -l, -w and -F behave as 3.8.`
+
+### `pin.keys-copy`: Adopt the 3.8 default keys, menus and copy commands
+
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.keys-copy. 3.8 grows the default tables from 303 to 308 bindings and adds four copy-mode commands.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `medium`
+- Owner: `protocol`
+- User impact: daily
+- Items: `binding:copy-mode-vi:r`, `binding:copy-mode:r`, `binding:root:M-MouseDown3Pane`, `binding:root:MouseDown1Border`, `binding:root:MouseDown3Pane`, `key:copy-mode:L`, `key:prefix:T`, `key:root:M-MouseDown3Empty`, `key:root:MouseDown3Empty`, `semantic:copy-mode-line-numbers-and-refresh-now`, `semantic:menus-belong-to-the-window`
+- Depends on: none
+- Evidence:
+  - `resource:compat/tmux-oracle.json`
+  - `resource:knowledge/research/2026-10-09-tmux-compat-revisit.md`
+  - `resource:crates/zz-mux/src/compat_manifest_tests.rs`
+  - `resource:crates/zz-protocol/src/key.rs`
+- Acceptance:
+  - `The default tables match 3.8's 308 bindings: prefix T, copy-mode L, MouseDown3Empty and M-MouseDown3Empty menus, MouseDown1Border select-pane -t =, r runs refresh-now, and the pane menus gain line-number and refresh items. C-MouseDown1Pane is gone in 3.8; zz never bound it, so its old missing-key item was dropped.`
+  - `line-numbers-on, line-numbers-off, line-numbers-toggle and refresh-now copy commands work.`
+  - `Menus belong to the window and show on every client (ad6832e6) where zz's model allows, or the divergence is recorded.`
+
+### `pin.layout-v2`: Print the 3.8 JSON v2 layout strings
+
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.layout-v2. The layout string is a format value, so the structural inventory cannot see the change; it is a semantic item measured against a live 3.8 build.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `next` / `hard`
+- Owner: `mux`
+- User impact: scripts
+- Items: `semantic:layout-json-v2`
+- Depends on: none
+- Evidence:
+  - `resource:knowledge/research/2026-10-09-tmux-compat-revisit.md`
+  - `resource:crates/zz-mux/src/command.rs`
+- Acceptance:
+  - `#{window_layout}, #{window_visible_layout} and list-windows print the 3.8 JSON v2 form (bf43fdc0, d9692f7e); select-layout accepts v1 and v2; control clients get v1 unless they set the new-layouts flag.`
 
 ### `presentation.native-status`: Keep native status and lifecycle presentation
 

@@ -30,7 +30,8 @@ for required_test in \
   compat_manifest_tests::positional_minimum_runtime_inventory_matches_the_pin \
   compat_manifest_tests::scoped_format_contexts_and_modifiers_match_the_pinned_oracle \
   compat_manifest_tests::tmux_option_consumer_partition_matches_pinned_inventory \
-  compat_manifest_tests::option_format_hook_and_default_key_items_match_pinned_inventories; do
+  compat_manifest_tests::option_format_hook_and_default_key_items_match_pinned_inventories \
+  compat_manifest_tests::option_scopes_and_defaults_match_the_pinned_oracle; do
   grep -Fqx -- "$required_test: test" <<<"$test_list" || {
     printf 'error: required compatibility manifest test is missing: %s\n' "$required_test" >&2
     exit 1

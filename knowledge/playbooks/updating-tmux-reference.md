@@ -4,7 +4,7 @@ title: Updating the pinned tmux behavioral reference
 description: How to bump zz's pinned tmux upstream commit and re-verify the Rust tmux-compat reimplementation against it.
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, upgrade, playbook, behavioral-reference]
-timestamp: 2026-08-16T00:00:00-03:00
+timestamp: 2026-10-09T00:00:00-03:00
 ---
 
 # Overview
@@ -20,9 +20,9 @@ implementation. That is a research-and-port task, unlike the mechanical version 
 
 # Steps
 
-1. **Pick the new pinned commit.** Choose a specific tmux commit (not a moving branch) from
-   `https://github.com/tmux/tmux`, matching the precision of the current pin
-   (`d77c9dc6aa021e4bc61f0da128c591af695e6466`).
+1. **Pick the new pinned commit.** Choose a release tag and its exact commit (not a moving
+   branch) from `https://github.com/tmux/tmux`, as the current pin does (tag `3.8`,
+   `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`).
 2. **Diff every relevant upstream file** between the old and new pinned commits. `UPSTREAM.md`
    groups these by feature area. Diff each group for the behavior it documents:
    - `cmd-parse.y`, `arguments.c`, `cfg.c` . tokenization and config loading
@@ -60,9 +60,15 @@ implementation. That is a research-and-port task, unlike the mechanical version 
    deliberately supported subset is implemented and unsupported config is reported and skipped.
 6. **Move the differential harness to the new pin.** The pin hash lives in three more places
    that must change together:
-   - `compat/fetch-tmux.sh` . `TMUX_COMMIT`, and `TMUX_VERSION` if the reported `-V` string moved
-   - `.github/workflows/ci.yml` . the `tmux-<short-hash>-${{ runner.os }}` cache key, so CI
-     rebuilds the reference instead of restoring the old binary
+   - `compat/fetch-tmux.sh` . `TMUX_TAG`, `TMUX_COMMIT`, and `TMUX_VERSION` if the reported `-V`
+     string moved; the fetcher refuses a tag that does not resolve to the commit and writes the tag
+     into the build stamp
+   - `compat/tmux-oracle.py` . `TAG`, `PIN`, `VERSION`, and any source-shape count the new tag
+     breaks; then `python3 compat/tmux-oracle.py --write` and register every new difference in
+     `compat/tmux-gaps.json` until `just compat check` passes
+   - `compat/startup-diagnostics.sh` and `compat/attached-client.sh` . their pin and version checks
+   - CI keys its tmux cache on a hash of `compat/fetch-tmux.sh` and the oracle, so it rebuilds by
+     itself
    - [the compat harness playbook](/playbooks/compat-harness.md) . the commit hash in its overview
 
    Then run `compat/run.sh` end to end. A behavior change in the new pin shows up as scenario

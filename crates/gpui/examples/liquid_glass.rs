@@ -61,6 +61,18 @@ const KNOBS: &[Knob] = &[
         set: |m, v| m.tint.a = v,
     },
     Knob {
+        name: "tint hue",
+        range: (0., 1.),
+        get: |m| m.tint.h,
+        set: |m, v| m.tint.h = v,
+    },
+    Knob {
+        name: "tint saturation",
+        range: (0., 1.),
+        get: |m| m.tint.s,
+        set: |m, v| m.tint.s = v,
+    },
+    Knob {
         name: "tint lightness",
         range: (0., 1.),
         get: |m| m.tint.l,
@@ -140,12 +152,15 @@ const KNOBS: &[Knob] = &[
     },
 ];
 
-const PRESETS: [(&str, fn() -> GlassMaterial); 5] = [
+const PRESETS: [(&str, fn() -> GlassMaterial); 6] = [
     ("regular", GlassMaterial::regular),
     ("clear", GlassMaterial::clear),
     ("frosted", GlassMaterial::frosted),
     ("bubble", GlassMaterial::bubble),
     ("smoked", GlassMaterial::smoked),
+    ("tinted", || {
+        GlassMaterial::tinted(hsla(0.58, 0.9, 0.55, 1.))
+    }),
 ];
 
 struct LiquidGlassDemo {
@@ -819,7 +834,7 @@ fn material_snippet(material: &GlassMaterial) -> String {
     for knob in KNOBS {
         let value = (knob.get)(material);
         match knob.name {
-            "tint" | "tint lightness" => {}
+            name if name.starts_with("tint") => {}
             "blur" | "bezel" | "refraction" | "glint width" | "edge width" | "merge" => {
                 lines.push(format!(".{}(px({value:.2}))", knob.name.replace(' ', "_")))
             }

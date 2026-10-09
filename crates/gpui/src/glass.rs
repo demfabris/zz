@@ -173,6 +173,21 @@ impl GlassMaterial {
         }
     }
 
+    /// Colored glass, as a prominent button: the backdrop still lenses
+    /// through, washed in `color`.
+    pub fn tinted(color: impl Into<Hsla>) -> Self {
+        let color = color.into();
+        Self {
+            blur: px(4.),
+            tint: Hsla { a: 0.55, ..color },
+            saturation: 1.3,
+            brightness: 0.03,
+            specular: 0.7,
+            fresnel: 0.12,
+            ..Self::regular()
+        }
+    }
+
     /// This material with every effect off: it draws the backdrop unchanged.
     /// Interpolate from here to make glass appear by lensing in.
     pub fn vanished(&self) -> Self {

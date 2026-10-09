@@ -2,12 +2,12 @@ use scheduler::Instant;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use crate::{
-    AbsoluteLength, AnyElement, App, Bounds, Corners, DispatchPhase, Div, Element, ElementId,
-    GlassMaterial, GlassShape, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId,
-    InteractiveElement, Interactivity, Interpolate, IntoElement, LayoutId, LiquidRect, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, Point, SpringConfig,
-    SpringState, Stateful, StatefulInteractiveElement, StyleRefinement, Styled, Window, div, point,
-    size,
+    AbsoluteLength, AnyElement, App, Bounds, BoxShadow, Corners, DispatchPhase, Div, Element,
+    ElementId, GlassMaterial, GlassShape, GlobalElementId, Hitbox, HitboxBehavior,
+    InspectorElementId, InteractiveElement, Interactivity, Interpolate, IntoElement, LayoutId,
+    LiquidRect, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ParentElement, Pixels,
+    Point, SpringConfig, SpringState, Stateful, StatefulInteractiveElement, StyleRefinement,
+    Styled, Window, div, point, size,
 };
 
 /// Glass that answers the pointer: it swells and lights up from where it is
@@ -32,6 +32,9 @@ pub fn liquid_glass(id: impl Into<ElementId>, material: GlassMaterial) -> Liquid
         morph: None,
         lift: None,
         lift_scale: 1.0,
+        drag_flex: Pixels(0.),
+        light_follows_pointer: false,
+        shadows: Vec::new(),
         corner_radii: Corners::default(),
     }
 }
@@ -51,6 +54,9 @@ pub struct LiquidGlass {
     morph: Option<SpringConfig>,
     lift: Option<GlassMaterial>,
     lift_scale: f32,
+    drag_flex: Pixels,
+    light_follows_pointer: bool,
+    shadows: Vec<BoxShadow>,
     corner_radii: Corners<AbsoluteLength>,
 }
 
@@ -119,6 +125,28 @@ impl LiquidGlass {
     /// How much morphing glass swells while it travels; 1 keeps its size.
     pub fn lift_scale(mut self, scale: f32) -> Self {
         self.lift_scale = scale;
+        self
+    }
+
+    /// How far a held press can pull the glass toward the pointer. The pull
+    /// rubber-bands, so it never quite reaches this, and the glass stretches
+    /// along it like gel; on release it springs back. Zero turns it off.
+    pub fn drag_flex(mut self, flex: impl Into<Pixels>) -> Self {
+        self.drag_flex = flex.into();
+        self
+    }
+
+    /// Swings the light toward the pointer while it hovers or presses, so
+    /// the glints follow it around the rim.
+    pub fn light_follows_pointer(mut self, follows: bool) -> Self {
+        self.light_follows_pointer = follows;
+        self
+    }
+
+    /// Shadows cast by the glass itself, following it as it swells, drags,
+    /// and morphs. They are painted under it, so the rim lenses them.
+    pub fn glass_shadow(mut self, shadows: Vec<BoxShadow>) -> Self {
+        self.shadows = shadows;
         self
     }
 
@@ -194,6 +222,11 @@ struct LiquidGlassState {
     /// Where morphing glass is on its way to the element's bounds.
     body: Option<LiquidRect>,
     lift: Toggle,
+    /// Where the press landed and where the pointer is now, in the window.
+    press_origin: Point<Pixels>,
+    pointer: Point<Pixels>,
+    /// How far a held press has pulled the glass, per axis.
+    drag: [SpringState; 2],
     updated_at: Instant,
 }
 
@@ -203,6 +236,7 @@ pub struct LiquidGlassFrame {
     hitbox: Hitbox,
     shape: GlassShape,
     material: GlassMaterial,
+    shadows: Vec<BoxShadow>,
     presence: f32,
     /// Whether an enclosing group paints this glass as part of its body.
     grouped: bool,
@@ -268,6 +302,9 @@ impl Element for LiquidGlass {
                         touch: point(0.5, 0.5),
                         body: None,
                         lift: Toggle::default(),
+                        press_origin: Point::default(),
+                        pointer: Point::default(),
+                        drag: Default::default(),
                         updated_at: cx.background_executor().now(),
                     }))
                 });
@@ -275,7 +312,7 @@ impl Element for LiquidGlass {
             },
         );
 
-        let (press, hover, presence, touch, lift, body) = {
+        let (press, hover, presence, touch, lift, body, drag) = {
             let mut state = state.borrow_mut();
             let now = cx.background_executor().now();
             let delta = now.duration_since(state.updated_at).as_secs_f32().min(0.1);
@@ -311,6 +348,40 @@ impl Element for LiquidGlass {
                     bounds
                 }
             };
+            let flex = self.drag_flex.as_f32();
+            let pull = if flex > 0. && state.press.on {
+                let reach = state.pointer - state.press_origin;
+                let length = reach.x.as_f32().hypot(reach.y.as_f32());
+                if length > 0. {
+                    let banded = flex * (length / (flex * 3.)).tanh();
+                    [
+                        reach.x.as_f32() / length * banded,
+                        reach.y.as_f32() / length * banded,
+                    ]
+                } else {
+                    [0., 0.]
+                }
+            } else {
+                [0., 0.]
+            };
+            for (axis, target) in state.drag.iter_mut().zip(pull) {
+                if snap {
+                    *axis = SpringState {
+                        position: target,
+                        velocity: 0.,
+                    };
+                    continue;
+                }
+                *axis = config.step(*axis, target, delta);
+                if config.is_settled(*axis, target, 0.01) {
+                    *axis = SpringState {
+                        position: target,
+                        velocity: 0.,
+                    };
+                } else {
+                    moving = true;
+                }
+            }
             if moving {
                 window.request_animation_frame();
             }
@@ -321,6 +392,7 @@ impl Element for LiquidGlass {
                 state.touch,
                 state.lift.phase(),
                 body,
+                point(state.drag[0].position, state.drag[1].position),
             )
         };
 
@@ -344,20 +416,32 @@ impl Element for LiquidGlass {
         if let Some(lifted) = self.lift {
             material = Interpolate::interpolate(material, lifted, lift);
         }
+        let attention = hover.max(press).clamp(0., 1.);
+        if self.light_follows_pointer && attention > 0.001 {
+            let toward = window.mouse_position() - body.center();
+            if toward.x != Pixels(0.) || toward.y != Pixels(0.) {
+                let angle = toward.y.as_f32().atan2(toward.x.as_f32());
+                material.light_angle = turn_toward(material.light_angle, angle, attention);
+            }
+        }
 
         let scale = (1. + (self.hover_scale - 1.) * hover + (self.press_scale - 1.) * press)
             * (1. + (self.lift_scale - 1.) * lift)
             * (0.92 + 0.08 * presence);
-        let grown = size(body.size.width * scale, body.size.height * scale);
+        // A pulled drop stretches along the pull by about as far as it moved
+        // and thins across it, whatever its size.
+        let (pull_x, pull_y) = (drag.x.abs(), drag.y.abs());
+        let grown = size(
+            body.size.width * scale + Pixels(1.2 * pull_x - 0.6 * pull_y),
+            body.size.height * scale + Pixels(1.2 * pull_y - 0.6 * pull_x),
+        );
+        let center = body.center() + point(Pixels(drag.x), Pixels(drag.y));
         let radii = self
             .corner_radii
             .to_pixels(window.rem_size())
             .clamp_radii_for_quad_size(bounds.size);
         let shape = GlassShape {
-            bounds: Bounds::new(
-                body.center() - point(grown.width / 2., grown.height / 2.),
-                grown,
-            ),
+            bounds: Bounds::new(center - point(grown.width / 2., grown.height / 2.), grown),
             corner_radii: Corners {
                 top_left: radii.top_left * scale,
                 top_right: radii.top_right * scale,
@@ -366,12 +450,21 @@ impl Element for LiquidGlass {
             },
         };
 
+        let shadows: Vec<BoxShadow> = self
+            .shadows
+            .iter()
+            .map(|shadow| BoxShadow {
+                color: shadow.color.opacity(presence.clamp(0., 1.)),
+                ..shadow.clone()
+            })
+            .collect();
         let grouped = presence > 0.001
             && window.glass_groups.last().is_some_and(|group| {
                 group.borrow_mut().push(GroupedGlass {
                     shape,
                     press,
                     touch,
+                    shadows: shadows.clone(),
                 });
                 true
             });
@@ -381,6 +474,7 @@ impl Element for LiquidGlass {
             hitbox,
             shape,
             material,
+            shadows,
             presence,
             grouped,
         }
@@ -398,6 +492,13 @@ impl Element for LiquidGlass {
     ) {
         let presence = frame.presence;
         if presence > 0.001 && !frame.grouped {
+            if !frame.shadows.is_empty() {
+                window.paint_drop_shadows(
+                    frame.shape.bounds,
+                    frame.shape.corner_radii,
+                    &frame.shadows,
+                );
+            }
             window.paint_glass(
                 frame.shape.bounds,
                 frame.shape.corner_radii,
@@ -421,6 +522,8 @@ impl Element for LiquidGlass {
             {
                 let mut state = down_state.borrow_mut();
                 state.press.on = true;
+                state.press_origin = event.position;
+                state.pointer = event.position;
                 state.touch = point(
                     ((event.position.x - bounds.origin.x) / bounds.size.width).clamp(0., 1.),
                     ((event.position.y - bounds.origin.y) / bounds.size.height).clamp(0., 1.),
@@ -440,10 +543,17 @@ impl Element for LiquidGlass {
         });
         let move_state = frame.state.clone();
         let move_hitbox = frame.hitbox.clone();
-        window.on_mouse_event(move |_: &MouseMoveEvent, phase, window, _| {
-            if phase == DispatchPhase::Bubble
-                && move_hitbox.is_hovered(window) != move_state.borrow().hover.on
-            {
+        let tracks_pointer = self.drag_flex > Pixels(0.) || self.light_follows_pointer;
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _| {
+            if phase != DispatchPhase::Bubble {
+                return;
+            }
+            let hovered = move_hitbox.is_hovered(window);
+            let mut state = move_state.borrow_mut();
+            if state.press.on {
+                state.pointer = event.position;
+            }
+            if hovered != state.hover.on || (tracks_pointer && (hovered || state.press.on)) {
                 window.refresh();
             }
         });
@@ -454,12 +564,21 @@ impl Element for LiquidGlass {
 /// it prepainted them.
 pub type GlassGroupShapes = Rc<RefCell<Vec<GroupedGlass>>>;
 
-/// One child's shape in a [`GlassGroup`], and how it is being pressed.
-#[derive(Clone, Copy, Debug)]
+/// One child's shape in a [`GlassGroup`], how it is being pressed, and the
+/// shadows it casts.
+#[derive(Clone, Debug)]
 pub struct GroupedGlass {
     shape: GlassShape,
     press: f32,
     touch: Point<f32>,
+    shadows: Vec<BoxShadow>,
+}
+
+/// Turns angle `from` toward `to` by `phase`, the short way round.
+fn turn_toward(from: f32, to: f32, phase: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    let delta = (to - from + PI).rem_euclid(TAU) - PI;
+    from + delta * phase
 }
 
 /// A container whose [`liquid_glass`] children, at any depth, are painted as
@@ -578,6 +697,15 @@ impl Element for GlassGroup {
         window: &mut Window,
         cx: &mut App,
     ) {
+        for glass in grouped.iter() {
+            if !glass.shadows.is_empty() {
+                window.paint_drop_shadows(
+                    glass.shape.bounds,
+                    glass.shape.corner_radii,
+                    &glass.shadows,
+                );
+            }
+        }
         for body in grouped.chunks(crate::GLASS_MAX_SHAPES) {
             let shapes: Vec<GlassShape> = body.iter().map(|glass| glass.shape).collect();
             let mut material = self.material;
@@ -677,6 +805,66 @@ mod tests {
             next_frame(cx, Duration::from_millis(16));
         }
         assert_eq!(glass_width(cx), rest);
+    }
+
+    struct Gel;
+
+    impl Render for Gel {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().child(
+                liquid_glass("gel", GlassMaterial::regular())
+                    .appear(false)
+                    .press_scale(1.)
+                    .drag_flex(px(10.))
+                    .absolute()
+                    .left(px(20.))
+                    .top(px(20.))
+                    .size(px(40.))
+                    .rounded_full(),
+            )
+        }
+    }
+
+    fn glass_center_x(cx: &mut VisualTestContext) -> f32 {
+        cx.update(|window, _| {
+            let glass = window.painted_glasses()[0].shape_bounds();
+            (glass.origin.x.0 + glass.size.width.0 / 2.) / window.scale_factor()
+        })
+    }
+
+    #[crate::test]
+    fn held_presses_pull_the_glass_toward_the_pointer_like_gel(cx: &mut TestAppContext) {
+        let (_, cx) = cx.add_window_view(|_, _| Gel);
+        cx.run_until_parked();
+        assert_eq!(glass_center_x(cx), 40.);
+
+        let start = point(px(40.), px(40.));
+        let pulled = point(px(240.), px(40.));
+        cx.simulate_mouse_move(start, None, Modifiers::none());
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+        cx.simulate_mouse_move(pulled, MouseButton::Left, Modifiers::none());
+        for _ in 0..60 {
+            next_frame(cx, Duration::from_millis(16));
+        }
+        let center = glass_center_x(cx);
+        assert!(
+            center > 45. && center < 50.,
+            "pulled glass sits at {center}"
+        );
+
+        cx.simulate_mouse_up(pulled, MouseButton::Left, Modifiers::none());
+        for _ in 0..120 {
+            next_frame(cx, Duration::from_millis(16));
+        }
+        assert_eq!(glass_center_x(cx), 40.);
+    }
+
+    #[test]
+    fn angles_turn_the_short_way_round() {
+        use std::f32::consts::PI;
+        let turned = turn_toward(0.9 * PI, -0.9 * PI, 0.5);
+        assert!((turned.abs() - PI).abs() < 1e-4, "{turned}");
+        assert!((turn_toward(0., 1., 0.25) - 0.25).abs() < 1e-6);
     }
 
     struct Row {

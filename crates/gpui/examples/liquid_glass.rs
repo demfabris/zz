@@ -586,6 +586,8 @@ impl Render for LiquidGlassDemo {
             let slot = self.tool_slot(index);
             layer = layer.child(
                 liquid_glass(("tool", index), material)
+                    .drag_flex(px(10.))
+                    .light_follows_pointer(true)
                     .absolute()
                     .left(slot.origin.x)
                     .top(slot.origin.y)
@@ -628,6 +630,8 @@ impl Render for LiquidGlassDemo {
                     |(index, label)| {
                         liquid_glass(("row", index), material)
                             .press_scale(1.22)
+                            .drag_flex(px(8.))
+                            .glass_shadow(soft_shadow(0.16))
                             .size(px(52.))
                             .rounded_full()
                             .flex()
@@ -649,6 +653,9 @@ impl Render for LiquidGlassDemo {
                 GlassMaterial::frosted().light_angle(material.light_angle),
             )
             .shown(self.card_shown)
+            .drag_flex(px(14.))
+            .light_follows_pointer(true)
+            .glass_shadow(soft_shadow(0.22))
             .press_scale(1.03)
             .absolute()
             .left(stage.size.width - px(320.))
@@ -774,6 +781,7 @@ impl Render for LiquidGlassDemo {
                 .appear(false)
                 .morph(SpringConfig::new(260., 22., 1.))
                 .press_scale(1.06)
+                .glass_shadow(soft_shadow(0.22))
                 .absolute()
                 .left(lens.origin.x)
                 .top(lens.origin.y)
@@ -823,6 +831,16 @@ fn material_snippet(material: &GlassMaterial) -> String {
         tint.h, tint.s, tint.l, tint.a
     ));
     lines.join("\n    ")
+}
+
+fn soft_shadow(alpha: f32) -> Vec<gpui::BoxShadow> {
+    vec![gpui::BoxShadow {
+        color: hsla(0., 0., 0., alpha),
+        offset: point(px(0.), px(10.)),
+        blur_radius: px(26.),
+        spread_radius: px(-2.),
+        inset: false,
+    }]
 }
 
 fn centered(center: Point<Pixels>, extent: gpui::Size<Pixels>, scale: f32) -> Bounds<Pixels> {

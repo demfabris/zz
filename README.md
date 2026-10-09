@@ -40,8 +40,15 @@ light, and shapes painted as one body melt into each other.
 // Any element, in its own shape.
 div().size(px(64.)).rounded_full().glass(GlassMaterial::regular())
 
-// Glass that swells and glows where it is pressed, and lenses in and out.
-liquid_glass("play", GlassMaterial::regular()).size(px(44.)).rounded_full().child("▶")
+// Glass that swells and glows where it is pressed, stretches like gel when a
+// held press is dragged, and lenses in and out.
+liquid_glass("play", GlassMaterial::regular())
+    .drag_flex(px(10.))
+    .light_follows_pointer(true)
+    .glass_shadow(shadows)
+    .size(px(44.))
+    .rounded_full()
+    .child("▶")
 
 // A tab bar pill that slides to the selected tab like a drop, lifting as it goes.
 liquid_glass("pill", GlassMaterial::regular())

@@ -43,8 +43,11 @@
 # refresh-client -f -F      client flags set                  client flags set               PROVED
 # refresh-client -A -B -C   control-client only               control-client only            PROVED
 # refresh-client -t         target client, missing-client     same                           PROVED
+# refresh-client -l         OSC 52 query to the client's      same, and the answer becomes   PROVED
+#                             terminal, answer stored as a      a new automatic buffer
+#                             new automatic buffer
 # refresh-client -c -D -L   pans a terminal client's view     loudly unsupported             DECLARED
-#   -R -U -l -r [adjust]                                                                      clients.interactive-refresh
+#   -R -U -r [adjust]                                                                         clients.interactive-refresh
 # capture-pane -p -S -E     the requested line range, one     same                           PROVED
 #                             line per row of it
 # capture-pane -J -q -T     join, quiet, trailing positions   same                           PROVED
@@ -326,6 +329,10 @@ state_of() {
     -F 'P #{session_name}:#{window_index}.#{pane_index} mode=#{pane_in_mode}/#{pane_mode} #{pane_width}x#{pane_height} #{pane_title}' 2>&1
   side_command "$side" list-buffers -F 'B #{buffer_name} #{buffer_size}' 2>&1
   side_command "$side" list-clients -F 'C #{client_session} #{client_width}x#{client_height} #{client_prefix}' 2>&1
+}
+
+buffer_is() {
+  [ "$(side_command "$1" show-buffer 2>/dev/null)" = "$2" ]
 }
 
 outer_pane_is() {
@@ -704,7 +711,7 @@ declare -A RECORD_OWNERS=([unattributed]=0)
 
 case_owner() {
   case "$1" in
-  refresh-pan-* | refresh-clipboard | refresh-adjustment | client-tree-open)
+  refresh-pan-* | refresh-adjustment | client-tree-open)
     printf 'gap:clients.interactive-refresh'
     ;;
   capture-* )
@@ -1548,7 +1555,16 @@ refresh_client_cases() {
   case_run refresh-pan-left record "$INTERACTIVE_REFRESH" -- refresh-client -L
   case_run refresh-pan-right record "$INTERACTIVE_REFRESH" -- refresh-client -R
   case_run refresh-pan-cursor record "$INTERACTIVE_REFRESH" -- refresh-client -c
-  case_run refresh-clipboard record "$INTERACTIVE_REFRESH" -- refresh-client -l
+  tmux_outer_command set-option -g set-clipboard on
+  tmux_outer_command set-buffer OUTER-CLIP
+  case_run refresh-clipboard same '' -- refresh-client -l
+  wait_for 'the pin to store the outer clipboard' buffer_is tmux OUTER-CLIP
+  wait_for 'zz to store the outer clipboard' buffer_is zz OUTER-CLIP
+  case_run refresh-clipboard-buffer same '' -- show-buffer
+  side_command zz delete-buffer
+  side_command tmux delete-buffer
+  tmux_outer_command set-option -gu set-clipboard
+  tmux_outer_command delete-buffer
   case_run refresh-adjustment record "$INTERACTIVE_REFRESH" -- refresh-client 5
   restore_case refresh-restored
 }

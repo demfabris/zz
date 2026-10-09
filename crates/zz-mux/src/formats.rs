@@ -3297,9 +3297,11 @@ impl MuxEngine {
                 .join(" ");
         }
         if let Some(facts) = self.pane_runtime_facts(pane.id) {
-            context
-                .pane_current_command
-                .clone_from(&facts.current_command);
+            if !pane.dead {
+                context
+                    .pane_current_command
+                    .clone_from(&facts.current_command);
+            }
             if pane.dead {
                 context.pane_current_path.clear();
             } else {
@@ -3325,6 +3327,9 @@ impl MuxEngine {
             context
                 .pane_start_path
                 .clone_from(&context.pane_current_path);
+        }
+        if context.pane_current_command.is_empty() && matches!(pane.kind, PaneKind::Terminal) {
+            context.pane_current_command = self.pane_command_fallback(pane.id);
         }
         let border_status = self.pane_border_status(window.id);
         if let Some(cell) = window
@@ -6483,7 +6488,7 @@ fn quote_style(value: &[u8]) -> RawText {
     RawText::from_bytes(output)
 }
 
-fn quote_argument(value: &str) -> String {
+pub(crate) fn quote_argument(value: &str) -> String {
     if value.is_empty() {
         return "''".to_owned();
     }

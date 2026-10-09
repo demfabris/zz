@@ -83,6 +83,13 @@ pub(crate) enum AgentRequest {
     AcknowledgePromptRestore {
         reclaim_id: u64,
     },
+    AnswerQuestion {
+        request_id: u64,
+        answers: Vec<zz_protocol::AgentQuestionAnswer>,
+    },
+    StopTask {
+        task_id: String,
+    },
 }
 
 /// What one drain hands the agent controller.
@@ -3520,6 +3527,17 @@ impl MuxClient {
             AgentRequest::Replay { from_seq } => client.agent_replay(pane, from_seq),
             AgentRequest::AcknowledgePromptRestore { reclaim_id } => {
                 client.agent_acknowledge_prompt_restore(pane, reclaim_id)
+            }
+            AgentRequest::AnswerQuestion {
+                request_id,
+                answers,
+            } => client.send(&zz_protocol::ProtocolMessage::AgentAnswerQuestion {
+                pane,
+                request_id,
+                answers,
+            }),
+            AgentRequest::StopTask { task_id } => {
+                client.send(&zz_protocol::ProtocolMessage::AgentStopTask { pane, task_id })
             }
         };
         if let Err(error) = sent {

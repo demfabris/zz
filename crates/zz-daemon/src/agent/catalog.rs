@@ -9,7 +9,9 @@ use serde_json::Value;
 use zz_protocol::{AgentAutoApprove, AgentProvider};
 
 use super::{
-    host::{PaneRunner, RuntimeChannels},
+    claude::run_claude_runtime,
+    codex::run_codex_runtime,
+    host::{PaneRunner, RuntimeChannels, native_claude, native_codex},
     runtime::{AgentSpawnConfig, RuntimeCommand, RuntimeControl, run_agent_runtime},
     stream::AgentStreamPayload,
 };
@@ -20,6 +22,20 @@ pub(crate) async fn load(
     cwd: PathBuf,
 ) -> Result<Value, String> {
     config.auto_approve = AgentAutoApprove::Off;
+    if let Some(command) = native_claude(&config, provider) {
+        let workspace = config.workspace;
+        let runner: PaneRunner = Box::new(move |channels| {
+            Box::pin(run_claude_runtime(command, workspace, provider, channels))
+        });
+        return load_with_runner(cwd, runner).await;
+    }
+    if let Some(command) = native_codex(&config, provider) {
+        let workspace = config.workspace;
+        let runner: PaneRunner = Box::new(move |channels| {
+            Box::pin(run_codex_runtime(command, workspace, provider, channels))
+        });
+        return load_with_runner(cwd, runner).await;
+    }
     let runner: PaneRunner = Box::new(move |channels| {
         Box::pin(run_agent_runtime(
             config,

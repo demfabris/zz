@@ -25,7 +25,7 @@ const STARTUP_REENTRY_CAPABILITY_PREFIX: &str = "zz-startup-reentry=";
 pub const CLIENT_EXITS_ON_DETACH_CAPABILITY: &str = "client-exits-on-detach-v1";
 const STARTUP_REENTRY_ENVIRONMENT_VARIABLE: &str = "ZZ_STARTUP_REENTRY";
 #[cfg(feature = "daemon")]
-const PARENT_CLAUDE_SESSION_ENVIRONMENT: &[&str] = &[
+pub(crate) const PARENT_CLAUDE_SESSION_ENVIRONMENT: &[&str] = &[
     "CLAUDECODE",
     "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDE_CODE_SESSION_ID",

@@ -76,4 +76,15 @@ wait_option @hev-closed
 main_client set-hook -gu client-created
 main_client set-hook -gu client-closed
 
+main_client set-option -t w @hev-flag 0
+main_client set-option -g @hev-monlog ''
+main_client set-hook -t w -T -B '@hevmon::#{@hev-flag}' "set -gaF @hev-monlog '#{hook_value}+'"
+sleep 1.5
+for value in 1 0 2; do
+    main_client set-option -t w @hev-flag "$value"
+    sleep 1.5
+done
+main_client set-hook -t w -u -B @hevmon
+seen="$seen monitor=$(main_client show-options -gv @hev-monlog)"
+
 main_client set-environment -g HOOKS_EVENTS_OUTPUT "$(echo $seen)"

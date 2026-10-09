@@ -2061,6 +2061,7 @@ struct FormatMonitorEntry {
     scope: FormatMonitorScope,
     format: String,
     session: Option<SessionId>,
+    notify_true: bool,
     previous: BTreeMap<FormatMonitorTarget, String>,
 }
 
@@ -10616,6 +10617,9 @@ impl MuxEngine {
             .len()
             .saturating_sub(parsed_options.positionals.len());
         let (options, positional) = parse_command_options("set-hook", &invocation.args)?;
+        if options.has("-E") {
+            return self.set_hook_event(context, &options, &positional, hooks);
+        }
         if let Some(subscription) = options.value("-B") {
             let subscription = subscription.to_owned();
             if positional.len() > 1 {
@@ -10731,6 +10735,66 @@ impl MuxEngine {
         self.set_hook_array_option(target, table_option.name, parsed.index, value, &options)
     }
 
+    fn set_hook_event(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+        positional: &[RawText],
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let Some(argument) = positional.first() else {
+            return Err(ServerError::InvalidCommand("missing argument".to_owned()));
+        };
+        if positional.len() != 1 {
+            return Err(ServerError::InvalidCommand("too many arguments".to_owned()));
+        }
+        let (name, target_context) = self.expand_hook_name(context, options, argument, hooks)?;
+        if !name.starts_with('@') {
+            return Err(ServerError::InvalidCommand(
+                "event name must start with @".to_owned(),
+            ));
+        }
+        let Some(commands) = self
+            .user_hook_commands(&target_context, &name)
+            .filter(|commands| !commands.is_empty())
+        else {
+            return Ok(Execution::default());
+        };
+        let mut hook_context = target_context;
+        let mut variables = BTreeMap::from([("hook_event".to_owned(), name.clone())]);
+        if let Some(session) = hook_context.session {
+            variables.insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
+            if let Some(state) = self.state.sessions.get(&session) {
+                variables.insert(
+                    HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+            }
+        }
+        if let Some(window) = hook_context.window
+            && let Some(state) = self.state.windows.get(&window)
+        {
+            variables.insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+            variables.insert(
+                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                state.name.clone(),
+            );
+            variables.insert(
+                HOOK_WINDOW_INDEX_CONTEXT_FORMAT.to_owned(),
+                state.index.to_string(),
+            );
+        }
+        if let Some(pane) = hook_context.pane {
+            variables.insert(HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string());
+        }
+        hook_context.format_variables = variables;
+        Ok(Execution::effect(MuxEffect::RunHook {
+            name,
+            commands,
+            context: hook_context,
+        }))
+    }
+
     fn set_hook_monitor(
         &mut self,
         context: &ExecutionContext,
@@ -10794,6 +10858,7 @@ impl MuxEngine {
             scope,
             format,
             session: context.session,
+            notify_true: options.has("-T"),
             previous: BTreeMap::new(),
         });
         Ok(execution)
@@ -10915,7 +10980,9 @@ impl MuxEngine {
             .iter_mut()
             .find(|monitor| monitor.id == id)?;
         match monitor.previous.insert(target, value.to_owned()) {
-            Some(last) if last != value => Some(last),
+            Some(last) if last != value && (!monitor.notify_true || format_true(value)) => {
+                Some(last)
+            }
             Some(_) | None => None,
         }
     }

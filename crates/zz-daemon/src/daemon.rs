@@ -12911,10 +12911,63 @@ impl Shared {
         kind: ClientKind,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_buffer_command_args("wait-for", args, &[], &['L', 'S', 'U'])?;
+        let parsed = parse_buffer_command_args("wait-for", args, &['w'], &['L', 'S', 'U', 'l'])?;
         let [name] = parsed.positional.as_slice() else {
             return Err(ServerError::CommandParse(WAIT_FOR_USAGE.to_owned()).into());
         };
+        if parsed.has('l') {
+            let inner = self.inner.lock();
+            let lines = inner
+                .wait_channels
+                .get(name)
+                .map(|channel| {
+                    channel
+                        .waiters
+                        .iter()
+                        .chain(&channel.lockers)
+                        .map(|item| format!("{}\n", client_format_name(&inner, item.client)))
+                        .collect::<String>()
+                })
+                .unwrap_or_default();
+            return Ok(Execution {
+                output: lines.into(),
+                ..Execution::default()
+            });
+        }
+        if let Some(waiter) = parsed.value('w') {
+            let wake = {
+                let mut inner = self.inner.lock();
+                let names = inner.wait_channels.get(name).map(|channel| {
+                    (
+                        channel
+                            .waiters
+                            .iter()
+                            .position(|item| client_format_name(&inner, item.client) == waiter),
+                        channel
+                            .lockers
+                            .iter()
+                            .position(|item| client_format_name(&inner, item.client) == waiter),
+                    )
+                });
+                let channel = inner.wait_channels.get_mut(name);
+                let item = match (channel, names) {
+                    (Some(channel), Some((Some(index), _))) => channel.waiters.remove(index),
+                    (Some(channel), Some((None, Some(index)))) => channel.lockers.remove(index),
+                    _ => None,
+                };
+                if inner.wait_channels.get(name).is_some_and(|channel| {
+                    !channel.locked
+                        && !channel.woken
+                        && channel.waiters.is_empty()
+                        && channel.lockers.is_empty()
+                }) {
+                    inner.wait_channels.remove(name);
+                }
+                item.map(|item| item.continuation)
+            };
+            self.wake_wait_items(wake);
+            return Ok(Execution::default());
+        }
         if parsed.has('S') {
             self.signal_wait_channel(name);
             return Ok(Execution::default());

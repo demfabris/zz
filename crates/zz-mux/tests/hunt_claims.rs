@@ -5,7 +5,8 @@ use zz_mux::{
     TmuxSortOrder, parse_config,
 };
 use zz_protocol::{
-    Axis, ChooseTreeKind, CommandInvocation, KeyToken, LayoutNode, PaneId, ServerError,
+    Axis, ChooseTreeKind, ChooserPreviewSize, CommandInvocation, KeyToken, LayoutNode, PaneId,
+    ServerError,
 };
 use zz_terminal::{CopyModeAction, CopySelectionMode, TerminalViewAction};
 
@@ -1534,7 +1535,7 @@ fn copy_mode_composes_hide_position_with_scroll_exit() {
 }
 
 #[test]
-fn choosers_take_a_key_format_and_refuse_the_large_preview() {
+fn choosers_take_a_key_format_and_the_preview_flags() {
     let mut engine = MuxEngine::default();
     let mut context = ExecutionContext::default();
     engine
@@ -1552,6 +1553,7 @@ fn choosers_take_a_key_format_and_refuse_the_large_preview() {
         tree.effects,
         [MuxEffect::ChooseTree {
             pane,
+            preview: ChooserPreviewSize::Off,
             kind: ChooseTreeKind::Panes,
             info_preview: false,
             sessions_only: false,
@@ -1574,6 +1576,7 @@ fn choosers_take_a_key_format_and_refuse_the_large_preview() {
         buffer.effects,
         [MuxEffect::ChooseBuffer {
             pane,
+            preview: ChooserPreviewSize::Off,
             filter: None,
             format: None,
             kill_source: false,
@@ -1584,19 +1587,31 @@ fn choosers_take_a_key_format_and_refuse_the_large_preview() {
         }]
     );
 
-    for (name, flags) in [
-        ("choose-tree", &["-NN"][..]),
-        ("choose-tree", &["-N", "-N"][..]),
-        ("choose-buffer", &["-NN"][..]),
-        ("choose-buffer", &["-N", "-N"][..]),
+    for (name, flags, expected) in [
+        ("choose-tree", &[][..], ChooserPreviewSize::Normal),
+        ("choose-tree", &["-N"][..], ChooserPreviewSize::Off),
+        ("choose-tree", &["-NN"][..], ChooserPreviewSize::Big),
+        ("choose-tree", &["-N", "-N"][..], ChooserPreviewSize::Big),
+        ("choose-tree", &["-NNN"][..], ChooserPreviewSize::Big),
+        ("choose-client", &[][..], ChooserPreviewSize::Normal),
+        ("choose-client", &["-N"][..], ChooserPreviewSize::Off),
+        ("choose-client", &["-NN"][..], ChooserPreviewSize::Big),
+        ("choose-buffer", &[][..], ChooserPreviewSize::Normal),
+        ("choose-buffer", &["-N"][..], ChooserPreviewSize::Off),
+        ("choose-buffer", &["-NN"][..], ChooserPreviewSize::Big),
+        ("choose-buffer", &["-N", "-N"][..], ChooserPreviewSize::Big),
     ] {
-        assert_eq!(
-            engine
-                .execute(&mut context, &command(name, flags))
-                .unwrap_err(),
-            ServerError::UnsupportedCommand(format!("{name} -NN")),
-            "{name} {flags:?} must ledger the pin's large preview"
-        );
+        let effects = engine
+            .execute(&mut context, &command(name, flags))
+            .unwrap()
+            .effects;
+        let preview = match effects.as_slice() {
+            [MuxEffect::ChooseTree { preview, .. } | MuxEffect::ChooseBuffer { preview, .. }] => {
+                *preview
+            }
+            other => panic!("{name} {flags:?} opened no chooser: {other:?}"),
+        };
+        assert_eq!(preview, expected, "{name} {flags:?}");
     }
 }
 

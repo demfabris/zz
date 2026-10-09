@@ -60,11 +60,15 @@ orchestrator never runs the full suite per item.
      (refresh its `compat/.cache` from the main checkout), then goes to review.
    - Merge checks, narrow: `compat/catchup/cargo.sh clippy -p <touched crates> --all-targets
      --all-features -- -D warnings`, the item's own filtered tests, and `just compat check` if the
-     registry, oracle or manifest tests changed.
+     registry, oracle or manifest tests changed. A merge that changes `zz-protocol` (wire types,
+     `key.rs` default tables, the catalog) also runs `cargo.sh test -p zz-client`: its which-key and
+     reducer tests read those tables (pin.keys-copy's 3.8 `T` binding broke two, 2026-10-09).
    - `ledger.py set <id> merged --sha <merge sha>`, commit the ledger, push `main`.
    - Delete the branch locally and on origin. Start the next ready item in the same slot
      (`wt.sh item` switches the warm worktree to a new branch), or `wt.sh rm <slot>` if nothing is
-     ready. No worktree outlives its work.
+     ready. No worktree outlives its work. A slot whose branch is in review stays on that branch
+     until the review reports: Codex reads `git diff main...HEAD` in that worktree, so the next item
+     starts in another slot. [The capture-e-links review saw an empty diff after its slot switched.]
 5. **Milestones**: at M1, M2 and M3 run the [full suite](#full-suite-milestones-only) once on `main`.
 
 Orchestrator shell habits: never `pkill -f <pattern>` (it matches the shell running it; list pids

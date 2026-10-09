@@ -78,7 +78,11 @@ runtime_probe() {
     error_file="$work/runtime-$label.err"
     expected_error_file="$work/runtime-$label.expected-err"
     check_count=$((check_count + 1))
-    printf '%s\n' "$expected_error" >"$expected_error_file"
+    if [ -n "$expected_error" ]; then
+        printf '%s\n' "$expected_error" >"$expected_error_file"
+    else
+        : >"$expected_error_file"
+    fi
     set +e
     main_client "$@" >"$output_file" 2>"$error_file"
     status=$?
@@ -108,7 +112,7 @@ probe typed-target 1 '' \
 expect_key typed-target-preserved F12 'F12=display-message -p preserved'
 
 main_client set-option -s 'command-alias[90]' \
-    'zzpanes10i=display-panes -b'
+    'zzpanes10i=display-panes -Z'
 main_client set-option -s 'command-alias[91]' \
     'zzdisplay10i=display-message -p'
 
@@ -116,7 +120,7 @@ bindings="$work/bindings.conf"
 printf '%s\n' \
     'bind-key -T zzpanes10i F1 display-panes { display -p typed }' \
     'bind-key -T zzpanes10i F2 display-panes "{ display -p quoted }"' \
-    'bind-key -T zzpanes10i F3 display-panes -bN { display -p flags }' \
+    'bind-key -T zzpanes10i F3 display-panes -kNZ { display -p flags }' \
     'bind-key -T zzpanes10i F4 display-panes -- { display -p boundary }' \
     'bind-key -T zzpanes10i F5 displayp { display -p builtin-alias }' \
     'bind-key -T zzpanes10i F6 display-pa { display -p builtin-prefix }' \
@@ -132,7 +136,7 @@ expect_key typed-template F1 \
 expect_key quoted-template F2 \
     'F2=display-panes "{ display -p quoted }"'
 expect_key valueless-flags F3 \
-    'F3=display-panes -Nb { display-message -p flags }'
+    'F3=display-panes -NZk { display-message -p flags }'
 expect_key boundary F4 \
     'F4=display-panes { display-message -p boundary }'
 expect_key builtin-alias F5 \
@@ -140,7 +144,7 @@ expect_key builtin-alias F5 \
 expect_key builtin-prefix F6 \
     'F6=display-panes { display-message -p builtin-prefix }'
 expect_key user-alias F7 \
-    'F7=display-panes -b { display-message -p outer-user }'
+    'F7=display-panes -Z { display-message -p outer-user }'
 expect_key child-alias F8 \
     'F8=display-panes { display-message -p child-alias }'
 expect_key child-prefix F9 \
@@ -172,17 +176,20 @@ probe arity 1 '' \
     'command display-panes: too many arguments (need at most 1)'
 expect_key arity-preserved F12 'F12=display-message -p preserved'
 
-runtime_probe invalid-duration 1 'no current client' \
+runtime_probe invalid-duration 1 'delay invalid' \
     display-panes -d not-a-delay
-runtime_probe valid-duration 1 'no current client' \
+runtime_probe removed-flag 1 'command display-panes: unknown flag -b' \
+    display-panes -b -d 0
+runtime_probe valid-duration 0 '' \
     display-panes -d 0
+main_client copy-mode -q
 
-if [ "$check_count" -ne 22 ]; then
+if [ "$check_count" -ne 23 ]; then
     fail_check "check-count-$check_count"
 fi
 
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g ARGS_PARSE_DISPLAY_PANES clean:22
+    main_client set-environment -g ARGS_PARSE_DISPLAY_PANES clean:23
 else
     failure_labels="$(paste -sd, "$work/failures")"
     failure_side="${ZZ_SMOKE_CANARY:-missing-canary}"

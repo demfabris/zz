@@ -1049,6 +1049,40 @@ client_case() {
   ROW_MASK=
 }
 
+# THE PREVIEW FLAGS, -N and -NN. mode_tree_start (mode-tree.c:580-589) opens
+# every mode tree with a draw callback - the window tree, the buffer tree and
+# the client tree all have one - with its preview off for one -N and with the
+# big preview, a list a quarter of the screen high, for two. Each chooser is
+# opened both ways from a prefix binding, then `v` is typed once: it cycles
+# from the state the flag set (off goes to big, big goes to normal,
+# mode-tree.c:1801-1808), so the flag has to have set the mode's own preview
+# state and not just its first draw. The client tree compares through
+# client_row_mask, as in client_case.
+PREVIEW_FLAG_KEY=Y
+preview_flag_step() {
+  local command="$1" flags="$2" open_needle="$3" cycled_needle="$4" name="$5"
+  run_on_both bind-key -T prefix "$PREVIEW_FLAG_KEY" "$command" "$flags"
+  prefix_step "$open_needle" "$PREVIEW_FLAG_KEY"
+  verdict "preview-flag-$name-open" same
+  step "$cycled_needle" v
+  verdict "preview-flag-$name-cycled" same
+  step 'MARK-previewflags' q
+  verdict "preview-flag-$name-closed" same
+}
+preview_flags_case() {
+  CASE_LABEL=preview-flags
+  mark_both previewflags
+  preview_flag_step choose-tree -N '(0)' '(sort: index)' tree-off
+  preview_flag_step choose-tree -NN '(sort: index)' '(sort: index)' tree-big
+  preview_flag_step choose-buffer -N '(0)' '(sort: creation)' buffer-off
+  preview_flag_step choose-buffer -NN '(sort: creation)' '(sort: creation)' buffer-big
+  ROW_MASK=client_row_mask
+  preview_flag_step choose-client -N 'session cho' '(sort: name)' client-off
+  preview_flag_step choose-client -NN '(sort: name)' '(sort: name)' client-big
+  ROW_MASK=
+  run_on_both unbind-key -T prefix "$PREVIEW_FLAG_KEY"
+}
+
 # THE ZOOM, -Z. mode_tree_zoom (mode-tree.c:613) reads WINDOW_ZOOMED first and
 # calls window_zoom only when the window was not zoomed already; mode_tree_free
 # unzooms only in that case. Both halves are driven here, in a window split so
@@ -1173,6 +1207,7 @@ run_cases() {
   find_window_case
   command_output_case
   client_case
+  preview_flags_case
   zoom_case
   tall_case
   styles_case

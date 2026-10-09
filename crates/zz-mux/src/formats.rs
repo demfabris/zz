@@ -2922,7 +2922,9 @@ impl MuxEngine {
         };
         let Some(cell) = pane
             .filter(|pane| window.panes.contains_key(pane))
-            .and_then(|pane| window.displayed_pane_cell(pane, self.pane_border_status(window.id)))
+            .and_then(|pane| {
+                window.displayed_pane_cell(pane, self.displayed_pane_border_status(window.id))
+            })
         else {
             return geometry;
         };
@@ -3339,6 +3341,7 @@ impl MuxEngine {
             context.pane_unzoomed_width = Some(cell.sx);
             context.pane_unzoomed_height = Some(cell.sy);
         }
+        let border_status = self.displayed_pane_border_status(window.id);
         let geometry = window
             .displayed_pane_cell(pane.id, border_status)
             .map(|geometry| (geometry.sx, geometry.sy, geometry.xoff, geometry.yoff));

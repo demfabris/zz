@@ -59,16 +59,11 @@ fn rename_and_publication_keep_the_earliest_deadline() {
 }
 
 #[test]
-fn stale_cancellations_leave_newer_display_silence_and_message_deadlines() {
+fn stale_cancellations_leave_newer_silence_and_message_deadlines() {
     let shared = Shared::new(1);
     let client = ClientId(1);
     let window = WindowId(1);
     let now = Instant::now();
-    let display = DisplayPanesDeadline {
-        client,
-        token: 2,
-        deadline: now,
-    };
     let silence = SilenceDeadline {
         window,
         token: 2,
@@ -80,11 +75,6 @@ fn stale_cancellations_leave_newer_display_silence_and_message_deadlines() {
         deadline: now,
     };
     let mut deadlines = Deadlines::default();
-    deadlines.insert(
-        TimerKey::DisplayPanes(client),
-        now,
-        Expiry::DisplayPanes(display),
-    );
     deadlines.insert(TimerKey::Silence(window), now, Expiry::Silence(silence));
     deadlines.insert(
         TimerKey::ClientMessage(client),
@@ -93,13 +83,12 @@ fn stale_cancellations_leave_newer_display_silence_and_message_deadlines() {
     );
     for token in [1, 2] {
         for input in [
-            TimerInput::DisplayPanes(DisplayPanesDeadlineCommand::Cancel { client, token }),
             TimerInput::Silence(SilenceDeadlineCommand::Cancel { window, token }),
             TimerInput::ClientMessage(ClientMessageDeadlineCommand::Cancel { client, token }),
         ] {
             shared.schedule_timer(&mut deadlines, &input);
         }
-        assert_eq!(deadlines.order.len(), if token == 1 { 3 } else { 0 });
+        assert_eq!(deadlines.order.len(), if token == 1 { 2 } else { 0 });
     }
 }
 

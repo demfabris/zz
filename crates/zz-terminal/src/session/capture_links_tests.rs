@@ -480,3 +480,188 @@ fn a_resized_or_recoloured_frozen_revision_keeps_its_output_marks() {
         .expect("reflowed revision");
     assert_eq!(wide.output_rows(), [1]);
 }
+
+fn e_links_screen() -> Terminal<'static, 'static> {
+    let mut terminal = new_terminal(80, 20, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    let bytes = [
+        format!("{} {}\r\n", osc8("http://a", "aa"), osc8("http://b", "bb")),
+        format!(
+            "{}{}\r\n",
+            osc8("http://a", "again"),
+            osc8("http://c", "cc")
+        ),
+        format!("\x1b[1;31m{}\x1b[0m tail\r\n", osc8("http://s", "red")),
+        "\x1b]8;;http://m\x07x\x1b[4my\x1b[24mz\x1b]8;;\x07\x1b[32mgreen\x1b[0m\r\n".to_owned(),
+        "\x1b]8;;http://q\x07a\x1b[1mb\x1b]8;;\x07\x1b[0m\r\n".to_owned(),
+        format!(
+            "{} {}\r\n",
+            osc8("http://x\\y", "ab"),
+            osc8("http://y", "cd")
+        ),
+        format!("pre {} post\r\n", osc8("http://w", &"0".repeat(90))),
+        format!("{}\r\n", osc8("http://t", "ab  ")),
+        format!("x{}\r\n", osc8("http://z", "y")),
+        format!("{}z\r\n", osc8("http://u", "一二")),
+        "\x1b]8;;http://n\x07one\r\ntwo\x1b]8;;\x07 three\r\n".to_owned(),
+        format!("\x1b[7m{}\r\nNEXT", osc8("http://r", "rev")),
+    ]
+    .concat();
+    feed(&mut terminal, &mut filter, bytes.as_bytes());
+    terminal
+}
+
+#[test]
+fn escaped_capture_wraps_links_in_osc_8_like_the_pin() {
+    let terminal = e_links_screen();
+    let filter = EngineFilter::default();
+    let rows = CaptureOptions {
+        start: CaptureBoundary::Relative(0),
+        end: CaptureBoundary::Relative(14),
+        ..CaptureOptions::default()
+    };
+    assert_eq!(
+        capture(
+            &terminal,
+            &filter,
+            CaptureOptions {
+                escape_sequences: true,
+                ..rows
+            }
+        ),
+        [
+            "\x1b]8;;http://a\x1b\\aa\x1b]8;;\x1b\\ \x1b]8;;http://b\x1b\\bb\x1b]8;;\x1b\\",
+            "\x1b]8;;http://a\x1b\\again\x1b]8;;http://c\x1b\\cc\x1b]8;;\x1b\\",
+            "\x1b[1m\x1b[31m\x1b]8;;http://s\x1b\\red\x1b[0m\x1b]8;;\x1b\\ tail",
+            "\x1b]8;;http://m\x1b\\x\x1b[4my\x1b[0mz\x1b[32m\x1b]8;;\x1b\\green\x1b[39m",
+            "\x1b]8;;http://q\x1b\\a\x1b[1mb\x1b[0m\x1b]8;;\x1b\\",
+            "\x1b]8;;http://x\\\\y\x1b\\ab\x1b]8;;\x1b\\ \x1b]8;;http://y\x1b\\cd\x1b]8;;\x1b\\",
+            "pre \x1b]8;;http://w\x1b\\0000000000000000000000000000000000000000000000000000000000000000000000000000\x1b]8;;\x1b\\",
+            "00000000000000 post",
+            "\x1b]8;;http://t\x1b\\ab  \x1b]8;;\x1b\\",
+            "x\x1b]8;;http://z\x1b\\y\x1b]8;;\x1b\\",
+            "\x1b]8;;http://u\x1b\\一二\x1b]8;;\x1b\\z",
+            "\x1b]8;;http://n\x1b\\one\x1b]8;;\x1b\\",
+            "\x1b]8;;http://n\x1b\\two\x1b]8;;\x1b\\ three",
+            "\x1b[7m\x1b]8;;http://r\x1b\\rev\x1b[0m\x1b]8;;\x1b\\",
+            "\x1b[7mNEXT\x1b[0m",
+        ]
+        .join("\n")
+    );
+    assert_eq!(
+        capture(
+            &terminal,
+            &filter,
+            CaptureOptions {
+                escape_sequences: true,
+                join_wrapped: true,
+                preserve_trailing: true,
+                ..rows
+            }
+        ),
+        [
+            "\x1b]8;;http://a\x1b\\aa\x1b]8;;\x1b\\ \x1b]8;;http://b\x1b\\bb\x1b]8;;\x1b\\",
+            "\x1b]8;;http://a\x1b\\again\x1b]8;;http://c\x1b\\cc\x1b]8;;\x1b\\",
+            "\x1b[1m\x1b[31m\x1b]8;;http://s\x1b\\red\x1b[0m\x1b]8;;\x1b\\ tail",
+            "\x1b]8;;http://m\x1b\\x\x1b[4my\x1b[0mz\x1b[32m\x1b]8;;\x1b\\green",
+            "\x1b[39m\x1b]8;;http://q\x1b\\a\x1b[1mb\x1b[1m\x1b]8;;\x1b\\",
+            "\x1b[0m\x1b]8;;http://x\\\\y\x1b\\ab\x1b]8;;\x1b\\ \x1b]8;;http://y\x1b\\cd\x1b]8;;\x1b\\",
+            "pre \x1b]8;;http://w\x1b\\0000000000000000000000000000000000000000000000000000000000000000000000000000\x1b]8;;\x1b\\00000000000000 post",
+            "\x1b]8;;http://t\x1b\\ab  \x1b]8;;\x1b\\",
+            "x\x1b]8;;http://z\x1b\\y\x1b]8;;http://z\x1b\\\x1b]8;;\x1b\\",
+            "\x1b]8;;http://u\x1b\\一二\x1b]8;;\x1b\\z",
+            "\x1b]8;;http://n\x1b\\one\x1b]8;;\x1b\\",
+            "two three",
+            "\x1b[7m\x1b]8;;http://r\x1b\\rev\x1b]8;;\x1b\\",
+            "NEXT",
+        ]
+        .join("\n")
+    );
+    assert_eq!(
+        capture(
+            &terminal,
+            &filter,
+            CaptureOptions {
+                escape_sequences: true,
+                trim_positions: true,
+                ..rows
+            }
+        ),
+        [
+            "\x1b]8;;http://a\x1b\\aa\x1b]8;;\x1b\\ \x1b]8;;http://b\x1b\\bb\x1b]8;;\x1b\\",
+            "\x1b]8;;http://a\x1b\\again\x1b]8;;http://c\x1b\\cc\x1b]8;;\x1b\\",
+            "\x1b[1m\x1b[31m\x1b]8;;http://s\x1b\\red\x1b[0m\x1b]8;;\x1b\\ tail",
+            "\x1b]8;;http://m\x1b\\x\x1b[4my\x1b[0mz\x1b[32m\x1b]8;;\x1b\\green",
+            "\x1b[39m\x1b]8;;http://q\x1b\\a\x1b[1mb\x1b[1m\x1b]8;;\x1b\\",
+            "\x1b[0m\x1b]8;;http://x\\\\y\x1b\\ab\x1b]8;;\x1b\\ \x1b]8;;http://y\x1b\\cd\x1b]8;;\x1b\\",
+            "pre \x1b]8;;http://w\x1b\\0000000000000000000000000000000000000000000000000000000000000000000000000000\x1b]8;;\x1b\\",
+            "00000000000000 post",
+            "\x1b]8;;http://t\x1b\\ab  \x1b]8;;\x1b\\",
+            "x\x1b]8;;http://z\x1b\\y\x1b]8;;http://z\x1b\\\x1b]8;;\x1b\\",
+            "\x1b]8;;http://u\x1b\\一二\x1b]8;;\x1b\\z",
+            "\x1b]8;;http://n\x1b\\one\x1b]8;;\x1b\\",
+            "two three",
+            "\x1b[7m\x1b]8;;http://r\x1b\\rev\x1b]8;;\x1b\\",
+            "NEXT",
+        ]
+        .join("\n")
+    );
+    assert_eq!(
+        capture(
+            &terminal,
+            &filter,
+            CaptureOptions {
+                escape_sequences: true,
+                preserve_trailing: true,
+                ..rows
+            }
+        ),
+        [
+            "\x1b]8;;http://a\x1b\\aa\x1b]8;;\x1b\\ \x1b]8;;http://b\x1b\\bb\x1b]8;;\x1b\\               ",
+            "\x1b]8;;http://a\x1b\\again\x1b]8;;http://c\x1b\\cc\x1b]8;;\x1b\\             ",
+            "\x1b[1m\x1b[31m\x1b]8;;http://s\x1b\\red\x1b[0m\x1b]8;;\x1b\\ tail            ",
+            "\x1b]8;;http://m\x1b\\x\x1b[4my\x1b[0mz\x1b[32m\x1b]8;;\x1b\\green\x1b[39m            ",
+            "\x1b]8;;http://q\x1b\\a\x1b[1mb\x1b[0m\x1b]8;;\x1b\\                  ",
+            "\x1b]8;;http://x\\\\y\x1b\\ab\x1b]8;;\x1b\\ \x1b]8;;http://y\x1b\\cd\x1b]8;;\x1b\\               ",
+            "pre \x1b]8;;http://w\x1b\\0000000000000000000000000000000000000000000000000000000000000000000000000000\x1b]8;;\x1b\\",
+            "00000000000000 post ",
+            "\x1b]8;;http://t\x1b\\ab  \x1b]8;;\x1b\\                ",
+            "x\x1b]8;;http://z\x1b\\y\x1b]8;;\x1b\\                  ",
+            "\x1b]8;;http://u\x1b\\一二\x1b]8;;\x1b\\z               ",
+            "\x1b]8;;http://n\x1b\\one\x1b]8;;\x1b\\                 ",
+            "\x1b]8;;http://n\x1b\\two\x1b]8;;\x1b\\ three           ",
+            "\x1b[7m\x1b]8;;http://r\x1b\\rev\x1b[0m\x1b]8;;\x1b\\                 ",
+            "\x1b[7mNEXT\x1b[0m                ",
+        ]
+        .join("\n")
+    );
+    assert_eq!(
+        capture(
+            &terminal,
+            &filter,
+            CaptureOptions {
+                escape_sequences: true,
+                escape_nonprintable: true,
+                ..rows
+            }
+        ),
+        [
+            "\\033]8;;http://a\\033\\\\aa\\033]8;;\\033\\\\ \\033]8;;http://b\\033\\\\bb\\033]8;;\\033\\\\",
+            "\\033]8;;http://a\\033\\\\again\\033]8;;http://c\\033\\\\cc\\033]8;;\\033\\\\",
+            "\\033[1m\\033[31m\\033]8;;http://s\\033\\\\red\\033[0m\\033]8;;\\033\\\\ tail",
+            "\\033]8;;http://m\\033\\\\x\\033[4my\\033[0mz\\033[32m\\033]8;;\\033\\\\green\\033[39m",
+            "\\033]8;;http://q\\033\\\\a\\033[1mb\\033[0m\\033]8;;\\033\\\\",
+            "\\033]8;;http://x\\\\y\\033\\\\ab\\033]8;;\\033\\\\ \\033]8;;http://y\\033\\\\cd\\033]8;;\\033\\\\",
+            "pre \\033]8;;http://w\\033\\\\0000000000000000000000000000000000000000000000000000000000000000000000000000\\033]8;;\\033\\\\",
+            "00000000000000 post",
+            "\\033]8;;http://t\\033\\\\ab  \\033]8;;\\033\\\\",
+            "x\\033]8;;http://z\\033\\\\y\\033]8;;\\033\\\\",
+            "\\033]8;;http://u\\033\\\\一二\\033]8;;\\033\\\\z",
+            "\\033]8;;http://n\\033\\\\one\\033]8;;\\033\\\\",
+            "\\033]8;;http://n\\033\\\\two\\033]8;;\\033\\\\ three",
+            "\\033[7m\\033]8;;http://r\\033\\\\rev\\033[0m\\033]8;;\\033\\\\",
+            "\\033[7mNEXT\\033[0m",
+        ]
+        .join("\n")
+    );
+}

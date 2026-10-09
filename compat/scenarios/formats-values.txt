@@ -26,6 +26,9 @@ out: list-windows -t =path-tmp -O index -f #{==:#{session_active},} -F #{window_
 out: list-windows -t =path-tmp -O index -f #{session_active} -F #{window_index}
 out: list-panes -t =path-tmp:0 -O index -f #{==:#{session_active},} -F #{pane_index}=[#{session_active}]
 out: list-panes -t =path-tmp:0 -O index -f #{session_active} -F #{pane_index}
+out: list-sessions -O name -F #{session_name}=[#{session_active}]
+out: list-windows -t =path-tmp -O index -F #{window_index}=[#{session_active}]#{S:n,a}
+out: list-panes -t =path-tmp:0 -O index -F #{pane_index}=[#{session_active}]
 new-window -d -t w: -n activity-quiet -- sleep 300
 out: display-message -p -t w:activity-quiet activity-created=#{?window_activity,set,unset}
 out: set-window-option -F -t w:activity-quiet @activity-captured #{window_activity}

@@ -773,7 +773,6 @@ impl Renderer {
             write_border_runs(&mut self.output, &border, model.size.columns);
         }
 
-        let active = model.active_pane();
         if force {
             self.paint_empty_window(model);
         }
@@ -796,8 +795,6 @@ impl Renderer {
             self.paint_entry(
                 model,
                 entry,
-                active == Some(entry.pane),
-                float.is_some(),
                 entry_force,
                 cleared_to_default && float.is_none(),
             );
@@ -845,11 +842,11 @@ impl Renderer {
         &mut self,
         model: &Model,
         entry: &PaneRect,
-        active: bool,
-        floating: bool,
         force: bool,
         cleared_to_default: bool,
     ) {
+        let active = model.active_pane() == Some(entry.pane);
+        let floating = model.is_float(entry.pane);
         let lines = model.pane_lines(entry.pane);
         let Some(pane) = model.pane_snapshot(entry.pane) else {
             return;
@@ -5116,6 +5113,113 @@ mod tests {
             }],
             focused_window: Some(window),
         }));
+    }
+
+    fn browser_under_float(float: Option<zz_protocol::FloatingPaneSnapshot>) -> Model {
+        let browser = PaneId(7);
+        let mut model = block_model(40, 12);
+        attach_one_pane(&mut model, browser);
+        let mut snapshot = (*model.snapshot).clone();
+        let window = &mut snapshot.sessions[0].windows[0];
+        let pane = |id: PaneId, kind: PaneKindSnapshot| zz_protocol::PaneSnapshot {
+            id,
+            title: String::new(),
+            kind,
+            synchronized_input: false,
+            bell: false,
+            dead: false,
+            dead_status: None,
+            border_colour: None,
+            active_border_colour: None,
+            border_status_text: String::new(),
+            mode: None,
+            status: None,
+        };
+        window.panes.insert(
+            browser,
+            pane(
+                browser,
+                PaneKindSnapshot::Browser(zz_protocol::BrowserDescriptor::single(
+                    "about:blank".to_owned(),
+                    "default".to_owned(),
+                )),
+            ),
+        );
+        if let Some(float) = float {
+            window
+                .panes
+                .insert(float.pane, pane(float.pane, PaneKindSnapshot::Terminal));
+            window.floating = vec![float];
+        }
+        model.update_snapshot(std::sync::Arc::new(snapshot));
+        model
+    }
+
+    fn browser_placement_output(model: &Model) -> String {
+        let mut renderer = Renderer::new();
+        renderer.enable_kitty_graphics();
+        renderer.install_browser_frame(BrowserFrameUpdate {
+            image: KittyImageData {
+                pane: PaneId(7),
+                image_id: BROWSER_IMAGE_ID,
+                generation: 1,
+                width: 2,
+                height: 1,
+                bytes: vec![0, 0, 255, 255, 0, 255, 0, 255],
+            },
+            placement: KittyPlacement {
+                image_id: BROWSER_IMAGE_ID,
+                image_generation: 1,
+                layer: zz_terminal::KittyLayer::AboveText,
+                viewport_col: 0,
+                viewport_row: 0,
+                absolute_row: 0,
+                cell_offset_x: 0,
+                cell_offset_y: 0,
+                grid_cols: 40,
+                grid_rows: 11,
+                pixel_width: 2,
+                pixel_height: 1,
+                source_rect: None,
+            },
+        });
+        renderer.output.clear();
+        renderer.reconcile_kitty_images(model);
+        String::from_utf8_lossy(&renderer.output).into_owned()
+    }
+
+    #[test]
+    fn a_browser_pane_a_float_covers_has_no_kitty_placement_while_covered() {
+        let float = zz_protocol::FloatingPaneSnapshot {
+            pane: PaneId(8),
+            xoff: 5,
+            yoff: 2,
+            sx: 10,
+            sy: 4,
+            visible: true,
+            border_lines: PaneBorderLines::Single,
+            border_status: zz_protocol::PaneBorderStatus::Off,
+        };
+        let bare = browser_under_float(None);
+        assert!(browser_placement_output(&bare).contains("\x1b_Ga=p"));
+
+        let covered = browser_under_float(Some(float));
+        assert_eq!(
+            covered.layout.float(PaneId(8)).map(|float| float.frame),
+            Some(Rect {
+                x: 4,
+                y: 1,
+                width: 12,
+                height: 6,
+            })
+        );
+        assert!(!browser_placement_output(&covered).contains("\x1b_Ga=p"));
+
+        let hidden = browser_under_float(Some(zz_protocol::FloatingPaneSnapshot {
+            visible: false,
+            ..float
+        }));
+        assert!(browser_placement_output(&hidden).contains("\x1b_Ga=p"));
     }
 
     #[test]

@@ -42,7 +42,7 @@
       "id": "fix.streams",
       "track": "fix",
       "title": "Close the last two caller-stream refusals",
-      "status": "review",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -58,9 +58,10 @@
         "protocol.binary-streams closes."
       ],
       "branch": "catchup/fix.streams",
-      "sha": null,
+      "sha": "d32a396b5",
       "notes": [
-        "2026-10-09: lane done at ad7a35ca9 (clauses met; show-buffer vis-escape claim in the clause was wrong for this pin: cmdq_print_data parses, matched the pin); integration pass merging main (3.8) sent"
+        "2026-10-09: lane done at ad7a35ca9 (clauses met; show-buffer vis-escape claim in the clause was wrong for this pin: cmdq_print_data parses, matched the pin); integration pass merging main (3.8) sent",
+        "2026-10-09: 3 codex reviews (4 P1, then 1 P1, fixed); findings 3-4 moved to fix.option-bytes; merged; just compat check green on main"
       ]
     },
     {
@@ -303,14 +304,16 @@
       "branch": null,
       "sha": null,
       "notes": [
-        "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here."
+        "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here.",
+        "2026-10-09 from pin.layout-v2: smoke/control-notify fails tmux-side-only at 3.8 (%pause, %continue and hook %window-renamed now queued outside %begin/%end).",
+        "2026-10-09 from pin.layout-v2: 3.8 layout_parse no longer rebuilds tiled pane z-order from the tree; zz still sets window.z_order = panes_in_order() in select_layout_string; measure and align."
       ]
     },
     {
       "id": "pin.layout-v2",
       "track": "pin",
       "title": "JSON v2 layout strings",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -331,7 +334,9 @@
       ],
       "branch": "catchup/pin.layout-v2",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at f2455a131: all 4 clauses met; wire: ControlFlags.new_layouts appended under 108; snapshot dumps now v2 text; a plain select-pane now sends a TreeOp::WindowLayout (dump strings carry a/l), small extra delta traffic"
+      ]
     },
     {
       "id": "pin.display-panes",

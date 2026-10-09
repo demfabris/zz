@@ -569,6 +569,107 @@ struct WindowAlertNotification {
     deadline: Option<ClientMessageDeadline>,
 }
 
+fn client_lifecycle_event(
+    inner: &ServerState,
+    name: &'static str,
+    client: ClientId,
+) -> Option<PendingHookEvent> {
+    let kind = inner.client(client).and_then(|c| c.kind)?;
+    if !matches!(kind, ClientKind::Interactive | ClientKind::Control) {
+        return None;
+    }
+    let context = client_attached_session(inner, client).map_or_else(ExecutionContext::default, |session| {
+        hook_events::live_session_context(&inner.engine.state, session)
+    });
+    let client_name = client_format_name(inner, client);
+    let mut event = PendingHookEvent::client(name, context, client, Some(client_name.as_str()));
+    if let Some(session) = event.context.session {
+        event
+            .variables
+            .insert(HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string());
+        if let Some(state) = inner.engine.state.sessions.get(&session) {
+            event.variables.insert(
+                HOOK_SESSION_NAME_CONTEXT_FORMAT.to_owned(),
+                state.name.clone(),
+            );
+        }
+    }
+    if let Some(window) = event.context.window {
+        event
+            .variables
+            .insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+        if let Some(state) = inner.engine.state.windows.get(&window) {
+            event.variables.insert(
+                HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                state.name.clone(),
+            );
+            event
+                .variables
+                .insert("hook_window_index".to_owned(), state.index.to_string());
+        }
+    }
+    if let Some(pane) = event.context.pane {
+        event
+            .variables
+            .insert(HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string());
+    }
+    Some(event)
+}
+
+fn add_command_payload(
+    inner: &ServerState,
+    event: &mut PendingHookEvent,
+    pane: PaneId,
+    facts: &zz_terminal::PaneOutputFacts,
+) {
+    if let Some(index) = inner
+        .engine
+        .state
+        .window_for_pane(pane)
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .map(|window| window.index)
+    {
+        event
+            .variables
+            .insert("hook_window_index".to_owned(), index.to_string());
+    }
+    if let Some(status) = facts.command_status {
+        event
+            .variables
+            .insert("hook_command_status".to_owned(), status.to_string());
+    }
+    if facts.command_start_time != 0 {
+        event.variables.insert(
+            "hook_command_start_time".to_owned(),
+            facts.command_start_time.to_string(),
+        );
+    }
+    if facts.command_end_time != 0 {
+        event.variables.insert(
+            "hook_command_end_time".to_owned(),
+            facts.command_end_time.to_string(),
+        );
+    }
+    if let Some(duration) = facts.command_duration(unix_timestamp()) {
+        event
+            .variables
+            .insert("hook_command_duration".to_owned(), duration.to_string());
+    }
+}
+
+fn pane_event_if_hooked(
+    inner: &ServerState,
+    name: &'static str,
+    pane: PaneId,
+) -> Option<PendingHookEvent> {
+    let event = PendingHookEvent::live_pane(name, pane, &inner.engine)?;
+    inner
+        .engine
+        .event_hook_commands(&event.context, name)
+        .is_some_and(|commands| !commands.is_empty())
+        .then_some(event)
+}
+
 fn window_alert_notifications(
     inner: &mut ServerState,
     alert: WindowAlert,
@@ -4651,6 +4752,7 @@ struct HookSessionState {
 #[derive(Clone)]
 struct HookWindowState {
     session: SessionId,
+    index: u32,
     name: String,
     active_pane: PaneId,
     zoomed_pane: Option<PaneId>,
@@ -4823,6 +4925,7 @@ impl MuxHookSnapshot {
             window,
             HookWindowState {
                 session: state.session,
+                index: state.index,
                 name: state.name.clone(),
                 active_pane: state.active_pane,
                 zoomed_pane: state.zoomed_pane,
@@ -6788,7 +6891,18 @@ impl Shared {
         (client, hello)
     }
 
+    fn client_lifecycle_hook(self: &Arc<Self>, name: &'static str, client: ClientId) {
+        let event = {
+            let inner = self.inner.lock();
+            client_lifecycle_event(&inner, name, client)
+        };
+        if let Some(event) = event {
+            self.run_event_hooks(vec![event]);
+        }
+    }
+
     fn unregister(self: &Arc<Self>, client: ClientId) {
+        let closed = client_lifecycle_event(&self.inner.lock(), "client-closed", client);
         let (detached, _) = self.detach_client_state(client, false);
         if detached {
             self.publish_snapshot_after_detach(client);
@@ -6938,6 +7052,8 @@ impl Shared {
         }
         if shutdown {
             self.request_shutdown_without_hooks();
+        } else if let Some(event) = closed {
+            self.run_event_hooks(vec![event]);
         }
     }
 
@@ -8725,14 +8841,13 @@ impl Shared {
             return String::new();
         };
         self.wake_control_queue(client, kind);
-        self.run_hook_commands(
-            client,
-            kind,
-            context,
-            commands,
-            &hook_format_variables(command, hook),
-            parent_queue,
-        )
+        let mut variables = context.format_variables.clone();
+        variables.insert(
+            "command".to_owned(),
+            canonical_command(&command.name).to_owned(),
+        );
+        variables.extend(hook_format_variables(command, hook));
+        self.run_hook_commands(client, kind, context, commands, &variables, parent_queue)
     }
 
     fn run_hook_commands(
@@ -9058,11 +9173,15 @@ impl Shared {
         let commands = commands.filter(|commands| !commands.is_empty())?;
         let draining =
             self.shutdown_pending.load(Ordering::Acquire) && !state.shutdown_already_blocked;
+        let mut variables = event.variables;
+        variables
+            .entry("hook_event".to_owned())
+            .or_insert_with(|| event.name.to_owned());
         Some(InsertedQueueChild {
             context,
             source: InsertedCommandSource::Hooks(Box::new(HookQueueSource {
                 commands: RefCell::new(commands),
-                variables: event.variables,
+                variables,
                 skip_resolution_errors: true,
                 initial_draining: draining,
                 replaying: false,
@@ -28286,7 +28405,7 @@ impl Shared {
         terminal: &Arc<TerminalSession>,
         now: Instant,
     ) {
-        let (check, silence_schedule, alert_window, refresh_activity_choosers) = {
+        let (check, silence_schedule, alert_window, refresh_activity_choosers, activity_hook) = {
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -28295,6 +28414,7 @@ impl Shared {
             {
                 return;
             }
+            let activity_hook = pane_event_if_hooked(&inner, "pane-activity", pane);
             let mut silence_schedule = None;
             let mut alert_window = None;
             terminal_reads::pane_changed(&mut inner, pane);
@@ -28336,8 +28456,12 @@ impl Shared {
                 silence_schedule,
                 alert_window,
                 refresh_activity_choosers,
+                activity_hook,
             )
         };
+        if let Some(hook) = activity_hook {
+            self.run_event_hooks(vec![hook]);
+        }
         if let Some(deadline) = silence_schedule {
             let _ = self.timer_tx.send(timers::TimerInput::Silence(
                 SilenceDeadlineCommand::Schedule(deadline),
@@ -30313,8 +30437,8 @@ impl Shared {
                 0
             };
             let mode_event = mode_changed
-                .then(|| PendingHookEvent::live_pane("pane-mode-changed", pane, &inner.engine))
-                .flatten();
+                .then(|| hook_events::copy_mode_exit_hook_events(pane, &inner.engine))
+                .filter(|events| !events.is_empty());
             (
                 subscriber,
                 kind,
@@ -30364,9 +30488,9 @@ impl Shared {
                 }
             }
         }
-        if let Some(event) = mode_event {
+        if let Some(events) = mode_event {
             self.nudge_client_timers();
-            self.run_event_hooks(vec![event]);
+            self.run_event_hooks(events);
         }
     }
 
@@ -30506,7 +30630,34 @@ impl Shared {
         }
     }
 
+    fn raise_shell_mark(self: &Arc<Self>, pane: PaneId, mark: zz_terminal::ShellMark) {
+        let name = match mark.kind {
+            zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
+            zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
+            zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
+        };
+        let event = {
+            let inner = self.inner.lock();
+            pane_event_if_hooked(&inner, name, pane).map(|mut event| {
+                if mark.kind != zz_terminal::ShellMarkKind::Prompt {
+                    add_command_payload(&inner, &mut event, pane, &mark.facts);
+                }
+                event
+            })
+        };
+        if let Some(event) = event {
+            self.run_event_hooks(vec![event]);
+        }
+    }
+
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
+        let pane_hook = {
+            let inner = self.inner.lock();
+            pane_event_if_hooked(&inner, "pane-bell", pane)
+        };
+        if let Some(hook) = pane_hook {
+            self.run_event_hooks(vec![hook]);
+        }
         let (snapshot_changed, hook, notifications) = {
             let mut inner = self.inner.lock();
             let Some(window) = inner.engine.state.window_for_pane(pane) else {
@@ -51963,6 +52114,7 @@ fn handle_connection_message<S: TransportStream>(
     }
     shared.warm_terminfo(&hello.environment)?;
     let mut registration = ClientRegistrationGuard::new(shared, client);
+    shared.client_lifecycle_hook("client-created", client);
     log::debug!(
         target: "zz_daemon::diagnostics::connection",
         "registered client={client} kind={:?} hello={hello:#?}",

@@ -318,6 +318,7 @@ impl CommandWatcher {
             | TerminalEvent::ViewClosed(_)
             | TerminalEvent::ClipboardSet { .. }
             | TerminalEvent::Bell
+            | TerminalEvent::ShellMark(_)
             | TerminalEvent::RenameWindow(_)
             | TerminalEvent::PlaceholderBound { .. }
             | TerminalEvent::PendingPasteExpired { .. } => {}
@@ -415,6 +416,7 @@ impl PopupWatcher {
             | TerminalEvent::CopyReady { .. }
             | TerminalEvent::OpenUri(_)
             | TerminalEvent::Bell
+            | TerminalEvent::ShellMark(_)
             | TerminalEvent::RenameWindow(_)
             | TerminalEvent::PlaceholderBound { .. }
             | TerminalEvent::PendingPasteExpired { .. } => {}
@@ -607,6 +609,7 @@ impl TerminalWatcher {
                 shared.deliver_clipboard_write(pane, target, text);
             }
             TerminalEvent::Bell => shared.raise_pane_bell(pane),
+            TerminalEvent::ShellMark(mark) => shared.raise_shell_mark(pane, mark),
             TerminalEvent::RenameWindow(name) => {
                 let terminal = Arc::clone(terminal);
                 shared.defer_watcher_effect(move |shared| {

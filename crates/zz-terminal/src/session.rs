@@ -454,6 +454,7 @@ struct EngineFilter {
     program_status_changed: bool,
     replies: Option<Rc<RefCell<PtyEffects>>>,
     output: PaneOutputFacts,
+    shell_marks: Vec<ShellMark>,
     cursor_blink_set: bool,
     mouse_mode: Option<usize>,
     output_marks: Vec<(Screen, TrackedGridRef)>,
@@ -514,6 +515,21 @@ fn unix_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs())
+}
+
+/// Which OSC 133 mark `input_osc_133` fires an event for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShellMarkKind {
+    Prompt,
+    CommandStarted,
+    CommandFinished,
+}
+
+/// One OSC 133 event, with the pane's command facts as the mark left them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShellMark {
+    pub kind: ShellMarkKind,
+    pub facts: PaneOutputFacts,
 }
 
 /// What `input_parse_pane`, `input_parse_buffer` and `input_osc_133` keep on
@@ -1030,6 +1046,18 @@ impl EngineFilter {
         }
         if !overflowed && let Some(mark) = osc.strip_prefix(b"133;") {
             self.output.osc_133(mark, unix_now());
+            let kind = match mark.first() {
+                Some(b'A' | b'N') => Some(ShellMarkKind::Prompt),
+                Some(b'C') => Some(ShellMarkKind::CommandStarted),
+                Some(b'D') => Some(ShellMarkKind::CommandFinished),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                self.shell_marks.push(ShellMark {
+                    kind,
+                    facts: self.output,
+                });
+            }
         }
         if is_prompt_start(&osc) {
             self.program_status_changed |= self.program_status.program_left();
@@ -1081,6 +1109,10 @@ impl EngineFilter {
         self.mouse_mode = None;
         self.output_marks.clear();
         self.program_status_changed |= self.program_status.reset();
+    }
+
+    fn take_shell_marks(&mut self) -> Vec<ShellMark> {
+        std::mem::take(&mut self.shell_marks)
     }
 
     fn take_program_status(&mut self) -> Option<ProgramStatus> {
@@ -1730,6 +1762,8 @@ pub enum TerminalEvent {
     RenameWindow(String),
     /// The program rang BEL. Raised once per occurrence.
     Bell,
+    /// The program wrote an OSC 133 prompt, command start or command end mark.
+    ShellMark(ShellMark),
     PlaceholderBound {
         token: u64,
         number: u32,
@@ -6002,6 +6036,10 @@ impl Publisher {
         }
     }
 
+    fn shell_mark(&self, mark: ShellMark) -> Result<(), WorkerError> {
+        self.send_user_action(TerminalEvent::ShellMark(mark), "shell mark")
+    }
+
     fn placeholder_bound(&self, token: u64, number: u32) -> Result<(), WorkerError> {
         self.send_reliable(TerminalEvent::PlaceholderBound { token, number })
     }
@@ -6037,6 +6075,7 @@ fn reliable_event_bytes(event: &TerminalEvent) -> usize {
         TerminalEvent::ViewportReady { .. }
         | TerminalEvent::ViewClosed(_)
         | TerminalEvent::Bell
+        | TerminalEvent::ShellMark(_)
         | TerminalEvent::PlaceholderBound { .. }
         | TerminalEvent::PendingPasteExpired { .. } => 0,
     };

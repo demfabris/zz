@@ -619,6 +619,9 @@ impl PaneActor {
         for name in self.engine_renames.drain(..) {
             self.publisher.rename_window(name)?;
         }
+        for mark in self.engine_filter.take_shell_marks() {
+            self.publisher.shell_mark(mark)?;
+        }
         if !self.output_pending {
             settle_unwatched(
                 &mut self.terminal,

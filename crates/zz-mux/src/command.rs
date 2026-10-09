@@ -2963,6 +2963,59 @@ impl MuxEngine {
             .map(|hooks| hooks.values().cloned().collect())
     }
 
+    fn marked_pane_changed(
+        &self,
+        context: &ExecutionContext,
+        start: PaneId,
+        old: Option<PaneId>,
+    ) -> Execution {
+        let mut execution = Execution::default();
+        if context.no_hooks {
+            return execution;
+        }
+        let marked = self.state.marked_pane();
+        let pane = marked.or(old).unwrap_or(start);
+        let Some(mut hook_context) = ExecutionContext::for_pane(&self.state, pane) else {
+            return execution;
+        };
+        let Some(commands) = self
+            .event_hook_commands(&hook_context, "marked-pane-changed")
+            .filter(|commands| !commands.is_empty())
+        else {
+            return execution;
+        };
+        let mut variables = BTreeMap::from([
+            ("hook_event".to_owned(), "marked-pane-changed".to_owned()),
+            (HOOK_PANE_CONTEXT_FORMAT.to_owned(), pane.to_string()),
+            (
+                "hook_marked".to_owned(),
+                u8::from(marked.is_some()).to_string(),
+            ),
+        ]);
+        if let Some(window) = self.state.window_for_pane(pane) {
+            variables.insert(HOOK_WINDOW_CONTEXT_FORMAT.to_owned(), window.to_string());
+            if let Some(state) = self.state.windows.get(&window) {
+                variables.insert(
+                    HOOK_WINDOW_NAME_CONTEXT_FORMAT.to_owned(),
+                    state.name.clone(),
+                );
+            }
+        }
+        if let Some(marked) = marked {
+            variables.insert("hook_new_pane".to_owned(), marked.to_string());
+        }
+        if let Some(old) = old {
+            variables.insert("hook_old_pane".to_owned(), old.to_string());
+        }
+        hook_context.format_variables = variables;
+        execution.effects.push(MuxEffect::RunHook {
+            name: "marked-pane-changed".to_owned(),
+            commands,
+            context: hook_context,
+        });
+        execution
+    }
+
     fn user_hook_commands(
         &self,
         context: &ExecutionContext,
@@ -8052,12 +8105,13 @@ impl MuxEngine {
             if options.has("-m") && !self.pane_is_visible(start) {
                 return Ok(Execution::default());
             }
+            let old = self.state.marked_pane();
             if options.has("-M") {
                 self.state.clear_marked_pane();
             } else {
                 self.state.toggle_marked_pane(start)?;
             }
-            return Ok(Execution::default());
+            return Ok(self.marked_pane_changed(context, start, old));
         }
         let mut execution = Execution::default();
         if let Some(style) = options.value("-P") {
@@ -19504,6 +19558,7 @@ fn push_shown_hook_option(
 pub fn hook_format_variables(command: &CommandInvocation, hook: &str) -> BTreeMap<String, String> {
     let mut variables = BTreeMap::from([
         (HOOK_CONTEXT_FORMAT.to_owned(), hook.to_owned()),
+        ("hook_event".to_owned(), hook.to_owned()),
         (
             HOOK_ARGUMENTS_CONTEXT_FORMAT.to_owned(),
             format_command_arguments(command),

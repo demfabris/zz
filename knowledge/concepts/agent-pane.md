@@ -115,7 +115,7 @@ connection produces leaves through one sink that journals it and hands it to the
    itself (`adopt_agent_session`), then publishes the changed snapshot.
 5. Send prompts as text content blocks, plus one `ContentBlock::Image` per attachment. Images
    cross the wire as `AgentImage { format, data }` and become content blocks daemon-side, so
-   `zpui::Image` never leaves the client. Prompt requests run concurrently with the runtime
+   `zz_gpui::Image` never leaves the client. Prompt requests run concurrently with the runtime
    command loop, so cancellation and permission responses remain responsive during a turn.
 
 zz does not crawl or decode Codex CLI's or Claude Code's private session files. Their ACP adapters
@@ -594,7 +594,7 @@ the element carries an id. Pending and running rows never animate, so an
 adapter can leave a status unresolved without leaving a spinner behind. Pane-level busy
 chrome derives from the connection phase alone (`pane_is_busy`, `view.rs`), never from tool rows.
 Pane activity, startup, and permissions share the leased pulse clock. No
-mounted agent spinner starts a display-rate `zpui::Animation`. A run of two or more
+mounted agent spinner starts a display-rate `zz_gpui::Animation`. A run of two or more
 adjacent tools and thoughts, regardless of label or action, renders one collapsed group header with
 the first member's icon and a first-seen, count-aware action summary such as **Ran command, Reasoning,
 Edit files**.
@@ -649,7 +649,7 @@ jump pill appears; clicking it re-engages the spring. The spring chases a lead p
 target, scaled by an EMA of how fast the target is growing, and teleports whatever remains beyond
 2.5 viewports, so a long replay lands rather than scrolling through the whole history.
 
-Spinners and streamed-text fades share one clock. A mounted repeating `zpui::Animation` pins the entire window to display
+Spinners and streamed-text fades share one clock. A mounted repeating `zz_gpui::Animation` pins the entire window to display
 refresh rate, because any notify repaints the whole window; `pulse.rs` instead runs a single ~30 fps
 tick and notifies only its leaseholders. A lease is taken through `pulse_phase` or `pulse_lease` and
 lapses 300 ms later . there is no release call . and the loop parks itself once the lease set

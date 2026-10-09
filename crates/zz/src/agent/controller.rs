@@ -12,10 +12,10 @@ use agent_client_protocol::schema::{
         ToolCallUpdate,
     },
 };
-use zpui::{App, Context, Entity, EventEmitter, Image, ImageFormat, Task};
 use zz_daemon::{
     AgentAuthMethod as StreamAuthMethod, AgentPromptOutcome, AgentStreamItem, AgentStreamPayload,
 };
+use zz_gpui::{App, Context, Entity, EventEmitter, Image, ImageFormat, Task};
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentGitSummary, AgentPaneWire, AgentProvider,
     AgentQuestionAnswer, AgentSessionOpKind, AgentTaskWire, MAX_AGENT_AUTH_METHODS,
@@ -2534,7 +2534,7 @@ mod tests {
     };
 
     use parking_lot::Mutex;
-    use zpui::{AppContext as _, TestAppContext};
+    use zz_gpui::{AppContext as _, TestAppContext};
 
     use super::*;
 
@@ -3452,7 +3452,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn stream_items_reduce_exactly_as_the_runtime_events_did(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(3);
@@ -3580,7 +3580,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn restored_prompts_only_refill_their_owners_composer(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(4);
@@ -3631,7 +3631,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn an_item_the_client_cannot_re_type_is_dropped_without_stalling_the_cursor(
         cx: &mut TestAppContext,
     ) {
@@ -3669,7 +3669,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn an_unknown_update_between_two_known_ones_only_skips_itself(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(40);
@@ -3701,7 +3701,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_replay_over_a_surviving_transcript_reduces_each_item_once(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(44);
@@ -3738,7 +3738,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn submitted_and_queued_user_messages_survive_session_switch_replay(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(44);
@@ -3781,7 +3781,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn an_unknown_update_mid_message_does_not_break_its_coalescing(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(41);
@@ -3809,7 +3809,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_batch_of_only_unknown_updates_advances_the_cursor(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(42);
@@ -3852,7 +3852,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_restored_session_replays_around_updates_this_build_cannot_read(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(43);
@@ -3927,7 +3927,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn published_pane_state_drives_the_composer_and_the_wizard(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(5);
@@ -4049,7 +4049,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_question_card_answers_through_its_own_request(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(8);
@@ -4109,7 +4109,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn published_tasks_and_a_parked_card_reach_the_pane(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(9);
@@ -4175,7 +4175,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn subagent_tool_rows_resolve_to_their_agents_entry(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(10);
@@ -4219,7 +4219,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn ordered_state_sync_wins_after_a_synthesized_replay(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(16);
@@ -4262,7 +4262,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn retry_preserves_the_failure_until_the_daemon_acknowledges_restart(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(17);
@@ -4294,7 +4294,7 @@ mod tests {
         assert_eq!(&*events.lock(), &[pane]);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn provider_switch_waits_for_the_daemon_descriptor(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(20);
@@ -4344,7 +4344,7 @@ mod tests {
         assert_eq!(&*events.lock(), &[(pane, AgentProvider::ClaudeCode)]);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn session_descriptor_waits_for_the_ordered_switch_boundary(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(24);
@@ -4376,7 +4376,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn new_session_waits_for_the_ordered_switch_boundary(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(25);
@@ -4421,7 +4421,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn nonfatal_wire_error_survives_the_ordered_ready_state(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(21);
@@ -4453,7 +4453,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn fatal_state_fails_inflight_tools(cx: &mut TestAppContext) {
         let (controller, _sink) = proxy_controller(cx);
         let pane = PaneId(22);
@@ -4488,7 +4488,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_prompt_reaches_the_wire_with_normalized_attachments(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(6);
@@ -4513,11 +4513,11 @@ mod tests {
                     }],
                 }
             )],
-            "the daemon receives bytes plus format, never a zpui image"
+            "the daemon receives bytes plus format, never a zz_gpui image"
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_prompt_typed_mid_turn_is_queued_by_the_daemon(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(7);
@@ -4555,7 +4555,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_zz_command_opens_no_turn_and_joins_no_queue(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(7);
@@ -4601,7 +4601,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn session_controls_send_the_daemon_every_filter_and_restore_path(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(15);
@@ -4688,7 +4688,7 @@ mod tests {
         ])
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn staged_settings_wait_for_provider_readiness_then_model_ack_before_effort(
         cx: &mut TestAppContext,
     ) {
@@ -4778,7 +4778,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn rejected_staged_model_does_not_send_effort(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(50);
@@ -4821,7 +4821,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn a_settings_acknowledgement_is_paired_with_the_origin_that_asked(cx: &mut TestAppContext) {
         let (controller, sink) = proxy_controller(cx);
         let pane = PaneId(9);
@@ -4872,7 +4872,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn session_titles_follow_successful_history_new_and_provider_switches(cx: &mut TestAppContext) {
         let pane = PaneId(51);
         let titles = Arc::new(Mutex::new(Vec::new()));
@@ -4961,7 +4961,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn the_first_prompt_of_a_session_names_the_pane_once(cx: &mut TestAppContext) {
         let pane = PaneId(10);
         let titles = Arc::new(Mutex::new(Vec::new()));

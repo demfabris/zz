@@ -13,12 +13,12 @@ carry license obligations into zz's own builds.
 
 | Project | What zz carries | License | Record |
 | --- | --- | --- | --- |
-| [gpui](https://github.com/zed-industries/zed) (Zed Industries) | The UI framework, split out of Zed and renamed zpui, in `crates/zpui` and `crates/zpui-*` with zz's changes on top. | Apache-2.0 | [`crates/zpui/LICENSE-APACHE`](crates/zpui/LICENSE-APACHE), [zpui](knowledge/references/zpui.md) |
-| [gpui-component / gpui-kit](https://github.com/longbridge/gpui-kit) (Longbridge) | `crates/zpui-kit`, a full fork of the widget layer taken at `b004e595`. Upstream is no longer a dependency. `crates/zz/src/window/frame.rs` is adapted from its Linux client-side window border. | Apache-2.0, © 2024–2025 Longbridge | [`crates/zpui-kit/LICENSE-APACHE`](crates/zpui-kit/LICENSE-APACHE), per-module port notes in [`crates/zpui-kit/UPSTREAM.md`](crates/zpui-kit/UPSTREAM.md) |
+| [gpui](https://github.com/zed-industries/zed) (Zed Industries) | The UI framework, split out of Zed and renamed zz-gpui, in `crates/zz-gpui` and `crates/zz-gpui-*` with zz's changes on top. | Apache-2.0 | [`crates/zz-gpui/LICENSE-APACHE`](crates/zz-gpui/LICENSE-APACHE), [zz-gpui](knowledge/references/zz-gpui.md) |
+| [gpui-component / gpui-kit](https://github.com/longbridge/gpui-kit) (Longbridge) | `crates/zz-gpui-kit`, a full fork of the widget layer taken at `b004e595`. Upstream is no longer a dependency. `crates/zz/src/window/frame.rs` is adapted from its Linux client-side window border. | Apache-2.0, © 2024–2025 Longbridge | [`crates/zz-gpui-kit/LICENSE-APACHE`](crates/zz-gpui-kit/LICENSE-APACHE), per-module port notes in [`crates/zz-gpui-kit/UPSTREAM.md`](crates/zz-gpui-kit/UPSTREAM.md) |
 | [libghostty-rs](https://github.com/uzaaft/libghostty-rs) (Uzaaft) | Source snapshots of `libghostty-vt` and `libghostty-vt-sys` 0.2.1 from the `demfabris/libghostty-rs` fork, adapted to build the Zig 0.16 VT library. | MIT OR Apache-2.0 | [`third_party/rust/libghostty-vt/`](third_party/rust/libghostty-vt/UPSTREAM.md), [`third_party/rust/libghostty-vt-sys/`](third_party/rust/libghostty-vt-sys/UPSTREAM.md) |
 | [Ghostty](https://github.com/ghostty-org/ghostty) (Mitchell Hashimoto and Ghostty contributors) | The VT state machine itself, compiled from the trimmed Ghostty source in `third_party/ghostty` through the snapshots above. Separately, `crates/zz-terminal/src/x11-rgb.txt` is copied from Ghostty's `src/terminal/res/rgb.txt` at `cf60af28`, which sources it from the X.Org `rgb` project. | MIT | [`third_party/ghostty/LICENSE`](third_party/ghostty/LICENSE), [`third_party/ghostty-reference/`](third_party/ghostty-reference/UPSTREAM.md) |
 
-zz builds against the Apache-2.0 `gpui` and `gpui_platform` crates (now `zpui` and `zpui-platform`) and the Zed utility crates they need only. No GPL-licensed Zed
+zz builds against the Apache-2.0 `gpui` and `gpui_platform` crates (now `zz-gpui` and `zz-gpui-platform`) and the Zed utility crates they need only. No GPL-licensed Zed
 code is linked into any zz binary.
 
 ## Bundled binaries
@@ -75,7 +75,7 @@ The desktop clients ship no fonts; they render with the system text stack.
 
 | Set | Used for | License |
 | --- | --- | --- |
-| [Tabler Icons](https://tabler.io/icons) | Every glyph in the app and the site. Two copies: `crates/zpui-kit/assets/icons` for the app and `site/src/icons`, which the Astro site inlines at build time. A handful are locally redrawn, noted in the zpui-kit port table. | MIT, © 2020–2026 Paweł Kuna. Retained as `LICENSE-TABLER` beside each copy. |
+| [Tabler Icons](https://tabler.io/icons) | Every glyph in the app and the site. Two copies: `crates/zz-gpui-kit/assets/icons` for the app and `site/src/icons`, which the Astro site inlines at build time. A handful are locally redrawn, noted in the zz-gpui-kit port table. | MIT, © 2020–2026 Paweł Kuna. Retained as `LICENSE-TABLER` beside each copy. |
 | [Simple Icons](https://simpleicons.org) | The vendor brand marks `openai.svg` and `claude.svg`. | CC0-1.0 |
 
 ## Color schemes

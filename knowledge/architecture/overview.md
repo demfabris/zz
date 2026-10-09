@@ -66,16 +66,16 @@ stream.
 | [zz-browser](/crates/zz-browser.md) | CEF init, subprocess dispatch, request context, input translation, frame mailboxes |
 | [zz-client](/crates/zz-client.md) | sans-IO protocol reduction and client-local chrome key tables shared by client shells |
 | [zz](/crates/zz.md) | long-lived GPUI mux client; reconciles layouts; hosts terminal and CEF runtimes and the Agent pane's viewport |
-| `zpui`, `zpui-*` | zpui, our GPUI: Zed's gpui crates and the utility crates they need, plus the `zpui-ios` UIKit backend |
-| `zpui-kit` | widget kit on zpui: theme, primitives, widgets, icons; no zz dependencies |
-| `zz-ui` | zz's application UI on zpui-kit, shared by the desktop and thin clients |
+| `zz-gpui`, `zz-gpui-macros`, `zz-gpui-platform` | zz-gpui, our GPUI: the core with Zed's utility code folded in, its macros, and every platform backend (iOS's UIKit one included) as a module per target |
+| `zz-gpui-kit` | widget kit on zz-gpui: theme, primitives, widgets, icons; no zz dependencies |
+| `zz-ui` | zz's application UI on zz-gpui-kit, shared by the desktop and thin clients |
 | `zz-app` (`clients/app`) | the thin-client app the web and iOS clients share |
-| `zz-ios` (`clients/ios`) | iOS entry point around zz-app and the `zpui-ios` UIKit backend |
+| `zz-ios` (`clients/ios`) | iOS entry point around zz-app and zz-gpui-platform's UIKit backend |
 | [zz-chrome-import](/crates/zz-chrome-import.md) | Chrome profile discovery, cookie decryption, read-only history extraction |
 | [zz-xtask](/crates/zz-xtask.md) | builds and validates platform CEF bundles |
 
-Workspace members without a dedicated page here: the zpui crates (see [zpui](/references/zpui.md)), `zpui-kit`, `zz-ui`, `zz-app`, `zz-ios`, and `zz-tui` (`zz attach`).
-The UIKit backend is `crates/zpui-ios`; the iOS app and its launch resources live in `clients/ios`.
+Workspace members without a dedicated page here: the zz-gpui crates (see [zz-gpui](/references/zz-gpui.md)), `zz-gpui-kit`, `zz-ui`, `zz-app`, `zz-ios`, and `zz-tui` (`zz attach`).
+The UIKit backend is `crates/zz-gpui-platform/src/ios`; the iOS app and its launch resources live in `clients/ios`.
 See [crates](/crates/index.md).
 
 # Platform status
@@ -90,7 +90,7 @@ on iPhone and iPad simulators; physical-device validation remains outstanding.
 
 - CEF pinned to Rust packages `154.0.0+154.0.23`, Chromium `154.0.8037.17` . see
   [CEF artifacts](/references/cef-artifacts.md).
-- GPUI is our own copy, the zpui crates . see [zpui](/references/zpui.md).
+- GPUI is our own copy, the zz-gpui crates . see [zz-gpui](/references/zz-gpui.md).
 - tmux behavior checked against a pinned commit . see [tmux upstream](/references/tmux-upstream.md).
 - X11 named colors sourced from Ghostty . see [Ghostty color reference](/references/ghostty-color-reference.md).
 

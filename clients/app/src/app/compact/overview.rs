@@ -1,10 +1,10 @@
 use std::{ops::Range, rc::Rc};
 
-use zpui::{
+use zz_client::StatusBarModel;
+use zz_gpui::{
     AnyElement, Bounds, Context, Font, Hsla, ParentElement as _, Pixels, StyledText, TextRun,
     Window, canvas, div, font, point, prelude::*, px, size,
 };
-use zz_client::StatusBarModel;
 use zz_protocol::{PaneId, PaneKindSnapshot, WindowId};
 use zz_terminal::{Glyph, TerminalViewport};
 use zz_ui::{
@@ -231,7 +231,7 @@ impl AppShell {
         bottom_inset: Pixels,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> zpui::Div {
+    ) -> zz_gpui::Div {
         let progress = self.compact.lift.progress();
         let (pages, current) = pages(model, &self.unseen_agents);
         let target = self

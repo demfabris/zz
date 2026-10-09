@@ -253,7 +253,7 @@ check `pgrep -af codex` on resume.
   known differences, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.
-- 2026-10-09 fabrico resumed the campaign after the restructure (gpui renamed zpui and moved in-repo,
+- 2026-10-09 fabrico resumed the campaign after the restructure (gpui renamed zz-gpui and moved in-repo,
   zz-kit split out of zz-ui, clients/gpui-shared became clients/app, clients/ios). Orchestrator: lane
   branches take main by merge, not rebase: their history is on origin and several carry merges already, so a rebase would force-push
   and replay those. Registry, generated gaps.md and wire doc conflicts are resolved by the

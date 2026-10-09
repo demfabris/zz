@@ -2,7 +2,7 @@
 
 use std::{borrow::Cow, io::Cursor, sync::Arc};
 
-use zpui::{Image, ImageFormat};
+use zz_gpui::{Image, ImageFormat};
 
 /// Formats sent as-is: Anthropic's API takes exactly these four.
 const NATIVE_FORMATS: [ImageFormat; 4] = [
@@ -59,7 +59,7 @@ pub(crate) fn normalize(image: &Image) -> Result<Arc<Image>, Cow<'static, str>> 
 }
 
 /// Hand normalized attachments to the wire. The daemon turns bytes plus MIME
-/// type into ACP content blocks on its own host, so `zpui::Image` never
+/// type into ACP content blocks on its own host, so `zz_gpui::Image` never
 /// crosses the socket.
 #[cfg(feature = "agent-pane")]
 pub(crate) fn wire_images(images: &[Arc<Image>]) -> Vec<zz_protocol::AgentImage> {

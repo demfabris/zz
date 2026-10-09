@@ -10,7 +10,7 @@ use crate::{
     tooltip::Tooltip,
     touch::{CoarsePointer, TOUCH_TARGET},
 };
-use zpui::{
+use zz_gpui::{
     App, ElementId, Hsla, IntoElement, ParentElement as _, Pixels, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled as _, Window, div, prelude::*, px,
 };
@@ -81,8 +81,8 @@ fn workspace_chrome_button(
 #[must_use]
 pub fn workspace_chrome_controls(
     settings: impl IntoElement,
-    layout: Option<zpui::AnyElement>,
-) -> zpui::Div {
+    layout: Option<zz_gpui::AnyElement>,
+) -> zz_gpui::Div {
     div()
         .flex()
         .items_center()
@@ -110,7 +110,7 @@ pub fn workspace_status_item(
     icon: Option<IconName>,
     text: SharedString,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .flex()
@@ -149,9 +149,9 @@ pub fn workspace_status_window(
     name: SharedString,
     tooltip: SharedString,
     state: WorkspaceStatusWindowState,
-    deck: Option<zpui::AnyElement>,
+    deck: Option<zz_gpui::AnyElement>,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     let foreground = cx.theme().foreground;
     let highlight = workspace_row_highlight(cx);
     let text_color = if state.active {
@@ -174,7 +174,8 @@ pub fn workspace_status_window(
         .rounded(cx.theme().control_radius())
         .overflow_hidden()
         .when(cx.theme().shadow, |item| {
-            item.border(px(0.5)).border_color(zpui::transparent_white())
+            item.border(px(0.5))
+                .border_color(zz_gpui::transparent_white())
         })
         .when(state.active, |item| {
             item.bg(highlight)
@@ -239,7 +240,7 @@ pub fn workspace_sidebar_titlebar(
     id: impl Into<ElementId>,
     controls: impl IntoElement,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     workspace_sidebar_titlebar_with_inset(id, controls, workspace_controls_leading_inset(cx))
 }
 
@@ -247,7 +248,7 @@ pub fn workspace_sidebar_titlebar_with_inset(
     id: impl Into<ElementId>,
     controls: impl IntoElement,
     leading_inset: Pixels,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .flex()
@@ -280,7 +281,7 @@ pub fn workspace_sidebar_surface(
     titlebar: impl IntoElement,
     navigation: impl IntoElement,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .flex()
@@ -324,7 +325,7 @@ pub fn workspace_tree_row(
     label: impl IntoElement,
     actions: impl IntoElement,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     let radius = cx.theme().radius;
     let fill_inset = if radius > px(0.) {
         px(WORKSPACE_TREE_FILL_INSET)
@@ -340,7 +341,8 @@ pub fn workspace_tree_row(
         .right(fill_inset)
         .rounded(cx.theme().control_radius())
         .when(cx.theme().shadow, |this| {
-            this.border(px(0.5)).border_color(zpui::transparent_white())
+            this.border(px(0.5))
+                .border_color(zz_gpui::transparent_white())
         })
         .group_hover(row_group.clone(), |this| {
             let this = this.bg(fill_color);
@@ -362,7 +364,7 @@ pub fn workspace_tree_row(
         .pl(px(6.0))
         .when(hover_actions, |this| {
             this.invisible()
-                .group_hover(row_group.clone(), zpui::Styled::visible)
+                .group_hover(row_group.clone(), zz_gpui::Styled::visible)
         })
         .child(actions);
     let id = id.into();
@@ -388,7 +390,7 @@ pub fn workspace_tree_row(
             cx.theme().foreground.muted()
         })
         .when(active, crate::StyledExt::font_medium)
-        .when(clickable, zpui::Styled::cursor_pointer)
+        .when(clickable, zz_gpui::Styled::cursor_pointer)
         .child(marker)
         .child(workspace_tree_row_label(label))
         .child(trailing)
@@ -401,7 +403,7 @@ pub fn workspace_tree_action_row(
     icon: IconName,
     label: impl Into<SharedString>,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     let foreground = cx.theme().foreground;
     workspace_tree_row_frame(id, depth, cx)
         .text_color(foreground.muted())
@@ -442,7 +444,11 @@ fn workspace_tree_row_height(cx: &App) -> f32 {
     }
 }
 
-fn workspace_tree_row_frame(id: impl Into<ElementId>, depth: u8, cx: &App) -> Stateful<zpui::Div> {
+fn workspace_tree_row_frame(
+    id: impl Into<ElementId>,
+    depth: u8,
+    cx: &App,
+) -> Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .w_full()
@@ -459,7 +465,7 @@ fn workspace_tree_row_frame(id: impl Into<ElementId>, depth: u8, cx: &App) -> St
         .text_sm()
 }
 
-fn workspace_tree_row_label(label: impl IntoElement) -> zpui::Div {
+fn workspace_tree_row_label(label: impl IntoElement) -> zz_gpui::Div {
     div()
         .min_w_0()
         .flex_1()
@@ -474,7 +480,7 @@ fn workspace_tree_row_label(label: impl IntoElement) -> zpui::Div {
 }
 
 #[must_use]
-pub fn workspace_tree_marker(marker: impl IntoElement) -> zpui::Div {
+pub fn workspace_tree_marker(marker: impl IntoElement) -> zz_gpui::Div {
     div()
         .h_full()
         .w(px(WORKSPACE_TREE_MARKER_SLOT_WIDTH))
@@ -495,7 +501,7 @@ pub fn workspace_tree_disclosure(
     expanded: bool,
     row_group: SharedString,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     let foreground = cx.theme().foreground;
     let chevron = Icon::new(if expanded {
         IconName::ChevronDown
@@ -520,7 +526,7 @@ pub fn workspace_tree_disclosure(
                 .flex()
                 .items_center()
                 .justify_center()
-                .group_hover(row_group.clone(), zpui::Styled::invisible)
+                .group_hover(row_group.clone(), zz_gpui::Styled::invisible)
                 .child(marker),
         )
         .child(
@@ -531,7 +537,7 @@ pub fn workspace_tree_disclosure(
                 .items_center()
                 .justify_center()
                 .invisible()
-                .group_hover(row_group, zpui::Styled::visible)
+                .group_hover(row_group, zz_gpui::Styled::visible)
                 .child(chevron),
         )
 }

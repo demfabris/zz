@@ -1,10 +1,10 @@
 use std::{cell::Cell, rc::Rc};
 
-use zpui::{
+use zz_client::{MenuBox, MenuKeyResult, MenuPointerKind, resolve_menu_mouse};
+use zz_gpui::{
     AnyElement, Bounds, Context, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point,
     ScrollWheelEvent, Window, div, point, prelude::*, px, size,
 };
-use zz_client::{MenuBox, MenuKeyResult, MenuPointerKind, resolve_menu_mouse};
 use zz_protocol::{InputMessage, MenuState, PopupBorderLines};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, ElementExt as _,
@@ -18,7 +18,7 @@ use zz_ui::{
 use super::AppShell;
 
 impl AppShell {
-    pub(super) fn floating_canvas_size(&self, window: &Window) -> zpui::Size<Pixels> {
+    pub(super) fn floating_canvas_size(&self, window: &Window) -> zz_gpui::Size<Pixels> {
         let viewport = window.fully_visible_bounds().size;
         size(
             (viewport.width

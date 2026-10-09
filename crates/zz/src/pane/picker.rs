@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     App, Context, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke, MouseButton,
     Render, Window, div, prelude::*, px,
 };
@@ -140,14 +140,18 @@ fn select_command(pane: PaneId) -> CommandInvocation {
 
 pub(crate) struct PanePickerView {
     pane: PaneId,
-    mux: zpui::Entity<MuxClient>,
+    mux: zz_gpui::Entity<MuxClient>,
     focus_handle: FocusHandle,
     selected: usize,
     window_corners: WindowCorners,
 }
 
 impl PanePickerView {
-    pub(crate) fn new(pane: PaneId, mux: zpui::Entity<MuxClient>, cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(
+        pane: PaneId,
+        mux: zz_gpui::Entity<MuxClient>,
+        cx: &mut Context<Self>,
+    ) -> Self {
         Self {
             pane,
             mux,
@@ -271,7 +275,7 @@ impl Render for PanePickerView {
 
 #[cfg(test)]
 mod tests {
-    use zpui::Modifiers;
+    use zz_gpui::Modifiers;
 
     use super::*;
 

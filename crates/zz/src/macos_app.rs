@@ -1,8 +1,8 @@
-use zpui::{App, KeyBinding};
+use zz_gpui::{App, KeyBinding};
 
 use crate::workspace::ClosePane;
 
-zpui::actions!(
+zz_gpui::actions!(
     zz,
     [Quit, Hide, HideOthers, ShowAll, CloseWindow, Minimize, Zoom,]
 );
@@ -31,11 +31,11 @@ pub(crate) fn key_bindings() -> [KeyBinding; 6] {
 mod tests {
     use std::any::TypeId;
 
-    use zpui::{KeyContext, Keymap, Keystroke};
+    use zz_gpui::{KeyContext, Keymap, Keystroke};
 
     use super::*;
 
-    fn assert_binding<A: zpui::Action>(keymap: &Keymap, source: &str, contexts: &[KeyContext]) {
+    fn assert_binding<A: zz_gpui::Action>(keymap: &Keymap, source: &str, contexts: &[KeyContext]) {
         let keystroke = Keystroke::parse(source).expect("valid macOS keystroke");
         let (bindings, pending) = keymap.bindings_for_input(&[keystroke], contexts);
         assert!(!pending);

@@ -17,13 +17,6 @@ use env_logger::{Builder, Env, WriteStyle};
 use image::{Frame as ImageFrame, ImageBuffer, Rgba};
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use parking_lot::Mutex;
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use zpui::{
-    App, Bounds, Context, ObjectFit, Render, RenderImage, Window, WindowBounds, WindowOptions, div,
-    external_texture, img, prelude::*, px, size,
-};
-#[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use zpui_platform::application;
 #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 use zz_browser::FrameTier;
 use zz_browser::{
@@ -34,6 +27,13 @@ use zz_browser::{
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use zz_browser::{BrowserGpuContext, OsrFrame, SessionId};
 use zz_daemon_client::unmasked::SpawnUnmasked as _;
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use zz_gpui::{
+    App, Bounds, Context, ObjectFit, Render, RenderImage, Window, WindowBounds, WindowOptions, div,
+    external_texture, img, prelude::*, px, size,
+};
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use zz_gpui_platform::application;
 
 const DEFAULT_PORT: u16 = 9324;
 const DEFAULT_SPIKE_SECONDS: u64 = 10;
@@ -678,7 +678,7 @@ enum FixturePaintSurface {
         device_size: (u32, u32),
         pool_generation: u64,
         sequence: u64,
-        texture: zpui::wgpu::Texture,
+        texture: zz_gpui::wgpu::Texture,
     },
 }
 
@@ -1123,7 +1123,7 @@ impl Render for SharedTextureSpikeView {
         self.record_paint_submission();
         window.request_animation_frame();
 
-        let content = div().size_full().bg(zpui::rgb(0x10_13_18));
+        let content = div().size_full().bg(zz_gpui::rgb(0x10_13_18));
         match self.surface.as_ref() {
             Some(FixturePaintSurface::OwnedBgra { image, .. }) => {
                 content.child(img(image.clone()).object_fit(ObjectFit::Fill).size_full())
@@ -1139,7 +1139,7 @@ impl Render for SharedTextureSpikeView {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(zpui::rgb(0xe8_ee_f7))
+                    .text_color(zz_gpui::rgb(0xe8_ee_f7))
                     .child("Waiting for the first CEF frame…"),
             ),
         }

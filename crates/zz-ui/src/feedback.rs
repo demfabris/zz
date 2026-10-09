@@ -6,7 +6,7 @@ use crate::{
     overlay::dialog_description,
     rems_from_px, v_flex,
 };
-use zpui::{
+use zz_gpui::{
     App, Div, Entity, ParentElement as _, SharedString, Styled as _, div,
     prelude::FluentBuilder as _,
 };

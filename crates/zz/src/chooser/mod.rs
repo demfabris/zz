@@ -1,6 +1,6 @@
 use std::{ops::Range, sync::Arc};
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, Bounds, Context, Element, ElementId, ElementInputHandler, Entity,
     EntityInputHandler, FocusHandle, Focusable, GlobalElementId, InspectorElementId, IntoElement,
     KeyDownEvent, LayoutId, MouseButton, Pixels, Point, Render, ScrollStrategy, Style,
@@ -361,8 +361,8 @@ impl<S: ChooserSpec> Render for Chooser<S> {
                     .flex()
                     .items_start()
                     .justify_center()
-                    .px(zpui::px(24.0))
-                    .py(zpui::px(22.0))
+                    .px(zz_gpui::px(24.0))
+                    .py(zz_gpui::px(22.0))
                     .bg(cx.theme().scrim)
                     .track_focus(&self.focus_handle)
                     .on_key_down(cx.listener(Self::on_key_down))

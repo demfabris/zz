@@ -1,6 +1,6 @@
 use std::{cell::OnceCell, future, path::PathBuf, sync::Arc, time::Duration};
-use zpui::{App, Global, Task};
 use zz_chrome_import::recent_pages::RecentPages as StoredPages;
+use zz_gpui::{App, Global, Task};
 
 pub(crate) use zz_chrome_import::recent_pages::{
     HistorySuggestion, MAX_TITLE_BYTES, MAX_URL_BYTES, RecentPage,
@@ -250,7 +250,7 @@ mod tests {
         time::UNIX_EPOCH,
     };
 
-    use zpui::{
+    use zz_gpui::{
         AppContext as _, Context, Entity, IntoElement, Render, StyleRefinement, Styled,
         TestAppContext, Window, div,
     };
@@ -259,7 +259,7 @@ mod tests {
 
     const URL: &str = "https://example.com";
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn startup_and_untouched_shutdown_do_not_load_or_rewrite_history(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("recent-pages");
@@ -289,7 +289,7 @@ mod tests {
         assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn first_read_loads_persisted_history_without_scheduling_a_save(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("recent-pages");
@@ -311,7 +311,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn first_mutation_preserves_previously_persisted_entries(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("recent-pages");
@@ -353,7 +353,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn title_changes_do_not_redraw_unrelated_views(cx: &mut TestAppContext) {
         cx.update(|cx| init_at(None, cx));
         let renders = Rc::new(Cell::new(0));
@@ -377,7 +377,7 @@ mod tests {
         assert!(renders.get() > before);
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn history_changes_share_one_delayed_save(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("recent-pages");
@@ -405,7 +405,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn shutdown_flushes_without_waiting_for_the_save_timer(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("recent-pages");
@@ -422,7 +422,7 @@ mod tests {
         );
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn shutdown_waits_for_the_active_writer_before_saving_newer_history(cx: &mut TestAppContext) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("recent-pages");
@@ -463,7 +463,7 @@ mod tests {
         });
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn memory_only_history_never_schedules_persistence(cx: &mut TestAppContext) {
         cx.update(|cx| {
             init_at(None, cx);

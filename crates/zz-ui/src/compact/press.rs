@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     Context, HitboxBehavior, IntoElement, MouseButton, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, Styled, TouchDragEvent, TouchPhase, WeakEntity, canvas,
 };

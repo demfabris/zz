@@ -31,7 +31,7 @@ notifications unrelated to mux structure also skip the full tree projection.
 The crate's job is narrow and mechanical by design: turn `MuxSnapshot` + protocol events into a
 tree of stable GPUI entities (`Entity<PanePickerView>` / `Entity<TerminalView>` /
 `Entity<BrowserView>` / `Entity<AgentView>`, one per `PaneId`,
-created once and retained across re-renders) and two custom `zpui::Element` implementations
+created once and retained across re-renders) and two custom `zz_gpui::Element` implementations
 (`TerminalElement`, `BrowserElement`) that do the per-frame painting. All tmux-compatible
 parsing, layout math, and session/window/pane lifecycle live in [`zz-mux`](/crates/zz-mux.md) and
 [`zz-daemon`](/crates/zz-daemon.md); this crate renders, forwards input, and owns the GUI-scoped CEF
@@ -516,7 +516,7 @@ overlay only ever rendered above a 40 ms transport RTT, which the deleted QUIC a
 for. Should ssh latency ever justify bringing it back, the RTT it gated on has to come from an
 application-level ping . the client no longer has a transport that reports one.
 
-`TerminalElement` is a custom `zpui::Element` (not an entity) instantiated fresh each render but reading
+`TerminalElement` is a custom `zz_gpui::Element` (not an entity) instantiated fresh each render but reading
 the same `Arc<RwLock<RetainedTerminalViewport>>` and a persistent `Rc<RefCell<RowRenderCache>>`
 owned by `TerminalView`. Each `prepaint` it shapes only the rows whose revision changed
 (`RowRenderCache::prepare` invalidates on a `RowCacheSignature` covering dictionary generation,
@@ -624,7 +624,7 @@ Neither path writes Chrome's profile or transfers passwords, autofill, cache, or
 Import/clear completion is surfaced through the mounted notification layer, and successful cookie
 imports reload the page.
 
-`BrowserElement` is the browser's custom `zpui::Element`: it does nothing but call
+`BrowserElement` is the browser's custom `zz_gpui::Element`: it does nothing but call
 `window.paint_image` with the `Arc<RenderImage>` handed to it and report its content bounds back to
 `BrowserView::update_content_bounds` (which resizes the CEF viewport). See
 [OSR rendering](/browser/osr-rendering.md) for the CEF-side half of this pipeline.

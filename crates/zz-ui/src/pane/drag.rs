@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use zpui::{
+use zz_gpui::{
     App, Bounds, Context, CursorStyle, ElementId, Entity, IntoElement, Pixels, Point, Render,
     Window, div, prelude::*, px,
 };
@@ -35,11 +35,11 @@ impl DropPreview {
 
 fn lerp_bounds(from: Bounds<Pixels>, to: Bounds<Pixels>, delta: f32) -> Bounds<Pixels> {
     Bounds::new(
-        zpui::point(
+        zz_gpui::point(
             lerp_pixels(from.origin.x, to.origin.x, delta),
             lerp_pixels(from.origin.y, to.origin.y, delta),
         ),
-        zpui::size(
+        zz_gpui::size(
             lerp_pixels(from.size.width, to.size.width, delta),
             lerp_pixels(from.size.height, to.size.height, delta),
         ),
@@ -91,7 +91,7 @@ pub fn pane_drag_button(
     enabled: bool,
     on_start: impl Fn(&PaneDrag, &mut Window, &mut App) + 'static,
     cx: &App,
-) -> zpui::Stateful<zpui::Div> {
+) -> zz_gpui::Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .aria_label("Drag pane")
@@ -122,7 +122,7 @@ pub fn pane_drag_button(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zpui::{Modifiers, MouseButton, TestAppContext, point};
+    use zz_gpui::{Modifiers, MouseButton, TestAppContext, point};
 
     struct DragTest {
         enabled: bool,
@@ -153,7 +153,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn handle_starts_without_prefix_and_drops_after_a_single_move(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, _| DragTest {

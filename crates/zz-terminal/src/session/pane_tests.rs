@@ -614,3 +614,33 @@ fn a_pane_keeps_transparent_huge_pages_off_when_zz_turned_them_off() {
         "spawning the pane left them off here"
     );
 }
+
+#[test]
+fn a_retained_exited_pane_keeps_its_output_marks() {
+    let session = TerminalSession::spawn(
+        100,
+        Arc::new(TerminalAppearance::default()),
+        TerminalSpawn {
+            command: Some(vec![
+                "sh".to_owned(),
+                "-c".to_owned(),
+                "printf 'plain\\r\\n\\033]133;C\\007out\\r\\n'".to_owned(),
+            ]),
+            ..TerminalSpawn::default()
+        },
+    );
+    wait_until("the exit", || session.completion().is_some());
+    assert!(session.wait_for_identity(Duration::ZERO));
+    session.write_dead_notice(Some(Arc::from("ZZ_PANE_DEAD")));
+    wait_until("the retained notice", || {
+        text(&session.latest_viewport()).contains("ZZ_PANE_DEAD")
+    });
+    let flags = session
+        .capture(super::CaptureOptions {
+            line_flags: true,
+            end: super::CaptureBoundary::Relative(1),
+            ..super::CaptureOptions::default()
+        })
+        .expect("retained capture");
+    assert_eq!(flags, "O out\n- ");
+}

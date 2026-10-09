@@ -42,7 +42,7 @@
       "id": "fix.streams",
       "track": "fix",
       "title": "Close the last two caller-stream refusals",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -58,14 +58,17 @@
         "protocol.binary-streams closes."
       ],
       "branch": "catchup/fix.streams",
-      "sha": null,
-      "notes": []
+      "sha": "d32a396b5",
+      "notes": [
+        "2026-10-09: lane done at ad7a35ca9 (clauses met; show-buffer vis-escape claim in the clause was wrong for this pin: cmdq_print_data parses, matched the pin); integration pass merging main (3.8) sent",
+        "2026-10-09: 3 codex reviews (4 P1, then 1 P1, fixed); findings 3-4 moved to fix.option-bytes; merged; just compat check green on main"
+      ]
     },
     {
       "id": "fix.capture-links",
       "track": "fix",
       "title": "capture-pane -H and the derivable -F line flags",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-terminal/src/session.rs",
@@ -81,8 +84,36 @@
         "capture.rich-transports keeps only -P, -R and the saved alternate grid."
       ],
       "branch": "catchup/fix.capture-links",
+      "sha": "2012f21c9",
+      "notes": [
+        "2026-10-09: lane done at 6b4a587a8 (-H and -F match; link identity is by URI since libghostty exposes no OSC 8 id, recorded); integration pass merging main (3.8) sent",
+        "2026-10-09: merged main at 7e0a35f4b; capture checks green at 3.8; tui-client-commands.sh red only from the pin move (see pin.tui-fixtures)",
+        "2026-10-09: fix pass 7946cf657: 5 fixed, 2 recorded as capture.terminal-engine-limits; second review running",
+        "2026-10-09: 3 fix passes after 2 reviews; IL/DL output-mark move and two OSC 8/133 cases recorded in capture.terminal-engine-limits; merged; clippy + just compat check green on main"
+      ]
+    },
+    {
+      "id": "fix.capture-e-links",
+      "track": "fix",
+      "title": "capture-pane -e keeps OSC 8 hyperlinks",
+      "status": "todo",
+      "deps": [
+        "fix.capture-links"
+      ],
+      "zones": [
+        "crates/zz-terminal/src/session.rs",
+        "crates/zz-daemon/src/daemon.rs"
+      ],
+      "gaps": [],
+      "accept": [
+        "On link rows capture-pane -e emits \\033]8;;uri\\033\\\\ around the linked text exactly where the pin does (measure on tmux 3.8); zz emits SGR only today.",
+        "A scenario or daemon test pins it against recorded pin output."
+      ],
+      "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: found by fix.capture-links; zz can read per-cell URIs now."
+      ]
     },
     {
       "id": "fix.chooser-preview",
@@ -132,7 +163,7 @@
       "id": "fix.small-semantics",
       "track": "fix",
       "title": "pane_current_command fallback, refresh-client -l, new-session -t hint, registry hygiene",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -156,9 +187,38 @@
         "mouse.bound-context's reason points at the scrollbar and floating-pane items that actually block it.",
         "The raw TUI's top-left crop of an oversized pane and attach -r self-promotion via switch-client -r are recorded in divergences.md."
       ],
+      "branch": "catchup/fix.small-semantics",
+      "sha": null,
+      "notes": [
+        "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'."
+      ]
+    },
+    {
+      "id": "fix.option-bytes",
+      "track": "fix",
+      "title": "Bytes survive option, environment, command-block and guard-output paths",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src/command.rs",
+        "crates/zz-mux/src/model.rs",
+        "crates/zz-mux/src/tmux_options.rs",
+        "crates/zz-daemon/src/daemon.rs"
+      ],
+      "gaps": [],
+      "accept": [
+        "set -g @x a\\376b (argv or source-file -) stores the bytes; show-options -g @x prints a\\376b as the pin does, and #{@x} expands to the same bytes as the pin for UTF-8 and non-UTF-8 clients.",
+        "A registry item records the divergence first if the store change is split across commits, and closes with it.",
+        "Sourcing `if-shell -F 1 { set-buffer -b x a<fe>b }` stores 61 fe 62 as tmux 3.8 does (zz stores 61 ef bf bd 62: command blocks are reparsed through a lossy string view).",
+        "X=a<fd>b in one sourced file then set-buffer -b y \"$X\" in another stores 61 fd 62 as 3.8 does (the second file takes the text-only parse path and reads the lossy global_environment_variable accessor).",
+        "A UTF-8 control client gets raw bytes for an inserted or sourced show-buffer as 3.8 does (ControlCommandGuard.output is a String in the protocol today; changing it is a wire append under the unreleased version)."
+      ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: found by fix.streams: UserOptions is BTreeMap<String,String> in zz-mux, so non-UTF-8 values read back as U+FFFD; set-option and show-options pass values as String.",
+        "2026-10-09: fix.streams handed over its findings 3 and 4 and the guard-output String; measured cases are in protocol.binary-streams' close in compat/tmux-gaps.json."
+      ]
     },
     {
       "id": "pin.move",
@@ -194,6 +254,33 @@
       ]
     },
     {
+      "id": "pin.tui-fixtures",
+      "track": "pin",
+      "title": "Re-baseline the TUI fixtures at the 3.8 pin",
+      "status": "active",
+      "deps": [
+        "pin.move"
+      ],
+      "zones": [
+        "compat/tui-*.sh",
+        "compat/tui",
+        "compat/tmux-gaps.json",
+        "knowledge/tmux/tui-parity.md"
+      ],
+      "gaps": [],
+      "accept": [
+        "Every compat/tui-*.sh fixture runs on main against tmux 3.8 with zero unattributed differences: each 3.8 difference is either fixed, or recorded (not asserted) with an owner that is an open gap (pin.formats-options, pin.hooks-events, pin.keys-copy, pin.display-panes, pin.contract-breaks, pin.layout-v2, float.*), using the fixtures' existing record/owner mechanism.",
+        "Measured on fix.capture-links' merge with main: tui-client-commands.sh had 168 of 538 asserted comparisons differ (155 customize-mode, 4 switch-mode, 4 show-messages terminals/jobs, 4 lock list-windows, 1 show-hooks -g); all are explained in the report.",
+        "--self-check passes for each fixture touched.",
+        "The closed TUI campaign's ledger keeps its own pin (compat/tui/tracker.py) and stays green."
+      ],
+      "branch": "catchup/pin.tui-fixtures",
+      "sha": null,
+      "notes": [
+        "2026-10-09: pin.move ran check.sh only; the TUI fixtures went red at 3.8. Gates every later lane that runs a TUI fixture."
+      ]
+    },
+    {
       "id": "pin.contract-breaks",
       "track": "pin",
       "title": "3.8 contract breaks: active-pane flag, %% quoting, q: escaping, relative targets",
@@ -219,14 +306,16 @@
       "branch": null,
       "sha": null,
       "notes": [
-        "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here."
+        "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here.",
+        "2026-10-09 from pin.layout-v2: smoke/control-notify fails tmux-side-only at 3.8 (%pause, %continue and hook %window-renamed now queued outside %begin/%end).",
+        "2026-10-09 from pin.layout-v2: 3.8 layout_parse no longer rebuilds tiled pane z-order from the tree; zz still sets window.z_order = panes_in_order() in select_layout_string; measure and align."
       ]
     },
     {
       "id": "pin.layout-v2",
       "track": "pin",
       "title": "JSON v2 layout strings",
-      "status": "todo",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -245,9 +334,12 @@
         "Control clients get v1 unless they set the new-layouts flag.",
         "The v2 writer has a place for floating panes so float.core only fills it in."
       ],
-      "branch": null,
+      "branch": "catchup/pin.layout-v2",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at f2455a131: all 4 clauses met; wire: ControlFlags.new_layouts appended under 108; snapshot dumps now v2 text; a plain select-pane now sends a TreeOp::WindowLayout (dump strings carry a/l), small extra delta traffic",
+        "2026-10-09: fix pass 5cd37e43c: 5 fixed; orchestrator ruling: refresh-client -B subscriptions print v2 regardless of new-layouts, as 3.8 measures (monitor.c formats have no client)"
+      ]
     },
     {
       "id": "pin.display-panes",
@@ -304,7 +396,7 @@
       "id": "pin.formats-options",
       "track": "pin",
       "title": "3.8 formats, modifiers, options and show -F",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -323,7 +415,7 @@
         "clear-on-attach, copy-mode-current-line-style, remain-on-exit failed-key exist; fill-character, pane-active-border-style and status-format defaults match 3.8.",
         "show-options, show-window-options and show-hooks accept -F; display-message -j works; capture-pane -I is adopted or registered native (libghostty keeps no per-row time)."
       ],
-      "branch": null,
+      "branch": "catchup/pin.formats-options",
       "sha": null,
       "notes": []
     },

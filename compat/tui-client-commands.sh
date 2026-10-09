@@ -62,6 +62,7 @@
 #                             there is no mode
 # capture-pane -a           `no alternate screen`, and one    same                           PROVED
 #                             empty line under -q
+# capture-pane -F -H        line flags, each line's links     same                           PROVED
 # load-buffer -             caller stdin into a buffer        adopted, same                  PROVED
 # save-buffer - / -a -      buffer bytes to caller stdout     adopted, same                  PROVED
 # show-buffer [-b]          buffer bytes to stdout            same                           PROVED
@@ -1520,8 +1521,6 @@ customize_screen_self_checks() {
 INTERACTIVE_REFRESH='clients.interactive-refresh, accepted: every zz client renders itself from published frames, so the pan and redraw-adjustment family stays loudly unsupported'
 LOCK_PROGRAM='DECIDED options.lock-program: decided 2026-09-14 by fabrico under the superset principle; the desktop session owns locking. The pin runs lock-command on the client tty; zz accepts the CLI and stores lock-command and lock-after-time without arming a terminal locker'
 RICH_CAPTURE='capture.rich-transports, accepted: zz captures the terminal worker retained UTF-8 text snapshot, not the pin grid and input parser'
-CAPTURE_FLAGS='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -F prints six grid_line flags and zz does not retain the full set as line facts. D is a dead pane line, X an extended cell line and H a hyperlink line, all tmux grid bookkeeping; O and P are the OSC 133 marks libghostty records on cells but does not publish per line; W is the wrap flag that the terminal grid now exposes. The workload it would serve is a script reading which rows are output, prompt or continuation; that wants a line-fact channel out of the terminal worker, not a sixth text transform. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
-CAPTURE_LINKS='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -H prints each line OSC 8 URIs and zz has no hyperlink to print. On a row the pin marks HX, a zz capture -e emits the text with no OSC 8 at all, so the retained snapshot did not keep the link. The workload it would serve is a script harvesting the URLs on a screen; that wants hyperlinks retained and published by the terminal worker first. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_PENDING='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -P prints the bytes the pin parser has read and not yet completed, input_pending(wp->ictx). libghostty-vt publishes no parser-pending buffer, so zz cannot answer it and an empty answer would be a fake channel that matched only because the buffer is almost always empty. The workload it would serve is debugging a half-written escape sequence. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_GRID='DECIDED capture.rich-transports, refused with a measurement 2026-09-15: -R dumps the pin internal grid - a header G <sx>x<sy> (<hsize>/<hlimit>), then per line L <yy> (<n>) flags=<string>[<hex>] <cellused>/<cellsize>, then one C line per column carrying that cell colour, attribute and link ids. Measured at 40x8 that is 329 lines for eight rows. zz has no hsize/hlimit pair, no per-line cellused and cellsize, and no grid flag word: building them inside zz would be inventing tmux internals to make bytes match. The workload it would serve is a tmux regression test reading another tmux grid. decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible'
 CAPTURE_CHARSET='DECIDED capture charset provenance: decided 2026-09-15 by the orchestrator under fabrico'"'"'s TUI parity contract of 2026-09-09; reversible. At 80x24 ESC(0qqqESC(B gives literal \016qqq\017 under -C -e on the pin and UTF-8 box drawing on zz; without -e the pin emits qqq while zz still emits box drawing. Ghostty maps the source charset byte to Unicode before storing the cell and retains no charset bit. The workload is replaying original DEC line drawing bytes; ordinary Unicode text capture remains asserted'
@@ -1589,8 +1588,8 @@ capture_pane_cases() {
   case_run capture-line-numbers-reversed same '' -- capture-pane -p -L -t PANE -S 2 -E 0
   case_run capture-control-line-numbers same '' -- capture-pane -p -C -L -t PANE -S 0 -E 2
   case_run capture-line-numbers-missing same '' -- capture-pane -p -L -t %99
-  case_run capture-flags record "$CAPTURE_FLAGS" -- capture-pane -p -F -t PANE -S 0 -E 2
-  case_run capture-hyperlinks record "$CAPTURE_LINKS" -- capture-pane -p -H -t PANE -S 0 -E 2
+  case_run capture-flags same '' -- capture-pane -p -F -t PANE -S 0 -E 2
+  case_run capture-hyperlinks same '' -- capture-pane -p -H -t PANE -S 0 -E 2
   case_run capture-pending record "$CAPTURE_PENDING" -- capture-pane -p -P -t PANE
   case_run capture-grid record "$CAPTURE_GRID" -- capture-pane -p -R -t PANE
   restore_case capture-restored

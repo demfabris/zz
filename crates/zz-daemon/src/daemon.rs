@@ -77,7 +77,8 @@ use zz_mux::{
     copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
     expand_format_values, expand_status, format_command, format_true, hook_format_variables,
     if_shell_truthy, legacy_layouts_in, parse_tmux_colour, sanitize_client_output,
-    send_keys_is_read_only_safe, send_keys_target_client, validate_static_command_chain,
+    send_keys_is_read_only_safe, send_keys_target_client, utf8_sanitize,
+    validate_static_command_chain,
 };
 #[cfg(windows)]
 use zz_protocol::read_protocol_message_into;
@@ -7622,10 +7623,11 @@ impl Shared {
         client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
-        let legacy = control_reads_legacy_layouts(
-            &self.inner.lock(),
-            format_provenance_client(context, client),
-        );
+        let legacy = !prints_stored_bytes(&command.name)
+            && control_reads_legacy_layouts(
+                &self.inner.lock(),
+                format_provenance_client(context, client),
+            );
         let previous_legacy = context.legacy_layouts();
         context.set_legacy_layouts(legacy);
         let result = self
@@ -8250,6 +8252,7 @@ impl Shared {
                     }
                     DaemonCommandDispatch::Buffer => self.buffer_command_for_client(
                         Some(client),
+                        kind,
                         context,
                         canonical,
                         &command.args,
@@ -12685,8 +12688,9 @@ impl Shared {
                 effects: Vec::new(),
             });
         }
+        let no_links = parsed.options.hyperlinks && output.is_empty();
         let mut data = output.into_bytes();
-        if !unavailable_alternate {
+        if !unavailable_alternate && !no_links {
             data.push(b'\n');
         }
         let events = {
@@ -19555,12 +19559,19 @@ impl Shared {
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        self.buffer_command_for_client(None, context, canonical_command(name), args)
+        self.buffer_command_for_client(
+            None,
+            ClientKind::Command,
+            context,
+            canonical_command(name),
+            args,
+        )
     }
 
     fn buffer_command_for_client(
         self: &Arc<Self>,
         invoking_client: Option<ClientId>,
+        kind: ClientKind,
         context: &ExecutionContext,
         name: &str,
         args: &[RawText],
@@ -19579,7 +19590,7 @@ impl Shared {
                     self.refresh_choose_buffers();
                     return Ok(Execution::default());
                 }
-                let [data] = parsed.positional.as_slice() else {
+                let (1, Some(data)) = (parsed.positional.len(), args.last()) else {
                     return Err(ServerError::CommandParse(
                         "set-buffer requires exactly one data argument".to_owned(),
                     )
@@ -19589,7 +19600,7 @@ impl Shared {
                     return Ok(Execution::default());
                 }
                 let requested_name = parsed.value('b');
-                validate_paste_buffer_size(data.len())?;
+                validate_paste_buffer_size(data.byte_len())?;
                 if let Some(name) = requested_name {
                     validate_paste_buffer_name(name)?;
                 }
@@ -19634,22 +19645,40 @@ impl Shared {
             "show-buffer" | "showb" => {
                 let parsed = parse_buffer_command_args(name, args, &['b'], &[])?;
                 require_no_positionals(name, &parsed)?;
-                let (buffer_name, data, utf8) = {
+                let (data, control, utf8) = {
                     let inner = self.inner.lock();
                     let buffer =
                         resolve_buffer(&inner, parsed.value('b'), BufferMissing::NoBuffer)?;
-                    (buffer.name.clone(), Arc::clone(&buffer.data), buffer.utf8)
+                    let printer = invoking_client
+                        .filter(|client| *client != ClientId(u64::MAX))
+                        .map(|client| (client, kind))
+                        .or_else(|| {
+                            context
+                                .control_command_target()
+                                .map(|(client, _)| client)
+                                .or_else(|| context.replay_client())
+                                .map(|client| {
+                                    let kind = inner.client(client).and_then(|c| c.kind);
+                                    (client, kind.unwrap_or(ClientKind::Command))
+                                })
+                        });
+                    let control = printer.is_some_and(|(_, kind)| kind == ClientKind::Control);
+                    let utf8 = printer
+                        .is_some_and(|(client, _)| inner.client(client).is_some_and(|c| c.utf8));
+                    (Arc::clone(&buffer.data), control, utf8)
                 };
-                if !utf8 {
-                    return Err(ServerError::InvalidCommand(format!(
-                        "buffer {buffer_name} contains non-UTF-8 bytes; use save-buffer"
-                    ))
-                    .into());
-                }
-                let output = String::from_utf8(data.as_ref().to_vec())
-                    .expect("paste-buffer UTF-8 validity is cached at insertion");
+                let output = if control {
+                    let printed = data.split(|byte| *byte == 0).next().unwrap_or_default();
+                    if utf8 {
+                        RawText::from_bytes(printed)
+                    } else {
+                        RawText::from(utf8_sanitize(printed))
+                    }
+                } else {
+                    RawText::from_bytes(data.as_ref())
+                };
                 Ok(Execution {
-                    output: output.into(),
+                    output,
                     effects: Vec::new(),
                 })
             }
@@ -34159,7 +34188,7 @@ impl<'a> ConfigInput<'a> {
 
 struct ConfigEnvironmentEntry {
     name: String,
-    value: String,
+    value: RawText,
     hidden: bool,
 }
 
@@ -34178,7 +34207,7 @@ impl ConfigParse {
                 .into_iter()
                 .map(|assignment| ConfigEnvironmentEntry {
                     name: assignment.name,
-                    value: assignment.value,
+                    value: assignment.value.into(),
                     hidden: assignment.hidden,
                 })
                 .collect(),
@@ -34192,13 +34221,8 @@ impl ConfigParse {
             let blocks = (0..command.args.len())
                 .filter(|index| command.argument_is_command_block(*index))
                 .collect::<Vec<_>>();
-            let name = String::from_utf8(command.name).ok()?;
-            let args = command
-                .args
-                .into_iter()
-                .map(String::from_utf8)
-                .collect::<Result<Vec<_>, _>>()
-                .ok()?;
+            let name = String::from_utf8_lossy(&command.name).into_owned();
+            let args = command.args.into_iter().map(RawText::from_bytes);
             let invocation = CommandInvocation::new(name, args).with_command_blocks(blocks);
             commands.push(match command.source {
                 Some(source) => invocation.with_source(source),
@@ -34209,7 +34233,7 @@ impl ConfigParse {
         for assignment in parsed.environment {
             environment.push(ConfigEnvironmentEntry {
                 name: String::from_utf8(assignment.name).ok()?,
-                value: String::from_utf8(assignment.value).ok()?,
+                value: RawText::from_bytes(assignment.value),
                 hidden: assignment.hidden,
             });
         }
@@ -38312,7 +38336,6 @@ struct PasteBuffer {
     data: Arc<[u8]>,
     created: SystemTime,
     automatic: bool,
-    utf8: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -41610,10 +41633,12 @@ fn prepare_command_request(
 /// `control_write` for a control client and `file_print_buffer` for
 /// everyone else. `save-buffer` always writes `file_write`, a real path and
 /// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
-/// has a session of its own or is a control client, so it is sanitized for
-/// a control client but falls through to the same raw `file_write` for a
-/// session-less command client, which is the only shape zz's `Command`
-/// kind has.
+/// has a session of its own or is a control client, and it shapes its own
+/// output for the client that runs it, so an inserted or sourced
+/// `show-buffer` is printed the same way as a direct one: a control client
+/// gets the buffer up to its first NUL, sanitized as one message unless it
+/// raised `CLIENT_UTF8`, and a session-less command client, the only shape
+/// zz's `Command` kind has, gets the raw `file_write` bytes.
 fn sanitizes_output_for(
     inner: &ServerState,
     client: ClientId,
@@ -41623,12 +41648,17 @@ fn sanitizes_output_for(
     if !matches!(kind, ClientKind::Command | ClientKind::Control) {
         return false;
     }
-    match canonical_command(command) {
-        "capture-pane" | "save-buffer" => return false,
-        "show-buffer" if kind == ClientKind::Command => return false,
-        _ => {}
+    if prints_stored_bytes(command) {
+        return false;
     }
     !inner.client(client).is_some_and(|c| c.utf8)
+}
+
+fn prints_stored_bytes(command: &str) -> bool {
+    matches!(
+        canonical_command(command),
+        "capture-pane" | "save-buffer" | "show-buffer"
+    )
 }
 
 fn detach_is_inert(inner: &ServerState, client: ClientId) -> bool {
@@ -49133,8 +49163,7 @@ impl CommandStdinSink {
     pub const fn accepts_binary(self) -> bool {
         match self {
             Self::Argument { binary } => binary,
-            Self::Config => false,
-            Self::PaneInput | Self::ConfigReplay => true,
+            Self::Config | Self::PaneInput | Self::ConfigReplay => true,
         }
     }
 
@@ -49400,7 +49429,6 @@ fn insert_paste_buffer(
         (name, true)
     };
 
-    let utf8 = std::str::from_utf8(&data).is_ok();
     inner.paste_buffers.retain(|buffer| {
         if buffer.name == name {
             if replacement_delete {
@@ -49421,7 +49449,6 @@ fn insert_paste_buffer(
             data: Arc::from(data),
             created: SystemTime::now(),
             automatic,
-            utf8,
         },
     );
     events.push(PendingHookEvent::paste_buffer("paste-buffer-changed", name));
@@ -49585,7 +49612,7 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         "capture-pane",
         args,
         &['b', 'E', 'S', 't'],
-        &['a', 'C', 'e', 'J', 'L', 'M', 'N', 'p', 'T', 'q'],
+        &['a', 'C', 'e', 'F', 'H', 'J', 'L', 'M', 'N', 'p', 'T', 'q'],
     )?;
     require_no_positionals("capture-pane", &args)?;
     let options = CaptureOptions {
@@ -49594,6 +49621,8 @@ fn parse_capture_pane_args(args: &[RawText]) -> Result<ParsedCapturePane, Server
         escape_nonprintable: args.has('C'),
         join_wrapped: args.has('J'),
         number_lines: args.has('L'),
+        line_flags: args.has('F'),
+        hyperlinks: args.has('H'),
         mode: args.has('M'),
         preserve_trailing: args.has('J') || args.has('N'),
         trim_positions: args.has('T'),
@@ -52860,7 +52889,7 @@ mod tests {
         };
         assert_eq!(
             request.operation,
-            ClientFileOperation::ReadStdin { binary: false }
+            ClientFileOperation::ReadStdin { binary: true }
         );
         assert_eq!(read_global_option(&shared, "@before"), "yes");
         assert_eq!(read_global_option(&shared, "@after"), "");
@@ -53042,7 +53071,7 @@ mod tests {
         }
         assert!(CommandStdinSink::Argument { binary: true }.accepts_binary());
         assert!(!CommandStdinSink::Argument { binary: false }.accepts_binary());
-        assert!(!CommandStdinSink::Config.accepts_binary());
+        assert!(CommandStdinSink::Config.accepts_binary());
         assert!(CommandStdinSink::PaneInput.accepts_binary());
     }
 
@@ -57605,9 +57634,245 @@ mod tests {
         }
 
         assert!(!shared.sanitizes_output_for(plain, ClientKind::Command, "show-buffer"));
-        assert!(shared.sanitizes_output_for(plain, ClientKind::Control, "show-buffer"));
+        assert!(!shared.sanitizes_output_for(plain, ClientKind::Control, "show-buffer"));
 
         assert!(!shared.sanitizes_output_for(plain, ClientKind::Interactive, "display-message"));
+    }
+
+    #[test]
+    fn show_buffer_hands_binary_bytes_to_each_client_shape_the_way_the_pin_does() {
+        let shared = Arc::new(Shared::new(1));
+        let plain = ClientId(1);
+        let utf8 = ClientId(2);
+        shared.inner.lock().client_entry(utf8).utf8 = true;
+        let mut context = ExecutionContext::default();
+        let stored = b"a\xfeb\nc\x01d".to_vec();
+        shared
+            .execute(
+                plain,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("binary"),
+                        RawText::from_bytes(stored.clone()),
+                    ],
+                ),
+            )
+            .expect("binary buffer");
+        let show = CommandInvocation::new("show-buffer", ["-b", "binary"]);
+        let mut shown = |client, kind| match shared.execute_command_request(
+            client,
+            kind,
+            &mut context,
+            1,
+            &show,
+        ) {
+            CommandResponse::Success {
+                output,
+                exit_code: 0,
+                stdout_claim,
+                ..
+            } => (output.as_bytes().to_vec(), stdout_claim),
+            other => panic!("show-buffer failed: {other:?}"),
+        };
+
+        assert_eq!(
+            shown(plain, ClientKind::Command),
+            (stored.clone(), StdoutClaim::Raw)
+        );
+        assert_eq!(
+            shown(utf8, ClientKind::Command),
+            (stored.clone(), StdoutClaim::Raw)
+        );
+        assert_eq!(shown(plain, ClientKind::Control).0, b"a_b_c_d");
+        assert_eq!(shown(utf8, ClientKind::Control).0, stored);
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut context,
+            2,
+            &CommandInvocation::new("if-shell", ["-F", "1", "show-buffer -b binary"]),
+        );
+        let guards = control_command_guards(take_reliable_messages(&mailbox));
+        assert!(
+            guards
+                .iter()
+                .any(|(output, error, _)| output == "a_b_c_d" && !error),
+            "{guards:?}"
+        );
+    }
+
+    #[test]
+    fn show_buffer_prints_for_the_control_client_that_ran_it_in_every_queue_shape() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let source = directory.path().join("show.conf");
+        fs::write(&source, "show-buffer -b mixed\n").expect("show-buffer source");
+        let shared = Arc::new(Shared::new(1));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-d", "-s", "show-shapes"]),
+            )
+            .expect("session");
+        shared
+            .execute(
+                command,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("mixed"),
+                        RawText::from_bytes(b"a\xfeb\0c".to_vec()),
+                    ],
+                ),
+            )
+            .expect("mixed buffer");
+        let session = context.session.expect("session");
+        let shapes = [
+            control_stdin_command("show-buffer", ["-b", "mixed"]),
+            control_stdin_command("if-shell", ["-F", "1", "show-buffer -b mixed"]),
+            control_stdin_command("source-file", [source.display().to_string()]),
+        ];
+        for utf8 in [false, true] {
+            let mailbox = OutboundMailbox::new();
+            let (control, _) =
+                shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+            shared.inner.lock().client_entry(control).utf8 = utf8;
+            shared
+                .attach(control, session)
+                .expect("attach control client");
+            take_reliable_messages(&mailbox);
+            for (request_id, shape) in (1..).zip(&shapes) {
+                let mut printed = Vec::new();
+                if let CommandResponse::Success { output, .. } = shared.execute_command_request(
+                    control,
+                    ClientKind::Control,
+                    &mut context,
+                    request_id,
+                    shape,
+                ) {
+                    printed.push(output.as_bytes().to_vec());
+                }
+                printed.extend(
+                    control_command_guards(take_reliable_messages(&mailbox))
+                        .into_iter()
+                        .map(|(output, _, _)| output.into_bytes()),
+                );
+                printed.retain(|output| !output.is_empty());
+                let expected: &[&[u8]] = if utf8 {
+                    &[b"a\xfeb", "a\u{fffd}b".as_bytes()]
+                } else {
+                    &[b"a_b"]
+                };
+                assert!(
+                    printed.len() == 1 && expected.contains(&printed[0].as_slice()),
+                    "{} utf8={utf8}: {printed:?}",
+                    shape.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn show_buffer_stops_a_control_client_at_the_first_nul_the_way_the_pin_does() {
+        let shared = Arc::new(Shared::new(1));
+        let plain = ClientId(1);
+        let utf8 = ClientId(2);
+        shared.inner.lock().client_entry(utf8).utf8 = true;
+        let mut context = ExecutionContext::default();
+        let stored = b"a\0b\xfec".to_vec();
+        shared
+            .execute(
+                plain,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("nul"),
+                        RawText::from_bytes(stored.clone()),
+                    ],
+                ),
+            )
+            .expect("buffer with a NUL");
+        let show = CommandInvocation::new("show-buffer", ["-b", "nul"]);
+        let mut shown = |client, kind| match shared.execute_command_request(
+            client,
+            kind,
+            &mut context,
+            1,
+            &show,
+        ) {
+            CommandResponse::Success {
+                output,
+                exit_code: 0,
+                ..
+            } => output.as_bytes().to_vec(),
+            other => panic!("show-buffer failed: {other:?}"),
+        };
+
+        assert_eq!(shown(plain, ClientKind::Command), stored);
+        assert_eq!(shown(plain, ClientKind::Control), b"a");
+        assert_eq!(shown(utf8, ClientKind::Control), b"a");
+    }
+
+    #[test]
+    fn source_file_stdin_applies_bytes_that_are_not_utf8() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(1);
+        let mut context = ExecutionContext::default();
+        let mut source = CommandInvocation::new("source-file", ["-"]);
+        source.set_stdin(RawText::from_bytes(
+            b"set -g @binary a\xfeb\nset-buffer -b sourced c\xfed\nBINARY_ENV=e\xfef\n".to_vec(),
+        ));
+        assert_eq!(
+            shared.execute_command_request(client, ClientKind::Command, &mut context, 1, &source),
+            CommandResponse::Success {
+                request_id: 1,
+                output: RawText::default(),
+                exit_code: 0,
+                stderr: String::new(),
+                stdout_claim: StdoutClaim::None,
+            }
+        );
+        let mut output = |name: &str, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new(name, args.iter().copied()),
+                )
+                .expect("readback")
+                .output
+                .as_bytes()
+                .to_vec()
+        };
+        let option = output("show-options", &["-gv", "@binary"]);
+        assert!(
+            option.starts_with(b"a") && option.ends_with(b"b"),
+            "{option:?}"
+        );
+        assert_eq!(output("show-buffer", &["-b", "sourced"]), b"c\xfed");
+        assert_eq!(
+            output("show-environment", &["-g", "BINARY_ENV"]),
+            b"BINARY_ENV=e\xfef"
+        );
     }
 
     #[test]
@@ -64376,6 +64641,73 @@ mod tests {
                 .all(|right| right.contains(r#"{"V":2,"L":{"t":"v""#)),
             "{rights:?}"
         );
+    }
+
+    #[test]
+    fn a_control_clients_show_buffer_keeps_stored_layout_bytes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("stored")
+            .expect("stored session");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("control".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).expect("attach control");
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let stored = r#"{"V":2,"L":{"t":"p","w":80,"h":24,"x":0,"y":0,"a":true,"i":0,"I":"%0"}}"#;
+        shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("set-buffer", ["-b", "kept", stored]),
+            )
+            .expect("store layout bytes");
+        let shown = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("show-buffer", ["-b", "kept"]),
+            )
+            .expect("show buffer")
+            .output
+            .to_string();
+        assert_eq!(shown, stored);
+        take_reliable_messages(&mailbox);
+        shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut context,
+            2,
+            &CommandInvocation::new("if-shell", ["-F", "1", "show-buffer -b kept"]),
+        );
+        let guards = control_command_guards(take_reliable_messages(&mailbox));
+        assert!(
+            guards
+                .iter()
+                .any(|(output, error, _)| output == stored && !error),
+            "{guards:?}"
+        );
+        let displayed = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new("display-message", ["-p", "#{window_layout}"]),
+            )
+            .expect("display layout")
+            .output
+            .to_string();
+        assert_eq!(displayed.trim_end(), "b25d,80x24,0,0,0");
     }
 
     #[test]
@@ -71579,18 +71911,18 @@ set-option -g @alias-mixed-next yes
             ),
         )
         .expect("unknown root source");
-        let invalid_utf8 = directory.path().join("invalid-utf8.conf");
-        fs::write(&invalid_utf8, b"display-message -p \x80\n").expect("invalid UTF-8 source");
-        let invalid_utf8_root = directory.path().join("invalid-utf8-root.conf");
+        let unreadable = directory.path().join("unreadable.conf");
+        fs::create_dir(&unreadable).expect("unreadable source");
+        let unreadable_root = directory.path().join("unreadable-root.conf");
         fs::write(
-            &invalid_utf8_root,
+            &unreadable_root,
             format!(
                 "if-shell -F 1 'source-file {}'\n\
-                 display-message -p AFTER_INVALID_UTF8\n",
-                tmux_path(&invalid_utf8),
+                 display-message -p AFTER_UNREADABLE\n",
+                tmux_path(&unreadable),
             ),
         )
-        .expect("invalid UTF-8 root source");
+        .expect("unreadable root source");
 
         let shared = Arc::new(Shared::new(78));
         let command = ClientId(u64::from(u16::MAX));
@@ -71680,16 +72012,13 @@ set-option -g @alias-mixed-next yes
             ),
             (
                 31,
-                &invalid_utf8_root,
+                &unreadable_root,
                 1,
                 vec![
                     "guard:false:false:".to_owned(),
                     "guard:false:false:".to_owned(),
-                    format!(
-                        "error:stream did not contain valid UTF-8: {}",
-                        invalid_utf8.display()
-                    ),
-                    "guard:false:false:AFTER_INVALID_UTF8".to_owned(),
+                    format!("read-error:Is a directory: {}", unreadable.display()),
+                    "guard:false:false:AFTER_UNREADABLE".to_owned(),
                 ],
             ),
         ] {
@@ -71735,6 +72064,13 @@ set-option -g @alias-mixed-next yes
                             },
                         ..
                     }) => Some(format!("error:{text}")),
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::ControlSourceFile {
+                                event: ControlSourceFileEvent::ReadError(text),
+                            },
+                        ..
+                    }) => Some(format!("read-error:{text}")),
                     _ => None,
                 })
                 .collect::<Vec<_>>();
@@ -72964,7 +73300,7 @@ set-option -g @alias-mixed-next yes
         let grouped = directory.path().join("grouped.conf");
         let separate = directory.path().join("separate.conf");
         let mixed_read = directory.path().join("mixed-read.conf");
-        let invalid_utf8 = directory.path().join("invalid-utf8.conf");
+        let unreadable = directory.path().join("unreadable.conf");
         fs::write(&grouped, "source-file missing-a.conf missing-b.conf\n")
             .expect("grouped nested source fixture");
         fs::write(
@@ -72972,13 +73308,12 @@ set-option -g @alias-mixed-next yes
             "source-file missing-c.conf\nsource-file missing-d.conf\n",
         )
         .expect("separate nested source fixture");
-        fs::write(&invalid_utf8, b"display-message -p \x80\n")
-            .expect("invalid UTF-8 source fixture");
+        fs::create_dir(&unreadable).expect("unreadable source fixture");
         fs::write(
             &mixed_read,
             format!(
-                "source-file '{}' missing-after-invalid-utf8.conf\n",
-                invalid_utf8.display()
+                "source-file '{}' missing-after-unreadable.conf\n",
+                unreadable.display()
             ),
         )
         .expect("mixed nested source fixture");
@@ -72986,12 +73321,8 @@ set-option -g @alias-mixed-next yes
         let missing_b = "No such file or directory: missing-b.conf";
         let missing_c = "No such file or directory: missing-c.conf";
         let missing_d = "No such file or directory: missing-d.conf";
-        let invalid_utf8_error = format!(
-            "stream did not contain valid UTF-8: {}",
-            invalid_utf8.display()
-        );
-        let missing_after_invalid_utf8 =
-            "No such file or directory: missing-after-invalid-utf8.conf";
+        let unreadable_error = format!("Is a directory: {}", unreadable.display());
+        let missing_after_unreadable = "No such file or directory: missing-after-unreadable.conf";
 
         let shared = Arc::new(Shared::new(66));
         let command = ClientId(u64::from(u16::MAX));
@@ -73101,10 +73432,8 @@ set-option -g @alias-mixed-next yes
                     ..
                 }),
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::ClientMessage {
-                        kind: ClientMessageKind::Error,
-                        text,
-                        ..
+                    payload: EventPayload::ControlSourceFile {
+                        event: ControlSourceFileEvent::ReadError(text),
                     },
                     ..
                 }),
@@ -73120,7 +73449,7 @@ set-option -g @alias-mixed-next yes
                     },
                     ..
                 }),
-            ] if output == missing_after_invalid_utf8 && text == &invalid_utf8_error
+            ] if output == missing_after_unreadable && text == &unreadable_error
         ));
 
         let response = shared.execute_command_request(
@@ -73128,7 +73457,7 @@ set-option -g @alias-mixed-next yes
             ClientKind::Control,
             &mut control_context,
             41,
-            &control_stdin_command("source-file", [invalid_utf8.display().to_string()]),
+            &control_stdin_command("source-file", [unreadable.display().to_string()]),
         );
         assert_eq!(
             response,
@@ -73144,10 +73473,8 @@ set-option -g @alias-mixed-next yes
             take_reliable_messages(&control_mailbox).as_slice(),
             [
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::ClientMessage {
-                        kind: ClientMessageKind::Error,
-                        text,
-                        ..
+                    payload: EventPayload::ControlSourceFile {
+                        event: ControlSourceFileEvent::ReadError(text),
                     },
                     ..
                 }),
@@ -73157,18 +73484,17 @@ set-option -g @alias-mixed-next yes
                     },
                     ..
                 }),
-            ] if text == &invalid_utf8_error
+            ] if text == &unreadable_error
         ));
 
         #[cfg(unix)]
         {
-            let colon_invalid_utf8 = directory.path().join("a: b");
+            let colon_unreadable = directory.path().join("a: b");
             let colon_read = directory.path().join("colon-read.conf");
-            fs::write(&colon_invalid_utf8, b"display-message -p \x80\n")
-                .expect("colon-space invalid UTF-8 fixture");
+            fs::create_dir(&colon_unreadable).expect("colon-space unreadable fixture");
             fs::write(
                 &colon_read,
-                format!("source-file '{}'\n", colon_invalid_utf8.display()),
+                format!("source-file '{}'\n", colon_unreadable.display()),
             )
             .expect("colon-space source fixture");
 
@@ -73203,10 +73529,8 @@ set-option -g @alias-mixed-next yes
                         ..
                     }),
                     ProtocolMessage::Event(Event {
-                        payload: EventPayload::ClientMessage {
-                            kind: ClientMessageKind::Error,
-                            text,
-                            ..
+                        payload: EventPayload::ControlSourceFile {
+                            event: ControlSourceFileEvent::ReadError(text),
                         },
                         ..
                     }),
@@ -73224,8 +73548,8 @@ set-option -g @alias-mixed-next yes
                     }),
                 ] if output.is_empty()
                     && text == &format!(
-                        "stream did not contain valid UTF-8: {}",
-                        colon_invalid_utf8.display()
+                        "Is a directory: {}",
+                        colon_unreadable.display()
                     )
             ));
         }
@@ -75111,6 +75435,98 @@ set-option -g @alias-mixed-next yes
             ServerError::CommandParse(message)
                 if message == "capture-pane -S requires a value"
         ));
+    }
+
+    #[test]
+    fn capture_pane_parser_takes_line_flags_and_hyperlinks() {
+        let parsed = parse_capture_pane_args(&["-pFH".into()]).expect("capture args");
+        assert!(parsed.options.line_flags);
+        assert!(parsed.options.hyperlinks);
+        let parsed = parse_capture_pane_args(&["-p".into()]).expect("capture args");
+        assert!(!parsed.options.line_flags);
+        assert!(!parsed.options.hyperlinks);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn capture_pane_prints_line_flags_and_each_new_link_like_tmux() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(7);
+        let mut context = ExecutionContext::default();
+        let run = |context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect("command")
+                .output
+        };
+        run(
+            &mut context,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "links",
+                "-x",
+                "20",
+                "-y",
+                "6",
+                "printf 'plain\\r\\n\\033]133;C\\007out\\r\\n\\033]8;;http://a\\007aa\\033]8;;\\007 \\033]8;;http://b\\007bb\\033]8;;\\007\\r\\nzz-ready'; exec /bin/cat",
+            ],
+        );
+        let target = context.pane.expect("links pane").to_string();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !run(&mut context, &["capture-pane", "-p", "-t", &target]).contains("zz-ready") {
+            assert!(Instant::now() < deadline, "the pane never printed");
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(
+            run(
+                &mut context,
+                &["capture-pane", "-pF", "-S", "0", "-E", "3", "-t", &target]
+            ),
+            "- plain\nO out\nH aa bb\n- zz-ready\n"
+        );
+        assert_eq!(
+            run(&mut context, &["capture-pane", "-pH", "-t", &target]),
+            "http://a http://b\n"
+        );
+        assert_eq!(
+            run(
+                &mut context,
+                &["capture-pane", "-pH", "-E", "1", "-t", &target]
+            ),
+            "\n"
+        );
+        run(
+            &mut context,
+            &["capture-pane", "-H", "-b", "links", "-t", &target],
+        );
+        run(
+            &mut context,
+            &[
+                "capture-pane",
+                "-H",
+                "-b",
+                "nolinks",
+                "-E",
+                "1",
+                "-t",
+                &target,
+            ],
+        );
+        assert_eq!(
+            run(&mut context, &["list-buffers", "-F", "#{buffer_name}"]),
+            "links"
+        );
+        assert_eq!(
+            run(&mut context, &["show-buffer", "-b", "links"]),
+            "http://a http://b\n"
+        );
     }
 
     #[cfg(unix)]
@@ -87462,7 +87878,7 @@ set-option -g @alias-mixed-next yes
 
     #[test]
     fn capture_pane_parser_rejects_unimplemented_flags() {
-        for flag in ["-F", "-H", "-P", "-R"] {
+        for flag in ["-P", "-R"] {
             let error = parse_capture_pane_args(&[flag.into()]).expect_err("unsupported flag");
             assert!(matches!(error, ServerError::CommandParse(_)), "{flag}");
         }
@@ -87610,18 +88026,18 @@ set-option -g @alias-mixed-next yes
             assert!(!buffer.automatic);
         }
 
-        let error = shared
-            .buffer_command(
-                &context,
-                "show-buffer",
-                &["-b", "binary"].map(RawText::from),
-            )
-            .expect_err("binary output cannot cross the text command response");
-        assert!(matches!(
-            error,
-            DaemonError::Server(ServerError::InvalidCommand(message))
-                if message.contains("non-UTF-8") && message.contains("save-buffer")
-        ));
+        assert_eq!(
+            shared
+                .buffer_command(
+                    &context,
+                    "show-buffer",
+                    &["-b", "binary"].map(RawText::from),
+                )
+                .expect("show binary buffer")
+                .output
+                .as_bytes(),
+            bytes
+        );
 
         shared
             .buffer_command(
@@ -87667,7 +88083,13 @@ set-option -g @alias-mixed-next yes
         mailbox.close();
 
         let error = shared
-            .buffer_command_for_client(Some(client), &context, "save-buffer", &args)
+            .buffer_command_for_client(
+                Some(client),
+                ClientKind::Command,
+                &context,
+                "save-buffer",
+                &args,
+            )
             .expect_err("a closed writer cannot take the write");
         assert!(matches!(
             error,
@@ -95013,7 +95435,6 @@ bind - split-window -v -c "#{pane_current_path}"
                 data: Arc::from(b"first line\nsecond line".as_slice()),
                 created: UNIX_EPOCH + Duration::from_secs(20),
                 automatic: false,
-                utf8: true,
             },
             PasteBuffer {
                 name: "older".to_owned(),
@@ -95026,7 +95447,6 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
                 created: UNIX_EPOCH + Duration::from_secs(10),
                 automatic: false,
-                utf8: true,
             },
         ];
         let mut chooser = ChooseBufferSession::new(
@@ -95466,7 +95886,6 @@ bind - split-window -v -c "#{pane_current_path}"
                 data: Arc::from(format!("payload {index}").into_bytes()),
                 created: UNIX_EPOCH + Duration::from_secs(100 + index),
                 automatic: false,
-                utf8: true,
             })
             .collect::<Vec<_>>();
         let facts = FormatHookFacts::default();
@@ -95715,14 +96134,12 @@ bind - split-window -v -c "#{pane_current_path}"
                 data: Arc::from(b"new".as_slice()),
                 created: UNIX_EPOCH + Duration::from_secs(20),
                 automatic: false,
-                utf8: true,
             },
             PasteBuffer {
                 name: "older".to_owned(),
                 data: Arc::from(b"old".as_slice()),
                 created: UNIX_EPOCH + Duration::from_secs(10),
                 automatic: false,
-                utf8: true,
             },
         ];
         let filtered = ChooseBufferSession::new(
@@ -95765,7 +96182,6 @@ bind - split-window -v -c "#{pane_current_path}"
             data: Arc::from(b"match".as_slice()),
             created: UNIX_EPOCH + Duration::from_secs(30),
             automatic: false,
-            utf8: true,
         });
         fallback.rebuild(&engine, &buffers, Some(z), &facts);
         assert_eq!(fallback.names, ["missing"]);

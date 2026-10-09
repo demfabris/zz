@@ -1,3 +1,4 @@
+use crate::wgpu_glass::{GlassResources, glass_count};
 use crate::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -267,6 +268,8 @@ struct WgpuResources {
     path_msaa_texture: Option<wgpu::Texture>,
     path_msaa_view: Option<wgpu::TextureView>,
     shader_layers: ShaderLayerResources,
+    /// Created when a scene first paints glass.
+    glass: Option<GlassResources>,
 }
 
 struct CachedTextureBindGroup {
@@ -418,6 +421,9 @@ impl WgpuResources {
         self.path_msaa_texture = None;
         self.path_msaa_view = None;
         self.shader_layers.release_textures();
+        if let Some(glass) = &mut self.glass {
+            glass.release_textures();
+        }
     }
 }
 
@@ -642,8 +648,18 @@ impl WgpuRenderer {
             );
         }
 
+        // Glass reads back what the frame holds so far by copying out of it.
+        // wgpu reports only RENDER_ATTACHMENT for a browser canvas, but WebGPU
+        // canvases accept any usage.
+        let copyable = surface_caps.usages.contains(wgpu::TextureUsages::COPY_SRC)
+            || context.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu;
+        let usage = if copyable {
+            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
+        } else {
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+        };
         let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage,
             format: surface_format,
             width: clamped_width.max(1),
             height: clamped_height.max(1),
@@ -1263,6 +1279,13 @@ impl WgpuRenderer {
         })
     }
 
+    /// Whether frames can be read back mid-frame, which glass needs.
+    pub fn supports_backdrop_sampling(&self) -> bool {
+        self.surface_config
+            .usage
+            .contains(wgpu::TextureUsages::COPY_SRC)
+    }
+
     pub fn supports_dual_source_blending(&self) -> bool {
         self.core().is_some_and(|core| core.dual_source_blending)
     }
@@ -1371,6 +1394,7 @@ impl WgpuRenderer {
             self.surface_config.alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
         if let Err(error) = core.render_frame(
             scene,
+            &frame.texture,
             &frame_view,
             size,
             premultiplied_alpha,
@@ -1540,6 +1564,7 @@ impl WgpuRendererCore {
                 path_msaa_texture: None,
                 path_msaa_view: None,
                 shader_layers,
+                glass: None,
             },
             uploaded_globals: None,
             atlas,
@@ -1624,6 +1649,7 @@ impl WgpuRendererCore {
     fn render_frame(
         &mut self,
         scene: &Scene,
+        target: &wgpu::Texture,
         target_view: &wgpu::TextureView,
         size: Size<DevicePixels>,
         premultiplied_alpha: bool,
@@ -1703,7 +1729,7 @@ impl WgpuRendererCore {
         }
         self.uploaded_globals = Some((globals, path_globals, gamma_params));
 
-        self.record_frame(scene, target_view, size, clear_color)
+        self.record_frame(scene, target, target_view, size, clear_color)
             .inspect_err(|_| {
                 // Queue writes are staged before encoding; flush them even if the frame fails.
                 self.resources.queue.submit(std::iter::empty());
@@ -1713,6 +1739,7 @@ impl WgpuRendererCore {
     fn record_frame(
         &mut self,
         scene: &Scene,
+        frame: &wgpu::Texture,
         frame_view: &wgpu::TextureView,
         size: Size<DevicePixels>,
         clear_color: wgpu::Color,
@@ -1720,6 +1747,16 @@ impl WgpuRendererCore {
         let mut instance_offset = 0;
         self.prepare_texture_bind_groups(scene);
         self.resources.shader_layers.drawn = false;
+        let glasses = glass_count(scene);
+        if glasses > 0 && self.resources.glass.is_none() {
+            self.resources.glass = Some(GlassResources::new(
+                &self.resources.device,
+                self.target_format,
+            ));
+        }
+        if let Some(glass) = &mut self.resources.glass {
+            glass.begin_frame(&self.resources.device, glasses);
+        }
 
         let mut encoder =
             self.resources()
@@ -1730,6 +1767,7 @@ impl WgpuRendererCore {
         let encoded = self.encode_scene(
             &mut encoder,
             scene,
+            frame,
             frame_view,
             size,
             wgpu::LoadOp::Clear(clear_color),
@@ -1738,6 +1776,9 @@ impl WgpuRendererCore {
         );
         if encoded.is_ok() && !self.resources.shader_layers.drawn {
             self.resources.shader_layers.release_textures();
+        }
+        if let Some(glass) = &mut self.resources.glass {
+            glass.finish_frame(&self.resources.queue);
         }
 
         let resources = &mut self.resources;
@@ -1756,10 +1797,12 @@ impl WgpuRendererCore {
         Ok(submission)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn encode_scene(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         scene: &Scene,
+        frame: &wgpu::Texture,
         frame_view: &wgpu::TextureView,
         size: Size<DevicePixels>,
         load: wgpu::LoadOp<wgpu::Color>,
@@ -1867,6 +1910,7 @@ impl WgpuRendererCore {
                         self.draw_shader_layer(
                             encoder,
                             layer,
+                            frame,
                             frame_view,
                             size,
                             instance_offset,
@@ -1880,15 +1924,39 @@ impl WgpuRendererCore {
                         "main_pass_continued",
                     );
                 }
+                PrimitiveBatch::Glass(range) => {
+                    let Some(glass) = self.resources.glass.as_mut() else {
+                        continue;
+                    };
+                    if !frame.usage().contains(wgpu::TextureUsages::COPY_SRC) {
+                        continue;
+                    }
+                    drop(pass);
+                    glass.draw(
+                        &self.resources.device,
+                        encoder,
+                        &scene.glasses[range],
+                        frame,
+                        frame_view,
+                    );
+                    pass = begin_pass(
+                        encoder,
+                        frame_view,
+                        wgpu::LoadOp::Load,
+                        "main_pass_continued",
+                    );
+                }
             }
         }
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_shader_layer(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
         layer: &ShaderLayer,
+        frame: &wgpu::Texture,
         frame_view: &wgpu::TextureView,
         size: Size<DevicePixels>,
         instance_offset: &mut u64,
@@ -1901,6 +1969,7 @@ impl WgpuRendererCore {
             return self.encode_scene(
                 encoder,
                 &layer.scene,
+                frame,
                 frame_view,
                 size,
                 wgpu::LoadOp::Load,
@@ -1935,6 +2004,7 @@ impl WgpuRendererCore {
         self.encode_scene(
             encoder,
             &layer.scene,
+            &target_texture,
             &target_view,
             size,
             wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
@@ -2908,14 +2978,13 @@ impl WgpuHeadlessRenderer {
     fn render(&mut self, scene: &Scene, size: Size<DevicePixels>) -> anyhow::Result<()> {
         self.check_gpu_errors()?;
         self.ensure_render_target(size)?;
-        let view = self
+        let target = self
             .render_target
             .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Headless render target was not created"))?
-            .view
-            .clone();
+            .ok_or_else(|| anyhow::anyhow!("Headless render target was not created"))?;
+        let (texture, view) = (target.texture.clone(), target.view.clone());
         self.core
-            .render_frame(scene, &view, size, false, wgpu::Color::BLACK)?;
+            .render_frame(scene, &texture, &view, size, false, wgpu::Color::BLACK)?;
         Ok(())
     }
 
@@ -4005,6 +4074,27 @@ fn main(@location(0) position: vec2<f32>) -> @location(0) vec4<f32> {
             }
             Ok(())
         }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn glass_lenses_its_backdrop() -> anyhow::Result<()> {
+        use gpui::PlatformHeadlessRenderer;
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        gpui::check_glass_rendering(|scene| {
+            renderer.render_scene_to_image(
+                scene,
+                Size {
+                    width: DevicePixels(64),
+                    height: DevicePixels(64),
+                },
+            )
+        })
+    }
+
+    #[test]
+    fn glass_shader_is_valid_wgsl() {
+        validate_wgsl(gpui::GLASS_SHADER, naga::valid::Capabilities::empty());
     }
 
     #[test]

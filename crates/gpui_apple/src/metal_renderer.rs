@@ -1,4 +1,5 @@
 use crate::metal_atlas::MetalAtlas;
+use crate::metal_glass::{MetalGlass, scene_has_glass};
 use anyhow::{Context as _, Result};
 use block2::RcBlock;
 use cocoa::{
@@ -140,6 +141,8 @@ pub struct MetalRenderer {
     shader_layer_targets: Vec<metal::Texture>,
     shader_layer_inputs: Vec<metal::Texture>,
     shader_layers_drawn: bool,
+    /// Built when a scene first paints glass; `Err` once building failed.
+    glass: Option<Result<MetalGlass, ()>>,
     unit_vertices: metal::Buffer,
     #[allow(clippy::arc_with_non_send_sync)]
     instance_buffer_pool: Arc<Mutex<InstanceBufferPool>>,
@@ -394,6 +397,7 @@ impl MetalRenderer {
             shader_layer_targets: Vec::new(),
             shader_layer_inputs: Vec::new(),
             shader_layers_drawn: false,
+            glass: None,
             unit_vertices,
             instance_buffer_pool,
             sprite_atlas,
@@ -581,6 +585,16 @@ impl MetalRenderer {
         })?;
         let atlas_frame = self.sprite_atlas.begin_frame();
         self.shader_layers_drawn = false;
+        if self.glass.is_none() && scene_has_glass(scene) {
+            self.glass = Some(
+                MetalGlass::new(&self.device)
+                    .inspect_err(|error| log::error!("glass is unavailable: {error:#}"))
+                    .map_err(drop),
+            );
+        }
+        if let Some(Ok(glass)) = &mut self.glass {
+            glass.begin_frame();
+        }
         let command_buffer = self.draw_primitives_to_texture(
             scene,
             &instance_bindings,
@@ -591,6 +605,9 @@ impl MetalRenderer {
         if !self.shader_layers_drawn {
             self.shader_layer_targets.clear();
             self.shader_layer_inputs.clear();
+        }
+        if let Some(Ok(glass)) = &mut self.glass {
+            glass.end_frame();
         }
 
         let instance_buffer_pool = self.instance_buffer_pool.clone();
@@ -847,6 +864,19 @@ impl MetalRenderer {
                             depth,
                         )?;
                     }
+                    command_encoder = new_command_encoder_for_texture(
+                        command_buffer,
+                        texture,
+                        viewport_size,
+                        None,
+                    );
+                }
+                PrimitiveBatch::Glass(range) => {
+                    let Some(Ok(glass)) = &mut self.glass else {
+                        continue;
+                    };
+                    command_encoder.end_encoding();
+                    glass.draw(&self.device, command_buffer, &scene.glasses[range], texture);
                     command_encoder = new_command_encoder_for_texture(
                         command_buffer,
                         texture,
@@ -2262,6 +2292,15 @@ mod tests {
         }
         assert!(atlas.upgrade().is_none());
         Ok(())
+    }
+
+    #[test]
+    fn glass_lenses_its_backdrop() -> Result<()> {
+        let mut renderer =
+            MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
+        gpui::check_glass_rendering(|scene| {
+            renderer.render_scene_to_image(scene, size(64.into(), 64.into()))
+        })
     }
 
     const SWAP_OR_TINT: &str = r#"

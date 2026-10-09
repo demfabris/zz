@@ -754,6 +754,13 @@ pub trait Styled: Sized {
         self
     }
 
+    /// Paints liquid glass under this element's background, in its shape.
+    /// See [`GlassMaterial`](crate::GlassMaterial) for the knobs.
+    fn glass(mut self, material: crate::GlassMaterial) -> Self {
+        self.style().glass = Some(material);
+        self
+    }
+
     /// Sets the opacity of this element and its children.
     fn opacity(mut self, opacity: f32) -> Self {
         self.style().opacity = Some(opacity);

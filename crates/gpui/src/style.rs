@@ -7,9 +7,9 @@ use std::{
 use crate::{
     AbsoluteLength, App, Background, BackgroundTag, BorderStyle, Bounds, ContentMask, Corners,
     CornersRefinement, CursorStyle, DefiniteLength, DevicePixels, Edges, EdgesRefinement, Font,
-    FontFallbacks, FontFeatures, FontStyle, FontWeight, GridLocation, Hsla, Length, Pixels, Point,
-    PointRefinement, Rgba, SharedString, Size, SizeRefinement, Styled, TextRun, Window, black, phi,
-    point, px, quad, rems, size,
+    FontFallbacks, FontFeatures, FontStyle, FontWeight, GlassMaterial, GridLocation, Hsla, Length,
+    Pixels, Point, PointRefinement, Rgba, SharedString, Size, SizeRefinement, Styled, TextRun,
+    Window, black, phi, point, px, quad, rems, size,
 };
 use collections::HashSet;
 use refineable::Refineable;
@@ -306,6 +306,10 @@ pub struct Style {
 
     /// Box shadow of the element
     pub box_shadow: Vec<BoxShadow>,
+
+    /// Liquid glass painted under the element's background, showing what
+    /// lies beneath it through the material.
+    pub glass: Option<GlassMaterial>,
 
     /// The text style of this element
     #[refineable]
@@ -738,6 +742,10 @@ impl Style {
             self.corner_smoothing,
         );
 
+        if let Some(material) = &self.glass {
+            window.paint_glass(bounds, corner_radii, material);
+        }
+
         let background_color = self.background.as_ref().and_then(Fill::color);
         if background_color.is_some_and(|color| !color.is_transparent()) {
             let mut border_color = match background_color {
@@ -845,6 +853,7 @@ impl Default for Style {
             corner_radius_mode: CornerRadiusMode::default(),
             corner_smoothing: None,
             box_shadow: Default::default(),
+            glass: None,
             text: TextStyleRefinement::default(),
             mouse_cursor: None,
             opacity: None,

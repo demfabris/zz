@@ -992,6 +992,14 @@ impl PlatformWindow for WebWindow {
         self.inner.state.borrow().renderer.sprite_atlas().clone()
     }
 
+    fn supports_backdrop_sampling(&self) -> bool {
+        self.inner
+            .state
+            .borrow()
+            .renderer
+            .supports_backdrop_sampling()
+    }
+
     fn is_subpixel_rendering_supported(&self) -> bool {
         self.inner
             .state

@@ -1864,6 +1864,10 @@ impl PlatformWindow for WaylandWindow {
         self.borrow().background_appearance
     }
 
+    fn supports_backdrop_sampling(&self) -> bool {
+        self.borrow().renderer.supports_backdrop_sampling()
+    }
+
     fn is_subpixel_rendering_supported(&self) -> bool {
         let client = self.borrow().client.get_client();
         let state = client.borrow();

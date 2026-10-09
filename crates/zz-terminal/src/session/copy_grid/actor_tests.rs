@@ -69,7 +69,6 @@ fn an_exited_child_answers_copy_reads_before_the_retention_decision() {
         source.revision.total_rows().saturating_sub(1),
         false,
         false,
-        false,
     );
     assert_eq!(frozen.trim_end(), captured.trim_end());
 
@@ -147,7 +146,6 @@ fn an_exited_child_answers_copy_reads_before_the_retention_decision() {
         source.revision.capture_rows(
             0,
             source.revision.total_rows().saturating_sub(1),
-            false,
             false,
             false,
         ),

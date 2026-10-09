@@ -711,6 +711,7 @@ The catalog count does not include syntax zz accepts or parses before diverging:
   deleted above it (`capture.terminal-engine-limits`). D and X are tmux grid storage
   letters zz never prints (`capture.grid-storage-line-flags`). In copy mode `-M -H` prints
   nothing, as the pin's mode screen resolves no link, and `-M -F` keeps the frozen H and O.
+  For the same reason `-M -e` prints the live `-e` codes without OSC 8 (2026-10-09).
   Capture has no retained saved-alternate grid, pending raw-byte stream or raw-grid dump, so
   `-P`/`-R` remain refused with measured workload-specific decisions in the fixture.
 - `copy-mode` (every flag, including bare) exits 1 with `pane is not attached: %N` when no

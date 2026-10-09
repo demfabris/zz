@@ -802,7 +802,11 @@ fn prefix_pieces(
     if line.depth > 0 {
         let unit = if line.parent_last { "    " } else { "│   " };
         pieces.push((unit.repeat(line.depth - 1), colours.grey));
-        let branch = if line.last { "└─→ " } else { "├─→ " };
+        let branch = if line.last {
+            "└─→ "
+        } else {
+            "├─→ "
+        };
         pieces.push((branch.to_owned(), colours.grey));
     }
     if line.children {

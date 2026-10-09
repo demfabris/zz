@@ -98,8 +98,10 @@ Each rule cost a campaign real time. The source is in brackets
 2. **Iterate behind a filter**: `compat/catchup/cargo.sh test -p <crate> --lib <name>`. Run the full
    test package of each crate you touched once, before your final commit. Never
    `cargo test --workspace`. [A whole `zz-daemon` run per edit made every loop cost minutes.]
-3. **Clippy on touched crates before the final commit**:
-   `compat/catchup/cargo.sh clippy -p <crate> --all-targets --all-features -- -D warnings`.
+3. **Clippy and fmt before the final commit**:
+   `compat/catchup/cargo.sh clippy -p <crate> --all-targets --all-features -- -D warnings` on
+   touched crates, then `cargo fmt --all -- --check`. [Three merged lanes left unformatted files
+   on main, 2026-10-09.]
 4. **Harness: named scenarios only.** Build `zz_cli` through `cargo.sh` first, then
    `ZZ_COMPAT_ZZ=$PWD/target/debug/zz_cli ZZ_COMPAT_TMUX=$PWD/compat/.cache/tmux-src/tmux
    ZZ_COMPAT_CORPUS=$PWD/compat/.cache/plugins compat/run.sh --strict-geometry <scenario>...`.

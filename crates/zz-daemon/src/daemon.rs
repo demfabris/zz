@@ -9036,7 +9036,9 @@ impl Shared {
         event: PendingHookEvent,
     ) -> Option<InsertedQueueChild> {
         if state.publish_control && !event.control_notified {
-            state.notifications.push(self.event_control_notification(&event));
+            state
+                .notifications
+                .push(self.event_control_notification(&event));
         }
         if self
             .command_item
@@ -104657,10 +104659,7 @@ bind - split-window -v -c "#{pane_current_path}"
             "attached,focused,ignore-size,no-detach-on-destroy,read-only"
         );
         let flags = shared.inner.lock().client_flags.get(client);
-        assert_eq!(
-            flags.reconnect_flags(),
-            "ignore-size,no-detach-on-destroy"
-        );
+        assert_eq!(flags.reconnect_flags(), "ignore-size,no-detach-on-destroy");
         let messages = take_reliable_messages(&mailbox);
         assert!(messages.iter().any(|message| matches!(
             message,

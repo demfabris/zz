@@ -3345,7 +3345,14 @@ mod tests {
             ),
             zz_protocol::CommandInvocation::new(
                 "attach-session",
-                ["-d", "-r", "-f", "ignore-size,!no-detach-on-destroy", "-t", "work",],
+                [
+                    "-d",
+                    "-r",
+                    "-f",
+                    "ignore-size,!no-detach-on-destroy",
+                    "-t",
+                    "work",
+                ],
             )
         );
     }

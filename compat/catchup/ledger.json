@@ -583,7 +583,7 @@
       "id": "pin.keys-copy",
       "track": "pin",
       "title": "3.8 default keys, menus and copy-mode commands",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -602,13 +602,14 @@
         "Menus belong to the window (ad6832e6) where zz's model allows, or the divergence is recorded."
       ],
       "branch": "catchup/pin.keys-copy",
-      "sha": null,
+      "sha": "ebc51d7ed",
       "notes": [
         "2026-10-09: lane done at dca3b35a0: 10/11 closed; menus stay per-client (menus.client-owned, native) with 3.8's window-relative placement adopted; accepted by orchestrator (consistent with copy mode per client, TUI-014). Left: goto-line absolute numbering with line numbers on; GUI line numbers native.",
         "PAUSED 2026-10-09: fix pass 8eafea12a + merge of main cb3b3f244 committed; the post-merge checks (smoke/copy-mode-line-numbers vs 3.8, tui-overlays/tui-mouse --self-check, tui-copy-mode, zz-daemon lib, clippy, fmt, just compat check) did not run: run them, then a second review, then merge.",
         "2026-10-09: RESUMED: main merged clean at 5195f9272; lane relaunched for the post-merge checks; then review 2.",
         "2026-10-09: Post-merge checks green at 2fef77246 (copy-mode-line-numbers 10 clean vs 3.8, tui-overlays 44/44, tui-mouse 51/51, zz-daemon 1687, zz-terminal 453, clippy, fmt, compat check); review 2 running.",
-        "2026-10-09: Codex review 2 (pin.keys-copy-2.md): 1 P1, refresh-now keeps stale search matches/search_snapshot; final fix pass sent to the lane, merges after it without a third review."
+        "2026-10-09: Codex review 2 (pin.keys-copy-2.md): 1 P1, refresh-now keeps stale search matches/search_snapshot; final fix pass sent to the lane, merges after it without a third review.",
+        "2026-10-09: Merged after the final fix pass (9f688671e); merge checks green (clippy 5 crates, zz-protocol 283, zz-terminal 454, zz-tui 267, compat check)."
       ]
     },
     {

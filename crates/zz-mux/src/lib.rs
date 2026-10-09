@@ -44,7 +44,7 @@ pub use command::{
 pub use command::{
     accepted_native_literal_format_context_scopes, missing_derived_format_context_families,
     missing_literal_format_context_scopes, mux_derived_format_context_families,
-    mux_literal_format_context_scopes,
+    mux_hook_payload_format_contexts, mux_literal_format_context_scopes,
 };
 pub use copy_actions::{
     CopyActionCategory, PINNED_COPY_MODE_ACTIONS, PinnedCopyAction, copy_mode_action_is_mapped,

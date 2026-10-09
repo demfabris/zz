@@ -1,7 +1,7 @@
 {
-  "schema": 5,
-  "pin": "d77c9dc6aa021e4bc61f0da128c591af695e6466",
-  "version": "tmux next-3.8",
+  "schema": 6,
+  "pin": "7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53",
+  "version": "tmux 3.8",
   "commands": [
     {
       "name": "attach-session",
@@ -65,12 +65,13 @@
       "aliases": [
         "capturep"
       ],
-      "usage": "[-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+      "usage": "[-aCeFHIJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
       "flags": {
         "-C": "none",
         "-E": "required",
         "-F": "none",
         "-H": "none",
+        "-I": "none",
         "-J": "none",
         "-L": "none",
         "-M": "none",
@@ -317,7 +318,7 @@
       "aliases": [
         "display"
       ],
-      "usage": "[-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+      "usage": "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
       "flags": {
         "-C": "none",
         "-F": "required",
@@ -326,6 +327,7 @@
         "-a": "none",
         "-c": "required",
         "-d": "required",
+        "-j": "none",
         "-l": "none",
         "-p": "none",
         "-t": "required",
@@ -339,11 +341,13 @@
       "aliases": [
         "displayp"
       ],
-      "usage": "[-bN] [-d duration] [-t target-client] [template]",
+      "usage": "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]",
       "flags": {
         "-N": "none",
-        "-b": "none",
+        "-Z": "none",
         "-d": "required",
+        "-k": "none",
+        "-s": "required",
         "-t": "required"
       },
       "min_args": 0,
@@ -746,13 +750,19 @@
       "aliases": [
         "newp"
       ],
-      "usage": "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
+      "usage": "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
       "flags": {
+        "-A": "none",
         "-B": "required",
+        "-C": "none",
+        "-D": "none",
         "-E": "none",
         "-F": "required",
         "-I": "none",
+        "-K": "none",
         "-L": "none",
+        "-M": "none",
+        "-O": "none",
         "-P": "none",
         "-R": "required",
         "-S": "required",
@@ -1220,10 +1230,12 @@
     {
       "name": "set-hook",
       "aliases": [],
-      "usage": "[-agpRuw] [-B name:what:format] [-t target-pane] [hook] [command]",
+      "usage": "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]",
       "flags": {
         "-B": "required",
+        "-E": "none",
         "-R": "none",
+        "-T": "none",
         "-a": "none",
         "-g": "none",
         "-p": "none",
@@ -1304,9 +1316,10 @@
     {
       "name": "show-hooks",
       "aliases": [],
-      "usage": "[-Bgpw] [-t target-pane] [hook]",
+      "usage": "[-Bgpw] [-F format] [-t target-pane] [hook]",
       "flags": {
         "-B": "none",
+        "-F": "required",
         "-g": "none",
         "-p": "none",
         "-t": "required",
@@ -1334,9 +1347,10 @@
       "aliases": [
         "show"
       ],
-      "usage": "[-AgHpqsvw] [-t target-pane] [option]",
+      "usage": "[-AgHpqsvw] [-F format] [-t target-pane] [option]",
       "flags": {
         "-A": "none",
+        "-F": "required",
         "-H": "none",
         "-g": "none",
         "-p": "none",
@@ -1366,8 +1380,9 @@
       "aliases": [
         "showw"
       ],
-      "usage": "[-gv] [-t target-window] [option]",
+      "usage": "[-gv] [-F format] [-t target-window] [option]",
       "flags": {
+        "-F": "required",
         "-g": "none",
         "-t": "required",
         "-v": "none"
@@ -1396,8 +1411,9 @@
       "aliases": [
         "splitw"
       ],
-      "usage": "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
+      "usage": "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
       "flags": {
+        "-B": "required",
         "-E": "none",
         "-F": "required",
         "-I": "none",
@@ -1547,11 +1563,16 @@
       "aliases": [
         "wait"
       ],
-      "usage": "[-L|-S|-U] channel",
+      "usage": "[-ELSUlv] [-F format] [-w waiter] name",
       "flags": {
+        "-E": "none",
+        "-F": "required",
         "-L": "none",
         "-S": "none",
-        "-U": "none"
+        "-U": "none",
+        "-l": "none",
+        "-v": "none",
+        "-w": "required"
       },
       "min_args": 1,
       "max_args": 1
@@ -1574,186 +1595,1135 @@
     "switch-mode": "commands-or-string"
   },
   "options": [
-    "activity-action",
-    "aggressive-resize",
-    "allow-passthrough",
-    "allow-rename",
-    "allow-set-title",
-    "alternate-screen",
-    "assume-paste-time",
-    "automatic-rename",
-    "automatic-rename-format",
-    "backspace",
-    "base-index",
-    "bell-action",
-    "buffer-limit",
-    "clock-mode-colour",
-    "clock-mode-style",
-    "codepoint-widths",
-    "command-alias",
-    "copy-command",
-    "copy-mode-current-line-number-style",
-    "copy-mode-current-match-style",
-    "copy-mode-line-number-style",
-    "copy-mode-line-numbers",
-    "copy-mode-mark-style",
-    "copy-mode-match-style",
-    "copy-mode-position-format",
-    "copy-mode-position-style",
-    "copy-mode-selection-style",
-    "cursor-colour",
-    "cursor-style",
-    "dark-theme-black",
-    "dark-theme-blue",
-    "dark-theme-cyan",
-    "dark-theme-dark-grey",
-    "dark-theme-green",
-    "dark-theme-light-grey",
-    "dark-theme-magenta",
-    "dark-theme-red",
-    "dark-theme-white",
-    "dark-theme-yellow",
-    "default-client-command",
-    "default-command",
-    "default-shell",
-    "default-size",
-    "default-terminal",
-    "destroy-unattached",
-    "detach-on-destroy",
-    "display-panes-active-colour",
-    "display-panes-colour",
-    "display-panes-format",
-    "display-panes-time",
-    "display-time",
-    "editor",
-    "escape-time",
-    "exit-empty",
-    "exit-unattached",
-    "extended-keys",
-    "extended-keys-format",
-    "fill-character",
-    "focus-events",
-    "focus-follows-mouse",
-    "get-clipboard",
-    "history-file",
-    "history-limit",
-    "initial-repeat-time",
-    "input-buffer-size",
-    "key-table",
-    "light-theme-black",
-    "light-theme-blue",
-    "light-theme-cyan",
-    "light-theme-dark-grey",
-    "light-theme-green",
-    "light-theme-light-grey",
-    "light-theme-magenta",
-    "light-theme-red",
-    "light-theme-white",
-    "light-theme-yellow",
-    "lock-after-time",
-    "lock-command",
-    "main-pane-height",
-    "main-pane-width",
-    "menu-border-lines",
-    "menu-border-style",
-    "menu-selected-style",
-    "menu-style",
-    "message-command-style",
-    "message-format",
-    "message-limit",
-    "message-line",
-    "message-style",
-    "mode-keys",
-    "mode-style",
-    "monitor-activity",
-    "monitor-bell",
-    "monitor-silence",
-    "mouse",
-    "other-pane-height",
-    "other-pane-width",
-    "pane-active-border-style",
-    "pane-base-index",
-    "pane-border-format",
-    "pane-border-indicators",
-    "pane-border-lines",
-    "pane-border-status",
-    "pane-border-style",
-    "pane-colours",
-    "pane-scrollbars",
-    "pane-scrollbars-position",
-    "pane-scrollbars-style",
-    "pane-scrollbars-timeout",
-    "pane-status-current-style",
-    "pane-status-style",
-    "popup-border-lines",
-    "popup-border-style",
-    "popup-style",
-    "prefix",
-    "prefix-timeout",
-    "prefix2",
-    "prompt-command-cursor-colour",
-    "prompt-command-cursor-style",
-    "prompt-cursor-colour",
-    "prompt-cursor-style",
-    "prompt-history-limit",
-    "remain-on-exit",
-    "remain-on-exit-format",
-    "renumber-windows",
-    "repeat-time",
-    "scroll-on-clear",
-    "session-status-current-style",
-    "session-status-style",
-    "set-clipboard",
-    "set-titles",
-    "set-titles-string",
-    "silence-action",
-    "status",
-    "status-bg",
-    "status-fg",
-    "status-format",
-    "status-interval",
-    "status-justify",
-    "status-keys",
-    "status-left",
-    "status-left-length",
-    "status-left-style",
-    "status-position",
-    "status-right",
-    "status-right-length",
-    "status-right-style",
-    "status-style",
-    "switch-mode-match-style",
-    "synchronize-panes",
-    "terminal-features",
-    "terminal-overrides",
-    "theme",
-    "tiled-layout-max-columns",
-    "tree-mode-border-style",
-    "tree-mode-preview-format",
-    "tree-mode-preview-style",
-    "tree-mode-selection-style",
-    "update-environment",
-    "user-keys",
-    "variation-selector-always-wide",
-    "visual-activity",
-    "visual-bell",
-    "visual-silence",
-    "window-active-style",
-    "window-pane-current-status-format",
-    "window-pane-status-format",
-    "window-size",
-    "window-status-activity-style",
-    "window-status-bell-style",
-    "window-status-current-format",
-    "window-status-current-style",
-    "window-status-format",
-    "window-status-last-style",
-    "window-status-separator",
-    "window-status-style",
-    "window-style",
-    "word-separators",
-    "wrap-search",
-    "xterm-keys"
+    {
+      "name": "activity-action",
+      "scope": "session",
+      "array": false,
+      "default": "other"
+    },
+    {
+      "name": "aggressive-resize",
+      "scope": "window",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "allow-passthrough",
+      "scope": "window-pane",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "allow-rename",
+      "scope": "window-pane",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "allow-set-title",
+      "scope": "window-pane",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "alternate-screen",
+      "scope": "window-pane",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "assume-paste-time",
+      "scope": "session",
+      "array": false,
+      "default": "1"
+    },
+    {
+      "name": "automatic-rename",
+      "scope": "window",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "automatic-rename-format",
+      "scope": "window",
+      "array": false,
+      "default": "#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}"
+    },
+    {
+      "name": "backspace",
+      "scope": "server",
+      "array": false,
+      "default": "C-?"
+    },
+    {
+      "name": "base-index",
+      "scope": "session",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "bell-action",
+      "scope": "session",
+      "array": false,
+      "default": "any"
+    },
+    {
+      "name": "buffer-limit",
+      "scope": "server",
+      "array": false,
+      "default": "50"
+    },
+    {
+      "name": "clear-on-attach",
+      "scope": "server",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "clock-mode-colour",
+      "scope": "window",
+      "array": false,
+      "default": "themeblue"
+    },
+    {
+      "name": "clock-mode-style",
+      "scope": "window",
+      "array": false,
+      "default": "24"
+    },
+    {
+      "name": "codepoint-widths",
+      "scope": "server",
+      "array": true,
+      "default": []
+    },
+    {
+      "name": "command-alias",
+      "scope": "server",
+      "array": true,
+      "default": [
+        "split-pane=split-window",
+        "splitp=split-window",
+        "server-info=show-messages -JT",
+        "info=show-messages -JT",
+        "choose-window=choose-tree -w",
+        "choose-session=choose-tree -s"
+      ]
+    },
+    {
+      "name": "copy-command",
+      "scope": "server",
+      "array": false,
+      "default": ""
+    },
+    {
+      "name": "copy-mode-current-line-number-style",
+      "scope": "window",
+      "array": false,
+      "default": "fg=themeyellow"
+    },
+    {
+      "name": "copy-mode-current-line-style",
+      "scope": "window",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "copy-mode-current-match-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=thememagenta,fg=themeblack"
+    },
+    {
+      "name": "copy-mode-line-number-style",
+      "scope": "window",
+      "array": false,
+      "default": "fg=themelightgrey,dim"
+    },
+    {
+      "name": "copy-mode-line-numbers",
+      "scope": "window",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "copy-mode-mark-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themeyellow,fg=themeblack"
+    },
+    {
+      "name": "copy-mode-match-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themecyan,fg=themeblack"
+    },
+    {
+      "name": "copy-mode-position-format",
+      "scope": "window-pane",
+      "array": false,
+      "default": "#[align=right]#{t/p:top_line_time}#{?#{e|>:#{top_line_time},0}, ,}[#{copy_position}/#{copy_position_limit}]#{?search_timed_out, (timed out),#{?search_count, (#{search_count}#{?search_count_partial,+,} results),}}"
+    },
+    {
+      "name": "copy-mode-position-style",
+      "scope": "window",
+      "array": false,
+      "default": "#{E:mode-style}"
+    },
+    {
+      "name": "copy-mode-selection-style",
+      "scope": "window",
+      "array": false,
+      "default": "#{E:mode-style}"
+    },
+    {
+      "name": "cursor-colour",
+      "scope": "window-pane",
+      "array": false,
+      "default": ""
+    },
+    {
+      "name": "cursor-style",
+      "scope": "window-pane",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "dark-theme-black",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray5,black}"
+    },
+    {
+      "name": "dark-theme-blue",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},skyblue3,blue}"
+    },
+    {
+      "name": "dark-theme-cyan",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},cadetblue,cyan}"
+    },
+    {
+      "name": "dark-theme-dark-grey",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray15,black}"
+    },
+    {
+      "name": "dark-theme-green",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},yellowgreen,green}"
+    },
+    {
+      "name": "dark-theme-light-grey",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray70,white}"
+    },
+    {
+      "name": "dark-theme-magenta",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},mediumpurple,magenta}"
+    },
+    {
+      "name": "dark-theme-red",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},indianred,red}"
+    },
+    {
+      "name": "dark-theme-white",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray90,white}"
+    },
+    {
+      "name": "dark-theme-yellow",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    },
+    {
+      "name": "default-client-command",
+      "scope": "server",
+      "array": false,
+      "default": "new-session"
+    },
+    {
+      "name": "default-command",
+      "scope": "session",
+      "array": false,
+      "default": ""
+    },
+    {
+      "name": "default-shell",
+      "scope": "session",
+      "array": false,
+      "default": "/bin/sh"
+    },
+    {
+      "name": "default-size",
+      "scope": "session",
+      "array": false,
+      "default": "80x24"
+    },
+    {
+      "name": "default-terminal",
+      "scope": "server",
+      "array": false,
+      "default": "tmux-256color"
+    },
+    {
+      "name": "destroy-unattached",
+      "scope": "session",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "detach-on-destroy",
+      "scope": "session",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "display-panes-active-colour",
+      "scope": "window",
+      "array": false,
+      "default": "themered"
+    },
+    {
+      "name": "display-panes-border-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themedarkgrey,fg=themelightgrey"
+    },
+    {
+      "name": "display-panes-colour",
+      "scope": "window",
+      "array": false,
+      "default": "themeblue"
+    },
+    {
+      "name": "display-panes-format",
+      "scope": "window",
+      "array": false,
+      "default": "#[align=right]#{pane_unzoomed_width}x#{pane_unzoomed_height}"
+    },
+    {
+      "name": "display-panes-time",
+      "scope": "window",
+      "array": false,
+      "default": "1000"
+    },
+    {
+      "name": "display-time",
+      "scope": "session",
+      "array": false,
+      "default": "750"
+    },
+    {
+      "name": "editor",
+      "scope": "server",
+      "array": false,
+      "default": "/usr/bin/vi"
+    },
+    {
+      "name": "escape-time",
+      "scope": "server",
+      "array": false,
+      "default": "10"
+    },
+    {
+      "name": "exit-empty",
+      "scope": "server",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "exit-unattached",
+      "scope": "server",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "extended-keys",
+      "scope": "server",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "extended-keys-format",
+      "scope": "server",
+      "array": false,
+      "default": "xterm"
+    },
+    {
+      "name": "fill-character",
+      "scope": "window",
+      "array": false,
+      "default": "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}"
+    },
+    {
+      "name": "focus-events",
+      "scope": "server",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "focus-follows-mouse",
+      "scope": "session",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "get-clipboard",
+      "scope": "server",
+      "array": false,
+      "default": "buffer"
+    },
+    {
+      "name": "history-file",
+      "scope": "server",
+      "array": false,
+      "default": ""
+    },
+    {
+      "name": "history-limit",
+      "scope": "session",
+      "array": false,
+      "default": "2000"
+    },
+    {
+      "name": "initial-repeat-time",
+      "scope": "session",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "input-buffer-size",
+      "scope": "server",
+      "array": false,
+      "default": "1048576"
+    },
+    {
+      "name": "key-table",
+      "scope": "session",
+      "array": false,
+      "default": "root"
+    },
+    {
+      "name": "light-theme-black",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray10,black}"
+    },
+    {
+      "name": "light-theme-blue",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},steelblue,blue}"
+    },
+    {
+      "name": "light-theme-cyan",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},darkcyan,cyan}"
+    },
+    {
+      "name": "light-theme-dark-grey",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray45,black}"
+    },
+    {
+      "name": "light-theme-green",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},seagreen,green}"
+    },
+    {
+      "name": "light-theme-light-grey",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray80,white}"
+    },
+    {
+      "name": "light-theme-magenta",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},purple4,magenta}"
+    },
+    {
+      "name": "light-theme-red",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},indianred4,red}"
+    },
+    {
+      "name": "light-theme-white",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},gray95,white}"
+    },
+    {
+      "name": "light-theme-yellow",
+      "scope": "server",
+      "array": false,
+      "default": "#{?#{e|>=:#{client_colours},256},darkgoldenrod,yellow}"
+    },
+    {
+      "name": "lock-after-time",
+      "scope": "session",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "lock-command",
+      "scope": "session",
+      "array": false,
+      "default": "lock -np"
+    },
+    {
+      "name": "main-pane-height",
+      "scope": "window",
+      "array": false,
+      "default": "24"
+    },
+    {
+      "name": "main-pane-width",
+      "scope": "window",
+      "array": false,
+      "default": "80"
+    },
+    {
+      "name": "menu-border-lines",
+      "scope": "window",
+      "array": false,
+      "default": "single"
+    },
+    {
+      "name": "menu-border-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themedarkgrey,fg=themelightgrey"
+    },
+    {
+      "name": "menu-selected-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themeyellow,fg=themeblack"
+    },
+    {
+      "name": "menu-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themedarkgrey,fg=themewhite"
+    },
+    {
+      "name": "message-command-style",
+      "scope": "session",
+      "array": false,
+      "default": "bg=themeblack,fg=themeyellow,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeblack}"
+    },
+    {
+      "name": "message-format",
+      "scope": "session",
+      "array": false,
+      "default": "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}"
+    },
+    {
+      "name": "message-limit",
+      "scope": "server",
+      "array": false,
+      "default": "1000"
+    },
+    {
+      "name": "message-line",
+      "scope": "session",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "message-style",
+      "scope": "session",
+      "array": false,
+      "default": "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}"
+    },
+    {
+      "name": "mode-keys",
+      "scope": "window",
+      "array": false,
+      "default": "emacs"
+    },
+    {
+      "name": "mode-style",
+      "scope": "window",
+      "array": false,
+      "default": "noattr,bg=themeyellow,fg=themeblack"
+    },
+    {
+      "name": "monitor-activity",
+      "scope": "window",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "monitor-bell",
+      "scope": "window",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "monitor-silence",
+      "scope": "window",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "mouse",
+      "scope": "session",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "other-pane-height",
+      "scope": "window",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "other-pane-width",
+      "scope": "window",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "pane-active-border-style",
+      "scope": "window-pane",
+      "array": false,
+      "default": "fg=#{?pane_modal_flag,themeblue,#{?pane_marked,thememagenta,#{?synchronize-panes,themered,#{?pane_in_mode,themeyellow,themegreen}}}}"
+    },
+    {
+      "name": "pane-base-index",
+      "scope": "window",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "pane-border-format",
+      "scope": "window-pane",
+      "array": false,
+      "default": "#{?pane_active,#[reverse],}#{pane_index}#[default] \"#{pane_title}\"#{?#{mouse},#[align=right]#[range=control|7][#{?#{pane_floating_flag},t,f}]#[norange]#[range=control|8][#{?#{window_zoomed_flag},u,z}]#[norange]#[range=control|9][x]#[norange],}"
+    },
+    {
+      "name": "pane-border-indicators",
+      "scope": "window",
+      "array": false,
+      "default": "colour"
+    },
+    {
+      "name": "pane-border-lines",
+      "scope": "window-pane",
+      "array": false,
+      "default": "single"
+    },
+    {
+      "name": "pane-border-status",
+      "scope": "window-pane",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "pane-border-style",
+      "scope": "window-pane",
+      "array": false,
+      "default": "fg=themelightgrey"
+    },
+    {
+      "name": "pane-colours",
+      "scope": "window-pane",
+      "array": true,
+      "default": []
+    },
+    {
+      "name": "pane-scrollbars",
+      "scope": "window",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "pane-scrollbars-position",
+      "scope": "window",
+      "array": false,
+      "default": "right"
+    },
+    {
+      "name": "pane-scrollbars-style",
+      "scope": "window-pane",
+      "array": false,
+      "default": "bg=themedarkgrey,fg=themelightgrey,width=1,pad=0"
+    },
+    {
+      "name": "pane-scrollbars-timeout",
+      "scope": "window",
+      "array": false,
+      "default": "500"
+    },
+    {
+      "name": "pane-status-current-style",
+      "scope": "window",
+      "array": false,
+      "default": "underscore"
+    },
+    {
+      "name": "pane-status-style",
+      "scope": "window",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "popup-border-lines",
+      "scope": "window",
+      "array": false,
+      "default": "single"
+    },
+    {
+      "name": "popup-border-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themedarkgrey,fg=themelightgrey"
+    },
+    {
+      "name": "popup-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themedarkgrey,fg=themewhite"
+    },
+    {
+      "name": "prefix",
+      "scope": "session",
+      "array": false,
+      "default": "C-b"
+    },
+    {
+      "name": "prefix-timeout",
+      "scope": "server",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "prefix2",
+      "scope": "session",
+      "array": false,
+      "default": "None"
+    },
+    {
+      "name": "prompt-command-cursor-colour",
+      "scope": "session",
+      "array": false,
+      "default": ""
+    },
+    {
+      "name": "prompt-command-cursor-style",
+      "scope": "session",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "prompt-cursor-colour",
+      "scope": "session",
+      "array": false,
+      "default": ""
+    },
+    {
+      "name": "prompt-cursor-style",
+      "scope": "session",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "prompt-history-limit",
+      "scope": "server",
+      "array": false,
+      "default": "100"
+    },
+    {
+      "name": "remain-on-exit",
+      "scope": "window-pane",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "remain-on-exit-format",
+      "scope": "window-pane",
+      "array": false,
+      "default": "Pane is dead (#{?#{!=:#{pane_dead_status},},status #{pane_dead_status},}#{?#{!=:#{pane_dead_signal},},signal #{pane_dead_signal},}, #{t:pane_dead_time})"
+    },
+    {
+      "name": "renumber-windows",
+      "scope": "session",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "repeat-time",
+      "scope": "session",
+      "array": false,
+      "default": "500"
+    },
+    {
+      "name": "scroll-on-clear",
+      "scope": "window-pane",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "session-status-current-style",
+      "scope": "window",
+      "array": false,
+      "default": "underscore"
+    },
+    {
+      "name": "session-status-style",
+      "scope": "window",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "set-clipboard",
+      "scope": "server",
+      "array": false,
+      "default": "external"
+    },
+    {
+      "name": "set-titles",
+      "scope": "session",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "set-titles-string",
+      "scope": "session",
+      "array": false,
+      "default": "#S:#I:#W - \"#T\" #{session_alerts}"
+    },
+    {
+      "name": "silence-action",
+      "scope": "session",
+      "array": false,
+      "default": "other"
+    },
+    {
+      "name": "status",
+      "scope": "session",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "status-bg",
+      "scope": "session",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "status-fg",
+      "scope": "session",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "status-format",
+      "scope": "session",
+      "array": true,
+      "default": [
+        "#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=window|#{window_index} list=focus #{?#{!=:#{E:window-status-current-style},default},#{E:window-status-current-style},#{E:window-status-style}}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}#[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]",
+        "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{P:#[range=pane|#{pane_id} #{E:pane-status-style}]#[push-default]#{T:window-pane-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}},#[range=pane|#{pane_id} list=focus #{?#{!=:#{E:pane-status-current-style},default},#{E:pane-status-current-style},#{E:pane-status-style}}]#[push-default]#{T:window-pane-current-status-format}#[pop-default]#[norange list=on default]#{?loop_last_flag,,#{E:window-status-separator}}}",
+        "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: #[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{S:#[range=session|#{session_id} #{E:session-status-style}]#[push-default]#S#{q/h:session_alert}#[pop-default]#[norange list=on default]  ,#[range=session|#{session_id} list=focus #{?#{!=:#{E:session-status-current-style},default},#{E:session-status-current-style},#{E:session-status-style}}]#[push-default]#S*#{q/h:session_alert}#[pop-default]#[norange list=on default] }"
+      ]
+    },
+    {
+      "name": "status-interval",
+      "scope": "session",
+      "array": false,
+      "default": "15"
+    },
+    {
+      "name": "status-justify",
+      "scope": "session",
+      "array": false,
+      "default": "left"
+    },
+    {
+      "name": "status-keys",
+      "scope": "session",
+      "array": false,
+      "default": "emacs"
+    },
+    {
+      "name": "status-left",
+      "scope": "session",
+      "array": false,
+      "default": "[#{session_name}] "
+    },
+    {
+      "name": "status-left-length",
+      "scope": "session",
+      "array": false,
+      "default": "10"
+    },
+    {
+      "name": "status-left-style",
+      "scope": "session",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "status-position",
+      "scope": "session",
+      "array": false,
+      "default": "bottom"
+    },
+    {
+      "name": "status-right",
+      "scope": "session",
+      "array": false,
+      "default": "#{?window_bigger,[#{window_offset_x}#,#{window_offset_y}] ,}\"#{=21:pane_title}\" %H:%M %d-%b-%y"
+    },
+    {
+      "name": "status-right-length",
+      "scope": "session",
+      "array": false,
+      "default": "40"
+    },
+    {
+      "name": "status-right-style",
+      "scope": "session",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "status-style",
+      "scope": "session",
+      "array": false,
+      "default": "bg=themegreen,fg=themeblack"
+    },
+    {
+      "name": "switch-mode-match-style",
+      "scope": "window-pane",
+      "array": false,
+      "default": "bg=cyan fg=black"
+    },
+    {
+      "name": "synchronize-panes",
+      "scope": "window-pane",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "terminal-features",
+      "scope": "server",
+      "array": true,
+      "default": [
+        "xterm*:clipboard:ccolour:cstyle:focus:title",
+        "screen*:title",
+        "rxvt*:ignorefkeys"
+      ]
+    },
+    {
+      "name": "terminal-overrides",
+      "scope": "server",
+      "array": true,
+      "default": [
+        "linux*:AX@"
+      ]
+    },
+    {
+      "name": "theme",
+      "scope": "server",
+      "array": false,
+      "default": "detect"
+    },
+    {
+      "name": "tiled-layout-max-columns",
+      "scope": "window",
+      "array": false,
+      "default": "0"
+    },
+    {
+      "name": "tree-mode-border-style",
+      "scope": "window",
+      "array": false,
+      "default": "bg=themedarkgrey,fg=themelightgrey"
+    },
+    {
+      "name": "tree-mode-preview-format",
+      "scope": "window-pane",
+      "array": false,
+      "default": "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}"
+    },
+    {
+      "name": "tree-mode-preview-style",
+      "scope": "window",
+      "array": false,
+      "default": "fg=#{?#{||:#{&&:#{pane_format},#{pane_active}},#{&&:#{window_format},#{window_active}}},themered,themeblue}"
+    },
+    {
+      "name": "tree-mode-selection-style",
+      "scope": "window",
+      "array": false,
+      "default": "#{E:mode-style}"
+    },
+    {
+      "name": "update-environment",
+      "scope": "session",
+      "array": true,
+      "default": [
+        "DISPLAY",
+        "KRB5CCNAME",
+        "MSYSTEM",
+        "SSH_ASKPASS",
+        "SSH_AUTH_SOCK",
+        "SSH_AGENT_PID",
+        "SSH_CONNECTION",
+        "WAYLAND_DISPLAY",
+        "WINDOWID",
+        "XAUTHORITY",
+        "XDG_CURRENT_DESKTOP",
+        "XDG_SESSION_DESKTOP",
+        "XDG_SESSION_TYPE"
+      ]
+    },
+    {
+      "name": "user-keys",
+      "scope": "server",
+      "array": true,
+      "default": []
+    },
+    {
+      "name": "variation-selector-always-wide",
+      "scope": "server",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "visual-activity",
+      "scope": "session",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "visual-bell",
+      "scope": "session",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "visual-silence",
+      "scope": "session",
+      "array": false,
+      "default": "off"
+    },
+    {
+      "name": "window-active-style",
+      "scope": "window-pane",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "window-pane-current-status-format",
+      "scope": "window",
+      "array": false,
+      "default": "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    },
+    {
+      "name": "window-pane-status-format",
+      "scope": "window",
+      "array": false,
+      "default": "#P:[#T]#{?pane_flags,#{pane_flags}, }"
+    },
+    {
+      "name": "window-size",
+      "scope": "window",
+      "array": false,
+      "default": "latest"
+    },
+    {
+      "name": "window-status-activity-style",
+      "scope": "window",
+      "array": false,
+      "default": "reverse"
+    },
+    {
+      "name": "window-status-bell-style",
+      "scope": "window",
+      "array": false,
+      "default": "reverse"
+    },
+    {
+      "name": "window-status-current-format",
+      "scope": "window",
+      "array": false,
+      "default": "#I:#W#{?window_flags,#{window_flags}, }"
+    },
+    {
+      "name": "window-status-current-style",
+      "scope": "window",
+      "array": false,
+      "default": "underscore"
+    },
+    {
+      "name": "window-status-format",
+      "scope": "window",
+      "array": false,
+      "default": "#I:#W#{?window_flags,#{window_flags}, }"
+    },
+    {
+      "name": "window-status-last-style",
+      "scope": "window",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "window-status-separator",
+      "scope": "window",
+      "array": false,
+      "default": " "
+    },
+    {
+      "name": "window-status-style",
+      "scope": "window",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "window-style",
+      "scope": "window-pane",
+      "array": false,
+      "default": "default"
+    },
+    {
+      "name": "word-separators",
+      "scope": "session",
+      "array": false,
+      "default": "!\"#$%&'()*+,-./:;<=>?@[\\]^`{|}~"
+    },
+    {
+      "name": "wrap-search",
+      "scope": "window",
+      "array": false,
+      "default": "on"
+    },
+    {
+      "name": "xterm-keys",
+      "scope": "window",
+      "array": false,
+      "default": "on"
+    }
   ],
   "formats": [
     "active_window_index",
@@ -1803,8 +2773,11 @@
     "cursor_very_visible",
     "cursor_x",
     "cursor_y",
+    "history_added",
     "history_all_bytes",
     "history_bytes",
+    "history_collected",
+    "history_generation",
     "history_limit",
     "history_size",
     "host",
@@ -1836,6 +2809,11 @@
     "pane_at_top",
     "pane_bg",
     "pane_bottom",
+    "pane_command_duration",
+    "pane_command_end_time",
+    "pane_command_running",
+    "pane_command_start_time",
+    "pane_command_status",
     "pane_current_command",
     "pane_current_path",
     "pane_dead",
@@ -1853,16 +2831,21 @@
     "pane_input_off",
     "pane_key_mode",
     "pane_last",
+    "pane_last_output_time",
+    "pane_last_prompt_time",
     "pane_left",
     "pane_marked",
     "pane_marked_set",
+    "pane_modal_flag",
     "pane_mode",
+    "pane_output_generation",
     "pane_path",
     "pane_pb_progress",
     "pane_pb_state",
     "pane_pid",
     "pane_pipe",
     "pane_pipe_pid",
+    "pane_private_modes",
     "pane_right",
     "pane_search_string",
     "pane_start_command",
@@ -1874,6 +2857,8 @@
     "pane_top",
     "pane_tty",
     "pane_unseen_changes",
+    "pane_unzoomed_height",
+    "pane_unzoomed_width",
     "pane_width",
     "pane_x",
     "pane_y",
@@ -1942,6 +2927,7 @@
     "window_manual_height",
     "window_manual_width",
     "window_marked_flag",
+    "window_modal_pane",
     "window_name",
     "window_offset_x",
     "window_offset_y",
@@ -1959,7 +2945,32 @@
     "literal_scopes": [
       {
         "path": "cmd-display-menu.c",
-        "function": "cmd_display_menu_get_pos",
+        "function": "cmd_display_menu_get_menu_pos",
+        "names": [
+          "popup_centre_x",
+          "popup_centre_y",
+          "popup_height",
+          "popup_last_x",
+          "popup_last_y",
+          "popup_mouse_bottom",
+          "popup_mouse_centre_x",
+          "popup_mouse_centre_y",
+          "popup_mouse_top",
+          "popup_mouse_x",
+          "popup_mouse_y",
+          "popup_pane_bottom",
+          "popup_pane_left",
+          "popup_pane_right",
+          "popup_pane_top",
+          "popup_status_line_y",
+          "popup_width",
+          "popup_window_status_line_x",
+          "popup_window_status_line_y"
+        ]
+      },
+      {
+        "path": "cmd-display-menu.c",
+        "function": "cmd_display_menu_get_popup_pos",
         "names": [
           "popup_centre_x",
           "popup_centre_y",
@@ -2058,6 +3069,46 @@
         ]
       },
       {
+        "path": "cmd-show-options.c",
+        "function": "cmd_show_hooks_print_monitor",
+        "names": [
+          "hook_fire_count",
+          "hook_fire_time",
+          "hook_monitor_format",
+          "hook_monitor_target",
+          "option_array_key",
+          "option_has_array_key",
+          "option_has_value",
+          "option_is_array",
+          "option_is_hook",
+          "option_is_parent",
+          "option_is_string",
+          "option_is_user",
+          "option_name",
+          "option_value",
+          "option_value_only"
+        ]
+      },
+      {
+        "path": "cmd-show-options.c",
+        "function": "cmd_show_options_print",
+        "names": [
+          "hook_fire_count",
+          "hook_fire_time",
+          "option_array_key",
+          "option_has_array_key",
+          "option_has_value",
+          "option_is_array",
+          "option_is_hook",
+          "option_is_parent",
+          "option_is_string",
+          "option_is_user",
+          "option_name",
+          "option_value",
+          "option_value_only"
+        ]
+      },
+      {
         "path": "format.c",
         "function": "format_loop_add_array_item",
         "names": [
@@ -2140,6 +3191,20 @@
         ]
       },
       {
+        "path": "hooks.c",
+        "function": "hooks_insert_event",
+        "names": [
+          "hook"
+        ]
+      },
+      {
+        "path": "hooks.c",
+        "function": "hooks_run",
+        "names": [
+          "hook"
+        ]
+      },
+      {
         "path": "mode-tree.c",
         "function": "mode_tree_draw",
         "names": [
@@ -2156,46 +3221,17 @@
         ]
       },
       {
-        "path": "notify.c",
-        "function": "notify_add",
+        "path": "prompt.c",
+        "function": "prompt_expand1",
         "names": [
-          "hook",
-          "hook_client",
-          "hook_pane",
-          "hook_session",
-          "hook_session_name",
-          "hook_window",
-          "hook_window_name"
-        ]
-      },
-      {
-        "path": "notify.c",
-        "function": "notify_hook",
-        "names": [
-          "hook"
-        ]
-      },
-      {
-        "path": "notify.c",
-        "function": "notify_monitor_cb",
-        "names": [
-          "hook",
-          "hook_last",
-          "hook_pane",
-          "hook_session",
-          "hook_session_name",
-          "hook_value",
-          "hook_window",
-          "hook_window_index",
-          "hook_window_name"
+          "message"
         ]
       },
       {
         "path": "prompt.c",
-        "function": "prompt_expand",
+        "function": "prompt_format_tree",
         "names": [
           "command_prompt",
-          "message",
           "prompt_flags",
           "prompt_input",
           "prompt_type"
@@ -2210,10 +3246,25 @@
         ]
       },
       {
+        "path": "window-border.c",
+        "function": "window_set_fill_cell",
+        "names": [
+          "is_inside",
+          "is_outside"
+        ]
+      },
+      {
         "path": "window-buffer.c",
         "function": "window_buffer_get_key",
         "names": [
           "line"
+        ]
+      },
+      {
+        "path": "window-client.c",
+        "function": "window_client_draw_info",
+        "names": [
+          "clipboard_invalid"
         ]
       },
       {
@@ -2232,9 +3283,11 @@
           "copy_cursor_word",
           "copy_cursor_x",
           "copy_cursor_y",
+          "copy_line_numbers",
           "copy_position",
           "copy_position_limit",
           "rectangle_toggle",
+          "refresh_active",
           "scroll_position",
           "search_count",
           "search_count_partial",
@@ -2255,6 +3308,7 @@
         "path": "window-customize.c",
         "function": "window_customize_build",
         "names": [
+          "is_environment",
           "is_key",
           "is_option"
         ]
@@ -2269,8 +3323,24 @@
       },
       {
         "path": "window-customize.c",
+        "function": "window_customize_build_environment",
+        "names": [
+          "environment_hidden",
+          "environment_is_global",
+          "environment_name",
+          "environment_removed",
+          "environment_scope",
+          "environment_value",
+          "is_environment",
+          "is_key",
+          "is_option"
+        ]
+      },
+      {
+        "path": "window-customize.c",
         "function": "window_customize_build_keys",
         "names": [
+          "is_environment",
           "is_key",
           "is_option",
           "key",
@@ -2283,6 +3353,9 @@
         "names": [
           "option_is_array",
           "option_is_global",
+          "option_is_hook",
+          "option_is_monitor",
+          "option_monitor",
           "option_name",
           "option_scope",
           "option_unit",
@@ -2312,71 +3385,6 @@
           {
             "path": "cfg.c",
             "function": "load_cfg_from_buffer"
-          }
-        ]
-      },
-      {
-        "family": "hook",
-        "names": [
-          "hook"
-        ],
-        "patterns": [],
-        "producers": [
-          {
-            "path": "cmd-queue.c",
-            "function": "cmdq_insert_hook"
-          }
-        ]
-      },
-      {
-        "family": "hook-argument",
-        "names": [],
-        "patterns": [
-          "hook_argument_N"
-        ],
-        "producers": [
-          {
-            "path": "cmd-queue.c",
-            "function": "cmdq_insert_hook"
-          }
-        ]
-      },
-      {
-        "family": "hook-arguments",
-        "names": [
-          "hook_arguments"
-        ],
-        "patterns": [],
-        "producers": [
-          {
-            "path": "cmd-queue.c",
-            "function": "cmdq_insert_hook"
-          }
-        ]
-      },
-      {
-        "family": "hook-flag",
-        "names": [],
-        "patterns": [
-          "hook_flag_X"
-        ],
-        "producers": [
-          {
-            "path": "cmd-queue.c",
-            "function": "cmdq_insert_hook"
-          }
-        ]
-      },
-      {
-        "family": "hook-flag-value",
-        "names": [],
-        "patterns": [
-          "hook_flag_X_N"
-        ],
-        "producers": [
-          {
-            "path": "cmd-queue.c",
-            "function": "cmdq_insert_hook"
           }
         ]
       },
@@ -2436,6 +3444,943 @@
         ]
       }
     ],
+    "event_payload": {
+      "consumers": [
+        {
+          "path": "cmd-wait-for.c",
+          "function": "cmd_wait_for_event_cb",
+          "prefix": ""
+        },
+        {
+          "path": "hooks.c",
+          "function": "hooks_insert_event",
+          "prefix": "hook_"
+        }
+      ],
+      "keys": [
+        {
+          "key": "arguments",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-queue.c",
+              "function": "cmdq_insert_hook"
+            }
+          ]
+        },
+        {
+          "key": "client",
+          "types": [
+            "client"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-set-option.c",
+              "function": "cmd_set_hook_event_exec"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_client"
+            },
+            {
+              "path": "hooks.c",
+              "function": "hooks_monitor_cb"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_session_changed"
+            }
+          ]
+        },
+        {
+          "key": "command_duration",
+          "types": [
+            "uint"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            }
+          ]
+        },
+        {
+          "key": "command_end_time",
+          "types": [
+            "time"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            }
+          ]
+        },
+        {
+          "key": "command_start_time",
+          "types": [
+            "time"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            }
+          ]
+        },
+        {
+          "key": "command_status",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            }
+          ]
+        },
+        {
+          "key": "created_empty",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            }
+          ]
+        },
+        {
+          "key": "created_respawn",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            }
+          ]
+        },
+        {
+          "key": "current_mode",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_mode_changed"
+            }
+          ]
+        },
+        {
+          "key": "event",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "events.c",
+              "function": "events_fire"
+            }
+          ]
+        },
+        {
+          "key": "exit_signal",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "server-fn.c",
+              "function": "server_fire_pane_exit"
+            }
+          ]
+        },
+        {
+          "key": "exit_status",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "server-fn.c",
+              "function": "server_fire_pane_exit"
+            }
+          ]
+        },
+        {
+          "key": "exit_success",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "server-fn.c",
+              "function": "server_fire_pane_exit"
+            }
+          ]
+        },
+        {
+          "key": "group",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "session.c",
+              "function": "session_group_fire"
+            }
+          ]
+        },
+        {
+          "key": "group_size",
+          "types": [
+            "uint"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "session.c",
+              "function": "session_group_fire"
+            }
+          ]
+        },
+        {
+          "key": "height",
+          "types": [
+            "uint"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "resize.c",
+              "function": "resize_fire_window_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "window.c",
+              "function": "window_pane_resize"
+            }
+          ]
+        },
+        {
+          "key": "last",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "hooks.c",
+              "function": "hooks_monitor_cb"
+            }
+          ]
+        },
+        {
+          "key": "marked",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_marked_pane"
+            }
+          ]
+        },
+        {
+          "key": "mode_entered",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_mode_changed"
+            }
+          ]
+        },
+        {
+          "key": "new_name",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-rename-session.c",
+              "function": "cmd_rename_session_exec"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_renamed"
+            }
+          ]
+        },
+        {
+          "key": "new_pane",
+          "types": [
+            "pane"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_marked_pane"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_changed"
+            }
+          ]
+        },
+        {
+          "key": "new_session",
+          "types": [
+            "session"
+          ],
+          "named": true,
+          "producers": [
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_session_changed"
+            }
+          ]
+        },
+        {
+          "key": "new_title",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_exec"
+            },
+            {
+              "path": "cmd-split-window.c",
+              "function": "cmd_split_window_exec"
+            },
+            {
+              "path": "input.c",
+              "function": "input_fire_pane_title_changed"
+            }
+          ]
+        },
+        {
+          "key": "new_window",
+          "types": [
+            "window"
+          ],
+          "named": true,
+          "producers": [
+            {
+              "path": "session.c",
+              "function": "session_fire_window_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_moved"
+            }
+          ]
+        },
+        {
+          "key": "new_window_index",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "session.c",
+              "function": "session_fire_window_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_moved"
+            }
+          ]
+        },
+        {
+          "key": "old_height",
+          "types": [
+            "uint"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "resize.c",
+              "function": "resize_fire_window_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "window.c",
+              "function": "window_pane_resize"
+            }
+          ]
+        },
+        {
+          "key": "old_name",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-rename-session.c",
+              "function": "cmd_rename_session_exec"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_renamed"
+            }
+          ]
+        },
+        {
+          "key": "old_pane",
+          "types": [
+            "pane"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_marked_pane"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_changed"
+            }
+          ]
+        },
+        {
+          "key": "old_session",
+          "types": [
+            "session"
+          ],
+          "named": true,
+          "producers": [
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_session_changed"
+            }
+          ]
+        },
+        {
+          "key": "old_width",
+          "types": [
+            "uint"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "resize.c",
+              "function": "resize_fire_window_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "window.c",
+              "function": "window_pane_resize"
+            }
+          ]
+        },
+        {
+          "key": "old_window",
+          "types": [
+            "window"
+          ],
+          "named": true,
+          "producers": [
+            {
+              "path": "session.c",
+              "function": "session_fire_window_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_moved"
+            }
+          ]
+        },
+        {
+          "key": "old_window_index",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "session.c",
+              "function": "session_fire_window_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_moved"
+            }
+          ]
+        },
+        {
+          "key": "pane",
+          "types": [
+            "pane"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_exec"
+            },
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_marked_pane"
+            },
+            {
+              "path": "cmd-set-option.c",
+              "function": "cmd_set_hook_event_exec"
+            },
+            {
+              "path": "cmd-split-window.c",
+              "function": "cmd_split_window_exec"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_client"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_pane"
+            },
+            {
+              "path": "hooks.c",
+              "function": "hooks_monitor_cb"
+            },
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            },
+            {
+              "path": "input.c",
+              "function": "input_fire_pane_title_changed"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_session_changed"
+            },
+            {
+              "path": "server-fn.c",
+              "function": "server_fire_pane_exit"
+            },
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_mode_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_moved"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_prompt"
+            },
+            {
+              "path": "window.c",
+              "function": "window_pane_resize"
+            }
+          ]
+        },
+        {
+          "key": "pane_command",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            }
+          ]
+        },
+        {
+          "key": "pane_current_path",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            }
+          ]
+        },
+        {
+          "key": "paste_buffer",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "paste.c",
+              "function": "paste_fire_event"
+            }
+          ]
+        },
+        {
+          "key": "previous_mode",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_mode_changed"
+            }
+          ]
+        },
+        {
+          "key": "prompt_type",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_prompt"
+            }
+          ]
+        },
+        {
+          "key": "session",
+          "types": [
+            "session"
+          ],
+          "named": true,
+          "producers": [
+            {
+              "path": "cmd-rename-session.c",
+              "function": "cmd_rename_session_exec"
+            },
+            {
+              "path": "cmd-set-option.c",
+              "function": "cmd_set_hook_event_exec"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_client"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_session"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_winlink"
+            },
+            {
+              "path": "hooks.c",
+              "function": "hooks_monitor_cb"
+            },
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_session_changed"
+            },
+            {
+              "path": "session.c",
+              "function": "session_fire_window_changed"
+            },
+            {
+              "path": "session.c",
+              "function": "session_group_fire"
+            },
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            }
+          ]
+        },
+        {
+          "key": "value",
+          "types": [
+            "string"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "hooks.c",
+              "function": "hooks_monitor_cb"
+            }
+          ]
+        },
+        {
+          "key": "width",
+          "types": [
+            "uint"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "resize.c",
+              "function": "resize_fire_window_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "window.c",
+              "function": "window_pane_resize"
+            }
+          ]
+        },
+        {
+          "key": "window",
+          "types": [
+            "window"
+          ],
+          "named": true,
+          "producers": [
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_exec"
+            },
+            {
+              "path": "cmd-select-pane.c",
+              "function": "cmd_select_pane_marked_pane"
+            },
+            {
+              "path": "cmd-set-option.c",
+              "function": "cmd_set_hook_event_exec"
+            },
+            {
+              "path": "cmd-split-window.c",
+              "function": "cmd_split_window_exec"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_client"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_pane"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_window"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_winlink"
+            },
+            {
+              "path": "hooks.c",
+              "function": "hooks_monitor_cb"
+            },
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            },
+            {
+              "path": "input.c",
+              "function": "input_fire_pane_title_changed"
+            },
+            {
+              "path": "resize.c",
+              "function": "resize_fire_window_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_session_changed"
+            },
+            {
+              "path": "server-fn.c",
+              "function": "server_fire_pane_exit"
+            },
+            {
+              "path": "session.c",
+              "function": "session_fire_window_changed"
+            },
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_mode_changed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_moved"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_prompt"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_renamed"
+            },
+            {
+              "path": "window.c",
+              "function": "window_pane_resize"
+            }
+          ]
+        },
+        {
+          "key": "window_index",
+          "types": [
+            "int"
+          ],
+          "named": false,
+          "producers": [
+            {
+              "path": "cmd-set-option.c",
+              "function": "cmd_set_hook_event_exec"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_client"
+            },
+            {
+              "path": "events.c",
+              "function": "events_fire_winlink"
+            },
+            {
+              "path": "hooks.c",
+              "function": "hooks_monitor_cb"
+            },
+            {
+              "path": "input.c",
+              "function": "input_fire_command_event"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_resized"
+            },
+            {
+              "path": "server-client.c",
+              "function": "server_client_fire_session_changed"
+            },
+            {
+              "path": "session.c",
+              "function": "session_fire_window_changed"
+            },
+            {
+              "path": "spawn.c",
+              "function": "spawn_fire_pane_created"
+            },
+            {
+              "path": "window.c",
+              "function": "window_fire_pane_moved"
+            }
+          ]
+        }
+      ],
+      "patterns": [
+        {
+          "pattern": "argument_N",
+          "types": [
+            "string"
+          ],
+          "producers": [
+            {
+              "path": "cmd-queue.c",
+              "function": "cmdq_insert_hook"
+            }
+          ]
+        },
+        {
+          "pattern": "flag_X",
+          "types": [
+            "string"
+          ],
+          "producers": [
+            {
+              "path": "cmd-queue.c",
+              "function": "cmdq_insert_hook"
+            }
+          ]
+        },
+        {
+          "pattern": "flag_X_N",
+          "types": [
+            "string"
+          ],
+          "producers": [
+            {
+              "path": "cmd-queue.c",
+              "function": "cmdq_insert_hook"
+            }
+          ]
+        }
+      ]
+    },
     "propagation": [
       {
         "path": "cmd-queue.c",
@@ -2458,8 +4403,8 @@
         "callee": "format_add"
       },
       {
-        "path": "notify.c",
-        "function": "notify_parse_hook",
+        "path": "hooks.c",
+        "function": "hooks_parse",
         "callee": "format_merge"
       }
     ]
@@ -2475,6 +4420,7 @@
     "==",
     ">",
     ">=",
+    "A",
     "C",
     "E",
     "I",
@@ -2521,7 +4467,6 @@
     "after-new-window",
     "after-paste-buffer",
     "after-pipe-pane",
-    "after-queue",
     "after-refresh-client",
     "after-rename-session",
     "after-rename-window",
@@ -2540,12 +4485,15 @@
     "after-show-messages",
     "after-show-options",
     "after-split-window",
+    "after-swap-window",
     "after-unbind-key",
     "alert-activity",
     "alert-bell",
     "alert-silence",
     "client-active",
     "client-attached",
+    "client-closed",
+    "client-created",
     "client-dark-theme",
     "client-detached",
     "client-focus-in",
@@ -2554,23 +4502,42 @@
     "client-resized",
     "client-session-changed",
     "command-error",
+    "marked-pane-changed",
+    "pane-activity",
+    "pane-bell",
+    "pane-command-finished",
+    "pane-command-started",
+    "pane-created",
     "pane-died",
     "pane-exited",
     "pane-focus-in",
     "pane-focus-out",
     "pane-mode-changed",
+    "pane-mode-entered",
+    "pane-mode-exited",
+    "pane-moved",
+    "pane-prompt-closed",
+    "pane-prompt-opened",
+    "pane-resized",
     "pane-set-clipboard",
+    "pane-shell-prompt",
     "pane-title-changed",
+    "session-added-to-group",
     "session-closed",
     "session-created",
+    "session-removed-from-group",
     "session-renamed",
     "session-window-changed",
+    "window-closed",
+    "window-created",
     "window-layout-changed",
     "window-linked",
     "window-pane-changed",
     "window-renamed",
     "window-resized",
-    "window-unlinked"
+    "window-unlinked",
+    "window-unzoomed",
+    "window-zoomed"
   ],
   "key_bindings": [
     {
@@ -2781,6 +4748,13 @@
       "key": "Home",
       "repeat": false,
       "command": "send-keys -X start-of-line",
+      "note": ""
+    },
+    {
+      "table": "copy-mode",
+      "key": "L",
+      "repeat": false,
+      "command": "send-keys -X line-numbers-toggle",
       "note": ""
     },
     {
@@ -3102,7 +5076,7 @@
       "table": "copy-mode",
       "key": "r",
       "repeat": false,
-      "command": "send-keys -X refresh-toggle",
+      "command": "send-keys -X refresh-now",
       "note": ""
     },
     {
@@ -3683,7 +5657,7 @@
       "table": "copy-mode-vi",
       "key": "r",
       "repeat": false,
-      "command": "send-keys -X refresh-toggle",
+      "command": "send-keys -X refresh-now",
       "note": ""
     },
     {
@@ -4061,7 +6035,7 @@
       "table": "prefix",
       "key": ">",
       "repeat": false,
-      "command": "display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -x P -y P \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z }",
+      "command": "display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -x P -y P \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{==:#{pane_mode},copy-mode},#{?copy_line_numbers,Hide Line Numbers,Show Line Numbers},}\" L { send-keys -X line-numbers-toggle } \"#{?#{==:#{pane_mode},copy-mode},#{?refresh_active,Refresh Off,Refresh On},}\" r { send-keys -X refresh-toggle } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z }",
       "note": "Display pane menu"
     },
     {
@@ -4339,6 +6313,13 @@
     },
     {
       "table": "prefix",
+      "key": "T",
+      "repeat": false,
+      "command": "command-prompt -I \"#T\" { select-pane -T \"%%\" }",
+      "note": "Change the pane title"
+    },
+    {
+      "table": "prefix",
       "key": "Tab",
       "repeat": false,
       "command": "new-pane -E -X 0 -Y 0 -x \"75%\" -y \"30%\" \\; move-pane -P bottom-centre \\; switch-mode -kw",
@@ -4507,16 +6488,23 @@
     },
     {
       "table": "root",
-      "key": "C-MouseDown1Pane",
+      "key": "C-MouseDown1Status",
       "repeat": false,
-      "command": "swap-pane -s @",
+      "command": "swap-window -t @",
       "note": ""
     },
     {
       "table": "root",
-      "key": "C-MouseDown1Status",
+      "key": "C-MouseDrag1Empty",
       "repeat": false,
-      "command": "swap-window -t @",
+      "command": "new-pane -M",
+      "note": ""
+    },
+    {
+      "table": "root",
+      "key": "C-MouseDrag1Pane",
+      "repeat": false,
+      "command": "new-pane -M",
       "note": ""
     },
     {
@@ -4528,9 +6516,16 @@
     },
     {
       "table": "root",
+      "key": "M-MouseDown3Empty",
+      "repeat": false,
+      "command": "display-menu -T \"#[align=centre]#{window_index}:#{window_name}\" -t = -x M -y M \"New Pane\" p { new-pane ; join-pane } \"New Window\" w { new-window }",
+      "note": ""
+    },
+    {
+      "table": "root",
       "key": "M-MouseDown3Pane",
       "repeat": false,
-      "command": "display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z }",
+      "command": "display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{==:#{pane_mode},copy-mode},#{?copy_line_numbers,Hide Line Numbers,Show Line Numbers},}\" L { send-keys -X line-numbers-toggle } \"#{?#{==:#{pane_mode},copy-mode},#{?refresh_active,Refresh Off,Refresh On},}\" r { send-keys -X refresh-toggle } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z }",
       "note": ""
     },
     {
@@ -4565,7 +6560,7 @@
       "table": "root",
       "key": "MouseDown1Border",
       "repeat": false,
-      "command": "select-pane -M",
+      "command": "select-pane -t =",
       "note": ""
     },
     {
@@ -4626,9 +6621,16 @@
     },
     {
       "table": "root",
+      "key": "MouseDown3Empty",
+      "repeat": false,
+      "command": "display-menu -T \"#[align=centre]#{window_index}:#{window_name}\" -t = -x M -y M \"New Pane\" p { new-pane ; join-pane } \"New Window\" w { new-window }",
+      "note": ""
+    },
+    {
+      "table": "root",
       "key": "MouseDown3Pane",
       "repeat": false,
-      "command": "if-shell -F -t = \"#{||:#{mouse_any_flag},#{&&:#{pane_in_mode},#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}}}\" { select-pane -t = ; send-keys -M } { display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z } }",
+      "command": "if-shell -F -t = \"#{||:#{mouse_any_flag},#{&&:#{pane_in_mode},#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}}}\" { select-pane -t = ; send-keys -M } { display-menu -T \"#[align=centre]#{pane_index} (#{pane_id})\" -t = -x M -y M \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Top,}\" < { send-keys -X history-top } \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},Go To Bottom,}\" > { send-keys -X history-bottom } '' \"#{?#{==:#{pane_mode},copy-mode},#{?copy_line_numbers,Hide Line Numbers,Show Line Numbers},}\" L { send-keys -X line-numbers-toggle } \"#{?#{==:#{pane_mode},copy-mode},#{?refresh_active,Refresh Off,Refresh On},}\" r { send-keys -X refresh-toggle } '' \"#{?#{&&:#{buffer_size},#{!:#{pane_in_mode}}},Paste #[underscore]#{=/9/...:buffer_sample},}\" p { paste-buffer } '' \"#{?mouse_word,Search For #[underscore]#{=/9/...:mouse_word},}\" C-r { if-shell -F \"#{?#{m/r:(copy|view)-mode,#{pane_mode}},0,1}\" \"copy-mode -t=\" ; send-keys -X -t = search-backward -- \"#{q:mouse_word}\" } \"#{?mouse_word,Type #[underscore]#{=/9/...:mouse_word},}\" C-y { copy-mode -q ; send-keys -l \"#{q:mouse_word}\" } \"#{?mouse_word,Copy #[underscore]#{=/9/...:mouse_word},}\" c { copy-mode -q ; set-buffer \"#{q:mouse_word}\" } \"#{?mouse_line,Copy Line,}\" l { copy-mode -q ; set-buffer \"#{q:mouse_line}\" } '' \"#{?mouse_hyperlink,Type #[underscore]#{=/9/...:mouse_hyperlink},}\" C-h { copy-mode -q ; send-keys -l \"#{q:mouse_hyperlink}\" } \"#{?mouse_hyperlink,Copy #[underscore]#{=/9/...:mouse_hyperlink},}\" h { copy-mode -q ; set-buffer \"#{q:mouse_hyperlink}\" } '' \"#{?#{#{pane_floating_flag}},Move,}\" '' { display-menu -T \"#[align=centre]Move\" -x L -y L Centre c { move-pane -P centre } '' \"Top Left\" 1 { move-pane -P top-left } \"Top Right\" 2 { move-pane -P top-right } \"Bottom Left\" 3 { move-pane -P bottom-left } \"Bottom Right\" 4 { move-pane -P bottom-right } '' Top t { move-pane -P top-centre } Bottom b { move-pane -P bottom-centre } Left l { move-pane -P centre-left } Right r { move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Move & Resize,}\" '' { display-menu -T \"#[align=centre]Move & Resize\" -x L -y L Fill 0 { resize-pane -x \"100%\" -y \"100%\" ; move-pane -P top-left } '' \"Top Left\" 1 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-left } \"Top Right\" 2 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P top-right } \"Bottom Left\" 3 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-left } \"Bottom Right\" 4 { resize-pane -x \"50%\" -y \"50%\" ; move-pane -P bottom-right } '' Top t { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P top-centre } Bottom b { resize-pane -x \"100%\" -y \"50%\" ; move-pane -P bottom-centre } Left l { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-left } Right r { resize-pane -x \"50%\" -y \"100%\" ; move-pane -P centre-right } } \"#{?#{#{pane_floating_flag}},Tile,}\" t { join-pane } \"#{?#{!:#{pane_floating_flag}},Float,}\" f { break-pane -W } \"#{?#{!:#{pane_floating_flag}},Horizontal Split,}\" h { split-window -h } \"#{?#{!:#{pane_floating_flag}},Vertical Split,}\" v { split-window -v } '' \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Up,}\" u { swap-pane -U } \"#{?#{&&:#{!:#{pane_floating_flag}},#{>:#{window_panes},1}},Swap Down,}\" d { swap-pane -D } \"#{?pane_marked_set,,-}Swap Marked\" s { swap-pane } '' Kill X { kill-pane } Respawn R { respawn-pane -k } \"#{?pane_marked,Unmark,Mark}\" m { select-pane -m } \"#{?#{>:#{window_panes},1},,-}#{?window_zoomed_flag,Unzoom,Zoom}\" z { resize-pane -Z } }",
       "note": ""
     },
     {

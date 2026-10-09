@@ -1322,9 +1322,9 @@ nobody intends to drain. `accepted` plus `native` means zz's own surface serves 
 - `options.theme-palette` (native): zz already resolves the pin's ten `theme*` style colour
   names into zz theme tokens in the GUI and through the pin's own fallback indices in the daemon and
   raw TUI, while the twenty-one options that would override those slots stay store-only.
-- `pane.floating-model` (native): a tmux floating pane is a mux object placed by `new-pane` and
-  `move-pane`, while zz's floating things are presentation objects its clients draw and its panes
-  are layout-tree leaves.
+- `pane.floating-model` (reopened as adopt 2026-10-09): a tmux floating pane is a mux object placed
+  by `new-pane` and `move-pane`; fabrico ruled to build it as
+  [the floating panes design](/designs/floating-panes.md) describes, closed by float.core.
 - `protocol.binary-streams` (native): zz's client protocol carries typed UTF-8 messages and its CLI
   already reads caller stdin as one bounded payload for its own verbs, so the five tmux `-` forms
   stay loudly refused; the roadmap's milestone 5 still owns the single bounded channel that would

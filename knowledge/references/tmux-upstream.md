@@ -4,15 +4,15 @@ title: tmux behavioral reference pin
 description: The pinned upstream tmux commit zz's Rust multiplexer reimplementation is checked against, and where the per-behavior file map lives.
 resource: third_party/tmux-reference/UPSTREAM.md
 tags: [tmux, reference, pin, behavioral-compatibility]
-timestamp: 2026-07-27T00:00:00Z
+timestamp: 2026-10-09T00:00:00Z
 ---
 
 # Overview
 
 zz's multiplexer is a Rust implementation: it does not compile, link, or run tmux, and no tmux C
 source is copied into the codebase. Instead, command names, aliases, key-table behavior, and
-`.tmux.conf` syntax are checked by hand against tmux at a single pinned commit,
-[`d77c9dc6aa021e4bc61f0da128c591af695e6466`](https://github.com/tmux/tmux/tree/d77c9dc6aa021e4bc61f0da128c591af695e6466).
+`.tmux.conf` syntax are checked by hand against tmux at a single pinned commit, the `3.8` release
+tag [`7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`](https://github.com/tmux/tmux/tree/7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53).
 
 Only the deliberately supported subset is implemented; unsupported tmux configuration commands are
 reported and skipped rather than approximated. The upstream tmux license is retained beside
@@ -36,7 +36,7 @@ The [tmux compat concept](/tmux/tmux-compat.md) documents the resulting Rust beh
 # Citations
 
 - `third_party/tmux-reference/UPSTREAM.md` . in-repo source of truth for the pin and the file map
-- Pinned commit: [`d77c9dc6aa021e4bc61f0da128c591af695e6466`](https://github.com/tmux/tmux/tree/d77c9dc6aa021e4bc61f0da128c591af695e6466)
+- Pinned commit: tag `3.8`, [`7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`](https://github.com/tmux/tmux/tree/7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53)
 
 # Related
 

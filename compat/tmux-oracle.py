@@ -11,9 +11,10 @@ import sys
 from pathlib import Path
 
 
-SCHEMA = 5
-PIN = "d77c9dc6aa021e4bc61f0da128c591af695e6466"
-VERSION = "tmux next-3.8"
+SCHEMA = 6
+TAG = "3.8"
+PIN = "7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53"
+VERSION = "tmux 3.8"
 ROOT = Path(__file__).resolve().parent.parent
 ORACLE = ROOT / "compat" / "tmux-oracle.json"
 MANIFEST = ROOT / "compat" / "tmux-gaps.json"
@@ -25,11 +26,6 @@ FORMAT_INSERTION_CALLS = frozenset(
 )
 FORMAT_DERIVED_FAMILIES = {
     "current-file": {"names": ["current_file"], "patterns": []},
-    "hook": {"names": ["hook"], "patterns": []},
-    "hook-argument": {"names": [], "patterns": ["hook_argument_N"]},
-    "hook-arguments": {"names": ["hook_arguments"], "patterns": []},
-    "hook-flag": {"names": [], "patterns": ["hook_flag_X"]},
-    "hook-flag-value": {"names": [], "patterns": ["hook_flag_X_N"]},
     "run-shell-position": {"names": [], "patterns": ["N"]},
     "window-neighbour-active": {
         "names": ["next_window_active", "prev_window_active"],
@@ -46,11 +42,6 @@ FORMAT_DERIVED_FAMILIES = {
 }
 FORMAT_DERIVED_PRODUCERS = {
     "current-file": {("cfg.c", "load_cfg"), ("cfg.c", "load_cfg_from_buffer")},
-    "hook": {("cmd-queue.c", "cmdq_insert_hook")},
-    "hook-argument": {("cmd-queue.c", "cmdq_insert_hook")},
-    "hook-arguments": {("cmd-queue.c", "cmdq_insert_hook")},
-    "hook-flag": {("cmd-queue.c", "cmdq_insert_hook")},
-    "hook-flag-value": {("cmd-queue.c", "cmdq_insert_hook")},
     "run-shell-position": {("cmd-run-shell.c", "cmd_run_shell_exec")},
     "window-neighbour-active": {("format.c", "format_add_window_neighbour")},
     "window-neighbour-index": {("format.c", "format_add_window_neighbour")},
@@ -58,15 +49,38 @@ FORMAT_DERIVED_PRODUCERS = {
 }
 FORMAT_DERIVED_CALL_COUNTS = {
     "current-file": 2,
-    "hook": 1,
-    "hook-argument": 1,
-    "hook-arguments": 1,
-    "hook-flag": 2,
-    "hook-flag-value": 1,
     "run-shell-position": 1,
     "window-neighbour-active": 1,
     "window-neighbour-index": 1,
     "window-neighbour-user-option": 1,
+}
+EVENT_PAYLOAD_SETTERS = frozenset(
+    {
+        "event_payload_set_client",
+        "event_payload_set_int",
+        "event_payload_set_pane",
+        "event_payload_set_pointer",
+        "event_payload_set_session",
+        "event_payload_set_string",
+        "event_payload_set_time",
+        "event_payload_set_uint",
+        "event_payload_set_window",
+    }
+)
+EVENT_PAYLOAD_NAMED_TYPES = frozenset({"session", "window"})
+EVENT_PAYLOAD_GENERATED_KEYS = {
+    "argument_%u": "argument_N",
+    "flag_%c": "flag_X",
+    "flag_%c_%u": "flag_X_N",
+}
+EVENT_PAYLOAD_RENDERER = ("events-payload.c", "event_payload_add_formats")
+EVENT_PAYLOAD_RENDERED_KEYS = {"%s%s": 1, "%s%s_name": 2}
+EVENT_PAYLOAD_HOOK_PREFIX = "hook_"
+OPTION_SCOPES = {
+    "OPTIONS_TABLE_SERVER": "server",
+    "OPTIONS_TABLE_SESSION": "session",
+    "OPTIONS_TABLE_WINDOW": "window",
+    "OPTIONS_TABLE_WINDOW|OPTIONS_TABLE_PANE": "window-pane",
 }
 
 
@@ -121,6 +135,7 @@ def verify_build_stamp(path, source, env, expected_pin, version):
             fail(f"malformed tmux build provenance stamp {stamp_path}")
         stamp[key] = value
     expected = {
+        "tag": TAG,
         "commit": expected_pin,
         "version": version,
         "script-cksum": checksum(FETCH_TMUX, env),
@@ -134,9 +149,10 @@ def verify_tmux(path, expected_pin):
     if not path.is_file() or not os.access(path, os.X_OK):
         fail(f"tmux is not executable: {path}")
     env = os.environ.copy()
-    env.pop("TMUX", None)
-    env.pop("TMUX_PANE", None)
+    for name in ("TMUX", "TMUX_PANE", "EDITOR", "VISUAL"):
+        env.pop(name, None)
     env["LC_ALL"] = "C"
+    env["SHELL"] = "/bin/sh"
     version = run([path, "-V"], env).strip()
     if version != VERSION:
         fail(f"tmux must report {VERSION!r}, got {version!r}")
@@ -146,6 +162,11 @@ def verify_tmux(path, expected_pin):
     commit = run(["git", "-C", source, "rev-parse", "HEAD"], env).strip()
     if commit != expected_pin:
         fail(f"tmux source must be at {expected_pin}, got {commit}")
+    tagged = run(
+        ["git", "-C", source, "rev-parse", "--verify", f"refs/tags/{TAG}^{{commit}}"], env
+    ).strip()
+    if tagged != expected_pin:
+        fail(f"tmux tag {TAG} must resolve to {expected_pin}, got {tagged}")
     dirty = run(
         ["git", "-C", source, "status", "--porcelain", "--untracked-files=all"], env
     ).strip()
@@ -268,8 +289,8 @@ def source_args_parse(source, commands):
         for command in commands.values()
         if command["args_parse_callback"] is not None
     }
-    if len(callbacks) != 9:
-        fail(f"expected 9 args_parse callbacks, got {len(callbacks)}")
+    if len(callbacks) != 8:
+        fail(f"expected 8 args_parse callbacks, got {len(callbacks)}")
     callback_rules = {}
     for path in sorted(source.glob("cmd-*.c")):
         contents = path.read_text(encoding="utf-8")
@@ -551,35 +572,13 @@ def source_format_contexts(source):
     literal_wrappers = {
         ("cfg.c", "load_cfg", "current_file"): "current-file",
         ("cfg.c", "load_cfg_from_buffer", "current_file"): "current-file",
-        ("cmd-queue.c", "cmdq_insert_hook", "hook"): "hook",
-        ("cmd-queue.c", "cmdq_insert_hook", "hook_arguments"): "hook-arguments",
     }
+    rendered_payload_calls = {template: 0 for template in EVENT_PAYLOAD_RENDERED_KEYS}
     pass_through = {
         ("cmd-queue.c", "cmdq_add_format", "format_add", "key"),
         ("format.c", "format_merge", "format_add", "fe->key"),
     }
     generated_families = {
-        (
-            "cmd-queue.c",
-            "cmdq_insert_hook",
-            "cmdq_add_format",
-            "tmp",
-            "hook_argument_%d",
-        ): "hook-argument",
-        (
-            "cmd-queue.c",
-            "cmdq_insert_hook",
-            "cmdq_add_format",
-            "tmp",
-            "hook_flag_%c",
-        ): "hook-flag",
-        (
-            "cmd-queue.c",
-            "cmdq_insert_hook",
-            "cmdq_add_format",
-            "tmp",
-            "hook_flag_%c_%d",
-        ): "hook-flag-value",
         (
             "cmd-run-shell.c",
             "cmd_run_shell_exec",
@@ -614,7 +613,7 @@ def source_format_contexts(source):
         ("cmd-queue.c", "cmdq_add_formats", "format_merge"),
         ("cmd-queue.c", "cmdq_merge_formats", "format_merge"),
         ("format.c", "format_merge", "format_add"),
-        ("notify.c", "notify_parse_hook", "format_merge"),
+        ("hooks.c", "hooks_parse", "format_merge"),
     }
 
     for path in sorted(source.glob("*.c")):
@@ -657,6 +656,14 @@ def source_format_contexts(source):
                     continue
                 else:
                     template = generated_key_template(generators, offset, key_expression)
+                    if (
+                        location == EVENT_PAYLOAD_RENDERER
+                        and callee == "format_add"
+                        and key_expression == "name"
+                        and template in rendered_payload_calls
+                    ):
+                        rendered_payload_calls[template] += 1
+                        continue
                     family = generated_families.get(
                         (*location, callee, key_expression, template)
                     )
@@ -687,10 +694,15 @@ def source_format_contexts(source):
     literal_scope_count = len(literal_scopes)
     literal_pair_count = sum(len(names) for names in literal_scopes.values())
     literal_names = set().union(*literal_scopes.values())
-    if (literal_scope_count, literal_pair_count, len(literal_names)) != (31, 153, 108):
+    if (literal_scope_count, literal_pair_count, len(literal_names)) != (37, 204, 122):
         fail(
-            "expected 31 literal format scopes, 153 scoped pairs, and 108 unique "
+            "expected 37 literal format scopes, 204 scoped pairs, and 122 unique "
             f"names, got {literal_scope_count}, {literal_pair_count}, {len(literal_names)}"
+        )
+    if rendered_payload_calls != EVENT_PAYLOAD_RENDERED_KEYS:
+        fail(
+            "event payload format rendering changed: "
+            f"expected {EVENT_PAYLOAD_RENDERED_KEYS!r}, got {rendered_payload_calls!r}"
         )
     if derived_producers != FORMAT_DERIVED_PRODUCERS:
         fail(
@@ -728,11 +740,153 @@ def source_format_contexts(source):
             }
             for family in sorted(FORMAT_DERIVED_FAMILIES)
         ],
+        "event_payload": source_event_payload(source),
         "propagation": [
             {"path": path, "function": function, "callee": callee}
             for path, function, callee in sorted(expected_propagation)
         ],
     }
+
+
+def source_event_payload(source):
+    consumers = set()
+    keys = {}
+    patterns = {}
+    renderer = None
+    for path in sorted(source.glob("*.c")):
+        contents = path.read_text(encoding="utf-8")
+        if "event_payload_" not in contents:
+            continue
+        for function in source_function_bodies(contents, path):
+            location = (path.name, function["name"])
+            body = contents[function["body_start"] : function["body_end"]]
+            if location == EVENT_PAYLOAD_RENDERER:
+                renderer = location
+                continue
+            for _, _, arguments in c_calls(body, {"event_payload_add_formats"}):
+                if len(arguments) != 3:
+                    fail(f"malformed event_payload_add_formats call in {path.name}:{function['name']}")
+                prefix = "" if normalized_c(arguments[2]) == "NULL" else c_string_literal(arguments[2])
+                if prefix is None:
+                    fail(f"nonliteral event payload prefix in {path.name}:{function['name']}")
+                consumers.add((*location, prefix))
+            if path.name == EVENT_PAYLOAD_RENDERER[0]:
+                continue
+            generators = c_calls(body, {"xasprintf", "xsnprintf"})
+            for offset, callee, arguments in c_calls(body, EVENT_PAYLOAD_SETTERS):
+                if len(arguments) < 2:
+                    fail(f"malformed {callee} call in {path.name}:{function['name']}")
+                kind = callee.removeprefix("event_payload_set_")
+                key = c_string_literal(arguments[1])
+                if key is None:
+                    template = generated_key_template(
+                        generators, offset, normalized_c(arguments[1])
+                    )
+                    pattern = EVENT_PAYLOAD_GENERATED_KEYS.get(template)
+                    if pattern is None:
+                        fail(
+                            f"unclassified generated event payload key {template!r} in "
+                            f"{path.name}:{function['name']}"
+                        )
+                    entry = patterns.setdefault(pattern, {"types": set(), "producers": set()})
+                    entry["types"].add(kind)
+                    entry["producers"].add(location)
+                    continue
+                if re.fullmatch(r"_?[a-z0-9][a-z0-9_]*", key) is None:
+                    fail(f"invalid event payload key {key!r} in {path.name}:{function['name']}")
+                if key.startswith("_"):
+                    continue
+                entry = keys.setdefault(key, {"types": set(), "producers": set()})
+                entry["types"].add(kind)
+                entry["producers"].add(location)
+    if renderer is None:
+        fail("cannot find the event payload format renderer")
+    prefixes = [prefix for _, _, prefix in consumers]
+    if prefixes.count(EVENT_PAYLOAD_HOOK_PREFIX) != 1 or len(consumers) != 2:
+        fail(f"event payload consumers changed: {sorted(consumers)!r}")
+    if set(patterns) != set(EVENT_PAYLOAD_GENERATED_KEYS.values()):
+        fail(f"generated event payload keys changed: {sorted(patterns)!r}")
+    if not keys:
+        fail("found no literal event payload keys")
+
+    def producers(locations):
+        return [{"path": path, "function": function} for path, function in sorted(locations)]
+
+    return {
+        "consumers": [
+            {"path": path, "function": function, "prefix": prefix}
+            for path, function, prefix in sorted(consumers)
+        ],
+        "keys": [
+            {
+                "key": key,
+                "types": sorted(entry["types"]),
+                "named": bool(entry["types"] & EVENT_PAYLOAD_NAMED_TYPES),
+                "producers": producers(entry["producers"]),
+            }
+            for key, entry in sorted(keys.items())
+        ],
+        "patterns": [
+            {
+                "pattern": pattern,
+                "types": sorted(entry["types"]),
+                "producers": producers(entry["producers"]),
+            }
+            for pattern, entry in sorted(patterns.items())
+        ],
+    }
+
+
+def source_option_table(source):
+    path = source / "options-table.c"
+    contents = path.read_text(encoding="utf-8")
+    table = re.search(
+        r"const struct options_table_entry options_table\[\]\s*=\s*\{(.*?)^\};",
+        contents,
+        re.MULTILINE | re.DOTALL,
+    )
+    if table is None:
+        fail(f"cannot parse options table in {path}")
+    options = {}
+    for match in re.finditer(r'\{\s*\.name\s*=\s*"([^"]+)"\s*,(.*?)\n\t\}', table.group(1), re.DOTALL):
+        name, body = match.groups()
+        scope_match = re.search(r"\.scope\s*=\s*([A-Z_|\s]+?)\s*,", body)
+        if scope_match is None:
+            fail(f"option {name} has no scope in {path}")
+        scope = OPTION_SCOPES.get(re.sub(r"\s+", "", scope_match.group(1)))
+        if scope is None:
+            fail(f"option {name} has an unclassified scope: {scope_match.group(1)!r}")
+        flags_match = re.search(r"\.flags\s*=\s*([A-Z_|\s]+?)\s*,", body)
+        flags = set(re.sub(r"\s+", "", flags_match.group(1)).split("|")) if flags_match else set()
+        if "OPTIONS_TABLE_IS_HOOK" in flags:
+            continue
+        if name in options:
+            fail(f"duplicate option table entry: {name}")
+        options[name] = {"scope": scope, "array": "OPTIONS_TABLE_IS_ARRAY" in flags}
+    return options
+
+
+def option_details(names, table, base, env):
+    if set(names) != set(table):
+        fail(
+            "options-table.c and show-options differ: "
+            f"missing={sorted(set(names) - set(table))}, stale={sorted(set(table) - set(names))}"
+        )
+    scope_flags = {"server": ["-sv"], "session": ["-gv"], "window": ["-gwv"], "window-pane": ["-gwv"]}
+    options = []
+    for name in names:
+        entry = table[name]
+        output = run(base + ["show-options", *scope_flags[entry["scope"]], name], env)
+        if entry["array"]:
+            default = output.splitlines()
+        else:
+            if not output.endswith("\n") or output.count("\n") != 1:
+                fail(f"option {name} printed a multi-line scalar default: {output!r}")
+            default = output[:-1]
+        options.append(
+            {"name": name, "scope": entry["scope"], "array": entry["array"], "default": default}
+        )
+    return options
 
 
 def source_format_modifiers(source):
@@ -772,8 +926,8 @@ def source_format_modifiers(source):
     modifiers = set(double_sources)
     for source_chars in single_sources:
         modifiers.update(source_chars)
-    if len(modifiers) != 36:
-        fail(f"expected 36 format modifiers, got {len(modifiers)}: {sorted(modifiers)!r}")
+    if len(modifiers) != 37:
+        fail(f"expected 37 format modifiers, got {len(modifiers)}: {sorted(modifiers)!r}")
     return sorted(modifiers)
 
 
@@ -857,6 +1011,9 @@ def capture(path):
             run(base + ["show-hooks", "-g", "-w", "-t", "=zz-oracle:0"], env),
             run(base + ["show-hooks", "-g", "-p", "-t", "=zz-oracle:0.0"], env),
         ]
+        options = option_details(
+            option_names(option_outputs), source_option_table(source), base, env
+        )
     finally:
         subprocess.run(
             base + ["kill-server"],
@@ -915,7 +1072,7 @@ def capture(path):
         "version": version,
         "commands": commands,
         "args_parse": args_parse,
-        "options": option_names(option_outputs),
+        "options": options,
         "formats": source_formats(source),
         "format_contexts": source_format_contexts(source),
         "format_modifiers": source_format_modifiers(source),
@@ -952,7 +1109,7 @@ def main():
     if current != rendered:
         print(f"error: {ORACLE.relative_to(ROOT)} is stale; run with --write", file=sys.stderr)
         return 1
-    print(f"{ORACLE.relative_to(ROOT)} matches {VERSION} at {PIN}")
+    print(f"{ORACLE.relative_to(ROOT)} matches {VERSION} (tag {TAG}) at {PIN}")
     return 0
 
 

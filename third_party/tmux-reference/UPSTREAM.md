@@ -2,8 +2,11 @@
 
 zz's multiplexer is a Rust implementation; it does not compile, link, or run
 tmux. Command names, aliases, key-table behavior, and configuration syntax were
-checked against tmux at commit
-[`d77c9dc6aa021e4bc61f0da128c591af695e6466`](https://github.com/tmux/tmux/tree/d77c9dc6aa021e4bc61f0da128c591af695e6466).
+checked against the tmux `3.8` release tag, commit
+[`7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`](https://github.com/tmux/tmux/tree/7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53).
+Hooks and their formats come from the event system in `events.c`,
+`events-payload.c` and `hooks.c` since 3.8, and `display-panes` is the pane mode
+in `window-panes.c`.
 
 The most relevant upstream files are:
 

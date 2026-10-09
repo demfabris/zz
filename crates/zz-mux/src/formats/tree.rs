@@ -412,8 +412,22 @@ impl FormatTree<'_> {
                     })
                     .unwrap_or_default(),
             ),
-            FormatBacking::PaneCurrentCommand
-            | FormatBacking::PaneCurrentPath
+            FormatBacking::PaneCurrentCommand => {
+                let live = self
+                    .pane
+                    .and_then(|pane| engine.pane_runtime_facts(pane))
+                    .filter(|_| !pane.is_some_and(|pane| pane.dead))
+                    .map(|facts| facts.current_command.as_str())
+                    .filter(|command| !command.is_empty());
+                match (live, self.pane, pane) {
+                    (Some(command), _, _) => Cow::Borrowed(command),
+                    (None, Some(id), Some(pane)) if matches!(pane.kind, PaneKind::Terminal) => {
+                        Cow::Owned(engine.pane_command_fallback(id))
+                    }
+                    _ => Cow::Borrowed(""),
+                }
+            }
+            FormatBacking::PaneCurrentPath
             | FormatBacking::PanePath
             | FormatBacking::PaneStartPath
             | FormatBacking::PanePid
@@ -421,7 +435,6 @@ impl FormatTree<'_> {
             | FormatBacking::PaneDeadSignal => {
                 if let Some(facts) = self.pane.and_then(|pane| engine.pane_runtime_facts(pane)) {
                     match backing {
-                        FormatBacking::PaneCurrentCommand => Cow::Borrowed(&facts.current_command),
                         FormatBacking::PaneCurrentPath => {
                             Cow::Borrowed(if pane.is_some_and(|pane| pane.dead) {
                                 ""

@@ -493,6 +493,8 @@ fn terminal_current_command(terminal: &TerminalSession) -> String {
 #[cfg(test)]
 mod edge_facts_tests;
 
+const CLIPBOARD_QUERY_TIMEOUT: Duration = Duration::from_secs(5);
+
 fn unix_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -9619,9 +9621,7 @@ impl Shared {
                             .window_for_pane(*pane)
                             .map(|window| inner.engine.state.windows[&window].session)
                             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                        let command = if empty {
-                            command.clone()
-                        } else if let Some(command) =
+                        let start_command = if let Some(command) =
                             command.clone().filter(|command| !command.is_empty())
                         {
                             Some(command)
@@ -9629,10 +9629,17 @@ impl Shared {
                             let default = inner.engine.default_command_for_session(pane_session)?;
                             (!default.is_empty()).then(|| vec![default.to_owned()])
                         };
+                        let command = if empty {
+                            command.clone()
+                        } else {
+                            start_command.clone()
+                        };
                         inner
                             .engine
-                            .set_pane_start_command(*pane, command.clone().unwrap_or_default())?;
-                        let shell = Some(terminal_shell_for_session(&inner.engine, pane_session)?);
+                            .set_pane_start_command(*pane, start_command.unwrap_or_default())?;
+                        let shell = terminal_shell_for_session(&inner.engine, pane_session)?;
+                        inner.engine.set_pane_shell(*pane, shell.clone())?;
+                        let shell = Some(shell);
                         let env = if empty {
                             Vec::new()
                         } else {
@@ -9803,9 +9810,11 @@ impl Shared {
                             .filter(|command| !command.is_empty())
                             .or_else(|| previous.command.clone());
                         let shell = match previous.shell.clone() {
-                            Some(shell) => Some(shell),
-                            None => Some(terminal_shell_for_session(&inner.engine, pane_session)?),
+                            Some(shell) => shell,
+                            None => terminal_shell_for_session(&inner.engine, pane_session)?,
                         };
+                        inner.engine.set_pane_shell(*pane, shell.clone())?;
+                        let shell = Some(shell);
                         let mut env =
                             terminal_environment_for_session(&inner.engine, pane_session)?;
                         env.extend([
@@ -12168,7 +12177,7 @@ impl Shared {
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&pending.path, &error)
                     } else {
-                        source_glob_error_warning(&pending.path, &error.to_string())
+                        client_source_read_error_warning(source_kind, &pending.path, &error)
                     };
                     if let Some(target) = control_target {
                         self.publish_control_source_read_error(
@@ -12239,7 +12248,7 @@ impl Shared {
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&path, &error)
                     } else {
-                        source_glob_error_warning(&path, &error.to_string())
+                        client_source_read_error_warning(source_kind, &path, &error)
                     };
                     if !options.suppress_replay_output {
                         if let Some(target) = control_target {
@@ -18262,12 +18271,15 @@ impl Shared {
             || parsed.has('R')
             || parsed.has('U')
             || !parsed.positional.is_empty()
-            || parsed.has('l')
         {
             return Err(ServerError::UnsupportedCommand(
                 "refresh-client interactive behavior".to_owned(),
             )
             .into());
+        }
+        if parsed.has('l') {
+            self.query_client_clipboard(target);
+            return Ok(Execution::default());
         }
         let mut handled_flags = false;
         for flags in parsed.values('F') {
@@ -21128,6 +21140,7 @@ impl Shared {
                     )?;
                 }
                 InputMessage::DismissClientMessage => {}
+                InputMessage::ClipboardReply { data } => self.store_clipboard_reply(client, data),
                 InputMessage::ResizeCommandOutput {
                     columns,
                     rows,
@@ -28397,13 +28410,8 @@ impl Shared {
                 .cloned()
                 .unwrap_or_default();
             let current_path = live_path.unwrap_or_else(|| previous.start_path.clone());
-            let current_command = if current_command.is_empty() {
-                previous.current_command.clone()
-            } else {
-                current_command.to_owned()
-            };
             let runtime = PaneRuntimeFacts {
-                current_command,
+                current_command: current_command.to_owned(),
                 current_path,
                 dead_signal: previous.dead_signal,
                 reported_path: previous.reported_path,
@@ -30733,6 +30741,47 @@ impl Shared {
 
     fn clear_pane_bell(&self, pane: PaneId) -> bool {
         self.inner.lock().engine.state.set_pane_bell(pane, false)
+    }
+
+    fn query_client_clipboard(&self, client: ClientId) {
+        let now = Instant::now();
+        {
+            let mut inner = self.inner.lock();
+            let Some(registered) = inner.client_mut(client) else {
+                return;
+            };
+            if registered.kind != Some(ClientKind::Interactive)
+                || registered
+                    .clipboard_query
+                    .is_some_and(|deadline| deadline > now)
+            {
+                return;
+            }
+            registered.clipboard_query = Some(now + CLIPBOARD_QUERY_TIMEOUT);
+        }
+        self.publish_to_client(client, EventPayload::ClipboardQuery);
+    }
+
+    fn store_clipboard_reply(self: &Arc<Self>, client: ClientId, data: Vec<u8>) {
+        let events = {
+            let mut inner = self.inner.lock();
+            let pending = inner
+                .client_mut(client)
+                .and_then(|registered| registered.clipboard_query.take())
+                .is_some_and(|deadline| deadline > Instant::now());
+            if !pending {
+                return;
+            }
+            match insert_paste_buffer(&mut inner, None, "buffer", data, true) {
+                Ok(events) => events,
+                Err(error) => {
+                    log::warn!("could not store the client clipboard: {error}");
+                    return;
+                }
+            }
+        };
+        self.run_event_hooks(events);
+        self.refresh_choose_buffers();
     }
 
     fn store_copy_buffer(self: &Arc<Self>, data: String, action: PasteBufferAction) {
@@ -35242,6 +35291,7 @@ struct Client {
     ctrl_layout: Option<(u64, u64)>,
     ctrl_attachment: Option<u64>,
     ctrl_initializing: bool,
+    clipboard_query: Option<Instant>,
 }
 
 #[derive(Default)]
@@ -46517,7 +46567,8 @@ fn read_only_blocks_input(input: &InputMessage) -> bool {
         | InputMessage::CancelPrefix { .. }
         | InputMessage::ClientSuspendState { .. }
         | InputMessage::ClientTerminalSize { .. }
-        | InputMessage::ClientFocus { .. } => false,
+        | InputMessage::ClientFocus { .. }
+        | InputMessage::ClipboardReply { .. } => false,
     }
 }
 
@@ -52666,6 +52717,20 @@ fn posix_error_text(kind: ErrorKind) -> Option<&'static str> {
 
 fn source_read_error_warning(path: &Path, error: &std::io::Error) -> String {
     source_glob_error_warning(path, &filesystem_error_message(error))
+}
+
+fn client_source_read_error_warning(
+    kind: ClientKind,
+    path: &Path,
+    error: &std::io::Error,
+) -> String {
+    if kind != ClientKind::Command {
+        return source_glob_error_warning(path, &error.to_string());
+    }
+    if error.kind() == ErrorKind::IsADirectory {
+        return source_glob_error_warning(path, "Input/output error");
+    }
+    source_read_error_warning(path, error)
 }
 
 fn missing_source_error(path: &Path) -> String {
@@ -65118,6 +65183,99 @@ mod tests {
     }
 
     #[test]
+    fn refresh_client_l_stores_the_client_clipboard_reply_while_the_query_is_pending() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .create_session("clipboard")
+            .unwrap();
+        let mailbox = OutboundMailbox::new();
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("tty".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(client, session).unwrap();
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let queries = || {
+            take_reliable_messages(&mailbox)
+                .iter()
+                .filter(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ClipboardQuery,
+                            ..
+                        })
+                    )
+                })
+                .count()
+        };
+        let buffers = || {
+            shared
+                .inner
+                .lock()
+                .paste_buffers
+                .iter()
+                .map(|buffer| (buffer.name.clone(), buffer.data.clone(), buffer.automatic))
+                .collect::<Vec<_>>()
+        };
+        let reply = |context: &mut ExecutionContext, data: &[u8]| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::ClipboardReply {
+                        data: data.to_vec(),
+                    },
+                )
+                .unwrap();
+        };
+        let refresh = |context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new("refresh-client", ["-l"]),
+                )
+                .unwrap();
+        };
+
+        reply(&mut context, b"unasked");
+        assert!(buffers().is_empty());
+        queries();
+        refresh(&mut context);
+        refresh(&mut context);
+        assert_eq!(queries(), 1);
+        reply(&mut context, &[0, 0xff, b'x']);
+        reply(&mut context, b"late");
+        let stored = buffers();
+        assert_eq!(stored.len(), 1, "{stored:?}");
+        assert!(stored[0].0.starts_with("buffer"), "{stored:?}");
+        assert_eq!(
+            (&stored[0].1[..], stored[0].2),
+            (&[0, 0xff, b'x'][..], true)
+        );
+        refresh(&mut context);
+        assert_eq!(queries(), 1);
+        assert!(matches!(
+            shared.execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("refresh-client", ["-U"]),
+            ),
+            Err(DaemonError::Server(ServerError::UnsupportedCommand(_)))
+        ));
+    }
+
+    #[test]
     fn refresh_client_abc_uses_pin_precedence_and_b_c_reject_non_control_targets() {
         let shared = Arc::new(Shared::new(1));
         let (session, window, pane) = shared
@@ -66206,6 +66364,33 @@ mod tests {
                 }) if text.contains("source-file from standard input is not supported")
             )
         }));
+    }
+
+    #[test]
+    fn source_file_of_a_directory_answers_the_command_client_read_error() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().display().to_string();
+        let shared = Arc::new(Shared::new(63));
+        let command = ClientId(u64::from(u16::MAX));
+        let mut context = ExecutionContext::default();
+        for (request_id, args) in [
+            (1, vec![path.clone()]),
+            (2, vec!["-q".to_owned(), path.clone()]),
+        ] {
+            let response = shared.execute_command_request(
+                command,
+                ClientKind::Command,
+                &mut context,
+                request_id,
+                &CommandInvocation::new("source-file", args),
+            );
+            let text = format!("{response:?}");
+            assert!(
+                text.contains(&format!("Input/output error: {path}")),
+                "{text}"
+            );
+            assert!(!text.contains("os error"), "{text}");
+        }
     }
 
     #[test]

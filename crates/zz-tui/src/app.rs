@@ -43,6 +43,7 @@ enum MainEvent {
     },
     Frames(u64),
     KittyImages(u64),
+    ClipboardQuery(u64),
     Terminal(Result<TerminalEvent, String>),
     Disconnected {
         connection: u64,
@@ -792,6 +793,14 @@ pub(crate) fn run(
                 }
                 paint_pending(paint, &mut model, &client, &mut browser, &mut renderer)?;
             }
+            MainEvent::ClipboardQuery(event_connection) => {
+                if event_connection == connection_id {
+                    renderer.queue_control(clipboard::QUERY.to_vec());
+                    renderer
+                        .paint(&model, false)
+                        .map_err(|error| error.to_string())?;
+                }
+            }
             MainEvent::Terminal(Ok(event)) => {
                 let probe_update = kitty_probe.observe(&event);
                 if probe_update.finish_file_probe {
@@ -1425,6 +1434,9 @@ fn forward_protocol_message(
 ) -> bool {
     let mut core = lock_core(core);
     core.handle_message(message);
+    if core.take_clipboard_query() && events.send(MainEvent::ClipboardQuery(connection)).is_err() {
+        return false;
+    }
     while let Some(outbound) = core.poll_outbound() {
         if let Err(error) = send_outbound(outbound) {
             log::warn!("failed to synchronize the terminal client: {error}");

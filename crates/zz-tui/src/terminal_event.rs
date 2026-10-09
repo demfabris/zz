@@ -2,6 +2,8 @@
 
 use std::{ops::BitOr, time::Instant};
 
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+
 const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 /// A device control string with no terminator in sight is not one, the way a
 /// control sequence with no final byte is not one either; past this many bytes
@@ -9,10 +11,12 @@ const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DEVICE_CONTROL_BYTES: usize = 256;
 const PASTE_START: &[u8] = b"\x1b[200~";
 const PASTE_END: &[u8] = b"\x1b[201~";
+const CLIPBOARD_REPLY: &[u8] = b"\x1b]52;";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Event {
     CellSize { width_px: u32, height_px: u32 },
+    Clipboard(Vec<u8>),
     DarkTheme,
     DeviceAttributes,
     ExtendedDeviceAttributes(String),
@@ -168,7 +172,12 @@ impl EventParser {
 
     pub fn flush_escape(&mut self, output: &mut Vec<Event>) {
         if self.has_pending_escape() {
-            if self.bytes.starts_with(b"\x1b[?") || self.bytes.starts_with(b"\x1b_") {
+            if self.bytes.starts_with(b"\x1b[?")
+                || self.bytes.starts_with(b"\x1b_")
+                || (self.bytes.len() > 2
+                    && self.bytes[..self.bytes.len().min(CLIPBOARD_REPLY.len())]
+                        == CLIPBOARD_REPLY[..self.bytes.len().min(CLIPBOARD_REPLY.len())])
+            {
                 return;
             }
             self.bytes.remove(0);
@@ -264,6 +273,17 @@ fn parse_one(bytes: &[u8], graphics_reply: bool) -> Option<Parsed> {
 
 fn parse_escape(bytes: &[u8], graphics_reply: bool) -> Option<Parsed> {
     let second = *bytes.get(1)?;
+    if second == b']' && bytes.len() > 2 {
+        let prefix = bytes.len().min(CLIPBOARD_REPLY.len());
+        if bytes[..prefix] == CLIPBOARD_REPLY[..prefix] {
+            let body = &bytes[prefix..];
+            let (end, terminator) = clipboard_reply_end(body)?;
+            return Some(Parsed {
+                consumed: prefix + end + terminator,
+                event: parse_clipboard_reply(&body[..end]),
+            });
+        }
+    }
     if second == b'_' {
         let terminator = find_subslice(&bytes[2..], b"\x1b\\")? + 2;
         let event = bytes.get(2..terminator).and_then(parse_application_command);
@@ -323,6 +343,25 @@ fn parse_escape(bytes: &[u8], graphics_reply: bool) -> Option<Parsed> {
         consumed: parsed.consumed + 1,
         event,
     })
+}
+
+fn clipboard_reply_end(body: &[u8]) -> Option<(usize, usize)> {
+    body.iter()
+        .enumerate()
+        .find_map(|(index, byte)| match byte {
+            0x07 => Some((index, 1)),
+            b'\\' if index > 0 && body[index - 1] == 0x1b => Some((index - 1, 2)),
+            _ => None,
+        })
+}
+
+fn parse_clipboard_reply(payload: &[u8]) -> Option<Event> {
+    let separator = payload.iter().position(|byte| *byte == b';')?;
+    let data = &payload[separator + 1..];
+    if data.is_empty() {
+        return None;
+    }
+    STANDARD.decode(data).ok().map(Event::Clipboard)
 }
 
 /// `tty_keys_extended_device_attributes`: the XTVERSION reply is a device
@@ -711,6 +750,29 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    #[test]
+    fn decodes_osc_52_clipboard_replies_the_way_tty_keys_clipboard_does() {
+        assert_eq!(
+            parse(b"\x1b]52;c;aGVsbG8=\x07x"),
+            [vec![Event::Clipboard(b"hello".to_vec())], typed("x")].concat()
+        );
+        assert_eq!(
+            parse(b"\x1b]52;;AP8K\x1b\\"),
+            [Event::Clipboard(vec![0x00, 0xff, b'\n'])]
+        );
+        assert_eq!(parse(b"\x1b]52;c;\x07y"), typed("y"));
+        assert_eq!(parse(b"\x1b]52;c\x07y"), typed("y"));
+        assert_eq!(parse(b"\x1b]52;c;not base64!\x07y"), typed("y"));
+
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        for chunk in [&b"\x1b]5"[..], b"2;c;aGk", b"=\x1b", b"\\"] {
+            parser.push(chunk, &mut events);
+            parser.flush_escape(&mut events);
+        }
+        assert_eq!(events, [Event::Clipboard(b"hi".to_vec())]);
     }
 
     #[test]

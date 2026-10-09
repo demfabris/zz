@@ -2397,6 +2397,7 @@ pub struct MuxEngine {
     format_user: String,
     pane_runtime_facts: BTreeMap<PaneId, PaneRuntimeFacts>,
     pane_start_commands: BTreeMap<PaneId, Vec<String>>,
+    pane_shells: BTreeMap<PaneId, String>,
     destroyed_sessions: Vec<(SessionId, String, String)>,
     experimental_agent_pane: bool,
     experimental_editor_pane: bool,
@@ -2420,6 +2421,8 @@ pub struct MuxEngine {
 }
 
 const NAME_INTERVAL: Duration = Duration::from_millis(500);
+
+const NEW_SESSION_GROUP_REFUSAL: &str = "new-session -t (zz has no session groups; use attach -t <session>, every client keeps its own current window)";
 
 const RUNTIME_FACT_MARKERS: [&str; 11] = [
     "pane_current_command",
@@ -2753,6 +2756,7 @@ impl Default for MuxEngine {
             format_user: String::new(),
             pane_runtime_facts: BTreeMap::new(),
             pane_start_commands: BTreeMap::new(),
+            pane_shells: BTreeMap::new(),
             destroyed_sessions: Vec::new(),
             experimental_agent_pane: true,
             experimental_editor_pane: false,
@@ -4409,6 +4413,34 @@ impl MuxEngine {
         self.pane_start_commands.get(&pane).map(Vec::as_slice)
     }
 
+    pub fn set_pane_shell(&mut self, pane: PaneId, shell: String) -> Result<(), ServerError> {
+        if self.state.pane(pane).is_none() {
+            return Err(ServerError::MissingTarget(pane.to_string()));
+        }
+        if self.pane_shells.get(&pane) != Some(&shell) {
+            self.pane_shells.insert(pane, shell);
+            self.format_data_generation = self.format_data_generation.wrapping_add(1);
+        }
+        Ok(())
+    }
+
+    pub(crate) fn pane_command_fallback(&self, pane: PaneId) -> String {
+        let command = self
+            .pane_start_command(pane)
+            .unwrap_or_default()
+            .iter()
+            .map(|argument| crate::formats::quote_argument(argument))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !command.is_empty() {
+            return parse_window_name(&command);
+        }
+        self.pane_shells
+            .get(&pane)
+            .map(|shell| parse_window_name(shell))
+            .unwrap_or_default()
+    }
+
     fn retain_pane_start_commands(&mut self, effects: &[MuxEffect]) {
         for effect in effects {
             match effect {
@@ -4432,6 +4464,7 @@ impl MuxEngine {
                 }
                 MuxEffect::PanesRemoved(panes) => {
                     for pane in panes {
+                        self.pane_shells.remove(pane);
                         if self.pane_start_commands.remove(pane).is_some() {
                             self.format_data_generation =
                                 self.format_data_generation.wrapping_add(1);
@@ -5773,6 +5806,7 @@ impl MuxEngine {
             pane_options,
             pane_hooks,
             pane_start_commands,
+            pane_shells,
             pane_runtime_facts,
             pane_remain_on_exit,
         );
@@ -5785,7 +5819,13 @@ impl MuxEngine {
         args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("new-session", args)?;
+        let (options, positional) =
+            parse_command_options("new-session", args).map_err(|error| match error {
+                ServerError::UnsupportedCommand(message) if message == "new-session -t" => {
+                    ServerError::UnsupportedCommand(NEW_SESSION_GROUP_REFUSAL.to_owned())
+                }
+                error => error,
+            })?;
         let format_client = context.format_client();
         let active_session = context.session;
         let command = shell_command_positional(&positional);
@@ -15423,6 +15463,39 @@ fn tmux_clean_name(name: &str, kind: &str) -> Result<String, ServerError> {
         )));
     }
     Ok(tmux_vis(name, false))
+}
+
+pub(crate) fn parse_window_name(input: &str) -> String {
+    let mut name = input.strip_prefix('"').unwrap_or(input);
+    if let Some(end) = name.find('"') {
+        name = &name[..end];
+    }
+    name = name.strip_prefix("exec ").unwrap_or(name);
+    name = name.trim_start_matches([' ', '-']);
+    if let Some(end) = name.find(' ') {
+        name = &name[..end];
+    }
+    let bytes = name.as_bytes();
+    let mut end = bytes.len();
+    while end > 1
+        && !(bytes[end - 1].is_ascii_alphanumeric() || bytes[end - 1].is_ascii_punctuation())
+    {
+        end -= 1;
+    }
+    let Ok(name) = std::str::from_utf8(&bytes[..end]) else {
+        return String::new();
+    };
+    let name = if name.starts_with('/') {
+        let trimmed = name.trim_end_matches('/');
+        if trimmed.is_empty() {
+            "/"
+        } else {
+            trimmed.rsplit('/').next().unwrap_or(trimmed)
+        }
+    } else {
+        name
+    };
+    tmux_vis(name, false)
 }
 
 fn tmux_clean_title(title: &str) -> Option<String> {
@@ -28973,6 +29046,25 @@ mod tests {
     }
 
     #[test]
+    fn parse_window_name_reads_a_start_command_the_way_the_pin_does() {
+        for (input, expected) in [
+            ("\"exec sleep 0.2\"", "sleep"),
+            ("\"sh -c \\\"sleep 0.1; exit 3\\\"\"", "sh"),
+            ("\"\\\"/bin/true\\\" a\"", "\\\\"),
+            ("\" true\"", "true"),
+            ("\"FOO=1 true\"", "FOO=1"),
+            ("/bin/true x \"y z\"", "true"),
+            ("-bash", "bash"),
+            ("/usr/local/bin/", "bin"),
+            ("/", "/"),
+            ("''", "''"),
+            ("/bin/sh", "sh"),
+        ] {
+            assert_eq!(parse_window_name(input), expected, "{input}");
+        }
+    }
+
+    #[test]
     fn bind_key_blocks_expand_the_live_global_environment() {
         let mut engine = MuxEngine::default();
         engine.seed_global_environment([("FOO", "hello world")]);
@@ -35676,6 +35768,9 @@ mod tests {
                 &mut context,
                 &command("set-window-option", &["-u", "automatic-rename-format"]),
             )
+            .unwrap();
+        engine
+            .set_pane_shell(pane, "/usr/local/bin/fish".to_owned())
             .unwrap();
         assert!(
             engine

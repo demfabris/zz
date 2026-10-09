@@ -2317,6 +2317,9 @@ pub enum InputMessage {
         rows: u16,
         layout_generation: u64,
     },
+    ClipboardReply {
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3712,6 +3715,7 @@ pub enum EventPayload {
         canonical_name: Option<String>,
         guard: bool,
     },
+    ClipboardQuery,
 }
 
 impl EventPayload {

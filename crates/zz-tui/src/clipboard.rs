@@ -3,6 +3,7 @@ use zz_protocol::ClipboardProducer;
 use zz_terminal::ClipboardTarget;
 
 pub(crate) const MAX_OSC52_PAYLOAD_BYTES: usize = 1024 * 1024;
+pub(crate) const QUERY: &[u8] = b"\x1b]52;;?\x07";
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum Osc52 {

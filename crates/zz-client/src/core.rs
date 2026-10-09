@@ -332,12 +332,17 @@ pub struct ClientCore {
     confirm: Option<ConfirmState>,
     outbound: VecDeque<Outbound>,
     events: VecDeque<CoreEvent>,
+    clipboard_query: bool,
 }
 
 impl ClientCore {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn take_clipboard_query(&mut self) -> bool {
+        std::mem::take(&mut self.clipboard_query)
     }
 
     /// Reduce one decoded message. Drain [`Self::poll_outbound`] and
@@ -1224,6 +1229,7 @@ impl ClientCore {
             | EventPayload::CommandStdout { .. }
             | EventPayload::CommandClientExit
             | EventPayload::SubscriptionChanged { .. } => {}
+            EventPayload::ClipboardQuery => self.clipboard_query = true,
         }
     }
 

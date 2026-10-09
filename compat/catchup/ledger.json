@@ -315,7 +315,7 @@
       "id": "pin.layout-v2",
       "track": "pin",
       "title": "JSON v2 layout strings",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -335,10 +335,11 @@
         "The v2 writer has a place for floating panes so float.core only fills it in."
       ],
       "branch": "catchup/pin.layout-v2",
-      "sha": null,
+      "sha": "a8c0a080d",
       "notes": [
         "2026-10-09: lane done at f2455a131: all 4 clauses met; wire: ControlFlags.new_layouts appended under 108; snapshot dumps now v2 text; a plain select-pane now sends a TreeOp::WindowLayout (dump strings carry a/l), small extra delta traffic",
-        "2026-10-09: fix pass 5cd37e43c: 5 fixed; orchestrator ruling: refresh-client -B subscriptions print v2 regardless of new-layouts, as 3.8 measures (monitor.c formats have no client)"
+        "2026-10-09: fix pass 5cd37e43c: 5 fixed; orchestrator ruling: refresh-client -B subscriptions print v2 regardless of new-layouts, as 3.8 measures (monitor.c formats have no client)",
+        "2026-10-09: 2 reviews + final pass (v2 everywhere, v1 only on a control client's own command output); merged. Known limit: stored text holding a v2 string (show-options on a user option, list-keys) still gets the v1 rewrite for a control client without new-layouts"
       ]
     },
     {

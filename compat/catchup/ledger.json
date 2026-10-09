@@ -533,7 +533,7 @@
       "id": "pin.keys-copy",
       "track": "pin",
       "title": "3.8 default keys, menus and copy-mode commands",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -551,7 +551,7 @@
         "line-numbers-on/off/toggle and refresh-now copy commands work; copy-mode L and r rebind.",
         "Menus belong to the window (ad6832e6) where zz's model allows, or the divergence is recorded."
       ],
-      "branch": null,
+      "branch": "catchup/pin.keys-copy",
       "sha": null,
       "notes": []
     },

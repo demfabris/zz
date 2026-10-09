@@ -8,7 +8,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use zz_browser::normalize_browser_profile_name;
+use zz_protocol::normalize_browser_profile_name;
 
 use crate::fs_util::{atomic_write, restrict_to_current_user};
 
@@ -120,7 +120,7 @@ pub fn save_cached_profiles(
 }
 
 fn profile_cache_path() -> Result<PathBuf, ChromeProfileDiscoveryError> {
-    Ok(zz_browser::recent_pages_path()?.with_file_name(PROFILE_CACHE_FILE_NAME))
+    Ok(zz_protocol::app_identity::recent_pages_path()?.with_file_name(PROFILE_CACHE_FILE_NAME))
 }
 
 fn load_cached_profiles_at(
@@ -281,7 +281,7 @@ fn clean_storage_key(storage_key: &str) -> Option<&str> {
     let storage_key = storage_key.trim();
     (!storage_key.is_empty()
         && storage_key.len()
-            <= zz_browser::MAX_BROWSER_PROFILE_NAME_BYTES - ZZ_PROFILE_PREFIX.len()
+            <= zz_protocol::MAX_BROWSER_PROFILE_NAME_BYTES - ZZ_PROFILE_PREFIX.len()
         && !storage_key.chars().any(char::is_control)
         && !storage_key.contains(['/', '\\'])
         && !matches!(storage_key, "." | ".."))

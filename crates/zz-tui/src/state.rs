@@ -5,7 +5,7 @@ use std::{
 };
 
 use zz_client::{ClientCore, Effect, InputEvent, InputOwner, InputRouter, SurfaceKind};
-use zz_daemon::{Endpoint, HostEntry};
+use zz_daemon_client::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, CommandPromptState, ConfirmState,
     DisplayPanesState, InputMessage, MenuState, MuxSnapshot, PaneBorderIndicators, PaneBorderLines,

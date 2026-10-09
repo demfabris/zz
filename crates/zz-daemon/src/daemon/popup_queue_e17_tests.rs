@@ -119,7 +119,7 @@ fn twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards() {
         })
     });
     assert_eq!(shared.connection_threads.worker_count(), 0);
-    let before = crate::process_info::sample(std::process::id())
+    let before = zz_daemon_client::process_info::sample(std::process::id())
         .unwrap()
         .threads;
     for target in &targets {
@@ -149,7 +149,7 @@ fn twenty_popup_waits_add_zero_watcher_or_command_workers_beyond_shards() {
     assert!(tasks.iter().all(|task| !task.ready()));
     assert_eq!(shared.connection_threads.worker_count(), 0);
     assert!(
-        crate::process_info::sample(std::process::id())
+        zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads
             <= before

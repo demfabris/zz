@@ -11,9 +11,9 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zz_daemon::{
-    ClientTerminalFlags, CommandClient, Daemon, DaemonError, InteractiveClient,
-    set_client_terminal_flags,
+use zz_daemon::Daemon;
+use zz_daemon_client::{
+    ClientTerminalFlags, CommandClient, DaemonError, InteractiveClient, set_client_terminal_flags,
 };
 use zz_protocol::{CommandInvocation, PaneId};
 use zz_terminal::TerminalColorScheme;

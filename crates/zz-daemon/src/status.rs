@@ -18,6 +18,7 @@ use std::thread;
 
 use glob::{MatchOptions, Pattern};
 use regex::RegexBuilder;
+use zz_daemon_client::{home_directory, unmasked::SpawnUnmasked as _};
 use zz_mux::{
     FormatClientRow, FormatEnvironRow, FormatJobTag, FormatNeeds, MuxEngine, StatusContext,
     StatusFormats, StatusHooks, StatusRowVariables, TtyTerm, display_width, expand_status,
@@ -31,10 +32,7 @@ use zz_terminal::{
     ProgressBar, TerminalColorScheme, TerminalFacts, TerminalSession, TerminalViewport,
 };
 
-use crate::{
-    configure_shell_job_environment, paths::home_directory, shell_process,
-    unmasked::SpawnUnmasked as _,
-};
+use crate::{configure_shell_job_environment, shell_process};
 
 type ShellCacheKey = (ClientId, FormatJobTag, String);
 
@@ -1927,7 +1925,7 @@ fn set_status_context_active(context: &mut StatusContext<'_>) {
 pub(crate) fn host_names() -> &'static (String, String) {
     static HOST: OnceLock<(String, String)> = OnceLock::new();
     HOST.get_or_init(|| {
-        let host = crate::process_info::host_name()
+        let host = zz_daemon_client::process_info::host_name()
             .map(|host| host.trim().to_owned())
             .filter(|host| !host.is_empty())
             .unwrap_or_else(|| "localhost".to_owned());
@@ -2849,7 +2847,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         entries
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.expect_facts();
         self.option_engine
             .and_then(|engine| engine.format_option_value(context, name))
@@ -2863,13 +2861,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     )
                 })
             })
+            .map(RawText::from)
             .or_else(|| {
                 name.starts_with('@')
                     .then(|| {
                         context
                             .engine()
                             .and_then(|engine| {
-                                engine.format_user_option(
+                                engine.format_user_option_bytes(
                                     &context.pane_id,
                                     &context.window_id,
                                     &context.session_id,
@@ -2877,14 +2876,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                                 )
                             })
                             .or_else(|| {
-                                self.facts.mux().user_option(
+                                self.facts.mux().user_option_bytes(
                                     &context.pane_id,
                                     &context.window_id,
                                     &context.session_id,
                                     name,
                                 )
                             })
-                            .map(str::to_owned)
+                            .cloned()
                     })
                     .flatten()
             })
@@ -2914,6 +2913,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         if COPY_MODE_CONTEXT_FORMATS.contains(&name) {
             let line_option = if name == "copy_line_numbers" {
                 self.option_variable("copy-mode-line-numbers", context)
+                    .map(String::from)
                     .unwrap_or_default()
             } else {
                 String::new()
@@ -4866,7 +4866,10 @@ mod tests {
             ("TERM_PROGRAM", "startup-program"),
             ("TERM_PROGRAM_VERSION", "startup-version"),
             ("COLORTERM", "startup-colorterm"),
-            (crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, "stale-reentry"),
+            (
+                zz_daemon_client::STARTUP_REENTRY_ENVIRONMENT_VARIABLE,
+                "stale-reentry",
+            ),
             (
                 crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE,
                 "stale-executable",

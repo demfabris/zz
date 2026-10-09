@@ -573,7 +573,7 @@ selection, and `#{config_files}` records it.
 `import-tmux-config [path]` copies a chosen file into a marked block in `zz/mux.conf` and
 reloads. With no path, `discover_tmux_config` selects the first discoverable donor. The first
 import prepends the block; re-import replaces it without changing surrounding user text.
-Unsupported commands become `# zz-unsupported:` comments. See `crates/zz-daemon/src/paths.rs`
+Unsupported commands become `# zz-unsupported:` comments. See `crates/zz-daemon-client/src/paths.rs`
 (`discover_tmux_config`, `default_mux_config`) and `crates/zz-daemon/src/daemon.rs`
 (`startup_mux_config_files`, `selected_mux_config_files`, `import_tmux_configuration`).
 

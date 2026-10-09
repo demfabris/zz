@@ -65,6 +65,12 @@ mod terminal_requests;
 mod watchers;
 pub use exec::exec_resume_kind;
 pub(crate) mod path_listing;
+use zz_daemon_client::{
+    DaemonError, DaemonIdentityGuard, default_mux_config, diagnostic_elapsed_us, diagnostic_timer,
+    discover_tmux_config, home_directory, mux_config_write_path, terminal_colour_count,
+    terminal_feature_mask, terminal_features_list,
+    transport::{LocalTransport, Transport, TransportListener, TransportStream},
+};
 use zz_mux::{
     CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CellLayout, CommandAliasResolution,
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
@@ -136,24 +142,21 @@ use crate::agent::{
     stream::{AgentImage, AgentPrompt, AgentSessionSummary},
 };
 use crate::{
-    DaemonError, configure_shell_job_environment, diagnostic_elapsed_us, diagnostic_timer,
+    configure_shell_job_environment,
     keys::{
         ChooserPromptEdit, choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer,
         chooser_prompt_edit, client_key_inputs, input_key_name, send_tokens,
     },
-    lifecycle::DaemonIdentityGuard,
-    paths::{default_mux_config, discover_tmux_config, home_directory, mux_config_write_path},
     shell_process,
     status::{
         BufferFormatFacts, ClientFormatFacts, ClientViewportFacts, DaemonFormatHooks,
         FormatHookFacts, MessageFormatFacts, StatusRenderer, StatusRequest, client_terminal_facts,
         host_names, live_status_context, status_context, warm_terminfo_entries,
     },
-    terminal_features::{terminal_colour_count, terminal_feature_mask, terminal_features_list},
-    transport::{AcceptWake, LocalTransport, Transport, TransportListener, TransportStream},
+    wake::AcceptWake,
 };
 #[cfg(not(unix))]
-use {crate::unmasked::SpawnUnmasked as _, std::process::Child};
+use {std::process::Child, zz_daemon_client::unmasked::SpawnUnmasked as _};
 
 #[cfg(windows)]
 const ACCEPT_WAIT_TIMEOUT: Duration = Duration::from_millis(20);
@@ -442,7 +445,7 @@ fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
 fn process_working_directory(pid: u32) -> Option<PathBuf> {
-    crate::process_info::working_directory(pid)
+    zz_daemon_client::process_info::working_directory(pid)
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -465,7 +468,7 @@ fn terminal_foreground_facts(terminal: &TerminalSession) -> (String, Option<Stri
         || (String::new(), None),
         |pid| {
             (
-                crate::process_info::command_name(pid).unwrap_or_default(),
+                zz_daemon_client::process_info::command_name(pid).unwrap_or_default(),
                 process_working_directory(pid).map(|path| path.to_string_lossy().into_owned()),
             )
         },
@@ -488,7 +491,7 @@ fn home_directory_for(engine: &MuxEngine, user: &str) -> Option<String> {
 
 fn terminal_current_command(terminal: &TerminalSession) -> String {
     terminal_foreground_process(terminal)
-        .and_then(crate::process_info::command_name)
+        .and_then(zz_daemon_client::process_info::command_name)
         .unwrap_or_default()
 }
 
@@ -1144,9 +1147,10 @@ impl StatusHooks for InertFormatHooks<'_> {
         String::new()
     }
 
-    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<RawText> {
         self.option_engine
             .and_then(|engine| engine.format_option_value(context, name))
+            .map(RawText::from)
     }
 }
 
@@ -1915,7 +1919,7 @@ fn accept_connections<T: Transport>(
                 }
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                listener.wait_for_incoming(ACCEPT_WAIT_TIMEOUT, &shared.accept_wake)?;
+                listener.wait_for_incoming(ACCEPT_WAIT_TIMEOUT)?;
             }
             Err(error) => return Err(error.into()),
         }
@@ -7534,7 +7538,8 @@ impl Shared {
         mut commands: Vec<CommandInvocation>,
     ) -> Vec<PreparedCommand> {
         let abort_server_id = commands.last().and_then(|command| {
-            (command.name == crate::COLD_START_PREPARE_ABORT_COMMAND && command.args.len() == 1)
+            (command.name == zz_daemon_client::COLD_START_PREPARE_ABORT_COMMAND
+                && command.args.len() == 1)
                 .then(|| command.args[0].parse::<u64>().ok())
                 .flatten()
         });
@@ -7917,7 +7922,7 @@ impl Shared {
                 let body = MuxEngine::command_alias_group_body(command).expect("alias body");
                 parent.insert_foreground_child(InsertedQueueChild {
                     context: context.clone(),
-                    source: InsertedCommandSource::Block(body.to_owned()),
+                    source: InsertedCommandSource::Block(body.into()),
                     label: "<command-alias>".to_owned(),
                     control_target: context.control_command_target(),
                     mux_source,
@@ -10067,6 +10072,14 @@ impl Shared {
                             .filter_map(|c| c.streamed_terminals.as_mut())
                         {
                             streamed.remove(pane);
+                        }
+                        for feed in inner
+                            .clients
+                            .values()
+                            .filter_map(|c| c.subscriber.as_ref())
+                            .filter_map(|subscriber| subscriber.control_feed())
+                        {
+                            feed.reset_pane(*pane);
                         }
                         inner.preview_watched.remove(pane);
                         respawned_terminals = true;
@@ -13680,7 +13693,13 @@ impl Shared {
             let command = parsed.positional.first().map(|command| {
                 if parsed.command_mode {
                     if invocation.argument_is_command_block(parsed.positional_start) {
-                        typed_inserted_command_source(command, true)
+                        typed_inserted_command_source(
+                            invocation
+                                .args
+                                .get(parsed.positional_start)
+                                .expect("run-shell command argument"),
+                            true,
+                        )
                     } else {
                         let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                             &facts,
@@ -14127,9 +14146,9 @@ impl Shared {
             .iter()
             .enumerate()
             .skip(1)
-            .map(|(position, branch)| {
+            .map(|(position, _)| {
                 typed_inserted_command_source(
-                    branch,
+                    &command.args[parsed.positional_start + position],
                     command.argument_is_command_block(parsed.positional_start + position),
                 )
             })
@@ -14505,7 +14524,7 @@ impl Shared {
         let body = MuxEngine::command_alias_group_body(command).ok_or_else(|| {
             ServerError::CommandParse(format!("unknown command: {}", command.name))
         })?;
-        let source = InsertedCommandSource::Block(body.to_owned());
+        let source = InsertedCommandSource::Block(body.into());
         let control_target = context.control_command_target();
         let result = self.execute_inserted_commands_with_control_target_and_mux_source(
             client,
@@ -15245,18 +15264,20 @@ impl Shared {
         let (commands, prepared) = if let InsertedCommandSource::Commands(commands) = source {
             (commands.clone(), true)
         } else {
-            let (input, prepared) = match source {
-                InsertedCommandSource::String(input) => (input, false),
-                InsertedCommandSource::Block(input) => (input, true),
-                InsertedCommandSource::Commands(_)
-                | InsertedCommandSource::Shell(_)
-                | InsertedCommandSource::Hooks(_)
-                | InsertedCommandSource::Events(_) => unreachable!(),
-            };
             let mut parsed = {
                 let inner = self.inner.lock();
-                inner.engine.parse_config(label, input)
+                match source {
+                    InsertedCommandSource::String(input) => inner.engine.parse_config(label, input),
+                    InsertedCommandSource::Block(input) => {
+                        inner.engine.parse_config_raw(label, input)
+                    }
+                    InsertedCommandSource::Commands(_)
+                    | InsertedCommandSource::Shell(_)
+                    | InsertedCommandSource::Hooks(_)
+                    | InsertedCommandSource::Events(_) => unreachable!(),
+                }
             };
+            let prepared = matches!(source, InsertedCommandSource::Block(_));
             if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
                 return Err(DaemonError::InsertedCommandParse(diagnostic.message));
             }
@@ -15987,8 +16008,8 @@ impl Shared {
                 output,
                 error: true,
                 ..
-            } => Some(output.clone()),
-            EventPayload::ControlCommandGuardRaw {
+            }
+            | EventPayload::ControlCommandGuardRaw {
                 output,
                 error: true,
                 ..
@@ -18465,11 +18486,16 @@ impl Shared {
         }
     }
 
-    fn set_control_client_size(&self, client: ClientId, value: &str) -> Result<(), DaemonError> {
+    fn set_control_client_size(
+        self: &Arc<Self>,
+        client: ClientId,
+        value: &str,
+    ) -> Result<(), DaemonError> {
         let update = parse_control_client_size(value)?;
-        let (changed, resizes, notifications) = {
+        let (changed, resizes, mut events) = {
             let mut inner = self.inner.lock();
             let scope = hook_events::HookScope::open(&mut inner.engine);
+            let unzoomed_layouts = zoomed_window_layouts(&inner);
             let mut affected = control_client_sized_panes(&inner, client);
             let output = inner
                 .client_entry(client)
@@ -18487,28 +18513,38 @@ impl Shared {
             affected.extend(control_client_sized_panes(&inner, client));
             let changed = write_back_terminal_geometries(&mut inner, &affected);
             let resizes = terminal_resizes_for_panes(&inner, &affected);
-            let notifications = scope
-                .finish(&inner.engine, "refresh-client")
-                .events
-                .into_iter()
-                .filter(|event| event.name == "window-layout-changed")
-                .collect::<Vec<_>>();
-            (changed, resizes, notifications)
+            let sized = client_sized_windows(&inner);
+            let mut events = scope.finish(&inner.engine, "refresh-client").events;
+            events.retain(|event| !hook_events::is_window_resize_event(event, &sized));
+            events.extend(hook_events::window_resize_events(
+                &inner.engine,
+                &sized,
+                &unzoomed_layouts,
+            ));
+            (changed, resizes, events)
         };
         apply_terminal_resizes(resizes);
         if changed {
             self.publish_snapshot_state();
         }
-        for event in notifications {
+        for event in events
+            .iter_mut()
+            .filter(|event| event.name == "window-layout-changed")
+        {
             self.publish_to_control_clients(
                 EventPayload::HookEvent {
                     name: event.name.to_owned(),
-                    variables: event.variables,
+                    variables: event.variables.clone(),
                 },
                 None,
                 true,
             );
+            event
+                .variables
+                .remove(hook_events::UNZOOMED_LAYOUT_VARIABLE);
+            event.control_notified = true;
         }
+        self.run_event_hooks(events);
         Ok(())
     }
 
@@ -18542,7 +18578,7 @@ impl Shared {
     }
 
     fn refresh_client(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         _kind: ClientKind,
         name: &str,
@@ -29868,7 +29904,7 @@ impl Shared {
                 }
             } else {
                 EventPayload::ControlCommandGuard {
-                    output: String::from(output),
+                    output,
                     error,
                     sticky_failure,
                     flags,
@@ -31812,7 +31848,7 @@ impl Shared {
             Err(error) => return Err(error),
         };
         let edited = replace_tmux_import(&existing, &source, &copied)?;
-        crate::fleet_hosts::atomic_write(&target, edited.as_bytes())?;
+        zz_daemon_client::atomic_write(&target, edited.as_bytes())?;
         let names = if unsupported.is_empty() || unsupported.len() > 5 {
             String::new()
         } else {
@@ -34775,7 +34811,7 @@ impl ConfigParse {
                 .into_iter()
                 .map(|assignment| ConfigEnvironmentEntry {
                     name: assignment.name,
-                    value: assignment.value.into(),
+                    value: assignment.value,
                     hidden: assignment.hidden,
                 })
                 .collect(),
@@ -35500,18 +35536,18 @@ impl CapturedControlCommandEvents {
                 continue;
             };
             match event {
+                EventPayload::ControlCommandOutput { output } => {
+                    output.clear();
+                    output.push_str(&diagnostic.message);
+                    qualified += 1;
+                }
                 EventPayload::ControlCommandGuard {
                     output,
                     error: true,
                     sticky_failure: false,
                     ..
                 }
-                | EventPayload::ControlCommandOutput { output } => {
-                    output.clear();
-                    output.push_str(&diagnostic.message);
-                    qualified += 1;
-                }
-                EventPayload::ControlCommandGuardRaw {
+                | EventPayload::ControlCommandGuardRaw {
                     output,
                     error: true,
                     sticky_failure: false,
@@ -41334,6 +41370,41 @@ fn control_client_geometry_from_source(
         .or(output.geometry)
 }
 
+fn zoomed_window_layouts(inner: &ServerState) -> BTreeMap<WindowId, String> {
+    inner
+        .engine
+        .state
+        .windows
+        .iter()
+        .filter(|(_, window)| window.zoomed_pane.is_some())
+        .map(|(id, window)| {
+            (
+                *id,
+                window.layout_string(
+                    zz_mux::LayoutFormat::V2,
+                    inner.engine.state.pane_base_index(*id),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn client_sized_windows(inner: &ServerState) -> Vec<WindowId> {
+    inner
+        .engine
+        .state
+        .windows
+        .iter()
+        .filter(|(id, window)| {
+            inner.engine.window_size(**id) == WindowSize::Manual
+                || window.panes.keys().any(|pane| {
+                    pane_geometry_from(inner, *pane, GeometrySource::ClientReport).is_some()
+                })
+        })
+        .map(|(window, _)| *window)
+        .collect()
+}
+
 fn control_client_sized_panes(inner: &ServerState, client: ClientId) -> BTreeSet<PaneId> {
     let Some(output) = inner.client(client).and_then(|c| c.control_output.as_ref()) else {
         return BTreeSet::new();
@@ -42365,8 +42436,49 @@ fn prepare_command_request(
     }
     let guarded = read_only_guard_client(inner, client, &command);
     let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
-        && !command_is_read_only_safe(&command);
+        && !read_only_client_may_run(inner, client, &command);
     Ok((command, blocked))
+}
+
+fn read_only_client_may_run(
+    inner: &ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+) -> bool {
+    if MuxEngine::is_command_alias_group(command) {
+        return MuxEngine::command_alias_group_commands(command).is_ok_and(|commands| {
+            commands.is_some_and(|commands| {
+                commands
+                    .iter()
+                    .all(|command| read_only_client_may_run(inner, client, command))
+            })
+        });
+    }
+    command_is_read_only_safe(command) || control_command_is_read_only_safe(inner, client, command)
+}
+
+fn control_command_is_read_only_safe(
+    inner: &ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+) -> bool {
+    if inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Control) {
+        return false;
+    }
+    let name = canonical_command(&command.name);
+    if name == "refresh-client" {
+        return parse_buffer_command_args(
+            name,
+            &command.args,
+            &['A', 'B', 'C', 'F', 'f', 'r', 't'],
+            &['c', 'D', 'l', 'L', 'R', 'S', 'U'],
+        )
+        .ok()
+        .and_then(|parsed| parsed.value('t').map(str::to_owned))
+        .and_then(|target| find_attached_client_with_aliases(inner, &target, true))
+        .is_none_or(|target| target == client);
+    }
+    hook_events::command_is_read_only(name, &command.args)
 }
 
 /// `server_client_print` runs `utf8_sanitize` over a message bound for a
@@ -45683,7 +45795,10 @@ fn run_shell_job(
             Stdio::null()
         });
     if let Some(startup_reentry) = startup_reentry {
-        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
+        process.env(
+            zz_daemon_client::STARTUP_REENTRY_ENVIRONMENT_VARIABLE,
+            startup_reentry,
+        );
     }
     let mut child = process.spawn_unmasked().map_err(|_| ())?;
     drop(child.stdin.take());
@@ -49133,7 +49248,7 @@ enum InsertedCommandSource {
     Commands(Vec<CommandInvocation>),
     Shell(String),
     String(String),
-    Block(String),
+    Block(RawText),
     Hooks(Box<HookQueueSource>),
     Events(Box<EventQueueSource>),
 }
@@ -49698,11 +49813,16 @@ fn parse_shell_delay_seconds(value: &str) -> Option<f64> {
     (seconds.is_finite() && seconds >= 0.0).then_some(seconds)
 }
 
-fn typed_inserted_command_source(argument: &str, command_block: bool) -> InsertedCommandSource {
-    if command_block && let Some(body) = command_block_body(argument) {
-        return InsertedCommandSource::Block(body.to_owned());
+fn typed_inserted_command_source(argument: &RawText, command_block: bool) -> InsertedCommandSource {
+    if command_block
+        && let Some(body) = argument
+            .as_bytes()
+            .strip_prefix(b"{")
+            .and_then(|rest| rest.strip_suffix(b"}"))
+    {
+        return InsertedCommandSource::Block(RawText::from_bytes(body));
     }
-    InsertedCommandSource::String(argument.to_owned())
+    InsertedCommandSource::String(argument.to_string())
 }
 
 fn select_if_shell_branch(
@@ -50834,7 +50954,7 @@ fn write_paste_buffer_file(path: &Path, data: &[u8], append: bool) -> Result<(),
 /// strerror(cf->error), cf->path)` in both cmd-load-buffer.c and
 /// cmd-save-buffer.c: the reason, then the path it expanded.
 fn buffer_file_error(path: &Path, error: &std::io::Error) -> ServerError {
-    client_file_failure(&crate::strerror_text(error), path)
+    client_file_failure(&zz_daemon_client::strerror_text(error), path)
 }
 
 fn client_file_failure(reason: &str, path: &Path) -> ServerError {
@@ -52940,7 +53060,7 @@ fn handle_connection_message<S: TransportStream>(
     }
     let startup_reentry_capability = format!(
         "{}{}",
-        crate::STARTUP_REENTRY_CAPABILITY_PREFIX,
+        zz_daemon_client::STARTUP_REENTRY_CAPABILITY_PREFIX,
         shared.server_id
     );
     let startup_reentry = hello.kind == ClientKind::Command
@@ -53179,7 +53299,7 @@ fn handle_connection_message<S: TransportStream>(
             "message begin client={client} bytes={} frame_capacity={} message={:#?}",
             inbound_frame.len(),
             inbound_frame.capacity(),
-            crate::client::TracedMessage(&message),
+            zz_daemon_client::TracedMessage(&message),
         );
         if shared.shutdown_pending.load(Ordering::Acquire)
             && !(hello.kind == ClientKind::Command
@@ -54089,7 +54209,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::{CommandClient, InteractiveClient};
+    use zz_daemon_client::{CommandClient, InteractiveClient};
 
     #[test]
     fn caller_stdin_request_waits_for_the_alias_reader() {
@@ -59184,16 +59304,61 @@ mod tests {
                 .as_bytes()
                 .to_vec()
         };
-        let option = output("show-options", &["-gv", "@binary"]);
-        assert!(
-            option.starts_with(b"a") && option.ends_with(b"b"),
-            "{option:?}"
+        assert_eq!(output("show-options", &["-gv", "@binary"]), b"a\xfeb");
+        assert_eq!(
+            output("show-options", &["-g", "@binary"]),
+            b"@binary a\\376b"
         );
+        assert_eq!(output("display-message", &["-p", "#{@binary}"]), b"a\xfeb");
         assert_eq!(output("show-buffer", &["-b", "sourced"]), b"c\xfed");
         assert_eq!(
             output("show-environment", &["-g", "BINARY_ENV"]),
             b"BINARY_ENV=e\xfef"
         );
+    }
+
+    #[test]
+    fn sourced_command_blocks_and_variables_keep_bytes_that_are_not_utf8() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(1);
+        let mut context = ExecutionContext::default();
+        let mut source = |stdin: &[u8]| {
+            let mut command = CommandInvocation::new("source-file", ["-"]);
+            command.set_stdin(RawText::from_bytes(stdin.to_vec()));
+            assert!(matches!(
+                shared.execute_command_request(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    1,
+                    &command
+                ),
+                CommandResponse::Success { exit_code: 0, .. }
+            ));
+        };
+        source(b"if-shell -F 1 { set-buffer -b block a\xfeb }\n");
+        source(b"BYTES_VARIABLE=a\xfdb\n");
+        source(b"set-buffer -b variable \"$BYTES_VARIABLE\"\n");
+        source(b"OCTAL_VARIABLE=a\\375b\n");
+        source(b"set-buffer -b octal \"$OCTAL_VARIABLE\"\n");
+        source(b"set-buffer -b escaped \"\\303\\251\\376\"\n");
+        let mut buffer = |name: &str| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-buffer", ["-b", name]),
+                )
+                .expect("show-buffer")
+                .output
+                .as_bytes()
+                .to_vec()
+        };
+        assert_eq!(buffer("block"), b"a\xfeb");
+        assert_eq!(buffer("variable"), b"a\xfdb");
+        assert_eq!(buffer("octal"), b"a\xfdb");
+        assert_eq!(buffer("escaped"), b"\xc3\xa9\xfe");
     }
 
     #[test]
@@ -66399,11 +66564,416 @@ mod tests {
         assert_eq!(notifications.len(), 1);
         assert!(snapshot_position < notifications[0]);
         shared.set_control_client_size(control, "100,30").unwrap();
-        assert!(!take_reliable_messages(&mailbox).iter().any(|message| matches!(
-            message,
-            ProtocolMessage::Event(Event { payload: EventPayload::HookEvent { name, .. }, .. })
-                if name == "window-layout-changed"
-        )));
+        let repeated = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed"
+                        && variables.get("hook_window") == Some(&window.to_string())
+                )
+            })
+            .count();
+        assert_eq!(repeated, 1);
+    }
+
+    #[test]
+    fn control_resize_fires_every_sized_window_even_when_no_size_changes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-all", "all");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("new-window", ["-d", "-t", "resize-all"]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-resized",
+                    "set-option -gF @resized '#{@resized}r'",
+                ],
+            ),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-layout-changed",
+                    "set-option -gF @layout '#{@layout}l'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let windows = shared.inner.lock().engine.state.sessions[&session]
+            .windows
+            .clone();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-all".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        let layout_notices = |mailbox: &OutboundMailbox| {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed" => variables.get("hook_window").cloned(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let every_window = windows.iter().map(ToString::to_string).collect::<Vec<_>>();
+        layout_notices(&mailbox);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        shared
+            .set_control_client_size(control, &format!("{}:", windows[1]))
+            .unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        let option = |name: &str| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-options", ["-gv", name]),
+                )
+                .expect("option readback")
+                .output
+                .to_string()
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(option("@resized"), "rrrrrr");
+        assert_eq!(option("@layout"), "llllll");
+    }
+
+    #[test]
+    fn control_resize_of_a_zoomed_window_reports_the_unzoom_step_to_control_only() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-zoom", "zoom");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("split-window", ["-d", "-t", &pane.to_string()]),
+            CommandInvocation::new("resize-pane", ["-Z", "-t", &pane.to_string()]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-layout-changed",
+                    "set-option -gF @seen '#{@seen}[#{unzoomed_layout}]'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let tiled = {
+            let inner = shared.inner.lock();
+            inner.engine.state.windows[&window].layout_string(
+                zz_mux::LayoutFormat::V2,
+                inner.engine.state.pane_base_index(window),
+            )
+        };
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-zoom".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        let unzoomed = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, variables },
+                    ..
+                }) if name == "window-layout-changed"
+                    && variables.get("hook_window") == Some(&window.to_string()) =>
+                {
+                    Some(
+                        variables
+                            .get(zz_protocol::UNZOOMED_LAYOUT_VARIABLE)
+                            .cloned(),
+                    )
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(unzoomed, vec![Some(tiled), None, None]);
+        let seen = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gv", "@seen"]),
+            )
+            .expect("hook readback")
+            .output
+            .to_string();
+        assert_eq!(seen.trim_end(), "[][][]");
+    }
+
+    #[test]
+    fn read_only_control_clients_run_queries_and_refresh_themselves_only() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "ro-control", "ro");
+        let control = |name: &str| {
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Control,
+                Some(name.to_owned()),
+                None,
+                OutboundMailbox::new(),
+            );
+            shared.attach(client, session).unwrap();
+            client
+        };
+        let viewer = control("viewer");
+        let peer = control("peer");
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("watcher".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(interactive, session).unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_flags.insert(viewer);
+            inner.client_flags.insert(interactive);
+        }
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let pane_target = pane.to_string();
+        let mut request_id = 0;
+        let mut run = |client: ClientId, kind: ClientKind, name: &str, args: &[&str]| {
+            request_id += 1;
+            shared.execute_command_request(
+                client,
+                kind,
+                &mut context,
+                request_id,
+                &CommandInvocation::new(name, args.iter().copied()),
+            )
+        };
+        let read_only = |response: &CommandResponse| {
+            matches!(
+                response,
+                CommandResponse::Error {
+                    error: ServerError::InvalidCommand(message),
+                    ..
+                } if message == "client is read-only"
+            )
+        };
+        for (name, args) in [
+            ("list-windows", &["-F", "#{window_index}"][..]),
+            ("display-message", &["-p", "#{client_readonly}"][..]),
+            ("show-options", &["-g", "base-index"][..]),
+            ("capture-pane", &["-p", "-t", pane_target.as_str()][..]),
+            ("has-session", &["-t", "ro-control"][..]),
+            ("list-clients", &[][..]),
+            ("refresh-client", &["-C", "100,30"][..]),
+            (
+                "refresh-client",
+                &["-t", "viewer", "-B", "sub::#{window_id}"][..],
+            ),
+            ("refresh-client", &["-f", "!read-only"][..]),
+        ] {
+            let response = run(viewer, ClientKind::Control, name, args);
+            assert!(
+                matches!(response, CommandResponse::Success { .. }),
+                "{name} {args:?} answered {response:?}"
+            );
+        }
+        for (name, args) in [
+            ("new-window", &["-d"][..]),
+            ("set-option", &["-g", "@ro", "1"][..]),
+            ("send-keys", &["-t", pane_target.as_str(), "x"][..]),
+            ("set-buffer", &["-b", "ro", "x"][..]),
+            ("capture-pane", &["-b", "ro"][..]),
+            ("display-message", &["-I", "-t", pane_target.as_str()][..]),
+            ("refresh-client", &["-t", "peer", "-C", "90,30"][..]),
+            ("kill-session", &["-t", "ro-control"][..]),
+        ] {
+            let response = run(viewer, ClientKind::Control, name, args);
+            assert!(
+                read_only(&response),
+                "{name} {args:?} answered {response:?}"
+            );
+        }
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[41]", "romix=copy-mode ; list-windows"],
+                ),
+            )
+            .expect("mixed alias");
+        let response = run(viewer, ClientKind::Control, "romix", &[]);
+        assert!(!read_only(&response), "mixed alias answered {response:?}");
+        let response = run(interactive, ClientKind::Interactive, "list-windows", &[]);
+        assert!(
+            read_only(&response),
+            "interactive list-windows answered {response:?}"
+        );
+        let inner = shared.inner.lock();
+        assert!(inner.client_flags.contains(viewer));
+        assert_eq!(inner.engine.state.sessions[&session].windows.len(), 1);
+        assert!(inner.paste_buffers.iter().all(|buffer| buffer.name != "ro"));
+        assert!(
+            inner
+                .client(peer)
+                .and_then(|c| c.control_output.as_ref())
+                .is_none_or(|output| output.geometry.is_none())
+        );
+    }
+
+    #[test]
+    fn respawn_drops_the_output_control_clients_still_had_queued() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "respawn-feed", "feed");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("respawn-feed".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        let feed = mailbox.ensure_control_feed(&shared.control_wake);
+        feed.queue_at(pane, b"OLD-PROCESS-OUTPUT", Instant::now());
+        assert!(feed.order(&mailbox, shard_sink::ControlOrder::AfterOutput, |_| true));
+        assert_eq!(feed.queued_lines(), 1);
+        assert!(
+            feed.queued_bytes(pane)
+                .windows(18)
+                .any(|bytes| bytes == b"OLD-PROCESS-OUTPUT")
+        );
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("respawn-pane", ["-k", "-t", &pane.to_string()]),
+            )
+            .expect("respawn");
+        assert!(
+            !feed
+                .queued_bytes(pane)
+                .windows(18)
+                .any(|bytes| bytes == b"OLD-PROCESS-OUTPUT")
+        );
+    }
+
+    #[test]
+    fn control_resize_fires_manual_windows_no_client_sizes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-manual", "manual");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("set-option", ["-w", "window-size", "manual"]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-resized",
+                    "set-option -gF @resized '#{@resized}r'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-manual".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        shared
+            .set_control_client_size(control, &format!("{window}:"))
+            .unwrap();
+        let notices = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed"
+                        && variables.get("hook_window") == Some(&window.to_string())
+                )
+            })
+            .count();
+        assert_eq!(notices, 1);
+        let resized = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gv", "@resized"]),
+            )
+            .expect("hook readback")
+            .output
+            .to_string();
+        assert_eq!(resized.trim_end(), "r");
     }
 
     #[test]
@@ -68918,8 +69488,13 @@ set-option -g @alias-mixed-next yes
                     .filter(|message| matches!(
                         message,
                         ProtocolMessage::Event(Event {
-                            payload: EventPayload::ControlCommandGuard { output, .. }
-                                | EventPayload::ControlCommandOutput { output },
+                            payload: EventPayload::ControlCommandGuard { output, .. },
+                            ..
+                        }) if output == &diagnostic
+                    ) || matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ControlCommandOutput { output },
                             ..
                         }) if output == &diagnostic
                     ))
@@ -68992,8 +69567,13 @@ set-option -g @alias-mixed-next yes
                         .filter(|message| matches!(
                             message,
                             ProtocolMessage::Event(Event {
-                                payload: EventPayload::ControlCommandGuard { output, .. }
-                                    | EventPayload::ControlCommandOutput { output },
+                                payload: EventPayload::ControlCommandGuard { output, .. },
+                                ..
+                            }) if output == "syntax error"
+                        ) || matches!(
+                            message,
+                            ProtocolMessage::Event(Event {
+                                payload: EventPayload::ControlCommandOutput { output },
                                 ..
                             }) if output == "syntax error"
                         ))
@@ -74736,7 +75316,7 @@ set-option -g @alias-mixed-next yes
                             ..
                         },
                     ..
-                }) => Some(("guard", output, error, sticky_failure)),
+                }) => Some(("guard", String::from(output), error, sticky_failure)),
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ControlConfigError { text },
                     ..
@@ -82146,7 +82726,7 @@ set-option -g @alias-mixed-next yes
         assert_eq!(client_features_fact(&["client-terminal-v1".to_owned()]), 0);
         assert_eq!(
             terminal_features_list(u32::MAX),
-            crate::terminal_features::TERMINAL_FEATURES.join(",")
+            zz_daemon_client::TERMINAL_FEATURES.join(",")
         );
         let client_cwd = std::env::temp_dir().join("client cwd");
         assert_eq!(
@@ -83095,7 +83675,7 @@ set-option -g @alias-mixed-next yes
                 assert!(TOOL_VERBS.contains(verb), "add `zz {verb}` to TOOL_VERBS");
             }
         }
-        assert!(catalog.contains(crate::transport::SOCKET_ENVIRONMENT_VARIABLE));
+        assert!(catalog.contains(zz_daemon_client::transport::SOCKET_ENVIRONMENT_VARIABLE));
     }
 
     #[test]
@@ -86018,7 +86598,10 @@ set-option -g @alias-mixed-next yes
             ("TERM_PROGRAM", "startup-program"),
             ("TERM_PROGRAM_VERSION", "startup-version"),
             ("COLORTERM", "startup-colorterm"),
-            (crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, "stale-reentry"),
+            (
+                zz_daemon_client::STARTUP_REENTRY_ENVIRONMENT_VARIABLE,
+                "stale-reentry",
+            ),
             (
                 crate::TMUX_SHIM_EXECUTABLE_ENVIRONMENT_VARIABLE,
                 "stale-executable",
@@ -105723,7 +106306,7 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(base.0, Some(8));
         assert_eq!(base.1, "bpaste,ccolour,clipboard,cstyle,focus,title");
 
-        let learned = crate::terminal_features::terminal_default_features("tmux")
+        let learned = zz_daemon_client::terminal_default_features("tmux")
             .split(',')
             .map(str::to_owned)
             .collect::<Vec<_>>();
@@ -107841,7 +108424,7 @@ bind - split-window -v -c "#{pane_current_path}"
             vec![
                 CommandInvocation::new("frobnicate", [] as [&str; 0]),
                 CommandInvocation::new(
-                    crate::COLD_START_PREPARE_ABORT_COMMAND,
+                    zz_daemon_client::COLD_START_PREPARE_ABORT_COMMAND,
                     [server_id.to_string()],
                 ),
             ]
@@ -107917,7 +108500,7 @@ bind - split-window -v -c "#{pane_current_path}"
         let owner = register(&valid, false);
         let commands = vec![
             CommandInvocation::new("list-sessions", [] as [&str; 0]),
-            CommandInvocation::new(crate::COLD_START_PREPARE_ABORT_COMMAND, ["74"]),
+            CommandInvocation::new(zz_daemon_client::COLD_START_PREPARE_ABORT_COMMAND, ["74"]),
         ];
         let _ = valid.prepare_command_list_for_request(owner, commands);
         assert_eq!(
@@ -108206,7 +108789,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             ..
                         },
                     ..
-                }) => Some((output, error, flags)),
+                }) => Some((String::from(output), error, flags)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -108258,7 +108841,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ControlCommandGuard { output, error, .. },
                     ..
-                }) => Some((output, error)),
+                }) => Some((String::from(output), error)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -121070,7 +121653,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             ..
                         },
                     ..
-                }) => Some((output, error, sticky_failure)),
+                }) => Some((String::from(output), error, sticky_failure)),
                 _ => None,
             })
             .collect()
@@ -121119,7 +121702,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             flags,
                         },
                     ..
-                }) => Some((output, error, sticky_failure, flags)),
+                }) => Some((String::from(output), error, sticky_failure, flags)),
                 _ => None,
             })
             .collect()

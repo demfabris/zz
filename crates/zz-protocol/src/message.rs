@@ -3670,7 +3670,7 @@ pub enum EventPayload {
         message_id: u64,
     },
     ControlCommandGuard {
-        output: String,
+        output: RawText,
         error: bool,
         sticky_failure: bool,
         flags: u8,
@@ -5474,12 +5474,31 @@ mod tests {
     }
 
     #[test]
+    fn control_command_guard_output_round_trips_bytes_that_are_not_utf8() {
+        let event = super::Event {
+            sequence: 7,
+            payload: super::EventPayload::ControlCommandGuard {
+                output: super::RawText::from_bytes(b"a\xfeb\n".to_vec()),
+                error: false,
+                sticky_failure: false,
+                flags: 1,
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("control command guard encodes");
+        let decoded = postcard::from_bytes::<super::Event>(&bytes).expect("guard decodes");
+        assert!(matches!(
+            decoded.payload,
+            super::EventPayload::ControlCommandGuard { output, .. } if output.as_bytes() == b"a\xfeb\n"
+        ));
+    }
+
+    #[test]
     fn control_command_guard_holds_wire_tag_forty_seven_and_round_trips_flags() {
         for flags in [0, 1] {
             let event = super::Event {
                 sequence: 7,
                 payload: super::EventPayload::ControlCommandGuard {
-                    output: "diagnostic\n".to_owned(),
+                    output: "diagnostic\n".into(),
                     error: true,
                     sticky_failure: false,
                     flags,

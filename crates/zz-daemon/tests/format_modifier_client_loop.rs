@@ -6,7 +6,7 @@
 //! `format_loop_clients`, sort.c `sort_get_clients`). Command clients are
 //! connections, not attachments, so they never own a row.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod clients;
 

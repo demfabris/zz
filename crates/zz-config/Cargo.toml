@@ -12,7 +12,7 @@ update = ["dep:semver", "dep:ureq"]
 
 [dependencies]
 zz-client.workspace = true
-zz-daemon.workspace = true
+zz-daemon-client.workspace = true
 zz-protocol.workspace = true
 zz-mux.workspace = true
 zz-terminal.workspace = true

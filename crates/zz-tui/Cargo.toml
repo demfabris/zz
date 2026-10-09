@@ -17,7 +17,7 @@ miniz_oxide = "0.9.1"
 rustix = { workspace = true, features = ["fs"] }
 signal-hook-registry = "1.4.8"
 unicode-width.workspace = true
-zz-daemon.workspace = true
+zz-daemon-client.workspace = true
 zz-protocol.workspace = true
 zz-client.workspace = true
 zz-terminal.workspace = true

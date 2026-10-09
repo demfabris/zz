@@ -27,7 +27,7 @@ pub use sticky::{StickyModifier, StickyModifiers};
 pub use swipe_back::{SwipeBack, swipe_back, yield_back_swipe};
 pub use web_time::Instant;
 pub use which_key_list::WhichKeyList;
-pub use zz_kit::dismissal::coast_guard;
-pub use zz_kit::sheet::{
+pub use zpui_kit::dismissal::coast_guard;
+pub use zpui_kit::sheet::{
     BottomSheet, bottom_sheet, floating_sheet, sheet_action, sheet_close, sheet_inset, sheet_option,
 };

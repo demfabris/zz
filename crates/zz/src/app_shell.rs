@@ -57,7 +57,6 @@ impl AppShell {
     ) -> Self {
         let sidebar = workspace.read(cx).sidebar();
         let mux = workspace.read(cx).mux();
-        #[cfg(not(target_os = "ios"))]
         crate::menus::observe_mux(&mux, cx);
         cx.subscribe(&sidebar, |_, _, _: &SidebarModeChanged, cx| cx.notify())
             .detach();
@@ -159,7 +158,6 @@ impl AppShell {
             .collect()
     }
 
-    #[cfg(not(target_os = "ios"))]
     fn active_menu_target(
         &self,
         session: bool,
@@ -187,7 +185,6 @@ impl AppShell {
         }
     }
 
-    #[cfg(not(target_os = "ios"))]
     fn rename_menu_target(&self, session: bool, cx: &App) {
         if let Some((target, name)) = self.active_menu_target(session, cx)
             && let Some((_, command)) = crate::mux::nav::rename_prompt_command(target, &name)
@@ -196,7 +193,6 @@ impl AppShell {
         }
     }
 
-    #[cfg(not(target_os = "ios"))]
     fn split_menu_pane(&self, axis: zz_protocol::Axis, cx: &App) {
         let mux = self.mux.read(cx);
         if let Some(pane) = mux.active_pane() {
@@ -204,7 +200,6 @@ impl AppShell {
         }
     }
 
-    #[cfg(not(target_os = "ios"))]
     fn pane_menu_command(&self, command: &str, flags: &[&str], cx: &App) {
         let mux = self.mux.read(cx);
         if let Some(pane) = mux.active_pane() {
@@ -393,7 +388,6 @@ impl Render for AppShell {
                 }
             });
 
-            #[cfg(not(target_os = "ios"))]
             let shell = {
                 use crate::menus;
                 use crate::mux::nav::{TreeTarget, kill_target_command, new_window_command};
@@ -555,7 +549,7 @@ mod tests {
 
     use zpui::{TestAppContext, VisualTestContext, div};
     use zz_browser::BrowserError;
-    use zz_daemon::DaemonError;
+    use zz_daemon_client::DaemonError;
     use zz_protocol::ClientMessageKind;
     use zz_ui::{WindowExt as _, notification::Notification};
 
@@ -575,7 +569,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

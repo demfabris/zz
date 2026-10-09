@@ -4,7 +4,7 @@ The app opens the session sidebar beside the attached window's panes. It uses
 `zz-ui` for the shell, navigation, pane frames, headers, terminal painting, and
 agent interface. Web and iOS compile the same app shell, sidebar, status bar, settings,
 command palette, overlays, terminal, agent, connection reducer, and image caches
-from `clients/app` (`zz-app`). The UIKit backend is `zpui_ios` in `zpui/crates/zpui_ios`;
+from `clients/app` (`zz-app`). The UIKit backend is `zpui_ios` in `crates/zpui-ios`;
 this crate (`zz-ios`) is only the entry point, the terminal example, and the bundle files.
 The sidebar is 256 points wide and respects the iOS safe area.
 
@@ -451,10 +451,10 @@ verified on hardware. The arm64 device binary builds, but the launcher currently
 packages simulator apps only.
 
 ```sh
-cargo test --locked -p zz-app -p zpui_ios
+cargo test --locked -p zz-app -p zpui-ios
 cargo test --locked -p zz-ui terminal_images::tests
 cargo fmt -p zz-ios -p zz-app -p zz-ui --check
-IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo clippy --locked -p zz-ios -p zz-app -p zpui_ios --all-targets --target aarch64-apple-ios-sim -- -D warnings
+IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo clippy --locked -p zz-ios -p zz-app -p zpui-ios --all-targets --target aarch64-apple-ios-sim -- -D warnings
 IPHONEOS_DEPLOYMENT_TARGET=26.0 cargo build --locked -p zz-ios --bin zz-ios --target aarch64-apple-ios
 just web build
 ```

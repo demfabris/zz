@@ -14,7 +14,7 @@ use parking_lot::{Condvar, Mutex};
 use super::path_listing;
 #[cfg(feature = "agent")]
 use super::{ClientId, PaneId};
-use crate::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
 const MAX_WORKERS: usize = 2;
 const MAX_PENDING: usize = 64;
@@ -550,7 +550,7 @@ fn scan_peers(state: &State, panes: Vec<(PaneId, String, Option<u32>)>) -> PeerR
                 *parents
                     .borrow_mut()
                     .entry(pid)
-                    .or_insert_with(|| crate::process_info::parent(pid))
+                    .or_insert_with(|| zz_daemon_client::process_info::parent(pid))
             })
             .filter(|record| {
                 let updated = if record.status_updated_at == 0 {

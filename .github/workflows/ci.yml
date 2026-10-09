@@ -76,7 +76,7 @@ jobs:
 
       - name: Lint daemon without agent support
         if: runner.os == 'Linux'
-        run: cargo clippy -p zz-daemon --no-default-features --features daemon --all-targets -- -D warnings
+        run: cargo clippy -p zz-daemon -p zz-daemon-client --no-default-features --all-targets -- -D warnings
 
       - name: Check browser client
         if: runner.os == 'Linux'
@@ -98,7 +98,7 @@ jobs:
       - name: Test workspace
         continue-on-error: ${{ runner.os == 'Windows' }}
         timeout-minutes: ${{ runner.os == 'Windows' && 90 || 360 }}
-        run: cargo test --workspace --all-features ${{ runner.os == 'Windows' && '--no-fail-fast' || '' }}
+        run: cargo ci-test ${{ runner.os == 'Windows' && '--no-fail-fast' || '' }}
 
       - name: Test zz-mux release profile
         if: runner.os == 'Linux'
@@ -123,7 +123,7 @@ jobs:
         shell: bash
         run: |
           tree=$(cargo tree -p zz-cli -e normal --prefix none)
-          if grep -Eq '^(zpui|zpui_platform|wgpu|cef|zz-kit|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
+          if grep -Eq '^(zpui|zpui-platform|wgpu|cef|zpui-kit|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
             echo "zz-cli links GUI crates"
             exit 1
           fi

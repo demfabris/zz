@@ -145,7 +145,7 @@ fn control_events_and_window_layout_fields_keep_the_frozen_wire_tail() {
         let event = Event {
             sequence: 0,
             payload: EventPayload::ControlCommandGuard {
-                output: String::new(),
+                output: "".into(),
                 error: false,
                 sticky_failure: false,
                 flags,

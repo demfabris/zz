@@ -325,12 +325,12 @@ impl StatusHooks for KeyListingHooks<'_> {
         String::new()
     }
 
-    fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<RawText> {
         self.calls += 1;
         (name == "key_command")
             .then_some(self.command)
             .flatten()
-            .map(str::to_owned)
+            .map(RawText::from)
     }
 }
 
@@ -408,7 +408,7 @@ fn default_key_listing_proven_tmux_hooks_skip_scoped_option_probes() {
             String::new()
         }
 
-        fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<String> {
+        fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<RawText> {
             panic!("cached listing unexpectedly probed {name}")
         }
     }
@@ -453,7 +453,7 @@ fn default_key_listing_custom_option_hooks_keep_the_resolved_target_context() {
             String::new()
         }
 
-        fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+        fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
             if name != "key_command" {
                 return None;
             }
@@ -462,7 +462,7 @@ fn default_key_listing_custom_option_hooks_keep_the_resolved_target_context() {
                 context.window_id.clone(),
                 context.pane_id.clone(),
             ));
-            Some(context.pane_id.clone())
+            Some(context.pane_id.clone().into())
         }
     }
 
@@ -534,13 +534,13 @@ fn stateful_option_hooks_keep_uncached_listing_output_and_lookup_order() {
             String::new()
         }
 
-        fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<String> {
+        fn option_variable(&mut self, name: &str, _: &StatusContext) -> Option<RawText> {
             self.names.push(name.to_owned());
             if name != "key_command" {
                 return None;
             }
             self.commands += 1;
-            (self.commands > 1).then(|| format!("override-{}", self.commands))
+            (self.commands > 1).then(|| format!("override-{}", self.commands).into())
         }
     }
 

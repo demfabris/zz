@@ -1,4 +1,4 @@
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 use std::{
     fs,
@@ -8,7 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zz_daemon::{CommandClient, Daemon};
+use zz_daemon::Daemon;
+use zz_daemon_client::CommandClient;
 use zz_protocol::CommandInvocation;
 
 fn connect(socket: &Path) -> CommandClient {

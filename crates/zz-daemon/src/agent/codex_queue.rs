@@ -13,7 +13,7 @@ use agent_client_protocol::AcpAgent;
 use serde_json::{Value, json};
 
 use super::{claude_peers, environment::with_platform_environment};
-use crate::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
 const TIMEOUT: Duration = Duration::from_secs(10);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -106,7 +106,7 @@ pub(crate) fn group_runs_codex(group: u32) -> bool {
             .to_str()
             .and_then(|name| name.parse::<u32>().ok())
             .is_some_and(|pid| {
-                crate::process_info::process_group(pid) == Some(group)
+                zz_daemon_client::process_info::process_group(pid) == Some(group)
                     && std::fs::read_link(format!("/proc/{pid}/exe")).is_ok_and(|path| {
                         path.file_name()
                             .and_then(std::ffi::OsStr::to_str)

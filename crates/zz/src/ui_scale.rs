@@ -56,12 +56,6 @@ pub fn set_percent(percent: f32, cx: &mut App) {
     });
 }
 
-/// Multiply the zoom by `factor`, the relative amount a pinch hands over.
-#[cfg(target_os = "ios")]
-pub fn scale_by(factor: f32, cx: &mut App) {
-    set_percent(effective_percent(cx) * factor, cx);
-}
-
 /// Start a freshly opened window at the zoom already in effect.
 pub fn apply_to_new_window(window: &mut Window, cx: &App) {
     apply(window, UiZoom::get(cx));
@@ -149,14 +143,14 @@ mod tests {
     fn shortcuts_are_scoped_to_the_ui_root() {
         let keymap = Keymap::new(key_bindings(&crate::keymap::test_chords(UI_TABLE)));
         let root = KeyContext::parse(ROOT_KEY_CONTEXT).expect("valid root context");
-        #[cfg(any(target_os = "macos", target_os = "ios"))]
+        #[cfg(target_os = "macos")]
         let shortcuts = [
             ("cmd-=", TypeId::of::<IncreaseUiZoom>()),
             ("cmd-+", TypeId::of::<IncreaseUiZoom>()),
             ("cmd--", TypeId::of::<DecreaseUiZoom>()),
             ("cmd-0", TypeId::of::<ResetUiZoom>()),
         ];
-        #[cfg(not(any(target_os = "macos", target_os = "ios")))]
+        #[cfg(not(target_os = "macos"))]
         let shortcuts = [
             ("ctrl-=", TypeId::of::<IncreaseUiZoom>()),
             ("ctrl-+", TypeId::of::<IncreaseUiZoom>()),

@@ -21,7 +21,7 @@ use url::Url;
 #[cfg(target_os = "windows")]
 use zeroize::Zeroize as _;
 use zeroize::Zeroizing;
-use zz_browser::{
+use zz_protocol::{
     BrowserCookie, CookieImportBatch, CookieImportError, MAX_COOKIE_IMPORT_BYTES,
     parse_cookie_import,
 };
@@ -142,7 +142,7 @@ pub fn import_all_cookies(
 }
 
 pub fn source_storage_key(zz_profile: &str) -> Result<&str, ChromeCookieImportError> {
-    if zz_profile == zz_browser::DEFAULT_BROWSER_PROFILE {
+    if zz_profile == zz_protocol::DEFAULT_BROWSER_PROFILE {
         return Ok(DEFAULT_CHROME_PROFILE);
     }
     if zz_profile.starts_with(CHROME_PROFILE_PREFIX) {
@@ -785,7 +785,7 @@ mod tests {
     use cbc::cipher::{BlockModeEncrypt as _, block_padding::Pkcs7};
     use rusqlite::params;
     use tempfile::tempdir;
-    use zz_browser::MAX_COOKIE_IMPORT_COUNT;
+    use zz_protocol::MAX_COOKIE_IMPORT_COUNT;
 
     use super::*;
 
@@ -1086,7 +1086,7 @@ mod tests {
     #[test]
     fn maps_zz_profiles_to_safe_chrome_storage_keys() {
         assert_eq!(
-            source_storage_key(zz_browser::DEFAULT_BROWSER_PROFILE).expect("default source"),
+            source_storage_key(zz_protocol::DEFAULT_BROWSER_PROFILE).expect("default source"),
             DEFAULT_CHROME_PROFILE
         );
         assert_eq!(

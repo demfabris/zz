@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     App, Context, Entity, FocusHandle, Focusable, IntoElement, KeyDownEvent, Keystroke, Render,
     Window, div, prelude::*, px,
 };
@@ -84,7 +84,7 @@ fn display_panes_action(keystroke: &Keystroke) -> DisplayPanesAction {
 
 #[cfg(test)]
 mod tests {
-    use zpui::Modifiers;
+    use zz_gpui::Modifiers;
     use zz_terminal::{KeyCode, Modifiers as TerminalModifiers};
 
     use super::*;

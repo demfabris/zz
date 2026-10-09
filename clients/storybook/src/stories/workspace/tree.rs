@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, Hsla, IntoElement, ListSizingBehavior, ParentElement as _, Stateful,
     Styled as _, UniformListScrollHandle, div, prelude::*, px, uniform_list,
 };
@@ -332,7 +332,7 @@ pub fn tree_list(
         .into_any_element()
 }
 
-pub fn chrome_controls(settings_selected: bool) -> zpui::Div {
+pub fn chrome_controls(settings_selected: bool) -> zz_gpui::Div {
     workspace_chrome_controls(
         workspace_settings_button("settings").selected(settings_selected),
         Some(workspace_layout_button("layout").into_any_element()),
@@ -343,7 +343,7 @@ pub fn sidebar(
     navigation: impl IntoElement,
     settings_selected: bool,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     workspace_sidebar_surface(
         "sidebar",
         WORKSPACE_SIDEBAR_DEFAULT_WIDTH,

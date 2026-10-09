@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use zpui::{TestAppContext, VisualTestContext};
+use zz_gpui::{TestAppContext, VisualTestContext};
 use zz_protocol::{InsertStyle, ShellKind};
 
 use super::*;
@@ -162,7 +162,7 @@ impl Mounted<'_> {
     }
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn opens_with_the_start_dir_and_browses_depth_one_dirs_first(cx: &mut TestAppContext) {
     let mut picker = mount(cx, Some("/tmp/start"));
     assert_eq!(picker.lists(), [(Some("/tmp/start".to_owned()), 1)]);
@@ -185,7 +185,7 @@ fn opens_with_the_start_dir_and_browses_depth_one_dirs_first(cx: &mut TestAppCon
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn stale_request_ids_are_ignored(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.picker.update(picker.cx, |picker, cx| {
@@ -212,7 +212,7 @@ fn stale_request_ids_are_ignored(cx: &mut TestAppContext) {
     assert!(!picker.labels().contains(&"late".to_owned()));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn tab_reroots_locally_inside_a_complete_walk(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -239,7 +239,7 @@ fn tab_reroots_locally_inside_a_complete_walk(cx: &mut TestAppContext) {
     )));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn tab_asks_the_daemon_for_unentered_or_truncated_dirs(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -264,7 +264,7 @@ fn tab_asks_the_daemon_for_unentered_or_truncated_dirs(cx: &mut TestAppContext) 
     assert_eq!(picker.dismissed.get(), 0);
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn backspace_on_an_empty_query_goes_to_the_parent(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -291,7 +291,7 @@ fn backspace_on_an_empty_query_goes_to_the_parent(cx: &mut TestAppContext) {
     assert_eq!(picker.lists().last(), Some(&(Some("..".to_owned()), 2)));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn enter_inserts_relative_and_alt_enter_absolute(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -326,7 +326,7 @@ fn enter_inserts_relative_and_alt_enter_absolute(cx: &mut TestAppContext) {
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn enter_inserts_the_top_ranked_match(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -350,7 +350,7 @@ fn enter_inserts_the_top_ranked_match(cx: &mut TestAppContext) {
     assert_eq!(picker.dismissed.get(), 1);
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn home_absolute_and_parent_queries_reroot_through_the_backend(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -392,7 +392,7 @@ fn home_absolute_and_parent_queries_reroot_through_the_backend(cx: &mut TestAppC
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn escape_dismisses_and_cancels_an_unfinished_walk(cx: &mut TestAppContext) {
     let picker = mount(cx, None);
     picker.picker.update(picker.cx, |picker, cx| {
@@ -406,7 +406,7 @@ fn escape_dismisses_and_cancels_an_unfinished_walk(cx: &mut TestAppContext) {
     assert_eq!(picker.calls.borrow().last(), Some(&Call::Cancel(1)));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn git_marks_apply_by_prefix_and_rank_changed_files_first(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(
@@ -460,7 +460,7 @@ fn git_marks_apply_by_prefix_and_rank_changed_files_first(cx: &mut TestAppContex
     assert_eq!(dir, Some(GitMark::Untracked));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn enter_and_tab_act_on_the_current_query_before_its_rank_lands(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -496,7 +496,7 @@ fn enter_and_tab_act_on_the_current_query_before_its_rank_lands(cx: &mut TestApp
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn a_truncated_listing_says_so_when_nothing_shows(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, Vec::new(), true);
@@ -518,7 +518,7 @@ fn a_truncated_listing_says_so_when_nothing_shows(cx: &mut TestAppContext) {
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn an_error_begin_shows_the_message(cx: &mut TestAppContext) {
     let picker = mount(cx, None);
     picker.picker.update(picker.cx, |picker, cx| {
@@ -537,7 +537,7 @@ fn an_error_begin_shows_the_message(cx: &mut TestAppContext) {
     assert!(picker.cx.debug_bounds("path-picker-empty").is_some());
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn a_typed_path_reroots_at_every_slash(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);
@@ -582,7 +582,7 @@ fn a_typed_path_reroots_at_every_slash(cx: &mut TestAppContext) {
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn a_pending_request_resets_the_local_base(cx: &mut TestAppContext) {
     let mut picker = mount(cx, None);
     picker.feed(1, tree(), false);

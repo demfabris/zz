@@ -1,4 +1,4 @@
-use zpui::{App, Div, ParentElement as _, SharedString, Styled as _, div, prelude::*};
+use zz_gpui::{App, Div, ParentElement as _, SharedString, Styled as _, div, prelude::*};
 
 use crate::{ActiveTheme as _, StyledExt as _, rems_from_px};
 

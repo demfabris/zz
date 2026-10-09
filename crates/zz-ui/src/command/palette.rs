@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, ClickEvent, Div, ElementId, Entity, FontWeight, HighlightStyle, Hsla,
     MouseButton, SharedString, StyledText, Window, div, prelude::*, px, relative,
 };
@@ -244,7 +244,7 @@ pub(super) fn palette_entry(
                 .child(
                     div()
                         .min_w_0()
-                        .when(row.detail.is_empty(), zpui::Styled::flex_1)
+                        .when(row.detail.is_empty(), zz_gpui::Styled::flex_1)
                         .when(!row.detail.is_empty(), |label| {
                             label.flex_shrink_0().max_w(relative(0.6))
                         })
@@ -357,7 +357,7 @@ mod tests {
         Root, Theme, ThemeMode,
         command::{CommandPaletteSurface, PaletteHint},
     };
-    use zpui::{Context, Focusable as _, Render, TestAppContext, Window};
+    use zz_gpui::{Context, Focusable as _, Render, TestAppContext, Window};
 
     struct Preview {
         input: Entity<InputState>,
@@ -435,7 +435,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn palette_fits_its_container_and_tracks_light_and_dark_themes(cx: &mut TestAppContext) {
         for (width, mode, radius) in [
             (720.0_f32, ThemeMode::Dark, 12.0),
@@ -466,14 +466,15 @@ mod tests {
                     .iter()
                     .find(|quad| {
                         quad.background
-                            == zpui::solid_background(cx.theme().background.raised(2).opaque())
+                            == zz_gpui::solid_background(cx.theme().background.raised(2).opaque())
                             && quad.bounds.size.width.0 > 300.0 * window.scale_factor()
                     })
                     .expect("palette surface");
                 let selection = quads
                     .iter()
                     .find(|quad| {
-                        quad.background == zpui::solid_background(cx.theme().selection_background())
+                        quad.background
+                            == zz_gpui::solid_background(cx.theme().selection_background())
                             && quad.bounds.size.width.0 > 100.0 * window.scale_factor()
                     })
                     .expect("selected row");
@@ -496,7 +497,7 @@ mod tests {
         }
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn disclosure_toggles_without_activating_or_taking_input_focus(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let (preview, cx) = cx.add_window_view(|window, cx| {
@@ -511,7 +512,7 @@ mod tests {
         });
         cx.run_until_parked();
         let disclosure = cx.debug_bounds("command-palette-disclosure").unwrap();
-        cx.simulate_click(disclosure.center(), zpui::Modifiers::default());
+        cx.simulate_click(disclosure.center(), zz_gpui::Modifiers::default());
         cx.run_until_parked();
         preview.read_with(cx, |preview, _| {
             assert!(preview.expanded);
@@ -519,8 +520,8 @@ mod tests {
         });
         assert!(cx.update(|window, cx| preview.read(cx).input.focus_handle(cx).is_focused(window)));
         cx.simulate_click(
-            disclosure.center() + zpui::point(px(100.0), px(0.0)),
-            zpui::Modifiers::default(),
+            disclosure.center() + zz_gpui::point(px(100.0), px(0.0)),
+            zz_gpui::Modifiers::default(),
         );
         cx.run_until_parked();
         assert_eq!(preview.read_with(cx, |preview, _| preview.activations), 1);

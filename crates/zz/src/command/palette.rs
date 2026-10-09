@@ -1,7 +1,7 @@
 use std::{rc::Rc, sync::Arc};
 
-use zpui::{App, Entity, KeyDownEvent, SharedString};
 use zz_client::completion::PaneKindAvailability;
+use zz_gpui::{App, Entity, KeyDownEvent, SharedString};
 use zz_protocol::{CommandInvocation, InputMessage, MuxSnapshot, PaneId};
 use zz_ui::{
     IconName,

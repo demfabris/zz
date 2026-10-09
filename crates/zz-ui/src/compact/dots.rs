@@ -1,4 +1,4 @@
-use zpui::{App, Div, ParentElement as _, Styled as _, div, prelude::*};
+use zz_gpui::{App, Div, ParentElement as _, Styled as _, div, prelude::*};
 
 use crate::{ActiveTheme as _, rems_from_px};
 
@@ -49,7 +49,7 @@ pub fn page_dots(groups: &[Vec<PageDot>], cx: &App) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use zpui::{
+    use zz_gpui::{
         Bounds, Context, IntoElement, Pixels, Render, TestAppContext, VisualTestContext, Window,
     };
 
@@ -69,7 +69,7 @@ mod tests {
         cx.debug_bounds(selector).expect(selector)
     }
 
-    #[zpui::test]
+    #[zz_gpui::test]
     fn one_element_per_dot_and_the_active_one_is_wider(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let groups = vec![

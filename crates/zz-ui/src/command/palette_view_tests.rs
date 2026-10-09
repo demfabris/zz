@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use zpui::{TestAppContext, VisualTestContext};
+use zz_gpui::{TestAppContext, VisualTestContext};
 use zz_protocol::{ChooseTreeItem, ChooseTreeKind, SessionId, WindowId};
 
 use super::*;
@@ -258,7 +258,7 @@ fn chooser_search_expands_descendants_and_restores_only_its_own_branches() {
     assert!(state.items[0].expanded());
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn daemon_tree_navigation_and_search_preserve_pane_activation(cx: &mut TestAppContext) {
     cx.update(|cx| {
         crate::init(cx);
@@ -306,7 +306,7 @@ fn daemon_tree_navigation_and_search_preserve_pane_activation(cx: &mut TestAppCo
                 .into_iter()
                 .find(|quad| {
                     quad.background
-                        == zpui::solid_background(cx.theme().background.raised(2).opaque())
+                        == zz_gpui::solid_background(cx.theme().background.raised(2).opaque())
                         && quad.bounds.size.width.0 > 300.0 * window.scale_factor()
                 })
                 .expect("palette stays fully opaque after chooser updates")
@@ -400,7 +400,7 @@ fn daemon_tree_navigation_and_search_preserve_pane_activation(cx: &mut TestAppCo
     assert!(sent(&messages, &ChooseTreeAction::ActivateIndex(4)));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn palette_navigation_scrolls_at_most_one_row_per_step(cx: &mut TestAppContext) {
     cx.update(crate::init);
     for unified in [true, false] {
@@ -456,7 +456,7 @@ fn palette_navigation_scrolls_at_most_one_row_per_step(cx: &mut TestAppContext) 
     }
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn unified_palette_modes_targets_and_backspace_keep_input_focus(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let (backend, _) = backend(offline_tree());
@@ -583,7 +583,7 @@ fn unified_palette_modes_targets_and_backspace_keep_input_focus(cx: &mut TestApp
     assert!(palette.read_with(cx, |palette, _| palette.is_finished()));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn local_palette_activates_targets_through_the_backend(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let (backend, calls) = backend(online_tree());
@@ -600,7 +600,7 @@ fn local_palette_activates_targets_through_the_backend(cx: &mut TestAppContext) 
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn local_palette_executes_commands_on_the_attached_host(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let (backend, calls) = backend(online_tree());
@@ -621,7 +621,7 @@ fn local_palette_executes_commands_on_the_attached_host(cx: &mut TestAppContext)
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn palette_keeps_local_edits_for_the_same_revision_and_disables_value_completions(
     cx: &mut TestAppContext,
 ) {
@@ -704,7 +704,7 @@ fn only_a_known_command_followed_by_whitespace_has_arguments() {
     assert!(!has_command_arguments("split-window"));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn key_reading_prompt_relays_keystrokes_to_the_active_pane(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let state = CommandPromptState {
@@ -728,7 +728,7 @@ fn key_reading_prompt_relays_keystrokes_to_the_active_pane(cx: &mut TestAppConte
     assert!(cx.update(|_, cx| palette.read(cx).input.read(cx).value().is_empty()));
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn history_suggestions_skip_commands_the_backend_cannot_run(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let mut state = prompt_state("", CommandPromptMode::Text);
@@ -767,7 +767,7 @@ fn history_suggestions_skip_commands_the_backend_cannot_run(cx: &mut TestAppCont
     assert_eq!(history, ["list-panes"]);
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn a_key_reading_prompt_drops_the_completion_list(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let initial = prompt_state("ren", CommandPromptMode::Text);
@@ -809,7 +809,7 @@ fn a_key_reading_prompt_drops_the_completion_list(cx: &mut TestAppContext) {
     }
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn tab_accepts_completion_without_leaving_the_palette(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let initial = prompt_state("new-w", CommandPromptMode::Text);

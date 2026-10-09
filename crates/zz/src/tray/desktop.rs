@@ -1,5 +1,5 @@
 use async_channel::Sender;
-use zpui::{AnyWindowHandle, App, Entity, Global, Task, WeakEntity};
+use zz_gpui::{AnyWindowHandle, App, Entity, Global, Task, WeakEntity};
 use zz_protocol::CommandInvocation;
 
 use crate::{

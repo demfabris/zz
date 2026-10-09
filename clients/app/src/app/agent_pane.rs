@@ -8,10 +8,6 @@ use std::{
 
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde_json::Value;
-use zpui::{
-    AnyElement, App, Context, Corners, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
-    ListState, MouseButton, Pixels, Render, Subscription, Window, div, prelude::*, px,
-};
 use zz_client::agent_completion::{
     AgentCommand, CommandCompletion, active_command_hint, bare_command_name, completion_query,
     completion_score, meaningful_command_description, pane_commands, ranked_completions,
@@ -23,6 +19,10 @@ use zz_client::agent_config::{
 use zz_client::agent_transcript::{
     AgentPermissionKind, AgentThreadEntry, AgentToolKindModel, AgentToolStatusModel,
     AgentTranscript, ToolPayload, is_zz_command, rewind_command,
+};
+use zz_gpui::{
+    AnyElement, App, Context, Corners, Entity, FocusHandle, Focusable, IntoElement, ListAlignment,
+    ListState, MouseButton, Pixels, Render, Subscription, Window, div, prelude::*, px,
 };
 use zz_protocol::{
     AgentConnectionPhase, AgentDescriptor, AgentImage, AgentQuestionAnswer, AgentSessionOpKind,
@@ -70,7 +70,7 @@ pub(super) struct AgentPane {
     completions: Arc<[CommandCompletion]>,
     completion_selected: Option<usize>,
     completion_dismissed: bool,
-    completion_scroll: zpui::UniformListScrollHandle,
+    completion_scroll: zz_gpui::UniformListScrollHandle,
     last_input: String,
     last_cursor: usize,
     transcript: Transcript,
@@ -102,10 +102,10 @@ pub(super) struct AgentPane {
     project_directory: Option<PathBuf>,
     project_hovered: Option<PathBuf>,
     project_focus: bool,
-    project_scroll: zpui::UniformListScrollHandle,
+    project_scroll: zz_gpui::UniformListScrollHandle,
     history_selected: usize,
     history_delete: Option<String>,
-    picker_scroll: zpui::UniformListScrollHandle,
+    picker_scroll: zz_gpui::UniformListScrollHandle,
     history_supported: bool,
     history_input: Entity<InputState>,
     history_loading: bool,
@@ -114,7 +114,7 @@ pub(super) struct AgentPane {
     next_cursor: Option<String>,
     transcript_dirty: bool,
     header_drag_handler: Option<Rc<dyn Fn(&PaneDrag, &mut Window, &mut App)>>,
-    header_touch_drag_handler: Option<Rc<dyn Fn(&zpui::TouchDragEvent, &mut Window, &mut App)>>,
+    header_touch_drag_handler: Option<Rc<dyn Fn(&zz_gpui::TouchDragEvent, &mut Window, &mut App)>>,
     corner_radii: Corners<Pixels>,
     _subscriptions: Vec<Subscription>,
 }
@@ -258,7 +258,7 @@ impl AgentPane {
             completions: Arc::from([]),
             completion_selected: None,
             completion_dismissed: false,
-            completion_scroll: zpui::UniformListScrollHandle::new(),
+            completion_scroll: zz_gpui::UniformListScrollHandle::new(),
             last_input: String::new(),
             last_cursor: 0,
             transcript: Transcript::default(),
@@ -290,10 +290,10 @@ impl AgentPane {
             project_directory: None,
             project_hovered: None,
             project_focus: false,
-            project_scroll: zpui::UniformListScrollHandle::new(),
+            project_scroll: zz_gpui::UniformListScrollHandle::new(),
             history_selected: 0,
             history_delete: None,
-            picker_scroll: zpui::UniformListScrollHandle::new(),
+            picker_scroll: zz_gpui::UniformListScrollHandle::new(),
             history_supported: false,
             history_input,
             history_loading: false,
@@ -324,7 +324,7 @@ impl AgentPane {
 
     pub(super) fn set_header_touch_drag_handler(
         &mut self,
-        handler: impl Fn(&zpui::TouchDragEvent, &mut Window, &mut App) + 'static,
+        handler: impl Fn(&zz_gpui::TouchDragEvent, &mut Window, &mut App) + 'static,
     ) {
         self.header_touch_drag_handler = Some(Rc::new(handler));
     }
@@ -416,7 +416,7 @@ impl AgentPane {
         );
         if let Some(selected) = self.completion_selected {
             self.completion_scroll
-                .scroll_to_item(selected, zpui::ScrollStrategy::Nearest);
+                .scroll_to_item(selected, zz_gpui::ScrollStrategy::Nearest);
         }
         true
     }
@@ -485,7 +485,7 @@ impl AgentPane {
         };
         self.completion_selected = Some(selected);
         self.completion_scroll
-            .scroll_to_item(selected, zpui::ScrollStrategy::Nearest);
+            .scroll_to_item(selected, zz_gpui::ScrollStrategy::Nearest);
         cx.notify();
     }
 
@@ -517,7 +517,7 @@ impl AgentPane {
         let selected = self.completion_selected;
         let view = cx.entity();
         let pane = self.pane;
-        let rows = zpui::uniform_list(
+        let rows = zz_gpui::uniform_list(
             ("web-agent-completion-rows", pane.0),
             completions.len(),
             move |range, _, cx| {
@@ -1297,7 +1297,7 @@ impl AgentPane {
         let layout_view = cx.entity();
         let view = cx.entity();
         let pane = self.pane;
-        let rows = zpui::uniform_list(
+        let rows = zz_gpui::uniform_list(
             ("agent-history-rows", pane.0),
             count,
             move |range, _, cx| {
@@ -1514,7 +1514,7 @@ impl AgentPane {
                 .map_element(|modal| modal.w_full().min_w_0().min_h_0())
                 .child(picker_header(cx).child(picker_search(&self.history_input, cx)))
                 .child(zz_ui::h_flex().relative().flex_1().min_h_0().min_w_0().items_stretch()
-                    .when(compact, zpui::Styled::flex_col)
+                    .when(compact, zz_gpui::Styled::flex_col)
                     .on_prepaint(move |bounds, _, cx| {
                         layout_view.update(cx, |this, cx| {
                             let compact = bounds.size.width < px(560.0);
@@ -1582,7 +1582,7 @@ impl AgentPane {
         self.history_selected = 0;
         self.history_delete = None;
         self.picker_scroll
-            .scroll_to_item(0, zpui::ScrollStrategy::Nearest);
+            .scroll_to_item(0, zz_gpui::ScrollStrategy::Nearest);
         cx.notify();
     }
 
@@ -1641,7 +1641,7 @@ impl AgentPane {
         let selected = self.project_directory.clone();
         let hovered = self.project_hovered.clone();
         let view = cx.entity();
-        let rows = zpui::uniform_list(
+        let rows = zz_gpui::uniform_list(
             ("agent-project-directories", self.pane.0),
             entries.len(),
             move |range, _, cx| {
@@ -1725,10 +1725,10 @@ impl AgentPane {
             .min_w_0()
             .min_h_0()
             .when(self.history_compact, |column| {
-                column.w_full().h(zpui::relative(0.35)).border_b_1()
+                column.w_full().h(zz_gpui::relative(0.35)).border_b_1()
             })
             .when(!self.history_compact, |column| {
-                column.w(zpui::relative(0.36)).border_r_1()
+                column.w(zz_gpui::relative(0.36)).border_r_1()
             })
             .border_color(cx.theme().border())
             .p(px(zz_ui::CHROME_GAP))
@@ -1748,7 +1748,7 @@ impl AgentPane {
 
     fn picker_key_down(
         &mut self,
-        event: &zpui::KeyDownEvent,
+        event: &zz_gpui::KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1808,7 +1808,7 @@ impl AgentPane {
                         let recent = directories.iter().take_while(|row| row.recent).count();
                         self.project_scroll.scroll_to_item(
                             next + 1 + usize::from(recent > 0 && next >= recent),
-                            zpui::ScrollStrategy::Nearest,
+                            zz_gpui::ScrollStrategy::Nearest,
                         );
                     }
                 } else {
@@ -1818,7 +1818,7 @@ impl AgentPane {
                         (self.history_selected + 1) % results
                     };
                     self.picker_scroll
-                        .scroll_to_item(self.history_selected, zpui::ScrollStrategy::Nearest);
+                        .scroll_to_item(self.history_selected, zz_gpui::ScrollStrategy::Nearest);
                 }
             }
             "enter" if self.history_delete.is_none() => {
@@ -2252,7 +2252,7 @@ impl AgentPane {
 
     fn permission_key_down(
         &mut self,
-        event: &zpui::KeyDownEvent,
+        event: &zz_gpui::KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -3084,7 +3084,7 @@ fn permission_questions(payload: &Value) -> Vec<AgentQuestion> {
         .unwrap_or_default()
 }
 
-fn decode_transcript_image(format: &str, data: Vec<u8>) -> Option<Arc<zpui::Image>> {
+fn decode_transcript_image(format: &str, data: Vec<u8>) -> Option<Arc<zz_gpui::Image>> {
     let image = AgentImage {
         format: format.to_owned(),
         data,
@@ -3093,9 +3093,9 @@ fn decode_transcript_image(format: &str, data: Vec<u8>) -> Option<Arc<zpui::Imag
     preview_image(&image)
 }
 
-fn preview_image(image: &AgentImage) -> Option<Arc<zpui::Image>> {
-    Some(Arc::new(zpui::Image::from_bytes(
-        zpui::ImageFormat::from_mime_type(&image.format)?,
+fn preview_image(image: &AgentImage) -> Option<Arc<zz_gpui::Image>> {
+    Some(Arc::new(zz_gpui::Image::from_bytes(
+        zz_gpui::ImageFormat::from_mime_type(&image.format)?,
         image.data.clone(),
     )))
 }
@@ -3139,7 +3139,7 @@ fn restored_prompts(
 }
 
 struct Transcript {
-    model: AgentTranscript<Arc<zpui::Image>>,
+    model: AgentTranscript<Arc<zz_gpui::Image>>,
     entries: Vec<AgentEntry>,
     markdown: HashMap<u64, AgentMarkdown>,
     tool_payloads: HashMap<(u64, usize), AgentToolPayload>,
@@ -3295,7 +3295,7 @@ fn replaced_markdown(
 }
 
 fn ui_entry_with_markdown(
-    entry: &AgentThreadEntry<Arc<zpui::Image>>,
+    entry: &AgentThreadEntry<Arc<zz_gpui::Image>>,
     parent: Option<u64>,
     markdown_sources: &mut HashMap<u64, AgentMarkdown>,
     tool_payloads: &mut HashMap<(u64, usize), AgentToolPayload>,
@@ -3310,7 +3310,7 @@ fn ui_entry_with_markdown(
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
             images: images.clone().into(),
-            rewind_id: entry.rewind_id().map(zpui::SharedString::from),
+            rewind_id: entry.rewind_id().map(zz_gpui::SharedString::from),
         },
         AgentThreadEntry::Assistant {
             id,
@@ -3332,7 +3332,7 @@ fn ui_entry_with_markdown(
             default_expanded,
         } => AgentEntry::Reasoning {
             id: *id,
-            label: zpui::SharedString::from(label.clone()),
+            label: zz_gpui::SharedString::from(label.clone()),
             markdown: streaming_markdown(markdown_sources, *id, markdown),
             default_expanded: *default_expanded,
         },
@@ -3376,8 +3376,8 @@ fn ui_entry_with_markdown(
                     AgentToolStatusModel::Failed => AgentToolStatus::Failed,
                     AgentToolStatusModel::Canceled => AgentToolStatus::Canceled,
                 },
-                label: zpui::SharedString::from(label.clone()),
-                location: location.clone().map(zpui::SharedString::from),
+                label: zz_gpui::SharedString::from(label.clone()),
+                location: location.clone().map(zz_gpui::SharedString::from),
                 input: input
                     .as_ref()
                     .map(|payload| retained_tool_payload(tool_payloads, *id, 0, payload)),

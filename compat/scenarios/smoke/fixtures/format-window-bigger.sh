@@ -156,11 +156,13 @@ check_equal cursor-inside 'big=[1] ox=[0] oy=[0]' "$(expand)"
 park_cursor 26 101 S || { echo "format-window-bigger-$side: park-26"; exit 0; }
 check_equal cursor-centred 'big=[1] ox=[60] oy=[3]' "$(expand)"
 
-# cmd_list_windows_exec builds its rows with a null client, so a row answers
-# null for all three even while the client is attached and the window is bigger.
-check_equal list-windows-row 'big=[] ox=[] oy=[]' \
+# tmux 3.8 (d9692f7e) builds list rows with the invoking client, here the
+# unattached command client, whose tty never set an offset, so a row answers 0
+# with null offsets even while another client sees a bigger window. The
+# d77c9dc6 pin passed a null client and answered null for all three.
+check_equal list-windows-row 'big=[0] ox=[] oy=[]' \
     "$(main_client list-windows -t "=$session" -F "$probe")"
-check_equal list-panes-row 'big=[] ox=[] oy=[]' \
+check_equal list-panes-row 'big=[0] ox=[] oy=[]' \
     "$(main_client list-panes -t "=$session" -F "$probe")"
 
 kill "$client_pid" >/dev/null 2>&1 || true

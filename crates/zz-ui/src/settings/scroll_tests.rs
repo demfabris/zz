@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AppContext as _, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
     Render, ScrollDelta, ScrollWheelEvent, Styled as _, TestAppContext, VisualTestContext, Window,
     div, point, px,
@@ -39,7 +39,7 @@ impl Render for WrappedTextTest {
                     .child(
                         div()
                             .text_size(crate::rems_from_px(10.))
-                            .child(zpui::SharedString::from("word ".repeat(60))),
+                            .child(zz_gpui::SharedString::from("word ".repeat(60))),
                     )
                     .child(row("wrapped-text-tail", 20.)),
             ),
@@ -48,8 +48,8 @@ impl Render for WrappedTextTest {
 }
 
 struct SettingsPageReplicaTest {
-    pickers: Vec<zpui::Entity<crate::color_picker::ColorPickerState>>,
-    numbers: Vec<zpui::Entity<crate::input::InputState>>,
+    pickers: Vec<zz_gpui::Entity<crate::color_picker::ColorPickerState>>,
+    numbers: Vec<zz_gpui::Entity<crate::input::InputState>>,
 }
 
 impl Render for SettingsPageReplicaTest {
@@ -89,7 +89,7 @@ impl Render for SettingsPageReplicaTest {
                                         .child(super::settings_provenance_badge("default")),
                                 )
                                 .control(
-                                    crate::color_picker::ColorPicker::new(picker, zpui::black()),
+                                    crate::color_picker::ColorPicker::new(picker, zz_gpui::black()),
                                 )
                             })),
                     )
@@ -136,7 +136,7 @@ impl Render for SettingsPageReplicaTest {
     }
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn settings_page_scroll_range_matches_content(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let (_, cx) = cx.add_window_view(|window, cx| SettingsPageReplicaTest {
@@ -160,7 +160,7 @@ fn settings_page_scroll_range_matches_content(cx: &mut TestAppContext) {
     );
 }
 
-#[zpui::test]
+#[zz_gpui::test]
 fn scroll_range_measures_wrapped_text_at_layout_width(cx: &mut TestAppContext) {
     cx.update(crate::init);
     let (_, cx) = cx.add_window_view(|_, _| WrappedTextTest);

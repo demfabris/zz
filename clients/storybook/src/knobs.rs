@@ -1,4 +1,4 @@
-use zpui::{App, WindowAppearance, px};
+use zz_gpui::{App, WindowAppearance, px};
 use zz_ui::{
     Theme, ThemeMode, UiZoom,
     chrome_palette::{ChromePresetId, inherited_chrome_colors},

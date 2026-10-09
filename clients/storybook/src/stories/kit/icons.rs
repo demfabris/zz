@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyElement, App, IntoElement, ParentElement as _, Styled as _, Transformation, Window, div,
     percentage, px,
 };

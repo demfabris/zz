@@ -1,6 +1,6 @@
 use std::{cell::Cell, rc::Rc};
 
-use zpui::{
+use zz_gpui::{
     AnyView, App, AppContext as _, Context, Entity, Focusable as _, IntoElement, Keystroke,
     ParentElement as _, Render, Styled as _, Window, div, prelude::*, px,
 };

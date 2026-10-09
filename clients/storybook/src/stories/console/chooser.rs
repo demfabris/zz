@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyElement, App, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div,
     prelude::*, px,
 };

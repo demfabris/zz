@@ -10,7 +10,9 @@ use std::{
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use zpui::{App, Bounds, Context, DisplayId, Pixels, Size, Window, WindowBounds, point, px, size};
+use zz_gpui::{
+    App, Bounds, Context, DisplayId, Pixels, Size, Window, WindowBounds, point, px, size,
+};
 
 use crate::{
     config::atomic_write,

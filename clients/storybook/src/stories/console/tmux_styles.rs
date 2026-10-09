@@ -1,4 +1,6 @@
-use zpui::{AnyElement, App, Hsla, IntoElement, ParentElement as _, Styled as _, Window, div, px};
+use zz_gpui::{
+    AnyElement, App, Hsla, IntoElement, ParentElement as _, Styled as _, Window, div, px,
+};
 use zz_protocol::parse_styled_segments;
 use zz_ui::{
     ActiveTheme as _, Colorize as _, h_flex,

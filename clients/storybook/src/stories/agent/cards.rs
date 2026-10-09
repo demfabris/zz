@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
-use zpui::{
-    AnyElement, AnyView, App, AppContext as _, Context, IntoElement, ParentElement as _, Render,
-    SharedString, Styled as _, Window, div, px, uniform_list,
-};
 use zz_client::agent_completion::{
     AgentCommand, CommandCompletion, bare_command_name, completion_query,
     meaningful_command_description, pane_commands, ranked_completions,
+};
+use zz_gpui::{
+    AnyElement, AnyView, App, AppContext as _, Context, IntoElement, ParentElement as _, Render,
+    SharedString, Styled as _, Window, div, px, uniform_list,
 };
 use zz_protocol::{AgentTaskWire, MAX_AGENT_OPTION_BYTES, agent_stream::AgentQuestion};
 use zz_ui::{

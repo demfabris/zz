@@ -1,10 +1,10 @@
 use std::{rc::Rc, sync::Arc};
 
-use zpui::{
+use zz_client::completion::PaneKindAvailability;
+use zz_gpui::{
     AnyElement, AnyView, App, AppContext as _, Context, Entity, IntoElement, KeyDownEvent,
     Keystroke, ParentElement as _, Render, SharedString, Styled as _, Window, div, prelude::*, px,
 };
-use zz_client::completion::PaneKindAvailability;
 use zz_protocol::{
     ChooseTreeItem, ChooseTreeKind, ChooseTreePaneKind, ChooseTreeState, ChooseTreeTarget,
     CommandInvocation, CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType,

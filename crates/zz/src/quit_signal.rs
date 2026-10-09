@@ -6,7 +6,7 @@ use std::{
     time::Duration,
 };
 
-use zpui::App;
+use zz_gpui::App;
 
 const QUIT_SIGNALS: [libc::c_int; 3] = [libc::SIGTERM, libc::SIGINT, libc::SIGHUP];
 const FORCED_EXIT_AFTER: Duration = Duration::from_secs(2);

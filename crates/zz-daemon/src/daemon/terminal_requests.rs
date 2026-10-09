@@ -272,6 +272,15 @@ pub(super) struct CommandState {
 }
 
 impl CommandState {
+    pub(super) fn parked(continuation: cmdq::WaitContinuation) -> Arc<Self> {
+        Arc::new(Self {
+            remaining: AtomicUsize::new(1),
+            continuation,
+            output: Mutex::new(None),
+            notify: Arc::new(|| {}),
+        })
+    }
+
     fn add(&self) {
         if self.remaining.fetch_add(1, Ordering::AcqRel) == 0 {
             self.continuation.rearm();

@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyView, Context, IntoElement, ParentElement as _, Render, Styled as _, Window, canvas, div,
     px, size,
 };

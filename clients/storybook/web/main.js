@@ -205,14 +205,14 @@ window.storybook = {
     current: () => current,
     show: (story, section) => {
         show(story, section);
-        return globalThis.zpui?.idle();
+        return globalThis.zzGpui?.idle();
     },
     setKnobs: (knobs) => {
         for (const [name, value] of Object.entries(knobs)) {
             if (form.elements[name]) setKnobValue(name, String(value));
         }
         applyKnobs();
-        return globalThis.zpui?.idle();
+        return globalThis.zzGpui?.idle();
     },
     knobs: () => Object.fromEntries(KNOBS.map((name) => [name, knobValue(name)])),
     presets: () => JSON.parse(zz.presets()),

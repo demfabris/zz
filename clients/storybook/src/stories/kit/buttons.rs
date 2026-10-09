@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyElement, AnyView, App, AppContext as _, Context, IntoElement, MouseButton,
     ParentElement as _, Render, Styled as _, Subscription, Window, div, px,
 };

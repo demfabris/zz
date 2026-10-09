@@ -426,12 +426,13 @@ impl SettingsView {
                                 .small()
                                 .label("Choose…")
                                 .on_click(cx.listener(move |this, _, window, cx| {
-                                    let selected = cx.prompt_for_paths(zpui::PathPromptOptions {
-                                        files: true,
-                                        directories: false,
-                                        multiple: false,
-                                        prompt: Some("Choose configuration".into()),
-                                    });
+                                    let selected =
+                                        cx.prompt_for_paths(zz_gpui::PathPromptOptions {
+                                            files: true,
+                                            directories: false,
+                                            multiple: false,
+                                            prompt: Some("Choose configuration".into()),
+                                        });
                                     let input = this.file_options[&kind].donor.clone();
                                     cx.spawn_in(window, async move |_, window| {
                                         let path =
@@ -769,10 +770,12 @@ fn option_choices(key: FileKey, scheme: TerminalColorScheme) -> Vec<(String, Str
 mod tests {
     use super::*;
 
-    #[zpui::test]
-    fn terminal_preview_uses_drafts_without_changing_saved_settings(cx: &mut zpui::TestAppContext) {
+    #[zz_gpui::test]
+    fn terminal_preview_uses_drafts_without_changing_saved_settings(
+        cx: &mut zz_gpui::TestAppContext,
+    ) {
         use std::{cell::RefCell, rc::Rc};
-        use zpui::EntityInputHandler as _;
+        use zz_gpui::EntityInputHandler as _;
 
         cx.update(zz_ui::init);
         let captured = Rc::new(RefCell::new(None));

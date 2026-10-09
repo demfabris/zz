@@ -63,6 +63,8 @@ orchestrator never runs the full suite per item.
      registry, oracle or manifest tests changed. A merge that changes `zz-protocol` (wire types,
      `key.rs` default tables, the catalog) also runs `cargo.sh test -p zz-client`: its which-key and
      reducer tests read those tables (pin.keys-copy's 3.8 `T` binding broke two, 2026-10-09).
+     Every merge also runs `cargo.sh test -p zz-cli`: its end-to-end tests drive the daemon and
+     caught two stale expectations that per-crate checks missed (hooks-events-2, followups).
    - `ledger.py set <id> merged --sha <merge sha>`, commit the ledger, push `main`.
    - Delete the branch locally and on origin. Start the next ready item in the same slot
      (`wt.sh item` switches the warm worktree to a new branch), or `wt.sh rm <slot>` if nothing is
@@ -97,7 +99,8 @@ Each rule cost a campaign real time. The source is in brackets
 
 1. **Cargo only through `compat/catchup/cargo.sh`.** It caps memory, sets `--jobs` from RAM, and
    holds one of two cargo slots inside `flock -o`, so a killed lane's daemons cannot keep a slot
-   locked. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
+   locked. When both slots are busy it polls every slot, so a build never queues behind one slot
+   while the other is free. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
    it too when run as `PATH=$PWD/compat/catchup/bin:$PATH <script>`; always run them that way. [Five lanes OOMed alienware for hours; a leaked slot fd stalled every lane for 7 h.]
 2. **Iterate behind a filter**: `compat/catchup/cargo.sh test -p <crate> --lib <name>`. Run the full
    test package of each crate you touched once, before your final commit. Never
@@ -185,6 +188,10 @@ so one of them may run beside the compiling lanes. On macOS there is no `systemd
   the measured 3.8 delta with its oracle tools). Never `/tmp`: it is RAM and a reboot empties it.
 - **Before stopping or switching machines**: every lane branch committed (a WIP commit is fine) and
   pushed, ledger notes saying where each lane stands, `main` pushed.
+- **main is shared**: fabrico and other sessions push to it while the campaign runs (two restructures on
+  2026-10-09). `git fetch` before every push; an unpushed ledger-only commit is rebased onto
+  `origin/main`, anything else is merged. After a restructure lands, tell every running lane to merge
+  `main` before its final commit.
 - **Before every push** (public repo): `python3 compat/evidence-secrets.py`, then
   `git diff origin/<branch>..HEAD | rg -n 'gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|BEGIN [A-Z ]*PRIVATE KEY'`
   must print nothing.
@@ -246,7 +253,7 @@ check `pgrep -af codex` on resume.
   known differences, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.
-- 2026-10-09 fabrico resumed the campaign after the restructure (gpui renamed zpui and moved in-repo,
+- 2026-10-09 fabrico resumed the campaign after the restructure (gpui renamed zz-gpui and moved in-repo,
   zz-kit split out of zz-ui, clients/gpui-shared became clients/app, clients/ios). Orchestrator: lane
   branches take main by merge, not rebase: their history is on origin and several carry merges already, so a rebase would force-push
   and replay those. Registry, generated gaps.md and wire doc conflicts are resolved by the
@@ -266,3 +273,6 @@ check `pgrep -af codex` on resume.
   cause: clipping a float rewrote its rect instead of cropping its surface). Because the float track is
   large and each item's reviews only saw its own slice, one whole-track Codex review
   (`git diff main...catchup/float.keys`) runs before the track merges to main.
+- 2026-10-09 orchestrator: a centred display-popup sits one row higher than 3.8's at an odd client
+  height, because the modal pane is placed in window cells; recorded with the title column and the `O`
+  flag as known drift under `display-popup.modal-pane` (fabrico's master-model ruling).

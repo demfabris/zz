@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, IntoElement, ListSizingBehavior, ParentElement as _, SharedString,
     Styled as _, UniformListScrollHandle, Window, div, prelude::*, px, uniform_list,
 };
@@ -142,7 +142,7 @@ fn sidebars(scrolls: &[UniformListScrollHandle; 3], _: &mut Window, cx: &mut App
 
 fn row_box(id: impl Into<SharedString>, width: f32, content: impl IntoElement) -> AnyElement {
     div()
-        .id(zpui::ElementId::Name(id.into()))
+        .id(zz_gpui::ElementId::Name(id.into()))
         .w(px(width))
         .child(content)
         .into_any_element()

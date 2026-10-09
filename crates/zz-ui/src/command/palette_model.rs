@@ -4,8 +4,8 @@ use std::{
     ops::Range,
 };
 
-use zpui::SharedString;
 use zz_client::completion::{CompletionSuggestion, PaneKindAvailability};
+use zz_gpui::SharedString;
 use zz_protocol::{
     ChooseTreeState, ChooseTreeTarget, CommandSpec, CommandValueKind, MuxSnapshot, PaneId,
     PaneKindSnapshot, SessionId, WindowId, command_specs,

@@ -464,7 +464,7 @@
         "2026-10-09: lane done at 123fd791c: all 11 items closed; tui-overlays mode screen asserted; terminal.zoom-reflow ruled an engine limit (native) by the orchestrator under the no-engine-patch ruling; integration merge sent",
         "2026-10-09: codex review 1: 4 P1 + 5 P2 (template lost when -k host chosen, desktop routing by invoking client, -k dropped on desktop, wrong window unzoomed, ...); fix pass sent; full attached-client PASS moved to pin.hooks-events-2",
         "PAUSED 2026-10-09: fix pass 9a9628914 done (9 findings); second Codex review was stopped before it reported: rerun review.sh a pin.display-panes, then merge.",
-        "2026-10-09: RESUMED: main (8e948fd46, the zpui/zz-kit/clients restructure plus pin.hooks-events) merged in at a1acf6309; daemon.rs pane-mode conflict hand-resolved (push_pane_mode wraps push_pane_mode_entry, Panes is panes-mode); lane relaunched to compile, prove the pane-mode hooks, rerun its scenarios; then review 2.",
+        "2026-10-09: RESUMED: main (8e948fd46, the zz-gpui/zz-kit/clients restructure plus pin.hooks-events) merged in at a1acf6309; daemon.rs pane-mode conflict hand-resolved (push_pane_mode wraps push_pane_mode_entry, Panes is panes-mode); lane relaunched to compile, prove the pane-mode hooks, rerun its scenarios; then review 2.",
         "2026-10-09: Relaunch done at ebb54affb: merge compiles; pane-mode hooks fire on timer, overlay choice and mode re-entry like 3.8 (display-panes-format 38 steps, display-panes-template clean:36, args-parse 3, tui-overlays 39/39, zz-daemon 1690, zz-mux 679, clippy, fmt, compat check); review 2 running.",
         "2026-10-09: Codex review 2 (pin.display-panes-2.md): 4 P1 (overlay not tied to the mode: focus dismissal, -s source vs host window, viewers attaching later; copy-mode does not replace panes-mode) + 2 P2 (zoom marker, format_draw alignment); final fix pass sent (overlay derived from the pane mode), merges after it without a third review.",
         "2026-10-09: Merged after the final fix pass (730dd70da) and the main merge (override count 25); merge checks green (clippy 4 crates, zz-protocol 283, zz-mux 680, daemon display_panes 18, zz-tui 269, compat check). Desktop: with -s naming another window the overlay draws indicators on panes not on screen (renderer work, not chased)."
@@ -504,7 +504,7 @@
       "id": "pin.hooks-events-2",
       "track": "pin",
       "title": "Rest of the 3.8 hook surface",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "pin.hooks-events"
       ],
@@ -527,14 +527,15 @@
         "compat/attached-client.sh's probe_client_event_hooks passes at 3.8: client-active fills #{hook_session} and #{hook_session_name} (3.8 prints |$0|attached,)."
       ],
       "branch": "catchup/pin.hooks-events-2",
-      "sha": null,
+      "sha": "7f251c2e4",
       "notes": [
         "2026-10-09: leftovers of pin.hooks-events.",
         "2026-10-09: From pin.display-panes: inner.pane_mode_transitions.clear() at command end sits outside the hooks-enabled branch, so a transition recorded outside a command and not fired at once is dropped (clock-mode -k and switch-mode exits may leak); 3.8 send-keys to a pane in a mode does nothing without an attached client (window_pane_key), zz passes it to the mode.",
         "2026-10-09: Lane done at 44257f9e6: all 7 clauses (prompt events, wait-for -E/-v/-F sink, 10 payload keys + 2 to linked-groups, after-select-pane skip, set-hook -E registry, gap closed, attached-client --client-events PASS); mode transition leak fixed; send-keys to a mode unattached already matched. Follow-ups: zz events still carry d77 payload keys 3.8 dropped (visible in wait-for -E -v); -v prints at wake not per event; pane prompts are per client (close on detach); formats-values session_active list filters fail on main. Review 1 running.",
         "2026-10-09: Codex review 1 (pin.hooks-events-2-1.md): 4 P1 (format monitors bypass the sink, -v buffered not streamed, interactive clients cannot wait, pane_command uses the current default-shell) + P2 (prompt events carry session keys; also drop d77 keys 3.8 removed); fix pass sent.",
         "2026-10-09: Fix pass 18573ad8e (main merged 6ad508a6a): review 1's 4 P1 + P2 fixed with 3.8 checks; d77 payload keys left to fix.followups. Review 2 running.",
-        "2026-10-09: Codex review 2 (pin.hooks-events-2-2.md): 3 P1 (-v still buffered for control/interactive, filters inherit waiter context, set-hook -o no-op registers) + P2 (legacy keys: fix.followups); final fix pass sent."
+        "2026-10-09: Codex review 2 (pin.hooks-events-2-2.md): 3 P1 (-v still buffered for control/interactive, filters inherit waiter context, set-hook -o no-op registers) + P2 (legacy keys: fix.followups); final fix pass sent.",
+        "2026-10-09: Merged after the final fix pass (df5ce835b: -v streams to every client kind, filters use only the waiting client, set-hook @x registers only on assignment) and main merges; checks green (zz-daemon 1584, zz-mux 682, zz-protocol 291, zz-client 217, 8 hook scenarios vs 3.8, attached-client --client-events)."
       ]
     },
     {
@@ -601,7 +602,9 @@
       "notes": [
         "2026-10-09: leftovers of pin.formats-options; see its lane report in the ledger notes.",
         "2026-10-09: Session 1 done at 959a3fa27: display-message -j, history_* native (formats.history-counters), clear-on-attach, copy-mode-current-line-style, A modifier animation, hook_fire_*, clipboard_invalid, terminal-features-3-8 (tui-caps 408/408); wire appends under 108. Customize rebuild split to pin.customize-3-8. Review 1 running.",
-        "2026-10-09: Codex review 1 (pin.formats-options-2-1.md): 6 P1 (animation flag per client, current-line style change not republished, empty hooks not counted, counters survive unset, user hooks uncounted, extended underlines dropped); fix pass sent."
+        "2026-10-09: Codex review 1 (pin.formats-options-2-1.md): 6 P1 (animation flag per client, current-line style change not republished, empty hooks not counted, counters survive unset, user hooks uncounted, extended underlines dropped); fix pass sent.",
+        "2026-10-09: Fix pass dd957c8b5 (main merged): animation flag per client, current-line style republished (3.8 does not repaint at once: fixture proves), empty hooks counted on the global entry, unset clears counts, user hooks counted, extended underlines; hook-fire-count 27, display-message 34, tui-copy-mode 154/154. Review 2 running.",
+        "2026-10-09: Codex review 2: 4 P1 (negotiated utf8 not applied to TUI output, global hook unset keeps count, monitor fires not counted on the option entry, appesc ignores Enesc/Dsesc overrides) + 2 P2; final fix pass sent."
       ]
     },
     {
@@ -720,7 +723,7 @@
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "active",
+      "status": "review",
       "deps": [
         "float.core"
       ],
@@ -755,7 +758,8 @@
         "2026-10-09: Codex review 1 (float.clients-1.md): 8 P1 (capture modal vs terminal shortcuts, float header steals rows, rejected drag sticks, resize border-status adjust, TUI clip offset, web clip insets, cursor under a float, iOS browsers hidden by any float) + 2 P2 (one command list, screenshots); fix pass sent. Screenshots blocked: the alienware NVIDIA GPU fell off the bus (nvidia-smi Unknown Error), gamescope vkCreateInstance -9; needs a reboot or another machine.",
         "2026-10-09: Fix pass done at dcecfc5d3 (float.core ae87b1ec0 merged): review 1's 8 P1 fixed with tests, tui-floating 12/12 vs 3.8, drag commits as one command list (run-shell -C list); screenshots open (GPU down). Open: display-popup -T title missing when the popup's pane-border-style/window-style options are set (lane continuing). Review 2 running.",
         "2026-10-09: Codex review 2 (float.clients-2.md): 7 P1 (TUI crop rewrites rect: damage rows, kitty placements, pane-mode re-centre; mode cursor through floats; iOS browsers live under a modal scrim; no-op drag commit sticks; bottom-status resize uses canvas height) + 2 P2 (web title markup, screenshots); final fix pass queued after the -T title fix. A whole-track Codex review runs before the float track merges.",
-        "2026-10-09: Final pass done at ca5ae494c: popup -T title (ctrl.rs client view), review 2's 7 P1 + web title markup; tui-floating 15/15 vs 3.8. Left: raw TUI ignores a float pane's window-style (popup-style background), tui-overlays popup cases need master-model known drift (title column, O flag), drag height in a window with no tiled pane needs the window height on the wire; screenshots (GPU). Short follow-up lane in slot b."
+        "2026-10-09: Final pass done at ca5ae494c: popup -T title (ctrl.rs client view), review 2's 7 P1 + web title markup; tui-floating 15/15 vs 3.8. Left: raw TUI ignores a float pane's window-style (popup-style background), tui-overlays popup cases need master-model known drift (title column, O flag), drag height in a window with no tiled pane needs the window height on the wire; screenshots (GPU). Short follow-up lane in slot b.",
+        "2026-10-09: Follow-up done at fd87e8eba: float window-style in the raw TUI (popup colours as 3.8), tui-overlays popup cases pass with 3 master-model drifts (title column, O flag, odd-height centring one row up: accepted by the orchestrator under display-popup.modal-pane), WindowSnapshot sx/sy appended under 108 for drags in float-only windows. Desktop/web still map theme colours to zz's palette. Screenshots open (GPU). Done; merges with the float track."
       ]
     },
     {
@@ -795,7 +799,8 @@
         "2026-10-09: float.core deleted PopupPointerState; build drag on MouseKey.press (on the wire, ignored by the daemon until this item). Branch from the float.clients branch tip.",
         "2026-10-09: Branched from catchup/float.clients f61c2f2f1 (float track merges as one unit).",
         "2026-10-09: Lane done at cdeebf810: all 5 clauses (float-keys 32 steps, tui-floating 23/23, tui-mouse 62/62 + self-check, editor modal via choose-buffer/customize e, gaps keys.move-table/float.keys closed); fixed a float.core panic (new-pane in a float-only window). Found: a submenu item chosen by mouse release leaves no menu (3.8 shows the next menu); russh_socks loopback test failed twice. Review 1 running on f61c2f2f1..HEAD.",
-        "2026-10-09: Codex review 1 (float.keys-1.md): 4 P1 (editor write-back by name only, mouse geometry ignores top status rows, editor paste eaten by chooser checks, submenu by mouse release) + 2 P2 (paste-buffer-changed, failed-edit proofs); fix pass sent. The submenu mouse-release bug moved here from fix.followups."
+        "2026-10-09: Codex review 1 (float.keys-1.md): 4 P1 (editor write-back by name only, mouse geometry ignores top status rows, editor paste eaten by chooser checks, submenu by mouse release) + 2 P2 (paste-buffer-changed, failed-edit proofs); fix pass sent. The submenu mouse-release bug moved here from fix.followups.",
+        "2026-10-09: Fix pass bb73f52f8: review 1's 4 P1 + 2 P2 fixed (editor write-back identity, top-status mouse rows, editor paste, submenu by mouse release via display-menu from a mouse binding, paste-buffer-changed, failed-edit proofs); tui-floating 29/29, tui-mouse 66/66. Integration step running: merge float.clients fd87e8eba + main, prove the merged tip; then the whole-track review."
       ]
     },
     {
@@ -840,7 +845,7 @@
       "id": "fix.formats-values-3-8",
       "track": "fix",
       "title": "formats-values scenario is red on main at the 3.8 pin",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/formats.rs",
@@ -853,16 +858,21 @@
         "The cause is named: a regression from a catch-up merge (which commit) or 3.8 drift (which tmux change)."
       ],
       "branch": "catchup/fix.formats-values-3-8",
-      "sha": null,
+      "sha": "1ffee6457",
       "notes": [
-        "2026-10-09: found by pin.hooks-events-2 and confirmed by the orchestrator on main 51adcd7a5: OUT differs (zz prints rows tmux leaves out in the #{session_active} list filters); clean in compat/results/summary.md, which was stamped at the d77c9dc6 pin."
+        "2026-10-09: found by pin.hooks-events-2 and confirmed by the orchestrator on main 51adcd7a5: OUT differs (zz prints rows tmux leaves out in the #{session_active} list filters); clean in compat/results/summary.md, which was stamped at the d77c9dc6 pin.",
+        "2026-10-09: Lane done at 5cc71dda9: cause is 3.8 drift (tmux d9692f7e: list-sessions/windows/panes rows get the invoking client), zz now formats list rows with the invoking client; formats-values 48 steps clean vs 3.8. Follow-ups: format-window-cell-metrics and smoke/format-window-bigger red at 3.8 from the same commit (zz has no format facts for an unattached command client: client-PID name, focused, key table, 80 width, window_bigger 0; also new-session -P -F #{client_name}). Review 1 running.",
+        "2026-10-09: Codex review 1: P1 unattached list invocations drop client facts (list-sessions -f '#{client_pid}'); the unattached-client facts follow-up moved here from fix.followups (same tmux d9692f7e); P2 recorded proof; fix pass sent.",
+        "2026-10-09: Fix pass e7b468d9d: unattached command clients get 3.8's format facts (client-PID, focused, root, width 80, window_bigger 0); list rows and new-session -P use the invoking client's facts; formats-values 52, format-window-cell-metrics 8, smoke/format-window-bigger 3 clean at the tip (log in the worktree). Review 2 running.",
+        "2026-10-09: Codex review 2: P1 new-session -P keeps pre-attach facts (client_session empty), P2 unattached termfeatures empty with -T; final fix pass sent.",
+        "2026-10-09: Merged after the final fix pass (88deeb6ec: client_session after attach for new-session -P, -T features on unattached clients); merge checks green (clippy, zz-daemon 1589, zz-mux 684, compat check)."
       ]
     },
     {
       "id": "fix.followups",
       "track": "fix",
       "title": "Small follow-ups the catch-up lanes reported",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-mux/src",
@@ -876,7 +886,7 @@
         "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
       ],
       "branch": "catchup/fix.followups",
-      "sha": null,
+      "sha": "dbd408ed9",
       "notes": [
         "2026-10-09 (fix.capture-e-links): capture-pane -M -e (copy-mode styled capture) emits no OSC 8; the capture.terminal-engine-limits reason should mention the -e effects (no id=, back-to-back same-URI links open once).",
         "2026-10-09 (fix.chooser-preview): refresh_chooser_previews resends the full chooser state to every tree-chooser client on every snapshot publish even when unchanged.",
@@ -886,7 +896,11 @@
         "2026-10-09 (pin.hooks-events-2): zz pane prompts belong to the client (close on detach, a status prompt replaces them); in 3.8 the prompt stays on the pane.",
         "2026-10-09 (pin.display-panes): with -s naming another window the desktop overlay draws indicators on panes not on screen (desktop renderer).",
         "2026-10-09 (pin.hooks-events-2): zz events still carry d77 payload keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events), visible in wait-for -E -v; needs a 3.8 payload table per event (PendingHookEvent::window/::pane back many events; a daemon test and control notifications read those keys). Control and attached clients' wait-for -E -v lines arrive at wake, not per event.",
-        "2026-10-09 (pin.formats-options-2): clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48."
+        "2026-10-09 (pin.formats-options-2): clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48.",
+        "2026-10-09 session 1 done (lane report): fixed capture -M -e, chooser resend memo, unquoted } outside a block, mode prompt styles/cursor; recorded with measured reasons: option-bytes lossy paths (divergence row rewritten), blank-line sizing, pane prompts owned by the client (orchestrator accepts, menus.client-owned precedent); skipped display-panes -s desktop. Leftovers moved to fix.followups-2.",
+        "2026-10-09: Review 1 running on session 1.",
+        "2026-10-09: Codex review 1 (fix.followups-1.md): P1 chooser dedupe drops the presentation after a full chooser update (choose-tree -N f prompt never shows), P2 prompt_type/prompt_input in mode style expansion; final fix pass sent.",
+        "2026-10-09: Merged after the final fix pass (b35ae46ad: chooser state always followed by its presentation, prompt_type/prompt_input/prompt_flags in mode style expansion); merge checks green (clippy 6 crates, zz-protocol 291, zz-client 217, zz-terminal 456, zz-tui 272, daemon chooser 32, zz-mux 683)."
       ]
     },
     {
@@ -917,7 +931,34 @@
       "branch": null,
       "sha": null,
       "notes": [
-        "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs)."
+        "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs).",
+        "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux)."
+      ]
+    },
+    {
+      "id": "fix.followups-2",
+      "track": "fix",
+      "title": "Follow-ups, second batch",
+      "status": "active",
+      "deps": [],
+      "zones": [
+        "crates/zz-daemon/src/daemon/hook_events.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "crates/zz-mux/src",
+        "crates/zz-cli/src"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
+      ],
+      "branch": "catchup/fix.followups-2",
+      "sha": null,
+      "notes": [
+        "3.8 hook payload table per event: zz events still carry d77 keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events and pane-exited), visible in wait-for -E -v; PendingHookEvent::window/::pane back many events, a daemon test and control notifications read those keys.",
+        "Lossy byte paths left by fix.option-bytes: plain argv, show-options -F '#{option_value}', list-keys/show-hooks arguments (tmux_command_print), a control line's $NAME (resolve_environment); #{O:} and window-neighbour option copies unmeasured.",
+        "zz refuses copy-mode on an unattached pane ('pane is not attached') and command-prompt -P from a command client ('requires an interactive client'); tmux 3.8 accepts both.",
+        "capture-pane -M: tmux reads only the copy-mode screen, zz reads the frozen screen including history; -S/-E ranges into history may differ (unmeasured).",
+        "2026-10-09: Session 1 done at 14ba4f710: 3.8 hook payload table (fit_payload), capture -M ranges fixed; byte paths registered (options.byte-path-residue); copy-mode/command-prompt -P ruled out (client model). Sent back for two side effects before review: zz events -t session filter, pane-bell/activity/shell-prompt feeding the sink without a hook."
       ]
     }
   ]

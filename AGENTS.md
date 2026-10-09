@@ -1,14 +1,16 @@
 # AGENTS.md
 
-zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on zpui (our fork of Zed's GPUI UI framework, the `crates/zpui*` crates), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL and iOS clients, and a raw-terminal attach client.
+zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on zz-gpui (our fork of Zed's GPUI UI framework, the `crates/zz-gpui*` crates), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL and iOS clients, and a raw-terminal attach client.
 
 Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (see `mise.toml`).
 
 ## Project map
 
-- `crates/zpui`, `crates/zpui-*` - zpui, our GPUI: the gpui crates split out of Zed, the Zed utility crates they need (code still says `collections::`, `sum_tree::`), and `zpui-ios`, the UIKit backend
-- `crates/zpui-kit` - widget kit on zpui (theme, primitives, widgets, icons): a maintained fork of gpui-component with no zz dependencies, usable by other apps
-- `crates/zz` - desktop client: zpui shell, terminal/browser/agent panes, settings, daemon client
+- `crates/zz-gpui` - zz-gpui, our GPUI: the gpui core split out of Zed, with the Zed utility code it needs as modules (`zz_gpui::collections`, `sum_tree`, `scheduler`, `util`, `http_client`, `refineable`)
+- `crates/zz-gpui-platform` - zz-gpui's backends, one module per target, each compiled only there: `macos` (with the Metal renderer in `apple`), `linux` (Wayland, X11), `windows`, `web`, `ios` (UIKit), and the `wgpu` renderer Linux, web and iOS share
+- `crates/zz-gpui-macros` - zz-gpui's proc macros, including the `Refineable` derive
+- `crates/zz-gpui-kit` - widget kit on zz-gpui (theme, primitives, widgets, icons): a maintained fork of gpui-component with no zz dependencies, usable by other apps
+- `crates/zz` - desktop client: zz-gpui shell, terminal/browser/agent panes, settings, daemon client
 - `crates/zz-daemon` — the daemon: session state, PTY workers, client connections
 - `crates/zz-daemon-client` - the client half of the daemon: local and ssh endpoints, askpass, `CommandClient`/`InteractiveClient`, transport, paths, and process facts; client-only crates depend on it instead of `zz-daemon`
 - `crates/zz-mux` — tmux-compatible model: sessions, windows, panes, key tables
@@ -19,13 +21,13 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-terminal` — terminal engine: PTY sessions, libghostty-vt state, frame snapshots
 - `crates/zz-browser` — CEF off-screen-rendering browser runtime
 - `crates/zz-chrome-import` — Chrome profile, cookie, and history import
-- `crates/zz-ui` - zz's application UI on zpui-kit (panes, terminal painting, agent, palette, settings, navigation, phone shell); re-exports the kit
+- `crates/zz-ui` - zz's application UI on zz-gpui-kit (panes, terminal painting, agent, palette, settings, navigation, phone shell); re-exports the kit
 - `crates/zz-tui` — raw-terminal attach client as a library (the binary lives in `zz-cli`)
 - `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
 - `crates/zz-hotreload` - Subsecond hot-reload launcher for `just hot linux`
 - `clients/app` - `zz-app`: the thin-client app web and iOS share (shell, sidebar, status bar, settings, palette, overlays, panes, connection reducer, image cache, iOS transport and browser pane)
 - `clients/web` - `zz-web-client`: the WASM entry point around zz-app, with its own Cargo workspace
-- `clients/ios` - `zz-ios`: the iOS entry point around zz-app and `zpui-ios`, the bundle files, and a terminal example (`ZZ_GPUI_DEMO=terminal`); `just ios`
+- `clients/ios` - `zz-ios`: the iOS entry point around zz-app and zz-gpui-platform's iOS backend, the bundle files, and a terminal example (`ZZ_GPUI_DEMO=terminal`); `just ios`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runners (`run-N.js`); closed 2026-09-20 at 18/18
@@ -55,7 +57,7 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 
 | Command | What it does |
 |---|---|
-| `cargo ci-test` | Tests (what CI runs): `cargo test --workspace --all-features` minus the zpui renderer and platform crates, whose tests need a GPU or a display (alias in `.cargo/config.toml`) |
+| `cargo ci-test` | Tests (what CI runs): `cargo test --workspace --all-features` minus zz-gpui-platform, whose tests need a GPU or a display (alias in `.cargo/config.toml`). CI also runs that crate's iOS input tests: `cargo test -p zz-gpui-platform --all-features --test ios` |
 | `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Lint (what CI runs) |
 | `cargo clippy -p zz-daemon -p zz-daemon-client --no-default-features --all-targets -- -D warnings` | Lint the daemon without agent support (CI runs this too) |
 | `cargo fmt --all` | Format |
@@ -78,12 +80,12 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 Multiple agent sessions often share this checkout in parallel. Never `git stash`, hard-reset, or discard uncommitted changes you did not author — you may be destroying another session's in-flight work.
 </important>
 
-<important if="you are changing zpui (our gpui)">
+<important if="you are changing zz-gpui (our gpui)">
 
-- zpui is `crates/zpui` plus the `crates/zpui-*` crates: our copy of the gpui crates split out of Zed and the Zed utility crates they need, renamed `zpui-*`. It is not a patch branch: there is nothing to rebase, and upstream Zed fixes come in by hand. Change zpui in the same commit as the zz code that needs it.
-- They are root workspace members, so the root clippy run covers them with all features. Zed's extras zz never used (screen capture, the tracy profiler, Zed's perf test harness) are gone. `cargo ci-test` leaves out the tests of zpui-apple, zpui-linux, zpui-macos, zpui-platform, zpui-web, zpui-wgpu and zpui-windows, which need a GPU or a display server that CI runners lack; run `cargo test -p <crate>` for those when you touch them, on a machine with a GPU. The Zed-derived crates carry Zed's relaxed `[lints]` table instead of the workspace's pedantic set, and `[profile.dev.package]` in the root `Cargo.toml` keeps them at opt-level 2 so debug builds stay fast enough to use; a new zpui crate needs both. `crates/zpui-kit` is ours and takes the workspace lints.
-- `clients/web` consumes zpui's WASM renderer in an excluded workspace; check `just web build` after a zpui change.
-- `knowledge/references/zpui.md` has the full recipe; the `fork-rebase` skill covers pulling upstream Zed fixes and syncing the vendored Ghostty.
+- zz-gpui is `crates/zz-gpui`, `crates/zz-gpui-macros` and `crates/zz-gpui-platform`: our copy of the gpui crates split out of Zed, with Zed's utility crates folded into `zz-gpui` as modules and every backend folded into `zz-gpui-platform`. It is not a patch branch: there is nothing to rebase, and upstream Zed fixes come in by hand. Change zz-gpui in the same commit as the zz code that needs it.
+- They are root workspace members, so the root clippy run covers them with all features, but only for the host OS: each backend in zz-gpui-platform compiles for its own target only. Check the others from macOS with `cargo clippy --target <triple> -p zz-gpui-platform --all-features` (the `fork-rebase` skill has the zig setup that cross-compiles their C dependencies). `cargo ci-test` leaves out zz-gpui-platform's tests, which need a GPU or a display server that CI runners lack; run `cargo test -p zz-gpui-platform --all-features` when you touch it, on a machine with a GPU. The three carry Zed's relaxed `[lints]` table instead of the workspace's pedantic set, and `[profile.dev.package]` in the root `Cargo.toml` optimizes them in debug builds so those stay fast enough to use. `crates/zz-gpui-kit` is ours and takes the workspace lints.
+- `clients/web` consumes zz-gpui's WASM renderer in an excluded workspace; check `just web build` after a zz-gpui change.
+- `knowledge/references/zz-gpui.md` has the full recipe; the `fork-rebase` skill covers pulling upstream Zed fixes and syncing the vendored Ghostty.
 </important>
 
 <important if="a test fails under cargo test --workspace">
@@ -102,7 +104,7 @@ A few `zz-daemon` tests are timing-sensitive and only fail under full-workspace 
 <important if="you are building or styling UI chrome or widgets">
 
 - UI conventions: `knowledge/configuration/ui-conventions.md` (chrome colors come from the theme; clippy rejects raw `rgb`/`hsla`).
-- `crates/zpui-kit` is a full fork of gpui-component, not a dependency - read `crates/zpui-kit/UPSTREAM.md` before touching widget internals or trying to "update" it. App-specific UI belongs in `crates/zz-ui`; the kit must not depend on zz crates.
+- `crates/zz-gpui-kit` is a full fork of gpui-component, not a dependency - read `crates/zz-gpui-kit/UPSTREAM.md` before touching widget internals or trying to "update" it. App-specific UI belongs in `crates/zz-ui`; the kit must not depend on zz crates.
 </important>
 
 <important if="you are adding or editing documents under knowledge/">

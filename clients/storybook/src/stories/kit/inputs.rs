@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyView, App, AppContext as _, Context, Entity, IntoElement, Keystroke, ParentElement as _,
     Render, Styled as _, Window, div,
 };
@@ -274,7 +274,7 @@ impl Numbers {
 
 impl Render for Numbers {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        let narrow = |element: NumberInput| div().w(zpui::px(180.0)).child(element);
+        let narrow = |element: NumberInput| div().w(zz_gpui::px(180.0)).child(element);
         states()
             .columns(3)
             .state("step 1", narrow(NumberInput::new(&self.default)))

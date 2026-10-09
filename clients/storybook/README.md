@@ -1,7 +1,7 @@
 # zz storybook
 
-Every piece of `zz-ui` and `zpui-kit` in its states, on one web page. The page is plain HTML:
-navigation, prose and knobs. Each section of the story on screen is its own zpui window, mounted
+Every piece of `zz-ui` and `zz-gpui-kit` in its states, on one web page. The page is plain HTML:
+navigation, prose and knobs. Each section of the story on screen is its own zz-gpui window, mounted
 into the section's element and sized to its content.
 
 ```bash
@@ -60,7 +60,7 @@ await storybook.show("agent", "composer"); // open a story, scroll to a section
 await storybook.setKnobs({ theme: "dark", radius: 12 });
 ```
 
-The live UI is reachable through `globalThis.zpui` (see
-`knowledge/references/zpui-web-agents.md`): every section window's accessibility tree is
-mirrored into the page, so `zpui.find({ role: "button", name: "Send" })`, `zpui.click(ref)` and
-`zpui.capture(windowId)` work, and so do the browser's own accessibility snapshots.
+The live UI is reachable through `globalThis.zzGpui` (see
+`knowledge/references/zz-gpui-web-agents.md`): every section window's accessibility tree is
+mirrored into the page, so `zzGpui.find({ role: "button", name: "Send" })`, `zzGpui.click(ref)` and
+`zzGpui.capture(windowId)` work, and so do the browser's own accessibility snapshots.

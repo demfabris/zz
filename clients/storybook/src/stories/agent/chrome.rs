@@ -1,6 +1,6 @@
 use std::{rc::Rc, sync::Arc};
 
-use zpui::{
+use zz_gpui::{
     AnyElement, AnyView, App, AppContext as _, Context, Entity, IntoElement, ListAlignment,
     ListState, ParentElement as _, Render, SharedString, Styled as _, Subscription, Window, div,
     prelude::*, px,

@@ -6,7 +6,7 @@ resource: clients/storybook/src/lib.rs
 tags:
 - storybook
 - zz-ui
-- zpui-kit
+- zz-gpui-kit
 - wasm
 - agents
 timestamp: 2026-10-09T00:00:00Z
@@ -15,8 +15,8 @@ timestamp: 2026-10-09T00:00:00Z
 # What it is
 
 `clients/storybook` shows zz's own UI, not a generic widget catalog: every piece of `zz-ui` and
-`zpui-kit` in its states, built from fixture data with the same functions the app calls. The page
-is plain HTML (navigation, prose, knobs). Each section of the open story is its own zpui window,
+`zz-gpui-kit` in its states, built from fixture data with the same functions the app calls. The page
+is plain HTML (navigation, prose, knobs). Each section of the open story is its own zz-gpui window,
 mounted into the section's element with `WindowOptions::mount` and sized to its content, so a
 section looks exactly like that piece does in zz.
 
@@ -49,19 +49,19 @@ authoring rules; the short version:
 
 # Check a change
 
-Edit the component in `crates/zz-ui` or `crates/zpui-kit`, let `just storybook run` rebuild,
+Edit the component in `crates/zz-ui` or `crates/zz-gpui-kit`, let `just storybook run` rebuild,
 reload, and walk the knobs: light and dark, a few presets, radius 0 and full, contrast extremes,
 zoom. The sections re-render live as knobs move.
 
 # For agents
 
 - `scripts/storybook-shot.mjs <story>[/<section>][?knobs] out.png [--url ..]` (also
-  `just storybook shot`) opens the story in headless Chrome over CDP, waits for `zpui.idle()` and
+  `just storybook shot`) opens the story in headless Chrome over CDP, waits for `zzGpui.idle()` and
   saves a PNG clipped to the section. Its JSON output lists wasm panics and console errors under
   `problems`.
 - In a browser tab: `storybook.show(id, section)`, `storybook.setKnobs({ theme: "dark" })`, and
-  the `zpui` API from [zpui web windows for agents](/references/zpui-web-agents.md) for the live
-  UI (`zpui.find`, `zpui.click`, `zpui.capture`).
+  the `zzGpui` API from [zz-gpui web windows for agents](/references/zz-gpui-web-agents.md) for the live
+  UI (`zzGpui.find`, `zzGpui.click`, `zzGpui.capture`).
 
 # Traps
 

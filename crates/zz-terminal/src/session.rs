@@ -9024,6 +9024,10 @@ impl CaptureWork {
         request: CaptureRequest,
     ) -> Option<Self> {
         let CaptureRequest { options, reply } = request;
+        let options = CaptureOptions {
+            mode: options.mode && mode.is_some(),
+            ..options
+        };
         let output_rows = if options.line_flags {
             filter.output_rows(terminal)
         } else {
@@ -9141,9 +9145,12 @@ impl CaptureWork {
                 &mut self.previous,
                 &self.output_rows,
             )?,
-            CaptureSource::Mode(revision) => {
-                capture_revision(revision, self.visible_start as u32, options)?
-            }
+            CaptureSource::Mode(revision) => capture_revision(
+                revision,
+                self.visible_start as u32,
+                options,
+                &mut self.previous,
+            )?,
         };
         if keep_tail && matches!(self.source, CaptureSource::Screen(_)) {
             let mut lines = output.split('\n').peekable();
@@ -9222,7 +9229,15 @@ fn capture_terminal_marked(
         }
         return capture_mode_revision(mode, options);
     }
-    capture_grid(terminal, options, &mut CaptureCarry::default(), output_rows)
+    capture_grid(
+        terminal,
+        CaptureOptions {
+            mode: false,
+            ..options
+        },
+        &mut CaptureCarry::default(),
+        output_rows,
+    )
 }
 
 fn capture_grid(
@@ -9576,12 +9591,14 @@ fn capture_styled_terminal(
                 code = code.replace('\u{1b}', "\\033");
             }
             previous.style = style;
-            let length =
-                if wide != CellWide::SpacerHead && cell.has_hyperlink().map_err(capture_failure)? {
-                    capture_link_uri(&grid, &mut uri)?
-                } else {
-                    0
-                };
+            let length = if !options.mode
+                && wide != CellWide::SpacerHead
+                && cell.has_hyperlink().map_err(capture_failure)?
+            {
+                capture_link_uri(&grid, &mut uri)?
+            } else {
+                0
+            };
             let cell_uri = (length > 0).then(|| &uri[..length]);
             if cell_uri != previous.link.as_deref() {
                 if let Some(visible) = cell_uri
@@ -10077,7 +10094,12 @@ fn capture_mode_revision(
     mode: &CopyModeState,
     options: CaptureOptions,
 ) -> Result<String, TerminalCaptureError> {
-    capture_revision(&mode.revision, mode.viewport_offset, options)
+    capture_revision(
+        &mode.revision,
+        mode.viewport_offset,
+        options,
+        &mut CaptureCarry::default(),
+    )
 }
 
 /// Resolves `capture-pane` boundaries against a captured grid, whose visible
@@ -10086,6 +10108,7 @@ fn capture_revision(
     revision: &ModeRevision,
     viewport_offset: u32,
     options: CaptureOptions,
+    previous: &mut CaptureCarry,
 ) -> Result<String, TerminalCaptureError> {
     let total = u64::from(revision.total_rows());
     let visible_start = u64::from(viewport_offset).min(total.saturating_sub(1));
@@ -10097,6 +10120,22 @@ fn capture_revision(
     if start > end {
         return Ok(String::new());
     }
+    if options.escape_sequences {
+        let screen = revision.screen();
+        let screen = screen.lock();
+        return capture_styled_terminal(
+            &*screen,
+            CaptureOptions {
+                mode: true,
+                ..options
+            },
+            (start, end),
+            visible_start,
+            revision.columns,
+            previous,
+            revision.output_rows(),
+        );
+    }
     let head = u32::try_from(start).unwrap_or(u32::MAX);
     let tail = u32::try_from(end).unwrap_or(u32::MAX);
     let per_row = options.number_lines || options.line_flags;
@@ -10105,7 +10144,6 @@ fn capture_revision(
         tail,
         options.join_wrapped && !per_row,
         options.preserve_trailing,
-        options.escape_sequences,
     );
     if output.len() > MAX_CAPTURE_BYTES {
         return Err(TerminalCaptureError::TooLarge);
@@ -17606,7 +17644,7 @@ mod tests {
         let revision = ModeRevision::capture(&terminal).expect("revision");
         let rows = revision.total_rows();
         (
-            revision.capture_rows(0, rows.saturating_sub(1), false, false, false),
+            revision.capture_rows(0, rows.saturating_sub(1), false, false),
             renames,
             filter.bar,
         )
@@ -18179,7 +18217,7 @@ mod tests {
         }
         assert_eq!(terminal.cursor_x().expect("cursor"), 6);
         let revision = ModeRevision::capture(&terminal).expect("revision");
-        assert_eq!(revision.capture_rows(0, 0, false, false, false), "abcd");
+        assert_eq!(revision.capture_rows(0, 0, false, false), "abcd");
         assert!(revision.cell_matches_text(PointCoordinate { x: 5, y: 0 }, "d"));
     }
 
@@ -23689,7 +23727,7 @@ mod tests {
             },
         )
         .expect("styled mode capture");
-        assert!(captured_vt.contains("\x1b[0;1;38;2;"));
+        assert!(captured_vt.contains("\x1b[1m\x1b[31mfrozen-marker\x1b[0m"));
         assert!(captured_vt.contains("frozen-marker"));
     }
 

@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
-use zpui::{
+use zz_client::StatusBarPane;
+use zz_gpui::{
     AnyElement, AnyView, App, AppContext as _, Context, Corners, ElementId, Hsla, IntoElement,
     ParentElement as _, Pixels, Render, SharedString, Stateful, Styled as _, Window, div, px,
 };
-use zz_client::StatusBarPane;
 use zz_protocol::{
     AgentDescriptor, AgentProvider, BrowserDescriptor, EditorDescriptor, PaneId, PaneKindSnapshot,
 };
@@ -84,7 +84,7 @@ pub fn pane_background(cx: &App) -> Hsla {
         .opacity(cx.theme().pane_background_opacity)
 }
 
-pub fn terminal_body(lines: &[(Tone, &'static str)], dimmed: bool, cx: &App) -> zpui::Div {
+pub fn terminal_body(lines: &[(Tone, &'static str)], dimmed: bool, cx: &App) -> zz_gpui::Div {
     let theme = cx.theme();
     div()
         .flex()
@@ -124,7 +124,7 @@ pub fn placeholder_body(
     title: impl Into<SharedString>,
     detail: impl Into<SharedString>,
     cx: &App,
-) -> zpui::Div {
+) -> zz_gpui::Div {
     div()
         .flex()
         .flex_col()
@@ -184,7 +184,7 @@ impl TerminalPane {
         scope: impl Into<ElementId>,
         overlays: Vec<AnyElement>,
         cx: &App,
-    ) -> Stateful<zpui::Div> {
+    ) -> Stateful<zz_gpui::Div> {
         let radii = radii(self.gaps);
         let header = terminal_pane_header(
             self.active,
@@ -240,7 +240,7 @@ pub fn placeholder_pane(
     gaps: bool,
     overlays: Vec<AnyElement>,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     pane_surface(
         scope,
         placeholder_body(icon, title, detail, cx).rounded(radii(gaps).top_left),

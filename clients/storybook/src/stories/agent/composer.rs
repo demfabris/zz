@@ -1,10 +1,10 @@
 use std::{path::PathBuf, sync::Arc};
 
-use zpui::{
+use zz_client::agent_completion::{active_command_hint, pane_commands};
+use zz_gpui::{
     AnyElement, AnyView, App, AppContext as _, Context, Entity, Image, IntoElement,
     ParentElement as _, Render, SharedString, Styled as _, Window, div, px,
 };
-use zz_client::agent_completion::{active_command_hint, pane_commands};
 use zz_protocol::AgentProvider;
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, IconName, Sizable as _,

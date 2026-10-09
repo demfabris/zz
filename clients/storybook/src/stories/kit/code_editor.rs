@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyView, App, AppContext as _, Context, Entity, EntityInputHandler as _, IntoElement,
     ParentElement as _, Render, Styled as _, Window, div, px,
 };

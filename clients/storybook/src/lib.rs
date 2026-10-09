@@ -2,10 +2,10 @@
 //!
 //! The page (`web/`) renders the navigation, prose and knobs as HTML from the
 //! registry in [`stories`]. Each section of the story on screen is its own
-//! zpui window, mounted into that section's element and sized to its content,
+//! zz-gpui window, mounted into that section's element and sized to its content,
 //! so people and agents get real page structure around live zz UI. The
 //! sections' accessibility trees are mirrored into the page, and
-//! `globalThis.zpui` drives them.
+//! `globalThis.zzGpui` drives them.
 
 mod host;
 mod knobs;
@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::cell::RefCell;
 
 use serde_json::json;
-use zpui::{AnyWindowHandle, App, AppContext as _, WindowOptions};
+use zz_gpui::{AnyWindowHandle, App, AppContext as _, WindowOptions};
 use zz_ui::{ActiveTheme as _, Colorize as _, Root, Theme, to_hex};
 
 pub use knobs::Knobs;
@@ -164,11 +164,11 @@ mod web {
     use wasm_bindgen::prelude::*;
 
     thread_local! {
-        static APPLICATION: RefCell<Option<zpui::ApplicationHandle>> = const { RefCell::new(None) };
+        static APPLICATION: RefCell<Option<zz_gpui::ApplicationHandle>> = const { RefCell::new(None) };
         static READY: Cell<bool> = const { Cell::new(false) };
     }
 
-    fn with_app<R>(f: impl FnOnce(&mut zpui::App) -> R) -> Result<R, JsValue> {
+    fn with_app<R>(f: impl FnOnce(&mut zz_gpui::App) -> R) -> Result<R, JsValue> {
         APPLICATION.with(|application| {
             application
                 .borrow()
@@ -183,8 +183,8 @@ mod web {
         if APPLICATION.with(|application| application.borrow().is_some()) {
             return Err(JsValue::from_str("the storybook is already running"));
         }
-        zpui_platform::web_init();
-        let application = zpui_platform::single_threaded_web().with_assets(zz_ui::Assets);
+        zz_gpui_platform::web_init();
+        let application = zz_gpui_platform::single_threaded_web().with_assets(zz_ui::Assets);
         let handle = application.run_embedded(|cx| {
             super::launch(cx);
             READY.with(|ready| ready.set(true));

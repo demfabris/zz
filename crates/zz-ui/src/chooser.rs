@@ -2,7 +2,7 @@ use crate::{
     ActiveTheme as _, Colorize as _, Icon, IconName, Sizable as _, StyledExt as _, kbd::Kbd,
     list::ListItem, tag::Tag,
 };
-use zpui::{
+use zz_gpui::{
     AnyElement, App, CursorStyle, IntoElement, Keystroke, ParentElement as _, RenderOnce,
     SharedString, Styled as _, div, prelude::*, px, relative,
 };
@@ -34,11 +34,11 @@ pub struct ChooserSearch {
 
 #[derive(Clone, Copy)]
 pub struct ChooserRowTheme {
-    pub selection_background: zpui::Hsla,
-    pub primary: zpui::Hsla,
-    pub foreground: zpui::Hsla,
-    pub secondary_foreground: zpui::Hsla,
-    pub muted_foreground: zpui::Hsla,
+    pub selection_background: zz_gpui::Hsla,
+    pub primary: zz_gpui::Hsla,
+    pub foreground: zz_gpui::Hsla,
+    pub secondary_foreground: zz_gpui::Hsla,
+    pub muted_foreground: zz_gpui::Hsla,
 }
 
 impl ChooserRowTheme {
@@ -132,7 +132,7 @@ impl ChooserModal {
 }
 
 impl RenderOnce for ChooserModal {
-    fn render(self, window: &mut zpui::Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut zz_gpui::Window, cx: &mut App) -> impl IntoElement {
         let rows = f32::from(u8::try_from(self.dimensions.row_count.min(10)).unwrap_or(10));
         let notices = u8::from(self.help) + u8::from(self.prompt.is_some());
         let height = 106.0 + rows * CHOOSER_ROW_HEIGHT + f32::from(notices) * 36.0;
@@ -148,7 +148,7 @@ impl RenderOnce for ChooserModal {
             .overflow_hidden()
             .popover_style(cx)
             .rounded(cx.theme().radius + px(8.0))
-            .on_mouse_down(zpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(zz_gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
                     .h(px(56.0))
@@ -223,7 +223,7 @@ impl RenderOnce for ChooserModal {
                 self.font_family,
                 cx,
             ));
-        zpui_kit::foundation::surface_enter(surface, "chooser-open", px(0.0))
+        zz_gpui_kit::foundation::surface_enter(surface, "chooser-open", px(0.0))
     }
 }
 
@@ -232,7 +232,7 @@ pub fn chooser_footer(
     hints: &'static [ChooserHint],
     font_family: impl Into<SharedString>,
     cx: &App,
-) -> zpui::Div {
+) -> zz_gpui::Div {
     let searching = search.is_some();
     let font_family = font_family.into();
     let search = search.map(|search| {
@@ -287,7 +287,7 @@ pub fn chooser_row(
     id: &'static str,
     index: usize,
     selected: bool,
-    selection_background: zpui::Hsla,
+    selection_background: zz_gpui::Hsla,
 ) -> ListItem {
     ListItem::new((id, index))
         .h(px(CHOOSER_ROW_HEIGHT))

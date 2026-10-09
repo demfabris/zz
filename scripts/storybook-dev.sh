@@ -31,10 +31,10 @@ cargo watch \
     --watch clients/storybook/src \
     --watch clients/storybook/web \
     --watch crates/zz-ui/src \
-    --watch crates/zpui-kit/src \
-    --watch crates/zpui-kit/assets \
-    --watch crates/zpui/src \
-    --watch crates/zpui-web/src \
-    --watch crates/zpui-wgpu/src \
+    --watch crates/zz-gpui-kit/src \
+    --watch crates/zz-gpui-kit/assets \
+    --watch crates/zz-gpui/src \
+    --watch crates/zz-gpui-platform/src/web \
+    --watch crates/zz-gpui-platform/src/wgpu \
     --watch scripts/build-storybook.sh \
     --shell "$ROOT/scripts/build-storybook.sh"

@@ -1,10 +1,10 @@
 use std::sync::{Arc, LazyLock};
 
-use zpui::{
+use zz_client::StatusBarSettings;
+use zz_gpui::{
     AnyElement, App, AppContext as _, Entity, IntoElement, ParentElement as _, Styled as _, Window,
     div, prelude::*, px,
 };
-use zz_client::StatusBarSettings;
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Icon, IconName, IndexPath, Sizable as _, ThemeMode,
     chrome_palette::{
@@ -118,7 +118,7 @@ impl Controls {
         }
     }
 
-    fn number(&self, index: usize, cx: &App) -> zpui::Div {
+    fn number(&self, index: usize, cx: &App) -> zz_gpui::Div {
         div().w(px(120.0)).flex_none().child(
             NumberInput::new(&self.numbers[index])
                 .small()
@@ -558,14 +558,14 @@ fn status_bar(_: &mut Window, cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-static LOGOS: LazyLock<[Arc<zpui::Image>; 2]> = LazyLock::new(|| {
+static LOGOS: LazyLock<[Arc<zz_gpui::Image>; 2]> = LazyLock::new(|| {
     [
         include_bytes!("../../../../../assets/zz-light-512.png").as_slice(),
         include_bytes!("../../../../../assets/zz-dark-512.png").as_slice(),
     ]
     .map(|bytes| {
-        Arc::new(zpui::Image::from_bytes(
-            zpui::ImageFormat::Png,
+        Arc::new(zz_gpui::Image::from_bytes(
+            zz_gpui::ImageFormat::Png,
             bytes.to_vec(),
         ))
     })
@@ -578,7 +578,7 @@ fn about(_: &mut Window, cx: &mut App) -> AnyElement {
             "page",
             div().id("about").flex().h(px(780.0)).child(
                 settings_scroll_column("settings-about")
-                    .child(about_hero(zpui::img(logo).size(px(ABOUT_LOGO_SIZE)), cx))
+                    .child(about_hero(zz_gpui::img(logo).size(px(ABOUT_LOGO_SIZE)), cx))
                     .child(about_build_stack(
                         "browser · wasm32",
                         about_copy_button("copy-build"),

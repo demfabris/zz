@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyElement, App, IntoElement, Keystroke, ParentElement as _, Styled as _, Window, div,
     prelude::*, px, relative,
 };
@@ -167,7 +167,7 @@ fn header(
     active: bool,
     draggable: bool,
     cx: &App,
-) -> zpui::Stateful<zpui::Div> {
+) -> zz_gpui::Stateful<zz_gpui::Div> {
     zz_ui::pane::terminal_pane_header(
         active,
         title,
@@ -686,7 +686,7 @@ fn floating_box(id: &'static str, surface: impl IntoElement) -> impl IntoElement
 }
 
 fn floating(_: &mut Window, cx: &mut App) -> AnyElement {
-    let body = |cx: &App| terminal_body(SERVER, false, cx).bg(zpui::transparent_black());
+    let body = |cx: &App| terminal_body(SERVER, false, cx).bg(zz_gpui::transparent_black());
     states()
         .columns(2)
         .state(

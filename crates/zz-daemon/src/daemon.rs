@@ -4711,8 +4711,8 @@ struct PendingHookEvent {
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
 const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_CLIENT_CONTEXT_FORMAT: &str = "hook_client";
-/// The commands whose rows the pin builds with a null format client.
-const CLIENTLESS_ROW_COMMANDS: [&str; 3] = ["list-windows", "list-sessions", "list-panes"];
+const INVOKING_CLIENT_COMMANDS: [&str; 4] =
+    ["list-windows", "list-sessions", "list-panes", "new-session"];
 const HOOK_PANE_CONTEXT_FORMAT: &str = "hook_pane";
 const HOOK_SESSION_CONTEXT_FORMAT: &str = "hook_session";
 const HOOK_SESSION_NAME_CONTEXT_FORMAT: &str = "hook_session_name";
@@ -4760,6 +4760,8 @@ const PRODUCED_NON_AFTER_PINNED_HOOKS: &[&str] = &[
     "pane-mode-entered",
     "pane-mode-exited",
     "pane-moved",
+    "pane-prompt-closed",
+    "pane-prompt-opened",
     "pane-resized",
     "pane-set-clipboard",
     "pane-shell-prompt",
@@ -6039,7 +6041,11 @@ impl Shared {
                 client.visible_agents = None;
                 client.focused_window = None;
             }
-            let wakes = take_all_wait_wakes(&mut inner.wait_channels);
+            let mut wakes = take_all_wait_wakes(&mut inner.wait_channels);
+            wakes.extend(hook_events::take_event_waiter_wakes(
+                &mut inner.event_waiters,
+                None,
+            ));
             pane_exit::cancel_all(&mut inner);
             let pipes = std::mem::take(&mut inner.pane_pipes)
                 .into_values()
@@ -6426,11 +6432,14 @@ impl Shared {
             fires
         };
         for (id, name, value, last, key) in fires {
+            let variables = self
+                .inner
+                .lock()
+                .engine
+                .format_monitor_hook_variables(&name, &value, &last, key);
+            self.feed_event_waiters(&name, &variables);
             let prepared = {
                 let inner = self.inner.lock();
-                let variables = inner
-                    .engine
-                    .format_monitor_hook_variables(&name, &value, &last, key);
                 inner
                     .engine
                     .format_monitor_hook_body(id)
@@ -6988,7 +6997,11 @@ impl Shared {
             inner
                 .paste_uploads
                 .retain(|(uploader, _), _| *uploader != client);
-            let wait_wakes = remove_client_wait_items(&mut inner.wait_channels, client);
+            let mut wait_wakes = remove_client_wait_items(&mut inner.wait_channels, client);
+            wait_wakes.extend(hook_events::take_event_waiter_wakes(
+                &mut inner.event_waiters,
+                Some(client),
+            ));
             pane_exit::cancel_client(&mut inner, client);
             let popup_waiters = inner
                 .clients
@@ -8091,6 +8104,20 @@ impl Shared {
             post_admission_callback_parse_depth(error) != 0
                 && CallbackGroupAction::for_command(&name) == Some(CallbackGroupAction::Continue)
         });
+        if !no_hooks
+            && !suppress_after_hook
+            && !suppress_callback_parse_hook
+            && !matches!(&result, Err(DaemonError::ReportedCommandExit { .. }))
+            && let Some(hook) = match &result {
+                Ok(_) => MuxEngine::after_command_hook(&name),
+                Err(_) => Some("command-error"),
+            }
+            && self.event_waited(hook)
+        {
+            let mut variables = hook_format_variables(command, hook);
+            variables.insert(HOOK_CONTEXT_FORMAT.to_owned(), hook.to_owned());
+            self.feed_event_waiters(hook, &variables);
+        }
         let hook_output = if no_hooks
             || suppress_after_hook
             || suppress_callback_parse_hook
@@ -8438,7 +8465,9 @@ impl Shared {
                         }
                         Ok(Execution::default())
                     }
-                    DaemonCommandDispatch::WaitFor => self.wait_for(client, kind, &command.args),
+                    DaemonCommandDispatch::WaitFor => {
+                        self.wait_for_in(client, kind, context, &command.args)
+                    }
                     DaemonCommandDispatch::PipePane => {
                         self.pipe_pane(context, canonical, &command.args)
                     }
@@ -9119,13 +9148,15 @@ impl Shared {
     fn next_event_queue_child(
         self: &Arc<Self>,
         state: &mut EventQueueFrame,
-        event: PendingHookEvent,
+        mut event: PendingHookEvent,
     ) -> Option<InsertedQueueChild> {
         if state.publish_control && !event.control_notified {
             state
                 .notifications
                 .push(self.event_control_notification(&event));
         }
+        hook_events::complete_client_payload(&self.inner.lock().engine, &mut event);
+        self.feed_event_waiters(event.name, &event.variables);
         if self
             .command_item
             .as_ref()
@@ -9341,6 +9372,7 @@ impl Shared {
         let mut pending_hook_events = Vec::new();
         let (mut execution, mux_options_event, recheck_shutdown_requested) = {
             let mut inner = self.inner.lock();
+            let stale_mode_events = take_pane_mode_hook_events(&mut inner);
             format_variables.insert("config_files".to_owned(), inner.config_files.clone());
             let captures = !read_only || cfg!(debug_assertions);
             let generation_before = inner.engine.state.generation();
@@ -9409,18 +9441,21 @@ impl Shared {
                 && kind != ClientKind::Control
                 && nested_attach_refusal(&inner, client).is_some())
             .then(|| format_hook_facts_for_client(&inner, client, context));
-            // cmd-list-windows.c, cmd-list-sessions.c and cmd-list-panes.c all
-            // call `format_defaults(ft, NULL, ...)`, so a row answers null for
-            // every client-scoped name even while a client is attached.
-            if CLIENTLESS_ROW_COMMANDS.contains(&command_name)
-                && let Some(facts) = built_facts.as_mut()
-            {
-                facts.client = None;
-            }
-            if CLIENTLESS_ROW_COMMANDS.contains(&command_name)
+            if INVOKING_CLIENT_COMMANDS.contains(&command_name)
                 && let Some(seed) = command_seed.as_mut()
             {
-                seed.client = None;
+                match context.format_client() {
+                    FormatClient::Attached(_) => {}
+                    FormatClient::Unattached => {
+                        seed.client = format_provenance_client(context, client)
+                            .filter(|client| inner.client(*client).is_some())
+                            .map(|client| match client_attached_session(&inner, client) {
+                                Some(session) => client_format_facts(&inner, client, session),
+                                None => unattached_client_format_facts(&inner, client),
+                            });
+                    }
+                    FormatClient::NoClient => seed.client = None,
+                }
             }
             if command_name == "display-message" && !facts_unread {
                 let (target, target_client) = inner
@@ -10870,6 +10905,7 @@ impl Shared {
                         inner.client_entry(client).chooser_under =
                             chooser_under(&inner, client, *pane);
                         inner.client_entry(client).choose_tree.replace(chooser);
+                        inner.client_entry(client).published_chooser = Default::default();
                         direct_events.push(EventPayload::ChooseTree {
                             state: chooser_shown(&inner, client).then_some(state),
                         });
@@ -10940,6 +10976,7 @@ impl Shared {
                         inner.client_entry(client).chooser_under =
                             chooser_under(&inner, client, *pane);
                         inner.client_entry(client).choose_buffer.replace(chooser);
+                        inner.client_entry(client).published_chooser = Default::default();
                         direct_events.push(EventPayload::ChooseBuffer {
                             state: chooser_shown(&inner, client).then_some(state),
                         });
@@ -11568,6 +11605,11 @@ impl Shared {
                 !read_only || inner.engine.state.generation() == generation_before,
                 "read-only {command_name} moved the tree generation"
             );
+            pending_hook_events.extend(stale_mode_events);
+            let prompt_events = hook_events::pane_prompt_hook_events(&mut inner);
+            if event_hooks_enabled {
+                pending_hook_events.extend(prompt_events);
+            }
             let hook_events_before = pending_hook_events.len();
             if event_hooks_enabled && let Some(scope) = hook_scope {
                 let pane_focus_before = pane_focus_before.map(|scope| scope.close(&inner));
@@ -11666,6 +11708,9 @@ impl Shared {
             {
                 let client_name = client_format_name(&self.inner.lock(), client);
                 variables.insert("hook_client".to_owned(), client_name);
+            }
+            if variables.get("hook_event") == Some(&name) {
+                self.feed_event_waiters(&name, &variables);
             }
             variables.insert("hook".to_owned(), name);
             let hook_output = self.run_hook_commands(
@@ -12917,16 +12962,43 @@ impl Shared {
         }
     }
 
+    #[cfg(test)]
     fn wait_for(
         &self,
         client: ClientId,
         kind: ClientKind,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        let parsed = parse_buffer_command_args("wait-for", args, &['w'], &['L', 'S', 'U', 'l'])?;
+        self.wait_for_in(client, kind, &ExecutionContext::default(), args)
+    }
+
+    fn wait_for_in(
+        &self,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        args: &[RawText],
+    ) -> Result<Execution, DaemonError> {
+        let parsed = parse_buffer_command_args(
+            "wait-for",
+            args,
+            &['F', 'w'],
+            &['E', 'L', 'S', 'U', 'l', 'v'],
+        )?;
         let [name] = parsed.positional.as_slice() else {
             return Err(ServerError::CommandParse(WAIT_FOR_USAGE.to_owned()).into());
         };
+        if parsed.has('E') {
+            return self.wait_for_event(
+                client,
+                context,
+                name,
+                parsed.value('F'),
+                parsed.has('v'),
+                parsed.has('l'),
+                parsed.value('w'),
+            );
+        }
         if parsed.has('l') {
             let inner = self.inner.lock();
             let lines = inner
@@ -18135,12 +18207,19 @@ impl Shared {
             let hook_context =
                 hook_events::live_session_context(&inner.engine.state, target_session);
             let client_name = client_format_name(&inner, target_client);
-            attach_events.push(PendingHookEvent::client(
-                "client-session-changed",
-                hook_context,
-                target_client,
-                Some(client_name.as_str()),
-            ));
+            attach_events.push(
+                PendingHookEvent::client(
+                    "client-session-changed",
+                    hook_context,
+                    target_client,
+                    Some(client_name.as_str()),
+                )
+                .with_session_change(
+                    &inner.engine.state,
+                    Some(target_session),
+                    target_session,
+                ),
+            );
         }
         if !preserve_repeat {
             self.inner
@@ -20471,12 +20550,19 @@ impl Shared {
             hook_events.extend(mode_events);
             if previous_session != Some(session) {
                 let context = hook_events::live_session_context(&inner.engine.state, session);
-                hook_events.push(PendingHookEvent::client(
-                    "client-session-changed",
-                    context.clone(),
-                    client,
-                    Some(client_name.as_str()),
-                ));
+                hook_events.push(
+                    PendingHookEvent::client(
+                        "client-session-changed",
+                        context.clone(),
+                        client,
+                        Some(client_name.as_str()),
+                    )
+                    .with_session_change(
+                        &inner.engine.state,
+                        previous_session,
+                        session,
+                    ),
+                );
                 if previous_session.is_none() {
                     hook_events.push(PendingHookEvent::client(
                         "client-attached",
@@ -23513,6 +23599,8 @@ impl Shared {
                     return true;
                 }
                 pop_pane_mode(&mut self.inner.lock(), pane);
+                let events = take_pane_mode_hook_events(&mut self.inner.lock());
+                self.run_event_hooks(events);
                 self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
                 self.publish_snapshot();
                 if let Some(entry) = entry {
@@ -23951,6 +24039,9 @@ impl Shared {
             if let Some((x, y)) = cell {
                 let mut context = ExecutionContext::new(session, mouse.window, Some(pane));
                 self.pane_mode_mouse(client, &mut context, pane, key, x, y);
+            } else {
+                let events = take_pane_mode_hook_events(&mut self.inner.lock());
+                self.run_event_hooks(events);
             }
             self.publish_mux_snapshots();
             return;
@@ -25817,6 +25908,7 @@ impl Shared {
             ),
             PromptWireUpdate::Retire => {
                 self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
+                self.settle_pane_prompts();
             }
         }
         if outcome.retired {
@@ -25851,6 +25943,11 @@ impl Shared {
     /// `-i`'s per-edit fire: the template runs against the prefixed buffer
     /// while the prompt stays open, the pin's `prompt_fire_callback` with
     /// `PROMPT_KEY_HANDLED`.
+    fn settle_pane_prompts(self: &Arc<Self>) {
+        let events = hook_events::pane_prompt_hook_events(&mut self.inner.lock());
+        self.run_event_hooks(events);
+    }
+
     fn run_command_prompt_template(
         self: &Arc<Self>,
         client: ClientId,
@@ -25977,6 +26074,7 @@ impl Shared {
                     return Ok(());
                 }
                 self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
+                self.settle_pane_prompts();
                 if retired {
                     self.resume_client_terminals(client);
                 }
@@ -25993,6 +26091,7 @@ impl Shared {
                     .and_then(|c| c.command_prompt.take());
                 if let Some(retired) = retired {
                     self.publish_to_client(client, EventPayload::CommandPrompt { state: None });
+                    self.settle_pane_prompts();
                     if retired.freezes() {
                         self.resume_client_terminals(client);
                     }
@@ -27200,6 +27299,9 @@ impl Shared {
             });
             let command_prompt = command_prompt_state(&inner, client);
             let chooser_shown = chooser_shown(&inner, client);
+            if let Some(entry) = inner.client_mut(client) {
+                entry.published_chooser = Default::default();
+            }
             let choose_tree = inner
                 .client(client)
                 .and_then(|c| c.choose_tree.as_ref())
@@ -28250,7 +28352,8 @@ impl Shared {
             inner.engine.set_format_now(unix_timestamp());
             let hook_scope = hook_events::HookScope::open(&mut inner.engine);
             let pane_focus_before = hook_events::FocusProbeScope::open(&mut inner);
-            let exited = PendingHookEvent::live_pane("pane-exited", pane, &inner.engine);
+            let exited = PendingHookEvent::live_pane("pane-exited", pane, &inner.engine)
+                .map(|event| event.with_exit_status(dead_status, dead_signal.as_deref(), !failed));
             let retained = inner
                 .engine
                 .retain_exited_pane(pane, failed)
@@ -28276,7 +28379,11 @@ impl Shared {
                     && let Some(event) =
                         PendingHookEvent::live_pane("pane-died", pane, &inner.engine)
                 {
-                    events.push(event);
+                    events.push(event.with_exit_status(
+                        dead_status,
+                        dead_signal.as_deref(),
+                        !failed,
+                    ));
                 }
                 (events, None)
             } else {
@@ -29586,6 +29693,18 @@ impl Shared {
         payload: EventPayload,
         callback_parse_event: Option<Arc<()>>,
     ) {
+        if let Some(slot) = published_chooser_slot(&payload) {
+            let mut inner = self.inner.lock();
+            if let Some(entry) = inner.client_mut(client) {
+                if entry.published_chooser[slot].as_ref() == Some(&payload) {
+                    return;
+                }
+                entry.published_chooser[slot] = Some(payload.clone());
+                if slot != PUBLISHED_PRESENTATION_SLOT {
+                    entry.published_chooser[PUBLISHED_PRESENTATION_SLOT] = None;
+                }
+            }
+        }
         if matches!(
             &payload,
             EventPayload::ControlCommandGuard { .. }
@@ -35724,6 +35843,7 @@ struct Client {
     command_prompt: Option<CommandPrompt>,
     choose_tree: Option<ChooseTreeSession>,
     choose_buffer: Option<ChooseBufferSession>,
+    published_chooser: [Option<EventPayload>; 3],
     chooser_zoom: Option<WindowId>,
     chooser_under: ChooserUnder,
     display_panes: Option<DisplayPanesSession>,
@@ -35825,6 +35945,8 @@ struct ServerState {
     copy_kill_panes: Vec<PaneId>,
     pane_modes: BTreeMap<PaneId, Vec<PaneModeRequest>>,
     pane_mode_transitions: Vec<PaneModeTransition>,
+    open_pane_prompts: BTreeMap<ClientId, (u64, PaneId, CommandPromptType)>,
+    event_waiters: Vec<hook_events::EventWaiter>,
     pane_mode_zooms: BTreeSet<PaneId>,
     pane_mode_kill_panes: Vec<PaneId>,
     panes_mode_frames: BTreeMap<PaneId, PanesModeFrames>,
@@ -38827,6 +38949,17 @@ enum Overlay {
     Confirm,
 }
 
+const PUBLISHED_PRESENTATION_SLOT: usize = 2;
+
+fn published_chooser_slot(payload: &EventPayload) -> Option<usize> {
+    match payload {
+        EventPayload::ChooseTree { .. } => Some(0),
+        EventPayload::ChooseBuffer { .. } => Some(1),
+        EventPayload::ChooserPresentation { .. } => Some(PUBLISHED_PRESENTATION_SLOT),
+        _ => None,
+    }
+}
+
 fn dismiss_overlays(
     inner: &mut ServerState,
     client: ClientId,
@@ -38986,6 +39119,7 @@ struct CommandPrompt {
     vi_keys: bool,
     command_mode: bool,
     word_separators: String,
+    serial: u64,
     cursors: [PromptCursor; 2],
 }
 
@@ -39008,6 +39142,8 @@ fn prompt_cursors(inner: &ServerState, session: Option<SessionId>) -> [PromptCur
             }),
         })
 }
+
+static NEXT_COMMAND_PROMPT: AtomicU64 = AtomicU64::new(1);
 
 impl CommandPrompt {
     fn new(
@@ -39049,6 +39185,7 @@ impl CommandPrompt {
             vi_keys: false,
             command_mode: false,
             word_separators: String::new(),
+            serial: NEXT_COMMAND_PROMPT.fetch_add(1, Ordering::Relaxed),
             cursors: [PromptCursor::default(); 2],
         }
     }
@@ -41324,6 +41461,48 @@ fn client_format_facts(
     session: SessionId,
 ) -> ClientFormatFacts {
     client_format_facts_from_source(&ClientFormatSource::from_inner(inner), client, session)
+}
+
+fn unattached_client_format_facts(inner: &ServerState, client: ClientId) -> ClientFormatFacts {
+    let source = ClientFormatSource::from_inner(inner);
+    let registered = source.clients.get(&client);
+    let (written, discarded) = registered
+        .and_then(|c| c.subscriber.as_ref())
+        .map_or((0, 0), |subscriber| subscriber.stats());
+    ClientFormatFacts {
+        activity: client_format_time(registered.and_then(|c| c.activity_time)),
+        control_mode: usize::from(registered.and_then(|c| c.kind) == Some(ClientKind::Control))
+            .to_string(),
+        created: client_format_time(registered.and_then(|c| c.created_time)),
+        discarded: discarded.to_string(),
+        flags: format_client_flags_from_source(&source, client),
+        key_table: "root".to_owned(),
+        name: client_format_name_from_source(&source, client),
+        pid: registered
+            .and_then(|c| c.pid)
+            .filter(|pid| *pid != 0)
+            .map(|pid| pid.to_string())
+            .unwrap_or_default(),
+        prefix: "0".to_owned(),
+        readonly: usize::from(source.client_flags.contains(client)).to_string(),
+        termfeatures: client_negotiated_features_from_source(&source, client),
+        termname: client_environment_value_from_source(&source, client, "TERM")
+            .filter(|term| !term.is_empty())
+            .unwrap_or("unknown")
+            .to_owned(),
+        tty: registered
+            .and_then(|c| c.tty.as_ref())
+            .cloned()
+            .unwrap_or_default(),
+        uid: source.engine.format_uid().to_owned(),
+        user: source.engine.format_user().to_owned(),
+        utf8: usize::from(client_uses_utf8_from_source(&source, client)).to_string(),
+        width: "80".to_owned(),
+        written: written.to_string(),
+        environment: registered.and_then(|c| c.environment.as_ref()).cloned(),
+        viewport: Some(ClientViewportFacts::default()),
+        ..ClientFormatFacts::default()
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -44549,8 +44728,15 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::tree_selection_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
-                            presentation.prompt_style =
-                                chooser_presentation::prompt_style(mode.prompt_command_mode());
+                            (presentation.prompt_style, presentation.prompt_cursor) =
+                                chooser_presentation::mode_prompt_look(
+                                    inner,
+                                    chooser_presentation::pane_session(inner, *pane),
+                                    "command",
+                                    &["NOFORMAT"],
+                                    &mode.prompt_input(),
+                                    mode.prompt_command_mode(),
+                                );
                             let (prompt, prompt_cursor, prompt_top) = prompt.unwrap_or_default();
                             PaneMode::Customize {
                                 state,
@@ -44582,6 +44768,15 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 }
                             }
                             let (prompt, prompt_cursor) = mode.prompt.draw(columns);
+                            let (prompt_style, prompt_shape) =
+                                chooser_presentation::mode_prompt_look(
+                                    inner,
+                                    chooser_presentation::pane_session(inner, *pane),
+                                    "search",
+                                    &["INCREMENTAL", "NOFORMAT"],
+                                    &mode.prompt.input(),
+                                    mode.prompt.command_mode(),
+                                );
                             let matches = entries
                                 .iter()
                                 .map(|entry| {
@@ -44600,12 +44795,11 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                     inner, *pane,
                                 ),
                                 prompt,
-                                prompt_style: chooser_presentation::prompt_style(
-                                    mode.prompt.command_mode(),
-                                ),
+                                prompt_style,
                                 prompt_cursor,
                                 matches,
                                 match_style: chooser_presentation::switch_match_style(inner, *pane),
+                                prompt_shape,
                             }
                         }
                     });
@@ -54563,7 +54757,7 @@ mod tests {
         );
         assert_eq!(
             produced_non_after_hooks.len(),
-            47,
+            49,
             "explicit hook producer count changed"
         );
         assert!(
@@ -54590,7 +54784,7 @@ mod tests {
         }
         assert_eq!(
             tracked_hooks.len(),
-            4,
+            2,
             "runtime hook gap roster changed: {tracked_hooks:?}"
         );
 
@@ -54598,7 +54792,7 @@ mod tests {
             .union(&produced_non_after_hooks)
             .cloned()
             .collect::<BTreeSet<_>>();
-        assert_eq!(produced_hooks.len(), 85, "produced hook count changed");
+        assert_eq!(produced_hooks.len(), 87, "produced hook count changed");
         assert!(
             produced_hooks.is_disjoint(&tracked_hooks),
             "produced and tracked hooks overlap"
@@ -56050,7 +56244,7 @@ mod tests {
                 "new-session -d -s listed\n\
                  display-message -p ROOT_BEFORE\n\
                  source-file '{}'\n\
-                 list-sessions -F LIST_#{{session_name}}\n\
+                 list-sessions -F 'LIST_#{{session_name}}'\n\
                  display-message -p ROOT_AFTER\n",
                 child.display()
             ),
@@ -58146,7 +58340,7 @@ mod tests {
                     })
                 ))
                 .count(),
-            2
+            0
         );
         let peer_snapshot = peer_messages
             .iter()
@@ -81403,6 +81597,176 @@ set-option -g @alias-mixed-next yes
 
     fn prompt_state(shared: &Arc<Shared>, client: ClientId) -> Option<CommandPromptState> {
         command_prompt_state(&shared.inner.lock(), client)
+    }
+
+    #[test]
+    fn an_attached_waiter_sees_each_payload_while_it_waits() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (session, pane, _) = attached_message_fixture(&shared, "event-view", &[client]);
+        shared.inner.lock().client_entry(client).instance_id = Some(ClientInstanceId(client.0));
+        let context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            let mut context = context.clone();
+            std::thread::spawn(move || {
+                shared.execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "wait-for",
+                        [
+                            "-E",
+                            "-v",
+                            "-F",
+                            "#{||:#{pane_id},#{==:#{new_name},stop}}",
+                            "session-renamed",
+                        ],
+                    ),
+                )
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while shared.inner.lock().event_waiters.is_empty() {
+            assert!(!waiter.is_finished(), "the wait returned without parking");
+            assert!(Instant::now() < deadline, "the wait never parked");
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let rename = |name: &str| {
+            shared
+                .execute(
+                    ClientId(7),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("rename-session", ["-t", &session.to_string(), name]),
+                )
+                .expect("rename-session");
+        };
+        rename("first");
+        assert!(
+            !waiter.is_finished(),
+            "#{{pane_id}} has no target in the filter"
+        );
+        assert_eq!(shared.inner.lock().event_waiters.len(), 1);
+        assert!(shared.read_client(client, |c| c.is_some_and(|c| c.command_output.is_some())));
+        rename("stop");
+        waiter.join().expect("waiter thread").expect("wait-for -E");
+        assert!(shared.inner.lock().event_waiters.is_empty());
+    }
+
+    #[test]
+    fn pane_prompts_fire_the_prompt_events_with_their_type() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "pane-prompt-events", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let run = |context: &mut ExecutionContext, args: &[&str]| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                )
+                .expect(args[0]);
+        };
+        let log = |shared: &Arc<Shared>| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-options", ["-gqv", "@prompts"]),
+                )
+                .expect("show-options")
+                .output
+                .to_string()
+                .trim_end()
+                .to_owned()
+        };
+        let escape = |context: &mut ExecutionContext| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::Key {
+                        pane,
+                        input: test_key(KeyCode::Escape, Modifiers::default(), None),
+                        text_follows: false,
+                    },
+                )
+                .expect("escape");
+        };
+        run(&mut context, &["set", "-g", "@prompts", "-"]);
+        for (hook, tag) in [("pane-prompt-opened", "O"), ("pane-prompt-closed", "C")] {
+            run(
+                &mut context,
+                &[
+                    "set-hook",
+                    "-g",
+                    hook,
+                    &format!(
+                        "set -gaF @prompts '{tag}#{{hook_pane}}#{{hook_prompt_type}}#{{hook_event}}#{{hook_session}}+'"
+                    ),
+                ],
+            );
+        }
+        let pane_id = pane.to_string();
+        run(
+            &mut context,
+            &[
+                "command-prompt",
+                "-P",
+                "-T",
+                "search",
+                "-p",
+                "find",
+                "display-message %%",
+            ],
+        );
+        assert_eq!(
+            log(&shared),
+            format!("-O{pane_id}searchpane-prompt-opened+")
+        );
+        escape(&mut context);
+        assert!(prompt_state(&shared, client).is_none());
+        assert_eq!(
+            log(&shared),
+            format!("-O{pane_id}searchpane-prompt-opened+C{pane_id}searchpane-prompt-closed+")
+        );
+        run(&mut context, &["set", "-g", "@prompts", "-"]);
+        run(
+            &mut context,
+            &["command-prompt", "-P", "-p", "one", "display-message %%"],
+        );
+        run(
+            &mut context,
+            &["command-prompt", "-P", "-p", "two", "display-message %%"],
+        );
+        assert_eq!(
+            log(&shared),
+            format!("-O{pane_id}commandpane-prompt-opened+")
+        );
+        escape(&mut context);
+        assert_eq!(
+            log(&shared),
+            format!("-O{pane_id}commandpane-prompt-opened+C{pane_id}commandpane-prompt-closed+")
+        );
+        run(&mut context, &["set", "-g", "@prompts", "-"]);
+        run(
+            &mut context,
+            &["command-prompt", "-p", "status", "display-message %%"],
+        );
+        escape(&mut context);
+        assert_eq!(log(&shared), "-");
     }
 
     /// `prompt_key`'s head branches: `-1` folds one key into a character and
@@ -105948,6 +106312,150 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn list_rows_carry_the_invoking_client() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = switch_test_session(&shared, "rows-attached");
+        switch_test_session(&shared, "rows-other");
+        let (attached, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("rows-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (bystander, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("rows-bystander".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(attached, session).expect("attach client");
+        shared.attach(bystander, session).expect("attach bystander");
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_entry(attached).has_terminal = true;
+            inner.client_entry(bystander).has_terminal = true;
+            inner.client_entry(bystander).activity.replace(100);
+        }
+        let format = "#{session_name}=[#{session_active}]:[#{client_name}]";
+        let lists = |client: ClientId, kind: ClientKind| -> Vec<String> {
+            [
+                CommandInvocation::new("list-sessions", ["-F", format]),
+                CommandInvocation::new("list-windows", ["-a", "-F", format]),
+                CommandInvocation::new("list-panes", ["-a", "-F", format]),
+            ]
+            .iter()
+            .map(|command| {
+                let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+                shared
+                    .execute(client, kind, &mut context, command)
+                    .expect("list rows")
+                    .output
+                    .to_string()
+            })
+            .collect()
+        };
+
+        assert_eq!(
+            lists(attached, ClientKind::Interactive),
+            vec!["rows-attached=[1]:[rows-client]\nrows-other=[0]:[rows-client]"; 3]
+        );
+
+        let (command_client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared
+            .inner
+            .lock()
+            .client_entry(command_client)
+            .pid
+            .replace(4242);
+        assert_eq!(
+            lists(command_client, ClientKind::Command),
+            vec!["rows-attached=[0]:[client-4242]\nrows-other=[0]:[client-4242]"; 3]
+        );
+
+        let unattached_facts = "#{client_pid}|#{client_flags}|#{client_key_table}|#{client_width}|#{client_height}|#{client_session}|#{client_prefix}|#{client_readonly}|#{client_control_mode}|#{window_bigger}|#{window_offset_x}";
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let filtered = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-windows",
+                    ["-a", "-f", "#{client_pid}", "-F", unattached_facts],
+                ),
+            )
+            .expect("unattached list rows");
+        assert_eq!(
+            filtered.output,
+            "4242|focused|root|80|||0|0|0|0|\n".repeat(2).trim_end()
+        );
+
+        let mut context = ExecutionContext::default();
+        let created = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-P",
+                        "-s",
+                        "rows-new",
+                        "-F",
+                        "#{client_name}|#{session_active}",
+                    ],
+                ),
+            )
+            .expect("new-session -P from an unattached client");
+        assert_eq!(created.output, "client-4242|0");
+
+        shared
+            .inner
+            .lock()
+            .client_entry(command_client)
+            .features
+            .replace(client_features_fact(&["client-features-v1:RGB".to_owned()]));
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let features = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-windows",
+                    ["-t", "=rows-other", "-F", "#{client_termfeatures}"],
+                ),
+            )
+            .expect("unattached client features");
+        assert_eq!(features.output, "RGB");
+
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        let attached_print = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-P",
+                        "-s",
+                        "rows-demo",
+                        "-F",
+                        "#{client_session}|#{session_active}|#{client_flags}",
+                    ],
+                ),
+            )
+            .expect("new-session -P from a fresh control client");
+        assert_eq!(attached_print.output, "rows-demo|1|focused,control-mode");
+    }
+
+    #[test]
     fn requested_colour_features_join_the_roster_alone() {
         let shared = Arc::new(Shared::new(1));
         let (session, _, _) = switch_test_session(&shared, "requested-features");
@@ -106156,9 +106664,6 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(&fields[23..27], ["1", "132", "1234", "333"]);
         assert_eq!(fields[27], "1");
 
-        // cmd-list-panes.c passes a null client to format_defaults, so a row
-        // answers null for every client-scoped name even from an attached
-        // client; the pin answers the same empty pair here.
         let ordinary = shared
             .execute(
                 client,
@@ -106170,7 +106675,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("ordinary target client facts");
-        assert_eq!(ordinary.output, "|");
+        assert_eq!(ordinary.output, "/dev/pts/42|4242");
         let targeted = shared
             .execute(
                 client,

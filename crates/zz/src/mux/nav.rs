@@ -2,7 +2,7 @@
 
 use std::collections::BTreeSet;
 
-use zpui::{App, Entity, SharedString};
+use zz_gpui::{App, Entity, SharedString};
 use zz_protocol::{
     AgentProvider, Axis, CommandInvocation, MuxSnapshot, PaneId, PaneKindSnapshot, PaneSnapshot,
     PaneStatusState, SessionId, WindowId,

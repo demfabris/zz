@@ -1,6 +1,6 @@
 use crate::ActiveTheme as _;
 use crate::Colorize as _;
-use zpui::{
+use zz_gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement as _,
     Pixels, Stateful, Styled as _, WindowControlArea, div, prelude::FluentBuilder as _, px,
 };
@@ -20,7 +20,7 @@ pub fn app_shell_surface(
     titlebar: Option<AnyElement>,
     workspace: impl IntoElement,
     overlays: impl IntoIterator<Item = AnyElement>,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .relative()
@@ -67,7 +67,7 @@ pub fn app_shell_surface(
 pub fn app_titlebar_strip(
     id: impl Into<ElementId>,
     controls: impl IntoElement,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .flex()
@@ -90,7 +90,7 @@ pub fn app_workspace_surface(
     content: impl IntoElement,
     overlays: impl IntoIterator<Item = AnyElement>,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     div()
         .id(id)
         .relative()
@@ -110,7 +110,7 @@ pub fn app_workspace_surface(
         .children(overlays)
 }
 
-pub fn app_connection_state(message: impl IntoElement, cx: &App) -> zpui::Div {
+pub fn app_connection_state(message: impl IntoElement, cx: &App) -> zz_gpui::Div {
     div()
         .flex()
         .flex_1()
@@ -135,7 +135,7 @@ pub fn workspace_status_bar(
     leading_inset: Pixels,
     slots: WorkspaceStatusSlots,
     cx: &App,
-) -> Stateful<zpui::Div> {
+) -> Stateful<zz_gpui::Div> {
     use crate::TITLE_BAR_HEIGHT;
     let window_strip = div()
         .flex()

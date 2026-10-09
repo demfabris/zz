@@ -1,8 +1,8 @@
-use zpui::{
+use zz_client::AgentAttentionStatus;
+use zz_gpui::{
     AnyElement, App, IntoElement, ParentElement as _, SharedString, Styled as _, Window, div,
     prelude::*, px,
 };
-use zz_client::AgentAttentionStatus;
 use zz_protocol::{AgentProvider, PaneKindSnapshot};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, IconName, h_flex,
@@ -227,7 +227,7 @@ impl Bar {
     };
 }
 
-pub fn titlebar(config: &Bar, cx: &App) -> zpui::Stateful<zpui::Div> {
+pub fn titlebar(config: &Bar, cx: &App) -> zz_gpui::Stateful<zz_gpui::Div> {
     let state = |index: usize| {
         let (_, active, bell, activity) = WINDOWS[index % WINDOWS.len()];
         WorkspaceStatusWindowState {

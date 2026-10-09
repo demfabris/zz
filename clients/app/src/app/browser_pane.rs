@@ -2,7 +2,7 @@ use std::{collections::VecDeque, rc::Rc};
 
 use crate::ios_browser::{BrowserEvent, BrowserProfile, BrowserView, ElementPickerAppearance};
 use futures::StreamExt as _;
-use zpui::{
+use zz_gpui::{
     App, ClipboardEntry, ClipboardItem, ClipboardString, Context, Corners, Entity, FocusHandle,
     Focusable, Image, ImageFormat, Pixels, Render, Subscription, Window, div, prelude::*, px,
 };
@@ -33,7 +33,7 @@ struct Tab {
     error: Option<String>,
     picking: bool,
     pick_status: Option<String>,
-    _events: zpui::Task<()>,
+    _events: zz_gpui::Task<()>,
 }
 
 pub(super) struct BrowserPane {

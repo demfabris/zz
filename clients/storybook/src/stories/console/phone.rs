@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use zpui::{
+use zz_gpui::{
     AnyElement, App, AppContext as _, Context, Entity, IntoElement, ParentElement as _, Render,
     Styled as _, Window, div, prelude::*, px,
 };

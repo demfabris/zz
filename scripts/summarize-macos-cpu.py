@@ -297,7 +297,7 @@ def hot_actionable_inclusive_symbols(
         "<async_task::runnable::Runnable",
         "<core::pin::Pin<alloc::boxed::Box<dyn core::future",
         "<fn() -> std::process::ExitCode as core::ops::function::FnOnce",
-        "<zpui::app::Application>::run",
+        "<zz_gpui::app::Application>::run",
     )
     selected: list[dict[str, object]] = []
     for symbol, weight in candidates:

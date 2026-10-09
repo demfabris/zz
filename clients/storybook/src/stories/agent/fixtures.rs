@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use zpui::{Image, ImageFormat};
+use zz_gpui::{Image, ImageFormat};
 use zz_protocol::{
     AgentTaskWire,
     agent_stream::{AgentQuestion, AgentQuestionOption},

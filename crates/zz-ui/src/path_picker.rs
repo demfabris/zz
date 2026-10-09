@@ -1,11 +1,11 @@
 use std::{collections::HashMap, ops::Range, rc::Rc, sync::Arc};
 
-use zpui::{
+use zz_client::path_rank;
+use zz_gpui::{
     App, Context, Entity, EventEmitter, FocusHandle, Focusable, IntoElement, KeyDownEvent, Render,
     ScrollStrategy, SharedString, Task, UniformListScrollHandle, Window, div, prelude::*, px,
     uniform_list,
 };
-use zz_client::path_rank;
 use zz_protocol::{GitMark, PathEntry, PathKind, PathListRoot};
 
 use crate::{
@@ -604,7 +604,7 @@ impl PathPickerView {
         selected: bool,
         picker: Entity<Self>,
         cx: &App,
-    ) -> zpui::Div {
+    ) -> zz_gpui::Div {
         let hover = picker.clone();
         let click = picker;
         let muted_prefix = row.label.rfind('/').map_or(0, |index| index + 1);

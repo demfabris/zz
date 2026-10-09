@@ -34,9 +34,9 @@ fi
 "$WEB_ROOT/target/debug/zz-web" "$@" &
 WEB_GATEWAY_PID=$!
 
-zpui_watch=()
-for dir in crates/zpui*/; do
-    zpui_watch+=(--watch "$dir")
+gpui_watch=()
+for dir in crates/zz-gpui*/; do
+    gpui_watch+=(--watch "$dir")
 done
 
 cargo watch \
@@ -51,7 +51,7 @@ cargo watch \
     --watch crates/zz-protocol/src \
     --watch crates/zz-terminal/src \
     --watch crates/zz-ui/src \
-    "${zpui_watch[@]}" \
+    "${gpui_watch[@]}" \
     --watch clients/web/assets/fonts \
     --watch scripts/build-web-wasm.sh \
     --shell "$WEB_ROOT/scripts/build-web-wasm.sh"

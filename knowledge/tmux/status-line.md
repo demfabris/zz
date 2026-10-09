@@ -317,8 +317,9 @@ the initial pane keeps its donor or caller fallback.
 empty. An unattached client or a client attached to another session expands it to `0`; a client
 attached to the selected session expands it to `1`. Command execution retains the raw invoking
 client separately from the current or explicitly selected target client. Name and cwd expansions
-can use the invoker while target-aware command formats use the selected client. Clientless lists,
-filters, chooser rows, and `list-commands` remain empty. Status rows, deferred pane output, shell
+can use the invoker while target-aware command formats use the selected client. `list-sessions`,
+`list-windows` and `list-panes` rows use the invoker, as tmux 3.8 does. Clientless filters, chooser
+rows, and `list-commands` remain empty. Status rows, deferred pane output, shell
 callbacks, buffer and capture paths, popup and menu text, `list-keys`, Control subscriptions, and
 display-panes labels carry their selected client state. The 198-name partition now contains 94
 direct mux values, 32 daemon-delegated values, and 72 active constant-backed gaps. Unit,

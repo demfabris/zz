@@ -1,4 +1,4 @@
-use zpui::{
+use zz_gpui::{
     AnyElement, App, AppContext as _, Entity, IntoElement, ParentElement as _, Styled as _,
     UniformListScrollHandle, Window, div, prelude::*, px,
 };
@@ -122,7 +122,7 @@ fn canvas(
         div()
             .size_full()
             .p(gap(gaps))
-            .when(!inline_sidebar, zpui::Styled::pt_0)
+            .when(!inline_sidebar, zz_gpui::Styled::pt_0)
             .child(layout),
     )
 }
@@ -152,7 +152,7 @@ fn with_sidebar(gaps: bool, state: &Shell, index: usize, cx: &App) -> AnyElement
         cx,
     )
     .when(gaps, |surface| {
-        surface.border_color(zpui::transparent_black())
+        surface.border_color(zz_gpui::transparent_black())
     });
     app_shell_surface(
         "shell",

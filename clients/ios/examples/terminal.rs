@@ -8,12 +8,12 @@ mod terminal_app;
 mod app {
     use super::terminal_app::TerminalApp;
     use std::{borrow::Cow, rc::Rc};
-    use zpui::{App, AppContext, Application, WindowOptions};
+    use zz_gpui::{App, AppContext, Application, WindowOptions};
     use zz_ui::{Root, Theme, UiZoom};
 
     pub fn run() {
         env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
-        Application::with_platform(Rc::new(zpui_ios::IosPlatform::new()))
+        Application::with_platform(Rc::new(zz_gpui_platform::ios::IosPlatform::new()))
             .with_assets(zz_ui::Assets)
             .run(|cx: &mut App| {
                 cx.text_system()

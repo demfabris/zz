@@ -181,29 +181,10 @@ windows-registry = "0.6.0"
 x11rb = "0.13.2"
 zeroize = "=1.9.0"
 
-zpui = { path = "crates/zpui", default-features = false }
-zpui-apple = { path = "crates/zpui-apple" }
-collections = { path = "crates/zpui-collections", package = "zpui-collections" }
-http_client = { path = "crates/zpui-http-client", package = "zpui-http-client" }
-zpui-ios = { path = "crates/zpui-ios" }
-zpui-kit = { path = "crates/zpui-kit" }
-zpui-linux = { path = "crates/zpui-linux", default-features = false }
-zlog = { path = "crates/zpui-log", package = "zpui-log" }
-zpui-macos = { path = "crates/zpui-macos", default-features = false }
-zpui-macros = { path = "crates/zpui-macros" }
-zpui-platform = { path = "crates/zpui-platform", default-features = false }
-refineable = { path = "crates/zpui-refineable", package = "zpui-refineable" }
-derive_refineable = { path = "crates/zpui-refineable-derive", package = "zpui-refineable-derive" }
-scheduler = { path = "crates/zpui-scheduler", package = "zpui-scheduler" }
-zpui-shared-string = { path = "crates/zpui-shared-string" }
-sum_tree = { path = "crates/zpui-sum-tree", package = "zpui-sum-tree" }
-ztracing = { path = "crates/zpui-tracing", package = "zpui-tracing" }
-ztracing_macro = { path = "crates/zpui-tracing-macros", package = "zpui-tracing-macros" }
-zpui-util = { path = "crates/zpui-util" }
-util_macros = { path = "crates/zpui-util-macros", package = "zpui-util-macros" }
-zpui-web = { path = "crates/zpui-web" }
-zpui-wgpu = { path = "crates/zpui-wgpu" }
-zpui-windows = { path = "crates/zpui-windows", default-features = false }
+zz-gpui = { path = "crates/zz-gpui", default-features = false }
+zz-gpui-kit = { path = "crates/zz-gpui-kit" }
+zz-gpui-macros = { path = "crates/zz-gpui-macros" }
+zz-gpui-platform = { path = "crates/zz-gpui-platform", default-features = false }
 
 zz = { path = "crates/zz" }
 zz-app = { path = "clients/app" }
@@ -247,7 +228,7 @@ cast_sign_loss = "allow"
 float_cmp = "allow"
 struct_excessive_bools = "allow"
 type_complexity = "allow"
-# zpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
+# zz-gpui idioms: `_subscriptions`/`_task` fields held for RAII get reassigned,
 # and view methods take &self for organization before they need it.
 used_underscore_binding = "allow"
 unused_self = "allow"
@@ -258,28 +239,9 @@ debug = 1
 [profile.dev.package]
 "*" = { opt-level = 2 }
 taffy = { opt-level = 3 }
-zpui = { opt-level = 3 }
-zpui-apple = { opt-level = 2 }
-zpui-collections = { opt-level = 2 }
-zpui-http-client = { opt-level = 2 }
-zpui-ios = { opt-level = 2 }
-zpui-linux = { opt-level = 2 }
-zpui-log = { opt-level = 2 }
-zpui-macos = { opt-level = 2 }
-zpui-macros = { opt-level = 2 }
-zpui-platform = { opt-level = 2 }
-zpui-refineable = { opt-level = 2 }
-zpui-refineable-derive = { opt-level = 2 }
-zpui-scheduler = { opt-level = 2 }
-zpui-shared-string = { opt-level = 2 }
-zpui-sum-tree = { opt-level = 2 }
-zpui-tracing = { opt-level = 2 }
-zpui-tracing-macros = { opt-level = 2 }
-zpui-util = { opt-level = 2 }
-zpui-util-macros = { opt-level = 2 }
-zpui-web = { opt-level = 2 }
-zpui-wgpu = { opt-level = 2 }
-zpui-windows = { opt-level = 2 }
+zz-gpui = { opt-level = 3 }
+zz-gpui-macros = { opt-level = 2 }
+zz-gpui-platform = { opt-level = 2 }
 
 [profile.release]
 opt-level = 3

@@ -1,9 +1,9 @@
 ---
 type: Research
-title: zz-ui and zpui-kit findings from the first storybook pass
+title: zz-ui and zz-gpui-kit findings from the first storybook pass
 description: Visual bugs, crashes and missing APIs found while building every storybook section on 2026-10-09, grouped by area with the story and section that shows each one.
 resource: clients/storybook/src/stories
-tags: [storybook, zz-ui, zpui-kit, zpui-web, bugs, wasm]
+tags: [storybook, zz-ui, zz-gpui-kit, zz-gpui-platform, bugs, wasm]
 timestamp: 2026-10-09T00:00:00Z
 ---
 
@@ -22,7 +22,7 @@ few presets. Fixed items should be deleted from this page.
   never reach the SVG renderer on wasm. (`agent/mermaid`)
 - **Bold and medium weights render regular with Inter Variable.** Font ids are per face, a variable
   font has one face, and `CosmicTextSystem::render_glyph_image` builds the swash scaler without a
-  `wght` variation (`crates/zpui-wgpu/src/cosmic_text_system.rs`). Likely affects variable fonts
+  `wght` variation (`crates/zz-gpui-platform/src/wgpu/cosmic_text_system.rs`). Likely affects variable fonts
   on Linux too. (`markdown/headings`, `agent/answer`)
 - **CJK text renders as empty boxes**: the page loads only Inter and Lilex. (`terminal-grid/wide`)
 
@@ -58,7 +58,7 @@ few presets. Fixed items should be deleted from this page.
 - Pane deck "+N" card reads "-3": the card before it covers the "+". (`status-bar/pane-deck`)
 - The status bar at about 800px drops window names entirely. (`status-bar/bar`)
 - The tab strip does not scroll to the active tab on first render: the scroll request runs before
-  the scroller knows its size (zpui `div.rs`). (`browser/tabs`)
+  the scroller knows its size (zz-gpui `div.rs`). (`browser/tabs`)
 - Display-panes cards are see-through. (`panes/display-panes`)
 - The Panes settings preview prints "❯", which Lilex lacks; the status bar preview hard-codes
   "v0.9.0". (`settings/panes-page`)
@@ -97,7 +97,7 @@ few presets. Fixed items should be deleted from this page.
 - Git letters in the path picker are all muted, including conflicted "C"; the add-host error uses
   the warning colour.
 
-# Kit (`crates/zpui-kit`)
+# Kit (`crates/zz-gpui-kit`)
 
 - CodeEditor: horizontally scrolled code paints over the line-number rail; `set_selected_range`
   scrolls a visible line to the top; the focus border uses `foreground.outline()` while Input uses

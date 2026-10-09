@@ -42,7 +42,7 @@
       "id": "fix.tui-regressions",
       "track": "fix",
       "title": "Regressions the 3.8 fixture rebaseline found on main",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-tui/src",
@@ -59,10 +59,11 @@
         "TUI-012: the import-tmux-config message case matches the fixture (decide which side is right) and tui-superset passes.",
         "tui-launch-diff's command-chain case writes a valid separator so the fixture can pass, and the fixture is mapped in verify-claims."
       ],
-      "branch": null,
+      "branch": "catchup/fix.tui-regressions",
       "sha": null,
       "notes": [
-        "2026-10-09: found by pin.tui-fixtures; all six reproduce against both pins, so they are main regressions, not 3.8 drift. High priority: two break verified TUI obligations."
+        "2026-10-09: found by pin.tui-fixtures; all six reproduce against both pins, so they are main regressions, not 3.8 drift. High priority: two break verified TUI obligations.",
+        "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello"
       ]
     },
     {

@@ -21611,13 +21611,13 @@ impl Shared {
             {
                 *cell = (geometry.cell_width_px, geometry.cell_height_px);
             }
+            if let Some(place) = pane_place(&inner, pane) {
+                inner.reported_pane_places.insert(pane, place);
+            }
             if let Some(reported) = pane_geometry_from(&inner, pane, GeometrySource::ClientReport) {
                 inner
                     .engine
                     .set_pane_geometry(pane, reported.columns, reported.rows);
-            }
-            if let Some(place) = pane_place(&inner, pane) {
-                inner.reported_pane_places.insert(pane, place);
             }
             terminal_resize_for_pane(&inner, pane)
         };
@@ -46506,6 +46506,11 @@ fn terminal_geometry_for_mode_from(
     }
     let session = window_state.session;
     let suppress_ignored = unignored_attached_sizing_client_exists(inner);
+    let stale_report = source == GeometrySource::ClientReport
+        && inner
+            .reported_pane_places
+            .get(&pane)
+            .is_some_and(|place| Some(place) != pane_place(inner, pane).as_ref());
     let candidates = inner
         .attached
         .get(&session)?
@@ -46523,7 +46528,13 @@ fn terminal_geometry_for_mode_from(
             }
         })
         .filter_map(|client| {
-            client_terminal_geometry(inner, *client, pane).map(|geometry| (*client, geometry))
+            let mut geometry = client_terminal_geometry(inner, *client, pane)?;
+            if stale_report
+                && inner.client(*client).and_then(|c| c.kind) != Some(ClientKind::Control)
+            {
+                (geometry.columns, geometry.rows) = inner.engine.pane_geometry(pane)?;
+            }
+            Some((*client, geometry))
         })
         .collect::<Vec<_>>();
     let owner = candidates.iter().min_by_key(|(client, _)| {
@@ -46606,11 +46617,6 @@ fn pane_geometry_from(
     terminal_geometry_for_mode_from(inner, pane, aggressive, mode, source)
 }
 
-/// The layout learns what the owner client reported, so the cell the pty is
-/// then sized from is the cell the client draws. Every write-back runs: the
-/// owner set is already what `aggressive-resize` decides, and a pane whose
-/// owner moved without the layout following would report one size and run at
-/// another.
 #[derive(Clone, Debug, PartialEq)]
 struct PanePlace {
     path: Vec<(SplitId, bool)>,
@@ -46641,19 +46647,16 @@ fn pane_place(inner: &ServerState, pane: PaneId) -> Option<PanePlace> {
     }
 }
 
+/// The layout learns what the owner client reported, so the cell the pty is
+/// then sized from is the cell the client draws. Every write-back runs: the
+/// owner set is already what `aggressive-resize` decides, and a pane whose
+/// owner moved without the layout following would report one size and run at
+/// another.
 fn write_back_terminal_geometries(inner: &mut ServerState, panes: &BTreeSet<PaneId>) -> bool {
     let measurements = panes
         .iter()
         .filter_map(|pane| {
             if !inner.terminals.contains_key(pane) {
-                return None;
-            }
-            if inner.terminal_geometries.contains_key(pane)
-                && inner
-                    .reported_pane_places
-                    .get(pane)
-                    .is_some_and(|place| Some(place) != pane_place(inner, *pane).as_ref())
-            {
                 return None;
             }
             pane_geometry_from(inner, *pane, GeometrySource::ClientReport)
@@ -99921,6 +99924,103 @@ bind - split-window -v -c "#{pane_current_path}"
                 "split-window -d {axis} in an unseen window keeps it at 80x23 once selected"
             );
         }
+    }
+
+    #[test]
+    fn a_stale_report_leaves_the_latest_control_size_to_write_back() {
+        let shared = Arc::new(Shared::new(1));
+        let run =
+            |client: ClientId, kind: ClientKind, context: &mut ExecutionContext, args: &[&str]| {
+                shared
+                    .execute(
+                        client,
+                        kind,
+                        context,
+                        &CommandInvocation::new(args[0], args[1..].iter().copied()),
+                    )
+                    .expect("command")
+                    .output
+            };
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &[
+                "new-session",
+                "-d",
+                "-s",
+                "stale-control",
+                "-x",
+                "80",
+                "-y",
+                "23",
+                QUIET_PANE_COMMAND,
+            ],
+        );
+        let session = context.session.expect("session id");
+        shared.attach(client, session).expect("attach");
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["new-window", QUIET_PANE_COMMAND],
+        );
+        let hidden = context.pane.expect("new window pane");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: hidden,
+                    columns: 80,
+                    rows: 23,
+                    cell_width_px: 8,
+                    cell_height_px: 16,
+                },
+            )
+            .expect("client measurement");
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["select-window", "-t", ":0"],
+        );
+        run(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &["split-window", "-d", "-h", "-t", ":1", QUIET_PANE_COMMAND],
+        );
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        shared.attach(control, session).expect("attach control");
+        let mut control_context = ExecutionContext::default();
+        run(
+            control,
+            ClientKind::Control,
+            &mut control_context,
+            &["refresh-client", "-C", "100x24"],
+        );
+        assert_eq!(
+            run(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &[
+                    "list-panes",
+                    "-t",
+                    ":1",
+                    "-F",
+                    "#{pane_width}x#{pane_height} #{window_width}x#{window_height}",
+                ],
+            ),
+            "50x24 100x24\n49x24 100x24",
+            "the latest control client sizes the window past a stale interactive report"
+        );
     }
 
     #[test]

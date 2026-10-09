@@ -40,7 +40,7 @@
       "id": "fix.streams",
       "track": "fix",
       "title": "Close the last two caller-stream refusals",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -55,7 +55,7 @@
         "`printf 'set -g @x a\\376b\\n' | zz source-file -` applies like the pin instead of failing with 'stream did not contain valid UTF-8'.",
         "protocol.binary-streams closes."
       ],
-      "branch": null,
+      "branch": "catchup/fix.streams",
       "sha": null,
       "notes": []
     },
@@ -162,7 +162,7 @@
       "id": "pin.move",
       "track": "pin",
       "title": "Move the pin to the tmux 3.8 tag and register the whole delta",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "compat/tmux-oracle.py",
@@ -186,7 +186,8 @@
       "branch": "catchup/pin.move",
       "sha": null,
       "notes": [
-        "Measured delta and a soft-assert oracle runner: ~/.cache/zz-catchup/ on alienware (delta.md, tools/, oracle-38.json); rebuild from the research doc elsewhere."
+        "Measured delta and a soft-assert oracle runner: ~/.cache/zz-catchup/ on alienware (delta.md, tools/, oracle-38.json); rebuild from the research doc elsewhere.",
+        "2026-10-09: lane done at 6b8afcab3: just compat check green at 3.8; 7 new gaps keyed by ledger item; layout-v1.py added to the harness for v2 layouts"
       ]
     },
     {

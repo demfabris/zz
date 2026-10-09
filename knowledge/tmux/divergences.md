@@ -1605,7 +1605,9 @@ three called `format_defaults(ft, NULL, ...)`. tmux 3.8 (`d9692f7e`) passes the 
 and client-scoped names, and zz now does the same from `ExecutionContext::format_client`. An
 unattached command client answers what the pin gives it, on those rows and on `new-session -P`:
 its `client-PID` name and pid, `focused` (plus `UTF-8`), key table `root`, width 80, prefix,
-readonly and control mode 0, `window_bigger` 0, and null height, session and offsets. And
+readonly and control mode 0, the features it supplied with `-T`, `window_bigger` 0, and null
+height, session and offsets. A non-detached `new-session -P` prints after
+`server_client_set_session`, so its `client_session` is the new session. And
 `display-message -a` walks `format_each`: the 198-entry table in declaration order minus every
 entry whose callback returns NULL, then the command's own tree, which puts `command=display-message`
 after the whole table (scenario `smoke/format-listing`).

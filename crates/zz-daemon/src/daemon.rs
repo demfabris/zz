@@ -41485,6 +41485,7 @@ fn unattached_client_format_facts(inner: &ServerState, client: ClientId) -> Clie
             .unwrap_or_default(),
         prefix: "0".to_owned(),
         readonly: usize::from(source.client_flags.contains(client)).to_string(),
+        termfeatures: client_negotiated_features_from_source(&source, client),
         termname: client_environment_value_from_source(&source, client, "TERM")
             .filter(|term| !term.is_empty())
             .unwrap_or("unknown")
@@ -106410,6 +106411,48 @@ bind - split-window -v -c "#{pane_current_path}"
             )
             .expect("new-session -P from an unattached client");
         assert_eq!(created.output, "client-4242|0");
+
+        shared
+            .inner
+            .lock()
+            .client_entry(command_client)
+            .features
+            .replace(client_features_fact(&["client-features-v1:RGB".to_owned()]));
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let features = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-windows",
+                    ["-t", "=rows-other", "-F", "#{client_termfeatures}"],
+                ),
+            )
+            .expect("unattached client features");
+        assert_eq!(features.output, "RGB");
+
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        let attached_print = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-P",
+                        "-s",
+                        "rows-demo",
+                        "-F",
+                        "#{client_session}|#{session_active}|#{client_flags}",
+                    ],
+                ),
+            )
+            .expect("new-session -P from a fresh control client");
+        assert_eq!(attached_print.output, "rows-demo|1|focused,control-mode");
     }
 
     #[test]

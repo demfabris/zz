@@ -3048,7 +3048,16 @@ impl StatusHooks for DaemonFormatHooks<'_> {
             "client_pid" => Some(self.facts.client()?.pid.clone()),
             "client_prefix" => Some(self.facts.client()?.prefix.clone()),
             "client_readonly" => Some(self.facts.client()?.readonly.clone()),
-            "client_session" => Some(self.facts.client()?.session.clone()),
+            "client_session" => {
+                let client = self.facts.client()?;
+                if client.session.is_empty()
+                    && context.variable("session_active").as_deref() == Some("1")
+                {
+                    context.variable("session_name").map(Cow::into_owned)
+                } else {
+                    Some(client.session.clone())
+                }
+            }
             "client_termfeatures" => Some(self.facts.client()?.termfeatures.clone()),
             "client_termname" => Some(self.facts.client()?.termname.clone()),
             "client_termtype" => Some(self.facts.client()?.termtype.clone()),

@@ -212,5 +212,9 @@ check `pgrep -af codex` on resume.
   marks on resize, repeated alternate-on, IL/DL) and merges without a third review; IL/DL may be
   recorded as an engine limit if it does not fit. Zz approximates tmux's per-row output flag with
   tracked pins, so its edge cases are bounded by budget, not chased to the end.
+- 2026-10-09 orchestrator: float.core runs as repeated 240-minute sessions in six ordered steps
+  (model, commands, zoom/focus, daemon and display-popup, wire, formats/registry), each step its
+  own commit; a relaunch continues from the branch and the last session's report. It is reviewed
+  once all six steps are in.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

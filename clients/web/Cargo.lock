@@ -1185,15 +1185,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "collections"
-version = "0.1.0"
-dependencies = [
- "indexmap 2.14.2",
- "rustc-hash 2.1.3",
- "zpui_util",
-]
-
-[[package]]
 name = "color_quant"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1787,15 +1778,6 @@ dependencies = [
  "rustc_version",
  "syn 2.0.119",
  "unicode-xid",
-]
-
-[[package]]
-name = "derive_refineable"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.119",
 ]
 
 [[package]]
@@ -3054,25 +3036,6 @@ checksum = "ca2a8f2913ee65f60facd6a5905613afaa448497a0230cc41ce022d93290bc2c"
 dependencies = [
  "bytes",
  "http",
-]
-
-[[package]]
-name = "http_client"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-compression",
- "bytes",
- "derive_more",
- "futures",
- "http",
- "http-body",
- "log",
- "parking_lot",
- "serde",
- "serde_json",
- "serde_urlencoded",
- "url",
 ]
 
 [[package]]
@@ -4589,7 +4552,9 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.13.2",
+ "block2 0.6.2",
  "dispatch2",
+ "libc",
  "objc2 0.6.4",
 ]
 
@@ -5163,15 +5128,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
-name = "perf"
-version = "0.1.0"
-dependencies = [
- "collections",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "pest"
 version = "2.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5433,9 +5389,9 @@ checksum = "5da3b0203fd7ee5720aa0b5e790b591aa5d3f41c3ed2c34a3a393382198af2f7"
 
 [[package]]
 name = "pollster"
-version = "0.4.0"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+checksum = "bc6355899e1c9462875b6757c79f3caa011a1fdae12bbb1a2e72dd1f234f8336"
 
 [[package]]
 name = "poly1305"
@@ -6038,13 +5994,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "refineable"
-version = "0.1.0"
-dependencies = [
- "derive_refineable",
-]
-
-[[package]]
 name = "regex"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6432,21 +6381,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "scheduler"
-version = "0.1.0"
-dependencies = [
- "async-task",
- "backtrace",
- "chrono",
- "flume",
- "futures",
- "parking_lot",
- "rand 0.9.5",
- "wasm_thread",
- "web-time",
 ]
 
 [[package]]
@@ -7195,17 +7129,6 @@ name = "subtle"
 version = "2.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292"
-
-[[package]]
-name = "sum_tree"
-version = "0.1.0"
-dependencies = [
- "heapless",
- "log",
- "rayon",
- "tracing",
- "ztracing",
-]
 
 [[package]]
 name = "sval"
@@ -8056,15 +7979,6 @@ name = "utf8_iter"
 version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6c140620e7ffbb22c2dee59cafe6084a59b5ffc27a8859a5f0d494b5d52b6be"
-
-[[package]]
-name = "util_macros"
-version = "0.1.0"
-dependencies = [
- "perf",
- "quote",
- "syn 2.0.119",
-]
 
 [[package]]
 name = "uuid"
@@ -9486,16 +9400,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34b31d188d9d685a4f9c7b46d6e36631b07058d2cfe190267adce54dc230bf12"
 
 [[package]]
-name = "zlog"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "collections",
- "log",
-]
-
-[[package]]
 name = "zmij"
 version = "1.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9513,7 +9417,6 @@ dependencies = [
  "bindgen",
  "bitflags 2.13.2",
  "chrono",
- "collections",
  "core-video",
  "ctor",
  "derive_more",
@@ -9523,7 +9426,6 @@ dependencies = [
  "futures-concurrency",
  "getrandom 0.3.4",
  "heapless",
- "http_client",
  "image",
  "inventory",
  "itertools 0.14.0",
@@ -9536,16 +9438,14 @@ dependencies = [
  "parking",
  "parking_lot",
  "pin-project",
- "pollster 0.4.0",
+ "pollster 1.0.1",
  "postage",
  "profiling",
  "proptest",
  "rand 0.9.5",
  "raw-window-handle",
- "refineable",
  "regex",
  "resvg",
- "scheduler",
  "schemars 1.2.2",
  "seahash",
  "serde",
@@ -9554,13 +9454,11 @@ dependencies = [
  "smallvec",
  "spin 0.10.1",
  "strum",
- "sum_tree",
  "taffy",
  "thiserror 2.0.20",
  "ttf-parser",
  "url",
  "usvg",
- "util_macros",
  "uuid",
  "waker-fn",
  "web-time",
@@ -9568,13 +9466,19 @@ dependencies = [
  "windows 0.62.2",
  "zed-font-kit",
  "zed-scap",
- "zpui_macros",
- "zpui_shared_string",
- "zpui_util",
+ "zpui-collections",
+ "zpui-http-client",
+ "zpui-macros",
+ "zpui-refineable",
+ "zpui-scheduler",
+ "zpui-shared-string",
+ "zpui-sum-tree",
+ "zpui-util",
+ "zpui-util-macros",
 ]
 
 [[package]]
-name = "zpui_apple"
+name = "zpui-apple"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -9597,7 +9501,35 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui_ios"
+name = "zpui-collections"
+version = "0.1.0"
+dependencies = [
+ "indexmap 2.14.2",
+ "rustc-hash 2.1.3",
+ "zpui-util",
+]
+
+[[package]]
+name = "zpui-http-client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-compression",
+ "bytes",
+ "derive_more",
+ "futures",
+ "http",
+ "http-body",
+ "log",
+ "parking_lot",
+ "serde",
+ "serde_json",
+ "serde_urlencoded",
+ "url",
+]
+
+[[package]]
+name = "zpui-ios"
 version = "0.1.0"
 dependencies = [
  "accesskit_ios",
@@ -9614,11 +9546,38 @@ dependencies = [
  "raw-window-handle",
  "uuid",
  "zpui",
- "zpui_wgpu",
+ "zpui-wgpu",
 ]
 
 [[package]]
-name = "zpui_linux"
+name = "zpui-kit"
+version = "0.16.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "image",
+ "log",
+ "markdown",
+ "ropey",
+ "rust-embed",
+ "serde",
+ "smallvec",
+ "tree-sitter",
+ "tree-sitter-json",
+ "tree-sitter-language",
+ "tree-sitter-md",
+ "tree-sitter-rust",
+ "tree-sitter-tmux",
+ "tree-sitter-toml-ng",
+ "unicode-segmentation",
+ "url",
+ "web-time",
+ "zpui",
+ "zpui-sum-tree",
+]
+
+[[package]]
+name = "zpui-linux"
 version = "0.1.0"
 dependencies = [
  "accesskit",
@@ -9630,10 +9589,8 @@ dependencies = [
  "bytemuck",
  "calloop",
  "calloop-wayland-source",
- "collections",
  "filedescriptor",
  "futures",
- "http_client",
  "libc",
  "log",
  "notify-rust",
@@ -9658,12 +9615,24 @@ dependencies = [
  "zed-scap",
  "zed-xim",
  "zpui",
- "zpui_util",
- "zpui_wgpu",
+ "zpui-collections",
+ "zpui-http-client",
+ "zpui-util",
+ "zpui-wgpu",
 ]
 
 [[package]]
-name = "zpui_macos"
+name = "zpui-log"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "log",
+ "zpui-collections",
+]
+
+[[package]]
+name = "zpui-macos"
 version = "0.1.0"
 dependencies = [
  "accesskit",
@@ -9672,7 +9641,6 @@ dependencies = [
  "async-task",
  "block2 0.6.2",
  "cocoa 0.26.0",
- "collections",
  "core-foundation 0.10.1",
  "core-foundation-sys",
  "core-graphics 0.24.0",
@@ -9703,12 +9671,13 @@ dependencies = [
  "uuid",
  "zed-font-kit",
  "zpui",
- "zpui_apple",
- "zpui_util",
+ "zpui-apple",
+ "zpui-collections",
+ "zpui-util",
 ]
 
 [[package]]
-name = "zpui_macros"
+name = "zpui-macros"
 version = "0.1.0"
 dependencies = [
  "heck 0.5.0",
@@ -9718,20 +9687,60 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui_platform"
+name = "zpui-perf"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "zpui-collections",
+]
+
+[[package]]
+name = "zpui-platform"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
  "zpui",
- "zpui_linux",
- "zpui_macos",
- "zpui_web",
- "zpui_windows",
+ "zpui-linux",
+ "zpui-macos",
+ "zpui-web",
+ "zpui-windows",
 ]
 
 [[package]]
-name = "zpui_shared_string"
+name = "zpui-refineable"
+version = "0.1.0"
+dependencies = [
+ "zpui-refineable-derive",
+]
+
+[[package]]
+name = "zpui-refineable-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "zpui-scheduler"
+version = "0.1.0"
+dependencies = [
+ "async-task",
+ "backtrace",
+ "chrono",
+ "flume",
+ "futures",
+ "parking_lot",
+ "rand 0.9.5",
+ "wasm_thread",
+ "web-time",
+]
+
+[[package]]
+name = "zpui-shared-string"
 version = "0.1.0"
 dependencies = [
  "schemars 1.2.2",
@@ -9740,7 +9749,32 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui_util"
+name = "zpui-sum-tree"
+version = "0.1.0"
+dependencies = [
+ "heapless",
+ "log",
+ "rayon",
+ "tracing",
+ "zpui-tracing",
+]
+
+[[package]]
+name = "zpui-tracing"
+version = "0.1.0"
+dependencies = [
+ "tracing",
+ "tracing-subscriber",
+ "zpui-log",
+ "zpui-tracing-macros",
+]
+
+[[package]]
+name = "zpui-tracing-macros"
+version = "0.1.0"
+
+[[package]]
+name = "zpui-util"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -9749,18 +9783,25 @@ dependencies = [
 ]
 
 [[package]]
-name = "zpui_web"
+name = "zpui-util-macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.119",
+ "zpui-perf",
+]
+
+[[package]]
+name = "zpui-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "console_error_panic_hook",
  "futures",
- "http_client",
  "js-sys",
  "log",
  "parking_lot",
  "raw-window-handle",
- "scheduler",
  "smallvec",
  "unicode-properties",
  "unicode-script",
@@ -9772,16 +9813,17 @@ dependencies = [
  "web-sys",
  "web-time",
  "zpui",
- "zpui_wgpu",
+ "zpui-http-client",
+ "zpui-scheduler",
+ "zpui-wgpu",
 ]
 
 [[package]]
-name = "zpui_wgpu"
+name = "zpui-wgpu"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytemuck",
- "collections",
  "cosmic-text",
  "etagere",
  "itertools 0.14.0",
@@ -9798,17 +9840,17 @@ dependencies = [
  "wgpu",
  "zed-font-kit",
  "zpui",
- "zpui_util",
+ "zpui-collections",
+ "zpui-util",
 ]
 
 [[package]]
-name = "zpui_windows"
+name = "zpui-windows"
 version = "0.1.0"
 dependencies = [
  "accesskit",
  "accesskit_windows",
  "anyhow",
- "collections",
  "dunce",
  "etagere",
  "futures",
@@ -9825,22 +9867,9 @@ dependencies = [
  "windows-numerics 0.3.1",
  "windows-registry",
  "zpui",
- "zpui_util",
+ "zpui-collections",
+ "zpui-util",
 ]
-
-[[package]]
-name = "ztracing"
-version = "0.1.0"
-dependencies = [
- "tracing",
- "tracing-subscriber",
- "zlog",
- "ztracing_macro",
-]
-
-[[package]]
-name = "ztracing_macro"
-version = "0.1.0"
 
 [[package]]
 name = "zune-core"
@@ -9929,7 +9958,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "zpui",
- "zpui_ios",
+ "zpui-ios",
  "zz-client",
  "zz-daemon",
  "zz-protocol",
@@ -9983,33 +10012,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "zz-kit"
-version = "0.16.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "image",
- "log",
- "markdown",
- "ropey",
- "rust-embed",
- "serde",
- "smallvec",
- "sum_tree",
- "tree-sitter",
- "tree-sitter-json",
- "tree-sitter-language",
- "tree-sitter-md",
- "tree-sitter-rust",
- "tree-sitter-tmux",
- "tree-sitter-toml-ng",
- "unicode-segmentation",
- "url",
- "web-time",
- "zpui",
-]
-
-[[package]]
 name = "zz-protocol"
 version = "0.16.0"
 dependencies = [
@@ -10049,8 +10051,8 @@ dependencies = [
  "url",
  "web-time",
  "zpui",
+ "zpui-kit",
  "zz-client",
- "zz-kit",
  "zz-protocol",
  "zz-terminal",
 ]
@@ -10061,7 +10063,7 @@ version = "0.1.0"
 dependencies = [
  "wasm-bindgen",
  "zpui",
- "zpui_platform",
+ "zpui-platform",
  "zz-app",
  "zz-protocol",
  "zz-ui",

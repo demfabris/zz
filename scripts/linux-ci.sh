@@ -49,7 +49,7 @@ DOCKERFILE
 fi
 
 if [[ $# -eq 0 ]]; then
-    set -- bash -c 'cargo fmt --all -- --check && cargo clippy --workspace --all-targets --all-features -- -D warnings'
+    set -- bash -c "cargo fmt --all -- --check && cargo clippy --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-targets --all-features -- -D warnings"
 fi
 
 tty_flags=()

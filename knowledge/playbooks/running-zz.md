@@ -529,8 +529,8 @@ WASM target used by the browser check below.
 ```sh
 cargo fmt --all -- --check
 git diff --check
-cargo test --workspace --all-features --quiet
-cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-features --quiet
+cargo clippy --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-targets --all-features -- -D warnings
 cargo build --workspace --all-targets --all-features
 cargo check --workspace --all-targets --all-features
 cargo test --manifest-path clients/web/Cargo.toml --lib --locked

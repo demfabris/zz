@@ -1513,6 +1513,7 @@ fn parse_config_characters<C: ConfigContext>(
                     word.push('{');
                     block = Some(Block::open(line, column));
                 }
+                '}' => builder.diagnostic(line, column, "syntax error"),
                 ';' | '\n' => {
                     builder.finish_statement(
                         command_line,
@@ -2869,7 +2870,7 @@ set @single '\141\a\b\e\f\s\v\r\n\t\u03bb\U0001F980'"#,
     fn braces_stay_literal_inside_quotes_and_words() {
         let parsed = parse_config(
             "test.conf",
-            "bind z send-keys \"{ literal ; text }\"\nbind w new-window -n a{b}c\n",
+            "bind z send-keys \"{ literal ; text }\"\nbind w new-window -n a{b\\}c\n",
         );
         assert!(parsed.diagnostics.is_empty());
         assert_eq!(parsed.commands.len(), 2);
@@ -2911,5 +2912,40 @@ set @single '\141\a\b\e\f\s\v\r\n\t\u03bb\U0001F980'"#,
         assert_eq!(parsed.diagnostics[0].line, 2);
         assert_eq!(parsed.diagnostics[0].column, 18);
         assert_eq!(parsed.diagnostics[0].message, "syntax error");
+    }
+
+    #[test]
+    fn an_unquoted_close_brace_outside_a_block_is_the_pin_syntax_error() {
+        for line in [
+            "display -p foo::#{window_name}",
+            "display -p a}",
+            "display -p a }",
+            "display -p }",
+            "display -p a{b}",
+            "display -p a#{window_name} ; display -p next",
+            "if -F 1 { display -p in#{window_name} }",
+            "refresh-client -B name:%1:#{pane_id}",
+        ] {
+            let parsed = parse_config("one.conf", &format!("display -p first\n{line}\n"));
+            assert!(parsed.commands.is_empty(), "{line}");
+            assert_eq!(parsed.diagnostics.len(), 1, "{line}");
+            assert_eq!(parsed.diagnostics[0].line, 2, "{line}");
+            assert_eq!(parsed.diagnostics[0].message, "syntax error", "{line}");
+            let control = parse_config("<control>", line);
+            assert!(control.commands.is_empty(), "{line}");
+            assert_eq!(control.diagnostics[0].message, "syntax error", "{line}");
+        }
+        for line in [
+            "display -p a{b",
+            "display -p \"a}\"",
+            "display -p a\\}",
+            "display -p 'a#{window_name}'",
+            "display -p x#{",
+            "if -F 1 { display -p 'in#{window_name}' }",
+        ] {
+            let parsed = parse_config("one.conf", line);
+            assert!(parsed.diagnostics.is_empty(), "{line}");
+            assert_eq!(parsed.commands.len(), 1, "{line}");
+        }
     }
 }

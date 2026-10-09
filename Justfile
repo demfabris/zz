@@ -8,6 +8,7 @@ mod perf "scripts/just/perf.just"
 mod profile "scripts/just/profile.just"
 mod release "scripts/just/release.just"
 mod tools "scripts/just/tools.just"
+mod vendor "scripts/just/vendor.just"
 mod web "scripts/just/web.just"
 
 # Launch a fresh debug instance; append --verbose for continuous diagnostics.

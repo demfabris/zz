@@ -22596,6 +22596,33 @@ impl Shared {
         key: &str,
         mouse: &MouseEventTarget,
     ) -> Result<(), DaemonError> {
+        let outside_modal = (!key.contains("Status"))
+            .then(|| {
+                let inner = self.inner.lock();
+                let window = mouse
+                    .window
+                    .or_else(|| client_focused_window_for_attachment(&inner, client))?;
+                inner.engine.state.windows.get(&window)?.floats.modal
+            })
+            .flatten()
+            .filter(|modal| mouse.pane != Some(modal.pane));
+        if let Some(modal) = outside_modal {
+            if modal.close_on_click
+                && ["MouseDown", "SecondClick", "TripleClick"]
+                    .iter()
+                    .any(|prefix| key.starts_with(prefix))
+            {
+                let target = modal.pane.to_string();
+                self.execute_gesture(
+                    client,
+                    kind,
+                    context,
+                    "modal_click",
+                    &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+                )?;
+            }
+            return Ok(());
+        }
         let (pane, window) = (mouse.pane, mouse.window);
         let root_was_first;
         let Some((commands, repeat_binding, session, window, pane)) = ({
@@ -117311,6 +117338,70 @@ bind - split-window -v -c "#{pane_current_path}"
                 },
             )
             .expect("escape the popup");
+        assert_eq!(modal_pane(&shared, &context), None);
+        assert_eq!(window_pane_count(&shared, &context), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_click_outside_a_modal_does_nothing_or_closes_a_close_on_click_modal() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-click");
+        let tile = context.pane.expect("popup test pane");
+        let window = context.window.expect("popup test window");
+        let click = |shared: &Arc<Shared>, context: &mut ExecutionContext| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::MouseKey {
+                        key: "MouseDown1Pane".to_owned(),
+                        pane: Some(tile),
+                        window: Some(window),
+                        column: 1,
+                        row: 20,
+                        border: None,
+                        view_action: None,
+                        press_action: None,
+                        status_range_start: None,
+                        press: None,
+                    },
+                )
+                .expect("click outside the modal");
+        };
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-pane", ["-O", "-t", &tile.to_string()]),
+            )
+            .expect("open a modal");
+        let modal = modal_pane(&shared, &context).expect("modal");
+        click(&shared, &mut context);
+        assert_eq!(modal_pane(&shared, &context), Some(modal));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&window].active_pane,
+            modal
+        );
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", &modal.to_string()]),
+            )
+            .expect("close the modal");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-pane", ["-O", "-C", "-t", &tile.to_string()]),
+            )
+            .expect("open a close-on-click modal");
+        assert!(modal_pane(&shared, &context).is_some());
+        click(&shared, &mut context);
         assert_eq!(modal_pane(&shared, &context), None);
         assert_eq!(window_pane_count(&shared, &context), 1);
     }

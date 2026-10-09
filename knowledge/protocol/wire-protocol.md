@@ -836,6 +836,9 @@ zoomed itself. `TreeOp::WindowLayout` appends the same two fields. `LayoutNode` 
 variant `Empty`, which `WindowSnapshot.layout` holds when the window has no tiled pane.
 `InputMessage::MouseKey` appends `press: Option<(u16, u16)>` (`#[serde(default)]`), the client cell
 of the button-down that latched the gesture. `float_wire_tests` pins the encodings.
+`display-popup` is now a modal floating pane, so `EventPayload::Popup` and `InputMessage::Popup`
+keep their tags but the daemon never sends the event and ignores the input; they go at the next
+version.
 
 # Versioning & compatibility
 

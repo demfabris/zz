@@ -285,7 +285,11 @@ Recorded by float.core (sessions 1 and 2, 2026-10-09); 3.8 wins where this plan 
   format on the pane right after `new-pane` spawns it, so a command that exits within that instant
   closes as `remain-on-exit off`. A command client waits through `new-pane -W`, so a signal exits
   128+N and a popup killed by `kill-pane` or `-C` exits 0, not 129. Control clients still get
-  nothing, and a popup still needs a target client.
+  nothing, and a popup still needs a target client. `-C` also clears the target client's menus and
+  other overlays, as 3.8's `server_client_clear_overlay` did, before it kills the modal.
+- Modal `-D` and `-K` act in the daemon's key path before the key tables, and a click outside the
+  modal is dropped (or kills a `-C` modal) in its mouse path, both keyed on the pane the client
+  reports; drawing the modal and hit-testing floats on the client side is float.clients.
 - `PopupPointerState` went with the per-client popup, because it was keyed to the old `PopupPointer`
   input; float.keys builds the per-client drag on `MouseKey.press` instead. The daemon ignores
   `press` until then.

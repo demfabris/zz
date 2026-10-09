@@ -19287,21 +19287,43 @@ impl Shared {
                 overlay_style(&defaults.selected_style, parsed.selected_style.as_deref());
             let border_style =
                 overlay_style(&defaults.border_style, parsed.border_style.as_deref());
-            let variables = popup_position_variables(
+            let (window_rows, window_top) =
+                menu_window_rows(&inner.engine, &target, geometry.rows);
+            let mut variables = popup_position_variables(
                 &inner.engine,
                 &target,
-                context.invoking_mouse(),
+                None,
                 geometry.columns,
-                geometry.rows,
+                window_rows,
                 width,
                 height,
             );
+            if let Some(mouse) = context.invoking_mouse() {
+                variables.extend(
+                    menu_mouse_position_values(
+                        &inner.engine,
+                        &target,
+                        mouse,
+                        (geometry.rows, window_rows, window_top),
+                        width,
+                        height,
+                    )
+                    .into_iter()
+                    .map(|(name, value)| (name.to_owned(), value.to_string())),
+                );
+            }
+            if variables.contains_key(POPUP_STATUS_LINE_Y_CONTEXT_FORMAT) {
+                variables.insert(
+                    POPUP_STATUS_LINE_Y_CONTEXT_FORMAT.to_owned(),
+                    if window_top > 0 { height } else { window_rows }.to_string(),
+                );
+            }
             target.format_variables.extend(variables);
             let (left, top) = popup_position(
                 parsed.x.as_deref(),
                 parsed.y.as_deref(),
                 geometry.columns,
-                geometry.rows,
+                window_rows,
                 width,
                 height,
                 |value| {
@@ -19315,6 +19337,7 @@ impl Shared {
                     )
                 },
             );
+            let top = top.saturating_add(window_top);
             (
                 MenuState {
                     left,
@@ -43637,6 +43660,57 @@ fn popup_mouse_position_values(
         values.push((
             POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
             if top { y + 1 + height } else { y },
+        ));
+    }
+    values
+}
+
+fn menu_window_rows(engine: &MuxEngine, target: &ExecutionContext, rows: u16) -> (u16, u16) {
+    let status = engine.status_formats_for_session(target.session);
+    let lines = if status.enabled {
+        u16::from(status.lines).min(rows)
+    } else {
+        0
+    };
+    let top = if status.position == zz_protocol::StatusPosition::Top {
+        lines
+    } else {
+        0
+    };
+    (rows.saturating_sub(lines), top)
+}
+
+fn menu_mouse_position_values(
+    engine: &MuxEngine,
+    target: &ExecutionContext,
+    mouse: &MouseEventTarget,
+    (client_rows, window_rows, window_top): (u16, u16, u16),
+    width: u16,
+    height: u16,
+) -> Vec<(&'static str, i64)> {
+    let row = if window_top > 0 {
+        mouse.row.saturating_sub(window_top)
+    } else if mouse.row >= window_rows && client_rows > window_rows {
+        window_rows.saturating_sub(1)
+    } else {
+        mouse.row
+    };
+    let moved = MouseEventTarget {
+        row,
+        status_range_start: None,
+        ..mouse.clone()
+    };
+    let mut values =
+        popup_mouse_position_values(engine, target, &moved, window_rows, width, height);
+    if let Some(start) = mouse.status_range_start {
+        values.push((POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT, i64::from(start)));
+        values.push((
+            POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
+            if window_top > 0 {
+                i64::from(height)
+            } else {
+                i64::from(window_rows)
+            },
         ));
     }
     values

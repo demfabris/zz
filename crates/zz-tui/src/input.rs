@@ -1563,6 +1563,16 @@ fn bound_mouse_view_action(
         .content();
     let viewport = model.viewports.get(&pane)?;
     let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking;
+    let (content, global_column) = match crate::mode_view::presentation(model, pane, viewport)
+        .and_then(|mode| crate::mode_view::line_number_gutter(mode, viewport))
+    {
+        Some(gutter) => {
+            let body = gutter.body(content);
+            let last = body.x.saturating_add(body.width.saturating_sub(1));
+            (body, global_column.clamp(body.x, last.max(body.x)))
+        }
+        None => (content, global_column),
+    };
     pane_mouse_action(
         &model.size,
         event,

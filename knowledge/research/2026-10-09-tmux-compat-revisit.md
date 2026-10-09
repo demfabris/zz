@@ -86,7 +86,7 @@ What zz has: most of the parts, owned per client instead of per window.
   can turn a popup into a tiled pane (`popup_make_pane`, `:21753`).
 - Every client already draws a terminal over the tiled panes: desktop `popup_overlay`
   (`crates/zz/src/workspace/view.rs:3433`, `FloatingSurface` in `crates/zz-ui/src/pane.rs:280`),
-  web and iOS (`clients/gpui-shared/src/app.rs`, `floating.rs`), raw TUI (`crates/zz-tui/src/overlay.rs`).
+  web and iOS (`clients/app/src/app.rs`, `app/floating.rs`; `clients/gpui-shared` before the 2026-10-09 restructure), raw TUI (`crates/zz-tui/src/overlay.rs`).
 - `Window` already keeps a `z_order` (`crates/zz-mux/src/model.rs:234-262`).
 - The pin's layout dump leaves floating panes out (`layout-custom.c:72`); 3.8's JSON layouts include
   them.
@@ -96,7 +96,7 @@ What zz has: most of the parts, owned per client instead of per window.
 Upstream master (after 3.8) deleted `popup.c` and turned `display-popup` into a floating modal pane
 above zoom (34cd5da4). Making zz's popup window-owned therefore converges on upstream's model rather
 than adding a second one. Rough size: 15 to 20 files across zz-mux, zz-protocol (snapshot, wire bump),
-zz-daemon, zz-client, zz-tui, the desktop and gpui-shared; 1.5 to 3 weeks.
+zz-daemon, zz-client, zz-tui, the desktop and clients/app; 1.5 to 3 weeks.
 
 Risks: positions are in window cells and window size follows the latest active client, so they need
 clamping on shrink (popup placement already does this); interaction with zoom; raw TUI hit-testing

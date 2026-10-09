@@ -201,15 +201,6 @@ plus the ledger item as the prompt, from the lane's worktree. If Codex is out
 subagent instead and note it in the ledger. Killing the orchestrator leaves a running `codex` child;
 check `pgrep -af codex` on resume.
 
-## Paused 2026-10-09
-
-fabrico paused the campaign. Nothing is running. Merged: float.design, pin.move, fix.streams,
-fix.capture-links, pin.layout-v2, pin.formats-options, fix.small-semantics, pin.contract-breaks,
-fix.tui-colour, pin.tui-fixtures, pin.hooks-events. Each in-flight item's ledger notes end with a
-`PAUSED` line saying exactly what is left (review to rerun, checks to run, then merge). All lane
-branches are pushed to `origin/catchup/<id>`; worktrees `zz-cu-a`..`zz-cu-e` on alienware are
-clean. Resume with the steps above, starting from those PAUSED notes.
-
 ## Decisions
 
 - 2026-10-09 fabrico: build floating panes; move the pin to 3.8; `zz share` and desktop menu input
@@ -249,3 +240,8 @@ clean. Resume with the steps above, starting from those PAUSED notes.
   known differences, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.
+- 2026-10-09 fabrico resumed the campaign after the restructure (gpui renamed zpui and moved in-repo,
+  zz-kit split out of zz-ui, clients/gpui-shared became clients/app, clients/ios). Orchestrator: lane
+  branches take main by merge, not rebase: their history is on origin and several carry merges already, so a rebase would force-push
+  and replay those. Registry, generated gaps.md and wire doc conflicts are resolved by the
+  orchestrator; a code conflict is resolved too when it is local, and the relaunched lane compiles it.

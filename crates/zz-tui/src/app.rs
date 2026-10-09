@@ -532,6 +532,7 @@ pub(crate) fn run(
     let TerminalOptions {
         extended_keys,
         focus_events,
+        clear_on_attach,
     } = terminal_options.unwrap_or_default();
     let mut client = Arc::new(initial);
     let escape_time = Arc::new(AtomicU64::new(escape_timeout_ms(
@@ -545,6 +546,7 @@ pub(crate) fn run(
         },
         extended_keys,
         focus_events,
+        clear_on_attach,
     )
     .map_err(|error| error.to_string())?;
     let pixel_mouse = terminal.pixel_mouse();
@@ -723,6 +725,11 @@ pub(crate) fn run(
                                 ) {
                                     refresh_terminal_options(&mut model, &core, &escape_time);
                                     event_loop.adopt_negotiation(&core);
+                                    if crate::tty::take_utf8_repaint() {
+                                        renderer
+                                            .paint(&model, true)
+                                            .map_err(|error| error.to_string())?;
+                                    }
                                 }
                                 let popup_lifecycle_changed = matches!(
                                     &*event,
@@ -1078,7 +1085,12 @@ pub(crate) fn run(
                     .map_err(|error| error.to_string())?;
                 #[cfg(unix)]
                 terminal
-                    .resume(model.mouse_arming, extended_keys, focus_events)
+                    .resume(
+                        model.mouse_arming,
+                        extended_keys,
+                        focus_events,
+                        crate::tty::clear_on_attach_enabled(lock_core(&core).mux_options()),
+                    )
                     .map_err(|error| error.to_string())?;
                 if terminal.kitty_probe_sent() {
                     event_loop.await_graphics_reply();

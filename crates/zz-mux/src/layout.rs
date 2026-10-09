@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-mod json;
+pub(crate) mod json;
 
 use std::{
     borrow::Cow,

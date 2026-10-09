@@ -156,6 +156,8 @@ pub(crate) struct StatusRenderer {
     job_needs: StatusJobNeeds,
     uncovered_jobs: BTreeSet<ClientId>,
     completed: Option<CompletedStatus>,
+    animating: BTreeSet<ClientId>,
+    animation_started: bool,
     #[cfg(test)]
     expansions: usize,
     owned_clients: BTreeSet<ClientId>,
@@ -213,9 +215,27 @@ struct CompletedStatus {
     environment_identity: Weak<Vec<(RawText, Option<RawText>)>>,
     default_terminal_identity: Weak<String>,
     context_bytes: usize,
+    cycle_tick: Option<u64>,
 }
 
 const COMPLETED_STATUS_MAX_BYTES: usize = 1024 * 1024;
+
+pub(crate) const STATUS_CYCLE_PERIOD: std::time::Duration = std::time::Duration::from_millis(100);
+
+thread_local! {
+    static CYCLE_ANIMATED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn cycle_tick() -> u64 {
+    cycle_clock_ms() / 100
+}
+
+pub(crate) fn expand_cycle_frames<T>(expand: impl FnOnce() -> T) -> (T, bool) {
+    let before = CYCLE_ANIMATED.replace(false);
+    let value = expand();
+    let animated = CYCLE_ANIMATED.replace(before);
+    (value, animated)
+}
 
 struct StatusParts {
     left: Vec<StatusPart>,
@@ -587,6 +607,7 @@ impl CompletedStatus {
             environment_identity: Arc::downgrade(&request.environment),
             default_terminal_identity: Arc::downgrade(&request.default_terminal),
             context_bytes,
+            cycle_tick: None,
         }
     }
 }
@@ -747,7 +768,7 @@ pub(crate) fn expand_modes(
         .collect()
 }
 
-pub(crate) const MODE_FORMATS: [&str; 8] = [
+pub(crate) const MODE_FORMATS: [&str; 9] = [
     "#{E:copy-mode-position-format}",
     "#{E:copy-mode-position-style}",
     "#{E:copy-mode-selection-style}",
@@ -756,6 +777,7 @@ pub(crate) const MODE_FORMATS: [&str; 8] = [
     "#{copy-mode-line-numbers}",
     "#{E:copy-mode-line-number-style}",
     "#{E:copy-mode-current-line-number-style}",
+    "#{E:copy-mode-current-line-style}",
 ];
 
 fn mode_line_numbers(mode: &ModeRequest, hooks: &mut DaemonFormatHooks<'_>) -> u8 {
@@ -795,6 +817,7 @@ fn mode_presentation(
         _,
         line_number_style,
         current_line_number_style,
+        current_line_style,
     ] = MODE_FORMATS;
     let (line_number_style, current_line_number_style) = if line_numbers == 0 {
         (String::new(), String::new())
@@ -804,12 +827,19 @@ fn mode_presentation(
             expand_style(current_line_number_style, &mode.context, hooks),
         )
     };
+    let current_line_style =
+        if expand_status("#{copy-mode-current-line-style}", &mode.context, hooks) == "default" {
+            String::new()
+        } else {
+            expand_style(current_line_style, &mode.context, hooks)
+        };
     zz_protocol::ModePresentation {
         pane: mode.pane,
         view: mode.view,
         line_numbers,
         line_number_style,
         current_line_number_style,
+        current_line_style,
         position: if mode.hide_position {
             String::new()
         } else {
@@ -1616,7 +1646,9 @@ impl StatusRenderer {
         self.completed
             .as_ref()
             .filter(|completed| {
-                completed.now == now && completed.request_identity.as_ptr() == Arc::as_ptr(identity)
+                completed.now == now
+                    && completed.request_identity.as_ptr() == Arc::as_ptr(identity)
+                    && completed.cycle_tick.is_none_or(|tick| tick == cycle_tick())
             })
             .map(|completed| Arc::clone(&completed.status))
     }
@@ -1629,6 +1661,14 @@ impl StatusRenderer {
         now: i64,
         identity: Option<&Arc<StatusRequest>>,
     ) -> Arc<StatusLine> {
+        if self
+            .completed
+            .as_ref()
+            .and_then(|completed| completed.cycle_tick)
+            .is_some_and(|tick| tick != cycle_tick())
+        {
+            self.completed = None;
+        }
         if let Some(status) = self.cached_request_output(identity, now) {
             return status;
         }
@@ -1682,6 +1722,7 @@ impl StatusRenderer {
         {
             self.expansions += 1;
         }
+        CYCLE_ANIMATED.set(false);
         let status = Arc::new(render(
             &mut self.shell_cache,
             touched,
@@ -1694,6 +1735,12 @@ impl StatusRenderer {
             &self.job_client,
             parts.as_deref(),
         ));
+        let animated = CYCLE_ANIMATED.replace(false);
+        if animated {
+            self.animation_started |= self.animating.insert(request.client);
+        } else {
+            self.animating.remove(&request.client);
+        }
         let context_bytes = callback_names.as_ref().map_or(0, |_| {
             self.completed
                 .as_ref()
@@ -1727,7 +1774,7 @@ impl StatusRenderer {
                     .map_or(0, |parts| parts.retained_bytes().saturating_mul(2)),
             ) <= COMPLETED_STATUS_MAX_BYTES)
                 .then(|| {
-                    CompletedStatus::new(
+                    let mut completed = CompletedStatus::new(
                         request,
                         names,
                         callbacks,
@@ -1737,10 +1784,20 @@ impl StatusRenderer {
                         option_bytes,
                         parts,
                         context_bytes,
-                    )
+                    );
+                    completed.cycle_tick = animated.then(cycle_tick);
+                    completed
                 })
         });
         status
+    }
+
+    pub(crate) fn animating_clients(&self) -> BTreeSet<ClientId> {
+        self.animating.clone()
+    }
+
+    pub(crate) fn take_animation_started(&mut self) -> bool {
+        std::mem::take(&mut self.animation_started)
     }
 
     fn note_uncovered_jobs(
@@ -1809,6 +1866,7 @@ impl StatusRenderer {
             .retain(|(cached, _, _), _| *cached != client);
         self.job_needs.lock().remove(&client);
         self.uncovered_jobs.remove(&client);
+        self.animating.remove(&client);
     }
 
     pub(crate) fn set_tmux_shim(&mut self, directory: PathBuf, executable: PathBuf) {
@@ -2461,6 +2519,7 @@ pub(crate) struct DaemonFormatHooks<'a> {
     facts_withheld: bool,
     buffer_override: Option<BufferFormatFacts>,
     pane_in_mode_override: Option<(PaneId, usize)>,
+    cycle: bool,
 }
 
 impl<'a> DaemonFormatHooks<'a> {
@@ -2494,7 +2553,13 @@ impl<'a> DaemonFormatHooks<'a> {
             job_client: None,
             facts_withheld: false,
             pane_in_mode_override: None,
+            cycle: false,
         }
+    }
+
+    pub(crate) const fn with_cycle(mut self) -> Self {
+        self.cycle = true;
+        self
     }
 
     pub(crate) fn command_with_variables(
@@ -2573,6 +2638,7 @@ impl<'a> DaemonFormatHooks<'a> {
             job_client: Some(job_client),
             facts_withheld: false,
             pane_in_mode_override: None,
+            cycle: false,
         }
     }
 
@@ -2694,7 +2760,11 @@ fn cycle_clock_ms() -> u64 {
 
 impl StatusHooks for DaemonFormatHooks<'_> {
     fn cycle_clock(&mut self) -> Option<u64> {
-        self.status_client.map(|_| cycle_clock_ms())
+        (self.status_client.is_some() || self.cycle).then(cycle_clock_ms)
+    }
+
+    fn cycle_animates(&mut self) {
+        CYCLE_ANIMATED.set(true);
     }
 
     fn stable_option_lookups(&self) -> bool {
@@ -2818,7 +2888,12 @@ impl StatusHooks for DaemonFormatHooks<'_> {
 
     fn client_tty_term(&mut self) -> Option<Arc<TtyTerm>> {
         self.expect_facts();
-        self.facts.client()?.terminal.clone()
+        let client = self.facts.client()?;
+        let terminal = client.terminal.as_ref()?;
+        if client.utf8 == "1" && !terminal.has_feature("utf8") {
+            return Some(Arc::new(terminal.as_ref().clone().with_client_utf8(true)));
+        }
+        Some(Arc::clone(terminal))
     }
 
     fn client_terminal_environment(&mut self) -> Vec<FormatEnvironRow> {

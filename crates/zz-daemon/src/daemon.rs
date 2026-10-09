@@ -683,16 +683,21 @@ fn add_command_payload(
 }
 
 fn pane_event_if_hooked(
-    inner: &ServerState,
+    inner: &mut ServerState,
     name: &'static str,
     pane: PaneId,
 ) -> Option<PendingHookEvent> {
     let event = PendingHookEvent::live_pane(name, pane, &inner.engine)?;
-    inner
+    let hooked = inner
         .engine
         .event_hook_commands(&event.context, name)
-        .is_some_and(|commands| !commands.is_empty())
-        .then_some(event)
+        .is_some_and(|commands| !commands.is_empty());
+    if !hooked {
+        inner
+            .engine
+            .note_event_hook_fired(&event.context, name, unix_timestamp());
+    }
+    hooked.then_some(event)
 }
 
 fn window_alert_notifications(
@@ -6243,10 +6248,17 @@ impl Shared {
         if requests.is_empty() {
             return;
         }
-        let changed = {
+        let (changed, animation_started) = {
             let _round_trips = zz_terminal::forbid_actor_round_trips();
-            self.status.lock().render_changed(requests)
+            let mut status = self.status.lock();
+            (
+                status.render_changed(requests),
+                status.take_animation_started(),
+            )
         };
+        if animation_started {
+            self.nudge_client_timers();
+        }
         if !changed.is_empty() {
             let mut inner = self.inner.lock();
             for (client, status) in &changed {
@@ -6708,7 +6720,14 @@ impl Shared {
         );
         drop(inner);
         let mut hello = hello;
-        hello.status = self.status.lock().render_initial(&request);
+        let animation_started = {
+            let mut status = self.status.lock();
+            hello.status = status.render_initial(&request);
+            status.take_animation_started()
+        };
+        if animation_started {
+            self.nudge_client_timers();
+        }
         self.inner
             .lock()
             .client_entry(client)
@@ -8127,17 +8146,24 @@ impl Shared {
         } else if let Some(hook) = match &result {
             Ok(_) => MuxEngine::after_command_hook(&name),
             Err(_) => Some("command-error"),
-        } && self.command_hook_set(hook)
-        {
-            let mut hook_context = match &result {
-                Ok(execution) => self.command_hook_context(&name, execution, context),
-                Err(_) => original_context,
-            };
-            {
-                let inner = self.inner.lock();
-                inner.engine.repair_context(&mut hook_context);
+        } {
+            if self.command_hook_set(hook) {
+                let mut hook_context = match &result {
+                    Ok(execution) => self.command_hook_context(&name, execution, context),
+                    Err(_) => original_context,
+                };
+                {
+                    let inner = self.inner.lock();
+                    inner.engine.repair_context(&mut hook_context);
+                }
+                self.run_command_hook(client, kind, &hook_context, command, hook, queue_execution)
+            } else {
+                self.inner
+                    .lock()
+                    .engine
+                    .note_hook_fired(context.session, hook, unix_timestamp());
+                String::new()
             }
-            self.run_command_hook(client, kind, &hook_context, command, hook, queue_execution)
         } else {
             String::new()
         };
@@ -8832,12 +8858,17 @@ impl Shared {
         hook: &str,
         parent_queue: Option<&CommandQueueExecution>,
     ) -> String {
-        let commands = self
-            .inner
-            .lock()
-            .engine
-            .hook_commands(context.session, hook);
-        let Some(commands) = commands.filter(|commands| !commands.is_empty()) else {
+        let commands = {
+            let mut inner = self.inner.lock();
+            inner
+                .engine
+                .note_hook_fired(context.session, hook, unix_timestamp());
+            inner
+                .engine
+                .hook_commands(context.session, hook)
+                .filter(|commands| !commands.is_empty())
+        };
+        let Some(commands) = commands else {
             return String::new();
         };
         self.wake_control_queue(client, kind);
@@ -9165,16 +9196,22 @@ impl Shared {
             return None;
         }
         let (context, commands) = {
-            let inner = self.inner.lock();
+            let mut inner = self.inner.lock();
             let mut context = event.context.clone();
             inner.engine.repair_event_context(&mut context);
             context.set_no_client();
             context.set_replay_client(None);
             context.set_control_command_target(None);
-            let commands = inner.engine.event_hook_commands(&context, event.name);
+            inner
+                .engine
+                .note_event_hook_fired(&context, event.name, unix_timestamp());
+            let commands = inner
+                .engine
+                .event_hook_commands(&context, event.name)
+                .filter(|commands| !commands.is_empty());
             (context, commands)
         };
-        let commands = commands.filter(|commands| !commands.is_empty())?;
+        let commands = commands?;
         let draining =
             self.shutdown_pending.load(Ordering::Acquire) && !state.shutdown_already_blocked;
         let mut variables = event.variables;
@@ -11508,6 +11545,9 @@ impl Shared {
                         commands,
                         context,
                     } => {
+                        inner
+                            .engine
+                            .note_event_hook_fired(context, name, unix_timestamp());
                         immediate_hooks.push((name.clone(), commands.clone(), context.clone()));
                     }
                     MuxEffect::PaneFormatOutput {
@@ -18672,10 +18712,16 @@ impl Shared {
                 self.status_job_needs(target),
             )
         };
-        let status = {
+        let (status, animation_started) = {
             let mut renderer = self.status.lock();
-            renderer.render_forced_shared(&request)
+            (
+                renderer.render_forced_shared(&request),
+                renderer.take_animation_started(),
+            )
         };
+        if animation_started {
+            self.nudge_client_timers();
+        }
         self.publish_to_client(target, EventPayload::StatusChanged { status });
         Ok(Execution::default())
     }
@@ -28778,7 +28824,7 @@ impl Shared {
             {
                 return;
             }
-            let activity_hook = pane_event_if_hooked(&inner, "pane-activity", pane);
+            let activity_hook = pane_event_if_hooked(&mut inner, "pane-activity", pane);
             let mut silence_schedule = None;
             let mut alert_window = None;
             terminal_reads::pane_changed(&mut inner, pane);
@@ -29132,6 +29178,7 @@ impl Shared {
     ) {
         let startup_ready = with_status.then(|| *self.startup_ready.lock());
         let order = self.snapshot_order.lock();
+        let mut border_cycle_started = false;
         let (snapshots, appearance_updates, requests) = {
             let mut inner = self.inner.lock();
             let ServerState {
@@ -29166,7 +29213,9 @@ impl Shared {
                 }
                 let snapshot = inner.engine.state.snapshot();
                 let facts = format_hook_facts(&inner);
+                let cycled = inner.border_cycling();
                 let snapshots = stamped_snapshot_sends(&mut inner, tracked, &snapshot, &facts);
+                border_cycle_started = !cycled && inner.border_cycling();
                 let requests = status_requests(
                     &inner,
                     targets,
@@ -29187,6 +29236,9 @@ impl Shared {
         self.publish_compact_trees();
         drop(order);
         self.publish_status_requests(&requests);
+        if border_cycle_started {
+            self.nudge_client_timers();
+        }
     }
 
     fn refresh_choose_trees(&self) {
@@ -30960,31 +31012,30 @@ impl Shared {
             return;
         }
         let events = {
-            let inner = self.inner.lock();
-            marks
-                .into_iter()
-                .filter_map(|mark| {
-                    let name = match mark.kind {
-                        zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
-                        zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
-                        zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
-                    };
-                    pane_event_if_hooked(&inner, name, pane).map(|mut event| {
-                        if mark.kind != zz_terminal::ShellMarkKind::Prompt {
-                            add_command_payload(&inner, &mut event, pane, &mark.facts);
-                        }
-                        event
-                    })
-                })
-                .collect::<Vec<_>>()
+            let mut inner = self.inner.lock();
+            let mut events = Vec::new();
+            for mark in marks {
+                let name = match mark.kind {
+                    zz_terminal::ShellMarkKind::Prompt => "pane-shell-prompt",
+                    zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
+                    zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
+                };
+                if let Some(mut event) = pane_event_if_hooked(&mut inner, name, pane) {
+                    if mark.kind != zz_terminal::ShellMarkKind::Prompt {
+                        add_command_payload(&inner, &mut event, pane, &mark.facts);
+                    }
+                    events.push(event);
+                }
+            }
+            events
         };
         self.run_event_hooks(events);
     }
 
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
         let pane_hook = {
-            let inner = self.inner.lock();
-            pane_event_if_hooked(&inner, "pane-bell", pane)
+            let mut inner = self.inner.lock();
+            pane_event_if_hooked(&mut inner, "pane-bell", pane)
         };
         if let Some(hook) = pane_hook {
             self.run_event_hooks(vec![hook]);
@@ -35888,6 +35939,7 @@ struct Client {
 
 #[derive(Default)]
 struct ServerState {
+    border_cycle: parking_lot::Mutex<BTreeSet<ClientId>>,
     clients: BTreeMap<ClientId, Box<Client>>,
     agent_states: Arc<BTreeMap<PaneId, zz_protocol::AgentPaneWire>>,
     engine: MuxEngine,
@@ -36318,6 +36370,12 @@ struct PendingGuiRequest {
 }
 
 impl ServerState {
+    fn border_cycling(&self) -> bool {
+        let mut cycling = self.border_cycle.lock();
+        cycling.retain(|client| self.clients.contains_key(client));
+        !cycling.is_empty()
+    }
+
     #[inline]
     fn client(&self, id: ClientId) -> Option<&Client> {
         self.clients.get(&id).map(Box::as_ref)
@@ -41101,11 +41159,12 @@ fn client_feature_mask_from_source(inner: &ClientFormatSource<'_>, client: Clien
         &inner.engine.terminal_overrides_option(),
     ) {
         features |= terminal_feature_mask(term.requested_features());
+        features &= !terminal_feature_mask(term.removed_features());
     }
     features
 }
 
-type TerminalNegotiation = (Vec<String>, Vec<String>);
+type TerminalNegotiation = (Vec<String>, Vec<String>, Vec<String>);
 
 fn client_terminal_negotiation(
     inner: &ServerState,
@@ -41114,6 +41173,19 @@ fn client_terminal_negotiation(
     let source = ClientFormatSource::from_inner(inner);
     client_colour_count_from_source(&source, client)?;
     let features = terminal_features_list(client_feature_mask_from_source(&source, client));
+    let application_escape = client_terminal_facts(
+        client_environment_value_from_source(&source, client, "TERM").unwrap_or_default(),
+        client_environment_value_from_source(&source, client, "COLORTERM"),
+        &features,
+        &inner.engine.terminal_features_option(),
+        &inner.engine.terminal_overrides_option(),
+    )
+    .map(|term| {
+        ["Enesc", "Dsesc"]
+            .map(|name| term.string_capability(name).to_owned())
+            .to_vec()
+    })
+    .unwrap_or_default();
     Some((
         features
             .split(',')
@@ -41121,6 +41193,7 @@ fn client_terminal_negotiation(
             .map(str::to_owned)
             .collect(),
         inner.engine.user_keys_option(),
+        application_escape,
     ))
 }
 
@@ -41137,10 +41210,11 @@ fn take_terminal_negotiation(inner: &mut ServerState, client: ClientId) -> Optio
         .client_entry(client)
         .published_terminal_negotiation
         .replace(negotiation.clone());
-    let (features, user_keys) = negotiation;
+    let (features, user_keys, application_escape) = negotiation;
     Some(EventPayload::TerminalNegotiation {
         features,
         user_keys,
+        application_escape,
     })
 }
 
@@ -44689,13 +44763,20 @@ fn stamp_snapshot_for_client_with(
         &contexts,
         snapshot,
     );
-    stamp_pane_border_chrome(
+    let border_cycle = stamp_pane_border_chrome(
         &inner.engine,
         &inner.config_files,
         facts,
         &contexts,
         snapshot,
     );
+    let mut cycling = inner.border_cycle.lock();
+    if border_cycle {
+        cycling.insert(client);
+    } else {
+        cycling.remove(&client);
+    }
+    drop(cycling);
     drop(contexts);
     stamp_pane_modes(inner, facts, snapshot);
 }
@@ -44968,7 +45049,8 @@ fn stamp_pane_border_chrome(
     facts: &FormatHookFacts,
     contexts: &zz_mux::FormatContextSnapshot<'_>,
     snapshot: &mut MuxSnapshot,
-) {
+) -> bool {
+    let mut animated = false;
     for session in &mut snapshot.sessions {
         for window in &mut session.windows {
             window.pane_border_status = engine.displayed_pane_border_status(window.id);
@@ -44985,11 +45067,18 @@ fn stamp_pane_border_chrome(
                 let mut context =
                     contexts.status_context(Some(session.id), Some(window.id), Some(*pane));
                 context.set_format_value("config_files", config_files);
-                let mut hooks = DaemonFormatHooks::command(facts).with_option_engine(engine);
-                pane_snapshot.border_status_text = expand_status(&format, &context, &mut hooks);
+                let mut hooks = DaemonFormatHooks::command(facts)
+                    .with_option_engine(engine)
+                    .with_cycle();
+                let (text, cycles) = crate::status::expand_cycle_frames(|| {
+                    expand_status(&format, &context, &mut hooks)
+                });
+                pane_snapshot.border_status_text = text;
+                animated |= cycles;
             }
         }
     }
+    animated
 }
 
 fn stamp_pane_border_colours(
@@ -50648,7 +50737,9 @@ pub fn command_stdin_sink(canonical_name: &str, args: &[RawText]) -> Option<Comm
         "display-message" | "split-window" => (args
             .iter()
             .any(|argument| argument.as_bytes().contains(&b'I'))
-            && command_has_flag(canonical_name, args, "-I"))
+            && command_has_flag(canonical_name, args, "-I")
+            && !(canonical_name == "display-message"
+                && command_has_flag(canonical_name, args, "-j")))
         .then_some(CommandStdinSink::PaneInput),
         _ => None,
     }
@@ -54521,6 +54612,8 @@ mod tests {
                 Some(CommandStdinSink::PaneInput),
             ),
             ("display-message", &["-p", "#{pane_id}"][..], None),
+            ("display-message", &["-pIj", "{}"][..], None),
+            ("display-message", &["-I", "-j", "{}"][..], None),
             (
                 "split-window",
                 &["-I", "-t", "%1"][..],

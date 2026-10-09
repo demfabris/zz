@@ -720,7 +720,7 @@
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "active",
+      "status": "review",
       "deps": [
         "float.core"
       ],
@@ -755,7 +755,8 @@
         "2026-10-09: Codex review 1 (float.clients-1.md): 8 P1 (capture modal vs terminal shortcuts, float header steals rows, rejected drag sticks, resize border-status adjust, TUI clip offset, web clip insets, cursor under a float, iOS browsers hidden by any float) + 2 P2 (one command list, screenshots); fix pass sent. Screenshots blocked: the alienware NVIDIA GPU fell off the bus (nvidia-smi Unknown Error), gamescope vkCreateInstance -9; needs a reboot or another machine.",
         "2026-10-09: Fix pass done at dcecfc5d3 (float.core ae87b1ec0 merged): review 1's 8 P1 fixed with tests, tui-floating 12/12 vs 3.8, drag commits as one command list (run-shell -C list); screenshots open (GPU down). Open: display-popup -T title missing when the popup's pane-border-style/window-style options are set (lane continuing). Review 2 running.",
         "2026-10-09: Codex review 2 (float.clients-2.md): 7 P1 (TUI crop rewrites rect: damage rows, kitty placements, pane-mode re-centre; mode cursor through floats; iOS browsers live under a modal scrim; no-op drag commit sticks; bottom-status resize uses canvas height) + 2 P2 (web title markup, screenshots); final fix pass queued after the -T title fix. A whole-track Codex review runs before the float track merges.",
-        "2026-10-09: Final pass done at ca5ae494c: popup -T title (ctrl.rs client view), review 2's 7 P1 + web title markup; tui-floating 15/15 vs 3.8. Left: raw TUI ignores a float pane's window-style (popup-style background), tui-overlays popup cases need master-model known drift (title column, O flag), drag height in a window with no tiled pane needs the window height on the wire; screenshots (GPU). Short follow-up lane in slot b."
+        "2026-10-09: Final pass done at ca5ae494c: popup -T title (ctrl.rs client view), review 2's 7 P1 + web title markup; tui-floating 15/15 vs 3.8. Left: raw TUI ignores a float pane's window-style (popup-style background), tui-overlays popup cases need master-model known drift (title column, O flag), drag height in a window with no tiled pane needs the window height on the wire; screenshots (GPU). Short follow-up lane in slot b.",
+        "2026-10-09: Follow-up done at fd87e8eba: float window-style in the raw TUI (popup colours as 3.8), tui-overlays popup cases pass with 3 master-model drifts (title column, O flag, odd-height centring one row up: accepted by the orchestrator under display-popup.modal-pane), WindowSnapshot sx/sy appended under 108 for drags in float-only windows. Desktop/web still map theme colours to zz's palette. Screenshots open (GPU). Done; merges with the float track."
       ]
     },
     {

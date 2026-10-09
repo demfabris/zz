@@ -266,3 +266,6 @@ check `pgrep -af codex` on resume.
   cause: clipping a float rewrote its rect instead of cropping its surface). Because the float track is
   large and each item's reviews only saw its own slice, one whole-track Codex review
   (`git diff main...catchup/float.keys`) runs before the track merges to main.
+- 2026-10-09 orchestrator: a centred display-popup sits one row higher than 3.8's at an odd client
+  height, because the modal pane is placed in window cells; recorded with the title column and the `O`
+  flag as known drift under `display-popup.modal-pane` (fabrico's master-model ruling).

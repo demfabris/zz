@@ -1,6 +1,6 @@
 use zz_protocol::{
-    Axis, LayoutNode, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId,
-    PopupBorderLines,
+    Axis, FloatingPaneSnapshot, LayoutNode, PaneBorderIndicators, PaneBorderLines,
+    PaneBorderStatus, PaneId, PopupBorderLines,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -286,6 +286,160 @@ impl BorderOwners {
 pub(crate) struct ResolvedLayout {
     pub panes: Vec<PaneRect>,
     pub dividers: Vec<Divider>,
+    pub floats: Vec<FloatFrame>,
+}
+
+impl ResolvedLayout {
+    pub fn float(&self, pane: PaneId) -> Option<&FloatFrame> {
+        self.floats.iter().find(|float| float.pane == pane)
+    }
+
+    pub fn tiled(&self) -> &[PaneRect] {
+        &self.panes[..self.panes.len().saturating_sub(self.floats.len())]
+    }
+}
+
+/// A visible floating pane as `redraw_mark_pane_borders` marks it for one
+/// client: the content box and the box with its borders, both clipped to the
+/// window, and which border sides are drawn. A side that falls outside the
+/// window is not drawn, and the row or column it would have used is clamped
+/// to the window edge (`screen-redraw.c`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct FloatFrame {
+    pub pane: PaneId,
+    pub frame: Rect,
+    pub content: Rect,
+    pub lines: PaneBorderLines,
+    pub sides: [bool; 4],
+    pub active: bool,
+}
+
+impl FloatFrame {
+    pub const LEFT: usize = 0;
+    pub const RIGHT: usize = 1;
+    pub const TOP: usize = 2;
+    pub const BOTTOM: usize = 3;
+
+    /// `window_pane_contains`: a float with borders owns its border cells.
+    pub const fn hit_rect(&self) -> Rect {
+        self.frame
+    }
+
+    /// Every border cell with the `CELL_*` type its merged mask gives it.
+    pub fn border_cells(&self) -> Vec<(u16, u16, usize)> {
+        if self.lines == PaneBorderLines::None || self.frame.width == 0 || self.frame.height == 0 {
+            return Vec::new();
+        }
+        let left = self.frame.x;
+        let top = self.frame.y;
+        let right = left + self.frame.width - 1;
+        let bottom = top + self.frame.height - 1;
+        let mut cells: std::collections::BTreeMap<(u16, u16), u8> =
+            std::collections::BTreeMap::new();
+        for (side, row) in [(Self::TOP, top), (Self::BOTTOM, bottom)] {
+            if !self.sides[side] {
+                continue;
+            }
+            for column in left..=right {
+                let mut mask = 0;
+                if column > left {
+                    mask |= BORDER_L;
+                }
+                if column < right {
+                    mask |= BORDER_R;
+                }
+                *cells.entry((row, column)).or_default() |= mask;
+            }
+        }
+        for (side, column) in [(Self::LEFT, left), (Self::RIGHT, right)] {
+            if !self.sides[side] {
+                continue;
+            }
+            for row in top..=bottom {
+                let mut mask = 0;
+                if row > top {
+                    mask |= BORDER_U;
+                }
+                if row < bottom {
+                    mask |= BORDER_D;
+                }
+                *cells.entry((row, column)).or_default() |= mask;
+            }
+        }
+        cells
+            .into_iter()
+            .map(|((row, column), mask)| (column, row, cell_type_of(mask)))
+            .collect()
+    }
+}
+
+/// Places one float of the snapshot inside `canvas`, the client's view of the
+/// window. Offsets are window cells and may be negative; everything outside
+/// the window is clipped. `None` when no cell of it is on the window.
+pub(crate) fn resolve_float(
+    float: &FloatingPaneSnapshot,
+    canvas: Rect,
+    active: bool,
+) -> Option<(PaneRect, FloatFrame)> {
+    let window_x = i32::from(canvas.width);
+    let window_y = i32::from(canvas.height);
+    let xoff = float.xoff;
+    let yoff = float.yoff;
+    let x_end = xoff + i32::from(float.sx);
+    let y_end = yoff + i32::from(float.sy);
+    let to_rect = |x0: i32, y0: i32, x1: i32, y1: i32| -> Rect {
+        let x0 = x0.clamp(0, window_x);
+        let y0 = y0.clamp(0, window_y);
+        let x1 = x1.clamp(x0, window_x);
+        let y1 = y1.clamp(y0, window_y);
+        Rect {
+            x: canvas.x + u16::try_from(x0).unwrap_or(0),
+            y: canvas.y + u16::try_from(y0).unwrap_or(0),
+            width: u16::try_from(x1 - x0).unwrap_or(0),
+            height: u16::try_from(y1 - y0).unwrap_or(0),
+        }
+    };
+    let content = to_rect(xoff, yoff, x_end, y_end);
+    let bordered = float.border_lines != PaneBorderLines::None;
+    let (frame, sides) = if bordered {
+        let (left, right, top, bottom) = (xoff - 1, x_end, yoff - 1, y_end);
+        let sides = [left >= 0, right < window_x, top >= 0, bottom < window_y];
+        let frame = to_rect(
+            left.max(0),
+            top.max(0),
+            right.min(window_x - 1) + 1,
+            bottom.min(window_y - 1) + 1,
+        );
+        (frame, sides)
+    } else {
+        (content, [false; 4])
+    };
+    if frame.width == 0 || frame.height == 0 {
+        return None;
+    }
+    let border_status = match float.border_status {
+        PaneBorderStatus::Top if bordered && sides[FloatFrame::TOP] => PaneBorderStatus::Top,
+        PaneBorderStatus::Bottom if bordered && sides[FloatFrame::BOTTOM] => {
+            PaneBorderStatus::Bottom
+        }
+        _ => PaneBorderStatus::Off,
+    };
+    Some((
+        PaneRect {
+            pane: float.pane,
+            rect: content,
+            border_status,
+            status_on_border: true,
+        },
+        FloatFrame {
+            pane: float.pane,
+            frame,
+            content,
+            lines: float.border_lines,
+            sides,
+            active,
+        },
+    ))
 }
 
 pub(crate) fn resolve(

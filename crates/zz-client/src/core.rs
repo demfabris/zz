@@ -8,8 +8,8 @@ use zz_protocol::{
     ChooseTreeSearchState, ChooseTreeState, ChooserPresentation, ClientExitAction,
     ClientMessageKind, ClientView, ClipboardProducer, CommandPromptState, CommandResponse,
     ConfirmState, DisplayPanesState, Event, EventPayload, KeyBindingSnapshot, KeyTableSnapshot,
-    MenuState, MouseBindings, MuxOptions, MuxSnapshot, PaneId, PopupState, ProtocolMessage,
-    ServerHello, SessionId, StatusLine, TerminalUiCommand, Welcome, key_tables_hash,
+    MenuState, MouseBindings, MuxOptions, MuxSnapshot, PaneId, ProtocolMessage, ServerHello,
+    SessionId, StatusLine, TerminalUiCommand, Welcome, key_tables_hash,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, PackedCell, TerminalAppearance, TerminalDictionary,
@@ -126,7 +126,6 @@ pub enum CoreEvent {
     ChooseTreeChanged,
     ChooseBufferChanged,
     DisplayPanesChanged,
-    PopupChanged,
     MenuChanged,
     ConfirmChanged,
     PaneRemoved {
@@ -327,7 +326,6 @@ pub struct ClientCore {
     choose_buffer: Option<ChooseBufferState>,
     chooser_presentation: Option<ChooserPresentation>,
     display_panes: Option<DisplayPanesState>,
-    popup: Option<PopupState>,
     menu: Option<MenuState>,
     menu_opened: u64,
     confirm: Option<ConfirmState>,
@@ -398,7 +396,6 @@ impl ClientCore {
                 let choose_tree_changed = self.choose_tree.is_some();
                 let choose_buffer_changed = self.choose_buffer.is_some();
                 let display_panes_changed = self.display_panes.is_some();
-                let popup_changed = self.popup.is_some();
                 let menu_changed = self.menu.is_some();
                 let confirm_changed = self.confirm.is_some();
                 self.reset_session();
@@ -425,9 +422,6 @@ impl ClientCore {
                 }
                 if display_panes_changed {
                     self.events.push_back(CoreEvent::DisplayPanesChanged);
-                }
-                if popup_changed {
-                    self.events.push_back(CoreEvent::PopupChanged);
                 }
                 if menu_changed {
                     self.events.push_back(CoreEvent::MenuChanged);
@@ -567,6 +561,27 @@ impl ClientCore {
     #[must_use]
     pub const fn attached_session(&self) -> Option<SessionId> {
         self.attached_session
+    }
+
+    /// The pane of the attached window's modal when it captures keys
+    /// (`new-pane -O -K`, and every `display-popup`): every key, the prefix
+    /// included, goes to it unresolved.
+    #[must_use]
+    pub fn modal_capture(&self) -> Option<PaneId> {
+        let session = self.attached_session?;
+        let session = self
+            .snapshot
+            .sessions
+            .iter()
+            .find(|candidate| candidate.id == session)?;
+        let window = self.snapshot.focused_window_for(session);
+        session
+            .windows
+            .iter()
+            .find(|candidate| candidate.id == window)?
+            .modal
+            .filter(|modal| modal.capture_keys)
+            .map(|modal| modal.pane)
     }
 
     #[must_use]
@@ -741,11 +756,6 @@ impl ClientCore {
     }
 
     #[must_use]
-    pub const fn popup(&self) -> Option<&PopupState> {
-        self.popup.as_ref()
-    }
-
-    #[must_use]
     pub const fn menu(&self) -> Option<&MenuState> {
         self.menu.as_ref()
     }
@@ -809,7 +819,6 @@ impl ClientCore {
         self.choose_buffer = None;
         self.chooser_presentation = None;
         self.display_panes = None;
-        self.popup = None;
         self.menu = None;
         self.confirm = None;
         self.agent_states.clear();
@@ -991,17 +1000,6 @@ impl ClientCore {
             EventPayload::DisplayPanes { state } => {
                 self.display_panes = state;
                 self.events.push_back(CoreEvent::DisplayPanesChanged);
-            }
-            EventPayload::Popup { state } => {
-                if let Some(previous) = self.popup.as_ref()
-                    && state.as_ref().is_none_or(|next| next.pane != previous.pane)
-                {
-                    self.viewports.remove(&previous.pane);
-                    self.spare_cells.remove(&previous.pane);
-                    self.full_pending.remove(&previous.pane);
-                }
-                self.popup = state;
-                self.events.push_back(CoreEvent::PopupChanged);
             }
             EventPayload::Menu { state } => {
                 if self.menu.is_none() && state.is_some() {
@@ -1241,6 +1239,7 @@ impl ClientCore {
             | EventPayload::StartupConfigCauses { .. }
             | EventPayload::CommandStdout { .. }
             | EventPayload::CommandClientExit
+            | EventPayload::RetiredPopup { .. }
             | EventPayload::SubscriptionChanged { .. } => {}
             EventPayload::ClipboardQuery => self.clipboard_query = true,
         }
@@ -1261,7 +1260,6 @@ impl ClientCore {
             (self.choose_tree.is_some(), CoreEvent::ChooseTreeChanged),
             (self.choose_buffer.is_some(), CoreEvent::ChooseBufferChanged),
             (self.display_panes.is_some(), CoreEvent::DisplayPanesChanged),
-            (self.popup.is_some(), CoreEvent::PopupChanged),
             (self.menu.is_some(), CoreEvent::MenuChanged),
             (self.confirm.is_some(), CoreEvent::ConfirmChanged),
         ]
@@ -1397,14 +1395,10 @@ impl ClientCore {
             .flat_map(|session| &session.windows)
             .flat_map(|window| window.panes.keys().copied())
             .collect();
-        let popup = self.popup.as_ref().map(|popup| popup.pane);
-        self.viewports
-            .retain(|pane, _| live.contains(pane) || popup == Some(*pane));
-        self.spare_cells
-            .retain(|pane, _| live.contains(pane) || popup == Some(*pane));
+        self.viewports.retain(|pane, _| live.contains(pane));
+        self.spare_cells.retain(|pane, _| live.contains(pane));
         self.agent_states.retain(|pane, _| live.contains(pane));
-        self.full_pending
-            .retain(|pane| live.contains(pane) || popup == Some(*pane));
+        self.full_pending.retain(|pane| live.contains(pane));
     }
 
     fn update_choose_tree(&mut self, search: Option<ChooseTreeSearchState>, selected: u32) {
@@ -2125,47 +2119,101 @@ mod tests {
         );
     }
 
-    #[test]
-    fn popup_descriptor_owns_its_synthetic_viewport_lifetime() {
-        let pane = PaneId(u64::MAX - 1);
-        let state = PopupState {
-            pane,
-            left: 4,
-            top: 3,
-            width: 40,
-            height: 12,
-            client_columns: 80,
-            client_rows: 24,
-            cell_width_px: 8,
-            cell_height_px: 18,
-            title: "popup".to_owned(),
-            style: "bg=default,fg=default".to_owned(),
-            border_style: "fg=default".to_owned(),
-            border_lines: zz_protocol::PopupBorderLines::Single,
-            close_on_exit: false,
-            close_on_exit_zero: false,
-            close_on_any_key: false,
-            dead: false,
-        };
+    fn modal_core(capture_keys: bool) -> (ClientCore, PaneId, PaneId) {
+        let tiled = PaneId(1);
+        let modal = PaneId(2);
+        let mut snapshot = snapshot_with(&[tiled, modal]);
+        let window = &mut snapshot.sessions[0].windows[0];
+        window.active_pane = modal;
+        window.floating = vec![zz_protocol::FloatingPaneSnapshot {
+            pane: modal,
+            xoff: 10,
+            yoff: 5,
+            sx: 30,
+            sy: 8,
+            visible: true,
+            border_lines: zz_protocol::PaneBorderLines::Single,
+            border_status: zz_protocol::PaneBorderStatus::Off,
+        }];
+        window.modal = Some(zz_protocol::ModalPaneSnapshot {
+            pane: modal,
+            capture_keys,
+            close_on_click: false,
+            close_on_cancel: true,
+        });
         let mut core = ClientCore::new();
+        core.handle_message(ProtocolMessage::Attached {
+            session: SessionId(0),
+            snapshot,
+            read_only: false,
+            client_flags: String::new(),
+        });
+        (core, tiled, modal)
+    }
 
-        core.handle_message(event(EventPayload::Popup {
-            state: Some(state.clone()),
-        }));
-        assert_eq!(drain(&mut core), vec![CoreEvent::PopupChanged]);
-        assert_eq!(core.popup(), Some(&state));
+    #[test]
+    fn a_focused_capture_modal_sends_the_prefix_key_to_the_pane() {
+        use zz_terminal::{KeyAction, KeyInput, Modifiers};
 
-        core.handle_message(event(EventPayload::TerminalViewport {
-            pane,
-            viewport: TerminalViewport::blank(38, 10, zz_terminal::SessionStatus::Running),
-        }));
-        assert!(core.viewport(pane).is_some());
-        drain(&mut core);
+        use crate::{ChromeKeymap, ChromeProfile, Disposition, Effect, InputEvent, InputRouter};
 
-        core.handle_message(event(EventPayload::Popup { state: None }));
-        assert_eq!(drain(&mut core), vec![CoreEvent::PopupChanged]);
-        assert_eq!(core.popup(), None);
-        assert_eq!(core.viewport(pane), None);
+        let key = |ch: char, control: bool, platform: bool| KeyInput {
+            action: KeyAction::Press,
+            key: zz_terminal::KeyCode::Character(ch),
+            modifiers: Modifiers::new(false, control, false, platform),
+            text: None,
+            unshifted_codepoint: None,
+        };
+        let prefix = key('b', true, false);
+        let palette = key('k', false, true);
+        let claimed = crate::PrefixView {
+            armed: false,
+            claimed: true,
+        };
+
+        let (core, tiled, modal) = modal_core(true);
+        assert_eq!(core.modal_capture(), Some(modal));
+        let mut router = InputRouter::new(ChromeKeymap::for_profile(ChromeProfile::DesktopApple));
+        router.event(InputEvent::ActivatePane(
+            tiled,
+            crate::SurfaceKind::Terminal,
+        ));
+        router.drain_effects();
+        router.set_capture(core.modal_capture());
+        for input in [&prefix, &palette] {
+            assert_eq!(router.key(input, claimed), Disposition::Consumed);
+            assert_eq!(
+                router.drain_effects(),
+                vec![Effect::ForwardKey {
+                    pane: modal,
+                    input: input.clone(),
+                }]
+            );
+        }
+
+        let (core, _, _) = modal_core(false);
+        assert_eq!(core.modal_capture(), None);
+        router.set_capture(core.modal_capture());
+        assert_eq!(router.key(&prefix, claimed), Disposition::Consumed);
+        assert_eq!(
+            router.drain_effects(),
+            vec![Effect::ForwardKey {
+                pane: tiled,
+                input: prefix.clone(),
+            }]
+        );
+        assert_eq!(router.key(&palette, claimed), Disposition::Consumed);
+        assert!(matches!(
+            router.drain_effects().as_slice(),
+            [Effect::Chrome(_)]
+        ));
+    }
+
+    #[test]
+    fn a_retired_popup_event_changes_nothing() {
+        let mut core = ClientCore::new();
+        core.handle_message(event(EventPayload::RetiredPopup { state: None }));
+        assert!(drain(&mut core).is_empty());
     }
 
     #[test]
@@ -2284,25 +2332,6 @@ mod tests {
             colour: None,
             active_colour: None,
         });
-        core.popup = Some(PopupState {
-            pane,
-            left: 1,
-            top: 1,
-            width: 8,
-            height: 4,
-            client_columns: 80,
-            client_rows: 24,
-            cell_width_px: 8,
-            cell_height_px: 18,
-            title: String::new(),
-            style: String::new(),
-            border_style: String::new(),
-            border_lines: zz_protocol::PopupBorderLines::Single,
-            close_on_exit: false,
-            close_on_exit_zero: false,
-            close_on_any_key: false,
-            dead: false,
-        });
         core.menu = Some(MenuState {
             left: 1,
             top: 1,
@@ -2342,7 +2371,6 @@ mod tests {
         assert!(core.choose_tree().is_none());
         assert!(core.choose_buffer().is_none());
         assert!(core.display_panes().is_none());
-        assert!(core.popup().is_none());
         assert!(core.menu().is_none());
         assert!(core.confirm().is_none());
         assert_eq!(
@@ -2359,7 +2387,6 @@ mod tests {
                 CoreEvent::ChooseTreeChanged,
                 CoreEvent::ChooseBufferChanged,
                 CoreEvent::DisplayPanesChanged,
-                CoreEvent::PopupChanged,
                 CoreEvent::MenuChanged,
                 CoreEvent::ConfirmChanged,
             ]

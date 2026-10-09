@@ -23,8 +23,8 @@ use crate::{
     browser::{BROWSER_IMAGE_ID, BrowserFrameUpdate},
     kitty::{FrameTransport, KittyBridge, KittyImageData},
     layout::{
-        BORDER_D, BORDER_L, BORDER_R, BORDER_U, CELL_LR, Divider, FloatingSpec, Rect, border_glyph,
-        cell_type_of, resolve_floating,
+        BORDER_D, BORDER_L, BORDER_R, BORDER_U, CELL_LR, Divider, FloatFrame, FloatingSpec,
+        PaneRect, Rect, border_glyph, cell_type_of, resolve_floating,
     },
     picker, sidebar,
     state::Model,
@@ -442,8 +442,7 @@ impl Renderer {
         self.output.clear();
         self.output.extend_from_slice(PAINT_BEGIN);
         self.begin_tty_state();
-        let popup_visible = model.popup.is_some();
-        let floating_input = popup_visible || model.menu.is_some() || model.confirm.is_some();
+        let floating_input = model.menu.is_some() || model.confirm.is_some();
         if model.status.title != self.last_title {
             if !model.status.title.is_empty() {
                 self.output.extend_from_slice(b"\x1b]2;");
@@ -500,14 +499,6 @@ impl Renderer {
                 self.place_active_cursor(model);
             }
         }
-        if popup_visible {
-            self.kitty.suspend(&mut self.output);
-            self.paint_popup(model, true);
-            if model.menu.is_none() && model.confirm.is_none() {
-                self.reconcile_popup_kitty_images(model);
-                self.place_popup_cursor(model);
-            }
-        }
         if model.menu.is_some() {
             self.kitty.suspend(&mut self.output);
             self.paint_menu(model);
@@ -529,30 +520,11 @@ impl Renderer {
     pub fn paint_frames(&mut self, model: &Model) -> io::Result<()> {
         self.note_terminal_colours();
         self.forget_default_blank_under_overlays(model);
-        if let Some(popup) = model.popup.as_ref()
-            && model.menu.is_none()
-            && model.confirm.is_none()
-        {
-            if self.damage.keys().any(|pane| *pane != popup.pane) {
-                return self.paint(model, false);
-            }
-            self.output.clear();
-            self.output.extend_from_slice(PAINT_BEGIN);
-            self.begin_tty_state();
-            self.emit_queued_control();
-            self.kitty.suspend(&mut self.output);
-            self.paint_popup(model, false);
-            self.reconcile_popup_kitty_images(model);
-            self.place_popup_cursor(model);
-            self.output.extend_from_slice(b"\x1b[?2026l");
-            return self.flush_output();
-        }
         self.output.clear();
         self.output.extend_from_slice(PAINT_BEGIN);
         self.begin_tty_state();
         if model.choose_tree.is_none()
             && model.choose_buffer.is_none()
-            && model.popup.is_none()
             && model.menu.is_none()
             && model.confirm.is_none()
         {
@@ -717,8 +689,7 @@ impl Renderer {
     }
 
     fn forget_default_blank_under_overlays(&mut self, model: &Model) {
-        if model.popup.is_some()
-            || model.menu.is_some()
+        if model.menu.is_some()
             || model.confirm.is_some()
             || model.display_panes.is_some()
             || pane_prompt_target(model).is_some()
@@ -803,120 +774,41 @@ impl Renderer {
         }
 
         let active = model.active_pane();
-        for entry in &model.layout.panes {
-            let Some(pane) = model.pane_snapshot(entry.pane) else {
-                continue;
-            };
-            let active = active == Some(entry.pane);
-            let header_changed = if entry.border_status.is_on() {
-                let header = pane.border_status_text.clone();
-                let changed = self.headers.get(&entry.pane) != Some(&header);
-                if force || changed {
-                    self.paint_border_status_row(
-                        entry.status_row(),
-                        &header,
-                        active,
-                        entry.pane,
-                        lines,
-                        model.pane_index(entry.pane),
-                        model,
-                    );
-                    self.headers.insert(entry.pane, header);
-                }
-                changed
-            } else {
-                self.headers.remove(&entry.pane).is_some()
-            };
-            let content = entry.content();
-            let known_blank = self.default_blank.remove(&entry.pane) == Some(content);
-            let browser_live = matches!(pane.kind, PaneKindSnapshot::Browser(_))
-                && self.browser_frame_live(entry.pane);
-            let browser_state_changed = if matches!(pane.kind, PaneKindSnapshot::Browser(_)) {
-                self.browser_painted.insert(entry.pane, browser_live) != Some(browser_live)
-            } else {
-                self.browser_painted.remove(&entry.pane);
-                false
-            };
-            match &pane.kind {
-                PaneKindSnapshot::Terminal => {
-                    self.picker_cards.remove(&entry.pane);
-                    let pane_mode_changed = self
-                        .pane_modes_painted
-                        .insert(entry.pane, pane.mode.is_some())
-                        != Some(pane.mode.is_some());
-                    if let Some(pane_mode) = pane.mode.as_ref() {
-                        self.damage.remove(&entry.pane);
-                        self.painted.remove(&entry.pane);
-                        self.paint_pane_mode(pane_mode, content, model);
-                        continue;
-                    }
-                    let force = force || pane_mode_changed;
-                    if let Some(viewport) = model.pane_viewport(entry.pane) {
-                        let damage = self.damage.remove(&entry.pane);
-                        let mode = crate::mode_view::presentation(model, entry.pane, viewport);
-                        self.selection_style = mode.and_then(|mode| {
-                            crate::mode_view::resolved_style(
-                                &mode.selection_style,
-                                &model.status.theme,
-                            )
-                        });
-                        self.selection_trim = mode
-                            .filter(|mode| !mode.vi_keys)
-                            .and_then(|_| crate::mode_view::emacs_selection_trim(viewport));
-                        self.match_styles = mode.map_or([None, None], |mode| {
-                            [&mode.match_style, &mode.current_match_style].map(|style| {
-                                crate::mode_view::resolved_style(style, &model.status.theme)
-                            })
-                        });
-                        self.blank_is_default = cleared_to_default || known_blank;
-                        self.paint_terminal(entry.pane, viewport, content, force, damage.as_ref());
-                        self.blank_is_default = false;
-                        if let Some(mode) = mode {
-                            self.paint_mode_position(mode, viewport, content, model);
-                        }
-                        self.selection_style = None;
-                        self.selection_trim = None;
-                        self.match_styles = [None, None];
-                    } else if cleared_to_default || known_blank {
-                        self.painted.remove(&entry.pane);
-                        self.default_blank.insert(entry.pane, content);
-                    }
-                }
-                PaneKindSnapshot::Browser(_) if browser_live => {
-                    self.picker_cards.remove(&entry.pane);
-                    if force || header_changed || browser_state_changed {
-                        self.paint_background(content, model);
-                    }
-                }
-                PaneKindSnapshot::Picker if active => {
-                    let card_state = (content, model.picker_selection);
-                    if force || self.picker_cards.get(&entry.pane) != Some(&card_state) {
-                        self.paint_picker_card(content, model.picker_selection, model);
-                        self.picker_cards.insert(entry.pane, card_state);
-                    }
-                }
-                kind => {
-                    self.picker_cards.remove(&entry.pane);
-                    let (label, detail) = placeholder_text(kind);
-                    let card = (content, label, pane.title.clone(), detail);
-                    if force
-                        || header_changed
-                        || browser_state_changed
-                        || self.cards.get(&entry.pane) != Some(&card)
-                    {
-                        self.paint_card(content, card.1, &card.2, &card.3, model);
-                        self.cards.insert(entry.pane, card);
-                    }
-                }
+        if force {
+            self.paint_empty_window(model);
+        }
+        let tiled = model.layout.tiled().len();
+        let mut touched: Vec<Rect> = Vec::new();
+        for (index, entry) in model.layout.panes.iter().enumerate() {
+            let float = index
+                .checked_sub(tiled)
+                .and_then(|index| model.layout.floats.get(index));
+            let entry_force = force
+                || float.is_some_and(|float| {
+                    touched.iter().any(|rect| rects_overlap(*rect, float.frame))
+                });
+            let mark = self.output.len();
+            if let Some(float) = float
+                && entry_force
+            {
+                self.paint_float_border(float, model);
+            }
+            self.paint_entry(
+                model,
+                entry,
+                active == Some(entry.pane),
+                float.is_some(),
+                entry_force,
+                cleared_to_default && float.is_none(),
+            );
+            if self.output.len() != mark {
+                touched.push(float.map_or_else(|| entry_extent(entry), |float| float.frame));
             }
         }
-        let popup = model.popup.as_ref().map(|popup| popup.pane);
-        self.painted.retain(|pane, _| {
-            popup == Some(*pane) || model.layout.panes.iter().any(|entry| entry.pane == *pane)
-        });
-        self.damage.retain(|pane, _| {
-            popup == Some(*pane) || model.layout.panes.iter().any(|entry| entry.pane == *pane)
-        });
+        self.painted
+            .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
+        self.damage
+            .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
         self.picker_cards
             .retain(|pane, _| model.layout.panes.iter().any(|entry| entry.pane == *pane));
         self.cards
@@ -949,56 +841,227 @@ impl Renderer {
         }
     }
 
-    /// The pinned tree has no image protocol at all, so a popup's own images
-    /// are a zz contract: the popup's job writes into its own pane, and that
-    /// pane is not in the workspace layout the ordinary reconcile walks. The
-    /// suspend above has already retired every workspace placement, so the
-    /// popup reconciles alone and its placements are clipped to the content box
-    /// inside the border. When the popup closes, the next reconcile no longer
-    /// names its pane and the bridge deletes what it placed.
-    fn reconcile_popup_kitty_images(&mut self, model: &Model) {
-        let Some(popup) = model.popup.as_ref() else {
+    fn paint_entry(
+        &mut self,
+        model: &Model,
+        entry: &PaneRect,
+        active: bool,
+        floating: bool,
+        force: bool,
+        cleared_to_default: bool,
+    ) {
+        let lines = model.pane_lines(entry.pane);
+        let Some(pane) = model.pane_snapshot(entry.pane) else {
             return;
         };
-        let Some(layout) = model.popup_layout() else {
+        let header_changed = if entry.border_status.is_on() {
+            let header = pane.border_status_text.clone();
+            let changed = self.headers.get(&entry.pane) != Some(&header);
+            if force || changed {
+                self.paint_border_status_row(
+                    entry.status_row(),
+                    &header,
+                    active,
+                    entry.pane,
+                    lines,
+                    model.pane_index(entry.pane),
+                    model,
+                );
+                self.headers.insert(entry.pane, header);
+            }
+            changed
+        } else {
+            self.headers.remove(&entry.pane).is_some()
+        };
+        let content = entry.content();
+        let known_blank = !floating && self.default_blank.remove(&entry.pane) == Some(content);
+        let browser_live = matches!(pane.kind, PaneKindSnapshot::Browser(_))
+            && self.browser_frame_live(entry.pane);
+        let browser_state_changed = if matches!(pane.kind, PaneKindSnapshot::Browser(_)) {
+            self.browser_painted.insert(entry.pane, browser_live) != Some(browser_live)
+        } else {
+            self.browser_painted.remove(&entry.pane);
+            false
+        };
+        match &pane.kind {
+            PaneKindSnapshot::Terminal => {
+                self.picker_cards.remove(&entry.pane);
+                let pane_mode_changed = self
+                    .pane_modes_painted
+                    .insert(entry.pane, pane.mode.is_some())
+                    != Some(pane.mode.is_some());
+                if let Some(pane_mode) = pane.mode.as_ref() {
+                    self.damage.remove(&entry.pane);
+                    self.painted.remove(&entry.pane);
+                    self.paint_pane_mode(pane_mode, content, model);
+                    return;
+                }
+                let force = force || pane_mode_changed;
+                if let Some(viewport) = model.pane_viewport(entry.pane) {
+                    let damage = self.damage.remove(&entry.pane);
+                    let mode = crate::mode_view::presentation(model, entry.pane, viewport);
+                    self.selection_style = mode.and_then(|mode| {
+                        crate::mode_view::resolved_style(&mode.selection_style, &model.status.theme)
+                    });
+                    self.selection_trim = mode
+                        .filter(|mode| !mode.vi_keys)
+                        .and_then(|_| crate::mode_view::emacs_selection_trim(viewport));
+                    self.match_styles = mode.map_or([None, None], |mode| {
+                        [&mode.match_style, &mode.current_match_style].map(|style| {
+                            crate::mode_view::resolved_style(style, &model.status.theme)
+                        })
+                    });
+                    self.blank_is_default = cleared_to_default || known_blank;
+                    self.paint_terminal(entry.pane, viewport, content, force, damage.as_ref());
+                    self.blank_is_default = false;
+                    if let Some(mode) = mode {
+                        self.paint_mode_position(mode, viewport, content, model);
+                    }
+                    self.selection_style = None;
+                    self.selection_trim = None;
+                    self.match_styles = [None, None];
+                } else if floating {
+                    self.painted.remove(&entry.pane);
+                    if force {
+                        self.paint_background(content, model);
+                    }
+                } else if cleared_to_default || known_blank {
+                    self.painted.remove(&entry.pane);
+                    self.default_blank.insert(entry.pane, content);
+                }
+            }
+            PaneKindSnapshot::Browser(_) if browser_live => {
+                self.picker_cards.remove(&entry.pane);
+                if force || header_changed || browser_state_changed {
+                    self.paint_background(content, model);
+                }
+            }
+            PaneKindSnapshot::Picker if active => {
+                let card_state = (content, model.picker_selection);
+                if force || self.picker_cards.get(&entry.pane) != Some(&card_state) {
+                    self.paint_picker_card(content, model.picker_selection, model);
+                    self.picker_cards.insert(entry.pane, card_state);
+                }
+            }
+            kind => {
+                self.picker_cards.remove(&entry.pane);
+                let (label, detail) = placeholder_text(kind);
+                let card = (content, label, pane.title.clone(), detail);
+                if force
+                    || header_changed
+                    || browser_state_changed
+                    || self.cards.get(&entry.pane) != Some(&card)
+                {
+                    self.paint_card(content, card.1, &card.2, &card.3, model);
+                    self.cards.insert(entry.pane, card);
+                }
+            }
+        }
+    }
+
+    /// `redraw_mark_pane_borders` for a float: its own box, drawn over
+    /// whatever is under it, in the pane's border style.
+    fn paint_float_border(&mut self, float: &FloatFrame, model: &Model) {
+        let style = model.pane_border_style(float.pane);
+        let fallback = if float.active {
+            model.appearance.link_color
+        } else {
+            model.appearance.foreground
+        };
+        let color = model
+            .pane_border_colour(float.pane, float.active)
+            .map_or(fallback, |colour| {
+                resolve_tmux_colour(colour, fallback, &model.appearance)
+            });
+        let mut sgr = Vec::new();
+        if let Some(style) = &style {
+            write_border_sgr(&mut sgr, style, &model.appearance);
+        } else {
+            write_colored_sgr(&mut sgr, color, model.appearance.background);
+        }
+        let sgr = Rc::new(sgr);
+        let index = model.pane_index(float.pane);
+        let border: BTreeMap<(u16, u16), (Rc<Vec<u8>>, String)> = float
+            .border_cells()
+            .into_iter()
+            .map(|(column, row, cell_type)| {
+                (
+                    (row, column),
+                    (Rc::clone(&sgr), border_glyph(float.lines, cell_type, index)),
+                )
+            })
+            .collect();
+        write_border_runs(&mut self.output, &border, model.size.columns);
+    }
+
+    /// A window with no tiled pane leaves its whole area to
+    /// `REDRAW_SPAN_EMPTY`, which tmux 3.8 fills with the inside cell of the
+    /// default `fill-character`.
+    fn paint_empty_window(&mut self, model: &Model) {
+        let Some(window) = model.window() else {
             return;
         };
-        let Some(viewport) = model.viewports.get(&popup.pane) else {
-            return;
-        };
-        if layout.content.width == 0 || layout.content.height == 0 {
+        if window.zoomed_pane.is_some() || !matches!(window.layout, zz_protocol::LayoutNode::Empty)
+        {
             return;
         }
-        self.kitty.reconcile(
-            std::iter::once((
-                popup.pane,
-                layout.content,
-                viewport.kitty_placements.as_ref(),
-            )),
-            &mut self.output,
-        );
+        let canvas = model.canvas();
+        if canvas.width == 0 {
+            return;
+        }
+        let mut line = StyledLine::parsed(&format!(
+            "#[bg=themedarkgrey]{}",
+            " ".repeat(usize::from(canvas.width))
+        ));
+        line.resolve_theme(&model.status.theme);
+        for row in canvas.y..canvas.y.saturating_add(canvas.height) {
+            write_styled_text(
+                &mut self.output,
+                canvas.x,
+                row,
+                &line,
+                model.appearance.foreground,
+                model.appearance.background,
+                &model.appearance,
+            );
+        }
     }
 
     fn reconcile_kitty_images(&mut self, model: &Model) {
         let browser_placements = &self.browser_placements;
-        let panes = model.layout.panes.iter().filter_map(|entry| {
-            let pane = model.pane_snapshot(entry.pane)?;
-            match &pane.kind {
-                PaneKindSnapshot::Terminal => {
-                    let viewport = model.pane_viewport(entry.pane)?;
-                    Some((
-                        entry.pane,
-                        entry.content(),
-                        viewport.kitty_placements.as_ref(),
-                    ))
+        let tiled = model.layout.tiled().len();
+        let panes = model
+            .layout
+            .panes
+            .iter()
+            .enumerate()
+            .filter_map(|(index, entry)| {
+                let front = if index < tiled { 0 } else { index - tiled + 1 };
+                let covered = model.layout.floats.get(front..).is_some_and(|floats| {
+                    floats
+                        .iter()
+                        .any(|float| rects_overlap(float.frame, entry.content()))
+                });
+                if covered {
+                    return None;
                 }
-                PaneKindSnapshot::Browser(_) => {
-                    let placement = browser_placements.get(&entry.pane)?;
-                    Some((entry.pane, entry.content(), std::slice::from_ref(placement)))
+                let pane = model.pane_snapshot(entry.pane)?;
+                match &pane.kind {
+                    PaneKindSnapshot::Terminal => {
+                        let viewport = model.pane_viewport(entry.pane)?;
+                        Some((
+                            entry.pane,
+                            entry.content(),
+                            viewport.kitty_placements.as_ref(),
+                        ))
+                    }
+                    PaneKindSnapshot::Browser(_) => {
+                        let placement = browser_placements.get(&entry.pane)?;
+                        Some((entry.pane, entry.content(), std::slice::from_ref(placement)))
+                    }
+                    _ => None,
                 }
-                _ => None,
-            }
-        });
+            });
         self.kitty.reconcile(panes, &mut self.output);
     }
 
@@ -1606,57 +1669,6 @@ impl Renderer {
             model.appearance.link_color,
             model.appearance.background,
         );
-    }
-
-    fn paint_popup(&mut self, model: &Model, force: bool) {
-        let Some(state) = model.popup.as_ref() else {
-            return;
-        };
-        let Some(layout) = model.popup_layout() else {
-            self.painted.remove(&state.pane);
-            self.damage.remove(&state.pane);
-            return;
-        };
-        if force {
-            let style = crate::overlay::grounded(parse_style(&state.style).unwrap_or_default());
-            let mut line = StyledLine::default();
-            line.push_segment(&" ".repeat(usize::from(layout.frame.width)), style);
-            for row in 0..layout.frame.height {
-                write_styled_text(
-                    &mut self.output,
-                    layout.frame.x,
-                    layout.frame.y.saturating_add(row),
-                    &line,
-                    model.appearance.foreground,
-                    model.appearance.background,
-                    &model.appearance,
-                );
-            }
-            if state.border_lines != PopupBorderLines::None {
-                paint_floating_border(
-                    &mut self.output,
-                    layout.frame,
-                    state.border_lines,
-                    &state.border_style,
-                    &state.title,
-                    model,
-                );
-            }
-        }
-        if layout.content.width == 0 || layout.content.height == 0 {
-            self.painted.remove(&state.pane);
-            self.damage.remove(&state.pane);
-            return;
-        }
-        if let Some(viewport) = model.viewports.get(&state.pane) {
-            let damage = self.damage.remove(&state.pane);
-            self.terminal_defaults = parse_style(&state.style).unwrap_or_default();
-            self.paint_terminal(state.pane, viewport, layout.content, force, damage.as_ref());
-            self.terminal_defaults = TmuxStyle::default();
-        } else {
-            self.painted.remove(&state.pane);
-            self.damage.remove(&state.pane);
-        }
     }
 
     fn paint_menu(&mut self, model: &Model) {
@@ -2329,25 +2341,6 @@ impl Renderer {
         self.place_viewport_cursor(pane, viewport, entry.content(), model);
     }
 
-    fn place_popup_cursor(&mut self, model: &Model) {
-        let Some(popup) = model.popup.as_ref() else {
-            self.hide_cursor();
-            return;
-        };
-        let Some(layout) = model.popup_layout() else {
-            self.hide_cursor();
-            return;
-        };
-        let Some(viewport) = model.viewports.get(&popup.pane) else {
-            self.hide_cursor();
-            return;
-        };
-        self.place_viewport_cursor(popup.pane, viewport, layout.content, model);
-        if client_message_hides_the_cursor(model) {
-            self.hide_cursor();
-        }
-    }
-
     fn place_menu_cursor(&mut self, model: &Model) {
         if let Some(state) = model.menu.as_ref()
             && let Some(layout) = resolve_floating(
@@ -2560,6 +2553,32 @@ fn viewport_row(viewport: &TerminalViewport, row: u16, width: u16) -> Option<&[P
     viewport
         .row(row)
         .map(|cells| &cells[..cells.len().min(usize::from(width))])
+}
+
+const fn rects_overlap(a: Rect, b: Rect) -> bool {
+    a.x < b.x.saturating_add(b.width)
+        && b.x < a.x.saturating_add(a.width)
+        && a.y < b.y.saturating_add(b.height)
+        && b.y < a.y.saturating_add(a.height)
+}
+
+fn entry_extent(entry: &PaneRect) -> Rect {
+    let status = entry.status_row();
+    if status.height == 0 {
+        return entry.rect;
+    }
+    let top = entry.rect.y.min(status.y);
+    let bottom = entry
+        .rect
+        .y
+        .saturating_add(entry.rect.height)
+        .max(status.y.saturating_add(1));
+    Rect {
+        x: entry.rect.x,
+        y: top,
+        width: entry.rect.width,
+        height: bottom - top,
+    }
 }
 
 fn divider_cells(dividers: &[Divider]) -> BTreeSet<(u16, u16)> {
@@ -2892,112 +2911,6 @@ fn floating_border(lines: PopupBorderLines) -> FloatingBorder {
             separator_left: " ",
             separator_right: " ",
         },
-    }
-}
-
-fn paint_floating_border(
-    output: &mut Vec<u8>,
-    rect: Rect,
-    lines: PopupBorderLines,
-    border_style: &str,
-    title: &str,
-    model: &Model,
-) {
-    if rect.width == 0 || rect.height == 0 {
-        return;
-    }
-    let border = floating_border(lines);
-    let style = crate::overlay::grounded(parse_style(border_style).unwrap_or_default());
-    let top_text = floating_border_line(
-        border.top_left,
-        border.horizontal,
-        border.top_right,
-        rect.width,
-    );
-    let mut top = StyledLine::default();
-    top.push_segment(&top_text, style.clone());
-    write_styled_text(
-        output,
-        rect.x,
-        rect.y,
-        &top,
-        model.appearance.foreground,
-        model.appearance.background,
-        &model.appearance,
-    );
-    for offset in 1..rect.height.saturating_sub(1) {
-        let row = rect.y.saturating_add(offset);
-        let mut left = StyledLine::default();
-        left.push_segment(border.vertical, style.clone());
-        write_styled_text(
-            output,
-            rect.x,
-            row,
-            &left,
-            model.appearance.foreground,
-            model.appearance.background,
-            &model.appearance,
-        );
-        if rect.width > 1 {
-            write_styled_text(
-                output,
-                rect.x.saturating_add(rect.width.saturating_sub(1)),
-                row,
-                &left,
-                model.appearance.foreground,
-                model.appearance.background,
-                &model.appearance,
-            );
-        }
-    }
-    if rect.height > 1 {
-        let bottom_text = floating_border_line(
-            border.bottom_left,
-            border.horizontal,
-            border.bottom_right,
-            rect.width,
-        );
-        let mut bottom = StyledLine::default();
-        bottom.push_segment(&bottom_text, style.clone());
-        write_styled_text(
-            output,
-            rect.x,
-            rect.y.saturating_add(rect.height.saturating_sub(1)),
-            &bottom,
-            model.appearance.foreground,
-            model.appearance.background,
-            &model.appearance,
-        );
-    }
-    let title_width = rect.width.saturating_sub(4);
-    if !title.is_empty() && title_width > 0 {
-        let title = crate::overlay::compose_over(
-            title,
-            title_width,
-            border_style,
-            border.horizontal,
-            &style,
-        );
-        write_styled_text(
-            output,
-            rect.x.saturating_add(2),
-            rect.y,
-            &StyledLine::from_segments(title),
-            model.appearance.foreground,
-            model.appearance.background,
-            &model.appearance,
-        );
-    }
-}
-
-fn floating_border_line(left: &str, horizontal: &str, right: &str, width: u16) -> String {
-    match width {
-        0 => String::new(),
-        1 => left.to_owned(),
-        _ => format!(
-            "{left}{}{right}",
-            horizontal.repeat(usize::from(width.saturating_sub(2)))
-        ),
     }
 }
 
@@ -4569,264 +4482,6 @@ mod tests {
             stay_open: false,
             mouse_keys: false,
         }
-    }
-
-    fn popup_state(border_lines: PopupBorderLines) -> zz_protocol::PopupState {
-        zz_protocol::PopupState {
-            pane: PaneId(u64::MAX - 1),
-            left: 5,
-            top: 2,
-            width: 12,
-            height: 5,
-            client_columns: 40,
-            client_rows: 12,
-            cell_width_px: 8,
-            cell_height_px: 16,
-            title: "Popup title".to_owned(),
-            style: "fg=white,bg=blue".to_owned(),
-            border_style: "fg=red,bold".to_owned(),
-            border_lines,
-            close_on_exit: false,
-            close_on_exit_zero: false,
-            close_on_any_key: false,
-            dead: false,
-        }
-    }
-
-    fn popup_model(border_lines: PopupBorderLines, with_frame: bool) -> Model {
-        let mut model = block_model(40, 12);
-        let state = popup_state(border_lines);
-        if with_frame {
-            let mut viewport = TerminalViewport::blank(10, 3, SessionStatus::Running);
-            let mut cells = viewport.cells.as_ref().to_vec();
-            cells[0] = PackedCell::new('p' as u32, 0, CellWidth::Narrow);
-            cells[1] = PackedCell::new('o' as u32, 0, CellWidth::Narrow);
-            cells[2] = PackedCell::new('p' as u32, 0, CellWidth::Narrow);
-            viewport.cells = Arc::from(cells);
-            viewport.cursor = Some(Cursor::new(
-                1,
-                0,
-                true,
-                false,
-                false,
-                CursorStyle::Bar,
-                viewport.foreground,
-            ));
-            model.viewports.insert(state.pane, viewport);
-        }
-        model.popup = Some(state);
-        model
-    }
-
-    #[test]
-    fn popup_paints_bounded_title_styles_border_content_and_cursor() {
-        let model = popup_model(PopupBorderLines::Single, true);
-        let mut renderer = Renderer::new();
-        renderer.paint_popup(&model, true);
-        renderer.place_popup_cursor(&model);
-        let output = String::from_utf8(renderer.output).unwrap();
-
-        assert!(output.contains("\x1b[3;6H"), "{output:?}");
-        assert!(output.contains("Popup ti"), "{output:?}");
-        assert!(output.contains('┌'));
-        assert!(output.contains('┐'));
-        assert!(output.contains('└'));
-        assert!(output.contains('┘'));
-        assert!(output.contains("pop"));
-        assert!(output.contains("\x1b[1m"));
-        assert!(output.contains("\x1b[31m"), "{output:?}");
-        assert!(output.contains("\x1b[44m"), "{output:?}");
-        assert!(output.contains("\x1b[4;8H"), "{output:?}");
-        assert!(!output.contains(" q"), "{output:?}");
-        assert!(!output.contains("\x1b]12;"), "{output:?}");
-    }
-
-    #[test]
-    fn popup_blank_rows_keep_the_popup_style_instead_of_an_erase() {
-        let model = popup_model(PopupBorderLines::Single, true);
-        let mut renderer = Renderer::new();
-        renderer.paint_popup(&model, true);
-        let output = String::from_utf8(renderer.output).unwrap();
-
-        assert!(!output.contains('X'), "{output:?}");
-        assert!(output.contains("\x1b[44m          \x1b[0m"), "{output:?}");
-    }
-
-    #[test]
-    fn borderless_popup_uses_its_full_frame_and_missing_frame_hides_the_underlay_cursor() {
-        let model = popup_model(PopupBorderLines::None, false);
-        let layout = model.popup_layout().expect("popup layout");
-        assert_eq!(layout.content, layout.frame);
-        let mut renderer = Renderer::new();
-        renderer.paint_popup(&model, true);
-        renderer.place_popup_cursor(&model);
-        let output = String::from_utf8(renderer.output).unwrap();
-
-        assert!(output.contains("\x1b[3;6H"), "{output:?}");
-        assert!(!output.contains('┌'));
-        assert!(!output.contains("Popup title"));
-        assert!(output.ends_with("\x1b[?25l"));
-        assert!(
-            !renderer
-                .painted
-                .contains_key(&popup_state(PopupBorderLines::None).pane)
-        );
-    }
-
-    #[test]
-    fn popup_damage_survives_workspace_retention_and_repaints_only_changed_rows() {
-        let mut model = popup_model(PopupBorderLines::Single, true);
-        let pane = model.popup.as_ref().expect("popup").pane;
-        let content = model.popup_layout().expect("layout").content;
-        let mut renderer = Renderer::new();
-        renderer.paint_popup(&model, true);
-        renderer.output.clear();
-        renderer.note_frame(pane, FrameDamage::Rows(vec![1]));
-        renderer.paint_workspace(&model, false, false);
-        assert_eq!(
-            renderer.damage.get(&pane),
-            Some(&FrameDamage::Rows(vec![1]))
-        );
-        assert!(renderer.painted.contains_key(&pane));
-
-        let viewport = model.viewports.get_mut(&pane).expect("popup frame");
-        let mut cells = viewport.cells.as_ref().to_vec();
-        cells[usize::from(viewport.columns)] = PackedCell::new('x' as u32, 0, CellWidth::Narrow);
-        viewport.cells = Arc::from(cells);
-        renderer.paint_popup(&model, false);
-        let output = String::from_utf8(renderer.output).unwrap();
-        assert!(output.contains('x'));
-        assert!(output.contains(&format!(
-            "\x1b[{};{}H",
-            content.y.saturating_add(2),
-            content.x.saturating_add(1)
-        )));
-        assert!(!output.contains(&format!(
-            "\x1b[{};{}H",
-            content.y.saturating_add(1),
-            content.x.saturating_add(1)
-        )));
-    }
-
-    #[test]
-    fn higher_menu_paints_after_popup_and_suppresses_its_cursor() {
-        let mut model = popup_model(PopupBorderLines::Single, true);
-        model.menu = Some(menu_state());
-        model.menu_selection = Some(0);
-        let mut renderer = Renderer::new();
-        renderer.paint_popup(&model, true);
-        renderer.paint_menu(&model);
-        renderer.hide_cursor();
-        let output = String::from_utf8(renderer.output).unwrap();
-        let popup = output.find("Popup ti").expect("popup title");
-        let menu = output.rfind("Actions").expect("menu title");
-        assert!(popup < menu);
-        assert!(output.rfind("\x1b[?25l").is_some_and(|hide| hide > menu));
-    }
-
-    fn popup_kitty_placement(image_id: u32, generation: u64) -> zz_terminal::KittyPlacement {
-        zz_terminal::KittyPlacement {
-            image_id,
-            image_generation: generation,
-            layer: zz_terminal::KittyLayer::AboveText,
-            viewport_col: 0,
-            viewport_row: 0,
-            absolute_row: 0,
-            cell_offset_x: 0,
-            cell_offset_y: 0,
-            grid_cols: 2,
-            grid_rows: 1,
-            pixel_width: 2,
-            pixel_height: 1,
-            source_rect: None,
-        }
-    }
-
-    /// The pinned tree carries no image protocol anywhere - popup content goes
-    /// through `input_parse_screen` into the popup's own screen with no image
-    /// path - so a popup's images are a zz contract rather than a fidelity gap.
-    /// This is that contract: a placement inside the popup is drawn against the
-    /// content box inside the border, a replacement retires the placement it
-    /// replaces, and closing the popup deletes what the popup placed.
-    #[test]
-    fn popup_images_are_placed_replaced_and_cleaned_up_on_close() {
-        let mut model = popup_model(PopupBorderLines::Single, true);
-        let pane = model.popup.as_ref().expect("popup").pane;
-        let content = model.popup_layout().expect("popup layout").content;
-        let mut renderer = Renderer::new();
-        renderer.enable_kitty_graphics();
-        for image_id in [9, 10] {
-            renderer.install_kitty_image(KittyImageData {
-                pane,
-                image_id,
-                generation: 1,
-                width: 2,
-                height: 1,
-                bytes: vec![0, 0, 0, 255, 0, 0, 0, 255],
-            });
-        }
-        renderer.queued_control.clear();
-
-        let viewport = model.viewports.get_mut(&pane).expect("popup viewport");
-        viewport.kitty_placements = Arc::from([popup_kitty_placement(9, 1)]);
-        renderer.reconcile_popup_kitty_images(&model);
-        let placed = String::from_utf8(std::mem::take(&mut renderer.output)).unwrap();
-        assert!(placed.contains("\x1b_Ga=p,"), "{placed:?}");
-        assert!(
-            placed.contains(&format!("\x1b[{};{}H", content.y + 1, content.x + 1)),
-            "the placement is anchored inside the border: {placed:?}"
-        );
-
-        let viewport = model.viewports.get_mut(&pane).expect("popup viewport");
-        viewport.kitty_placements = Arc::from([popup_kitty_placement(10, 1)]);
-        renderer.reconcile_popup_kitty_images(&model);
-        let replaced = String::from_utf8(std::mem::take(&mut renderer.output)).unwrap();
-        assert!(
-            replaced.contains("\x1b_Ga=d,d=i,"),
-            "the replaced placement is retired: {replaced:?}"
-        );
-        assert!(replaced.contains("\x1b_Ga=p,"), "{replaced:?}");
-
-        model.popup = None;
-        renderer.reconcile_kitty_images(&model);
-        let closed = String::from_utf8(std::mem::take(&mut renderer.output)).unwrap();
-        assert!(
-            closed.contains("\x1b_Ga=d,d=i,"),
-            "closing the popup deletes what it placed: {closed:?}"
-        );
-        assert!(
-            !closed.contains("\x1b_Ga=p,"),
-            "and places nothing new: {closed:?}"
-        );
-    }
-
-    #[test]
-    fn forgetting_a_popup_purges_terminal_damage_and_image_caches() {
-        let model = popup_model(PopupBorderLines::Single, true);
-        let pane = model.popup.as_ref().expect("popup").pane;
-        let mut renderer = Renderer::new();
-        renderer.paint_popup(&model, true);
-        renderer.note_frame(pane, FrameDamage::Rows(vec![0]));
-        renderer.headers.insert(pane, "header".to_owned());
-        renderer.picker_cards.insert(pane, (Rect::default(), 0));
-        renderer.enable_kitty_graphics();
-        renderer.install_kitty_image(KittyImageData {
-            pane,
-            image_id: 9,
-            generation: 1,
-            width: 1,
-            height: 1,
-            bytes: vec![0, 0, 0, 255],
-        });
-        renderer.queued_control.clear();
-
-        renderer.forget_pane(pane);
-
-        assert!(!renderer.painted.contains_key(&pane));
-        assert!(!renderer.damage.contains_key(&pane));
-        assert!(!renderer.headers.contains_key(&pane));
-        assert!(!renderer.picker_cards.contains_key(&pane));
-        assert!(String::from_utf8_lossy(&renderer.queued_control).contains("\x1b_Ga=d,d=I"));
     }
 
     #[test]

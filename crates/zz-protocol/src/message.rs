@@ -2249,7 +2249,10 @@ pub enum InputMessage {
     CancelPrefix {
         request_id: u64,
     },
-    Popup {
+    /// The v107 per-client popup's input. Kept for its tag, never sent; it
+    /// goes at the next protocol version.
+    #[serde(rename = "Popup")]
+    RetiredPopup {
         action: PopupAction,
     },
     Menu {
@@ -3603,7 +3606,10 @@ pub enum EventPayload {
     PrefixCancelled {
         request_id: u64,
     },
-    Popup {
+    /// The v107 per-client popup. Kept for its tag, never sent; it goes at
+    /// the next protocol version.
+    #[serde(rename = "Popup")]
+    RetiredPopup {
         state: Option<PopupState>,
     },
     Menu {
@@ -4736,7 +4742,7 @@ mod tests {
 
     #[test]
     fn popup_variants_hold_the_appended_wire_tails() {
-        let input = super::InputMessage::Popup {
+        let input = super::InputMessage::RetiredPopup {
             action: super::PopupAction::Close,
         };
         let input_bytes = postcard::to_stdvec(&input).expect("popup input encodes");
@@ -4748,7 +4754,7 @@ mod tests {
 
         let event = super::Event {
             sequence: 7,
-            payload: super::EventPayload::Popup { state: None },
+            payload: super::EventPayload::RetiredPopup { state: None },
         };
         let event_bytes = postcard::to_stdvec(&event).expect("popup event encodes");
         assert_eq!(event_bytes[1], 36);

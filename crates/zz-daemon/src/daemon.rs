@@ -21073,7 +21073,7 @@ impl Shared {
                         },
                     )?;
                 }
-                InputMessage::DismissClientMessage | InputMessage::Popup { .. } => {}
+                InputMessage::DismissClientMessage | InputMessage::RetiredPopup { .. } => {}
                 InputMessage::ClipboardReply { data } => self.store_clipboard_reply(client, data),
                 InputMessage::ResizeCommandOutput {
                     columns,
@@ -43187,10 +43187,20 @@ fn stamp_pane_border_chrome(
                 float.border_lines = engine.pane_lines(float.pane);
                 float.border_status = engine.floating_pane_border_status(float.pane);
             }
-            if !window.pane_border_status.is_on() {
+            let tiled_status = window.pane_border_status.is_on();
+            let float_status: Vec<PaneId> = window
+                .floating
+                .iter()
+                .filter(|float| float.border_status.is_on())
+                .map(|float| float.pane)
+                .collect();
+            if !tiled_status && float_status.is_empty() {
                 continue;
             }
             for (pane, pane_snapshot) in &mut window.panes {
+                if !tiled_status && !float_status.contains(pane) {
+                    continue;
+                }
                 let format = engine.pane_border_format(*pane);
                 if format.is_empty() {
                     continue;
@@ -45943,7 +45953,7 @@ fn retire_pending_committed_text_locked(
 fn read_only_blocks_input(input: &InputMessage) -> bool {
     match input {
         InputMessage::ResizeSplit { .. }
-        | InputMessage::Popup { .. }
+        | InputMessage::RetiredPopup { .. }
         | InputMessage::Menu { .. }
         | InputMessage::Confirm { .. }
         | InputMessage::MouseKey { .. }
@@ -117659,7 +117669,7 @@ bind - split-window -v -c "#{pane_current_path}"
             assert!(!messages.iter().any(|message| matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::Popup { .. },
+                    payload: EventPayload::RetiredPopup { .. },
                     ..
                 })
             )));

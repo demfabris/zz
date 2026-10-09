@@ -91,7 +91,7 @@ fn tmux_action(json: &str) -> Option<InputMessage> {
         | InputMessage::CommandOutputView { .. }
         | InputMessage::TerminalView { .. }
         | InputMessage::Menu { .. }
-        | InputMessage::Popup { .. } => Some(input),
+        | InputMessage::RetiredPopup { .. } => Some(input),
         _ => None,
     }
 }

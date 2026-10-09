@@ -724,13 +724,6 @@ pub(crate) fn run(
                                     refresh_terminal_options(&mut model, &core, &escape_time);
                                     event_loop.adopt_negotiation(&core);
                                 }
-                                let popup_lifecycle_changed = matches!(
-                                    &*event,
-                                    CoreEvent::PopupChanged | CoreEvent::Attached { .. }
-                                );
-                                let previous_popup = popup_lifecycle_changed
-                                    .then(|| model.popup.as_ref().map(|popup| popup.pane))
-                                    .flatten();
                                 if let CoreEvent::PaneRemoved { pane } = &*event {
                                     frames.remove(*pane);
                                     renderer.forget_pane(*pane);
@@ -744,14 +737,6 @@ pub(crate) fn run(
                                     &mut creating_default,
                                     &mut browser,
                                 )?;
-                                if popup_lifecycle_changed
-                                    && previous_popup
-                                        != model.popup.as_ref().map(|popup| popup.pane)
-                                    && let Some(pane) = previous_popup
-                                {
-                                    frames.remove(pane);
-                                    renderer.forget_pane(pane);
-                                }
                                 match outcome {
                                     ProtocolOutcome::None => {}
                                     ProtocolOutcome::Repaint => {
@@ -856,7 +841,6 @@ pub(crate) fn run(
                     &mut browser,
                     event,
                     pixel_mouse,
-                    key_releases,
                     prefix,
                 )? {
                     InputOutcome::None => {}
@@ -1339,16 +1323,7 @@ pub(crate) fn mouse_binding_names(
 }
 
 fn desired_mouse_arming(model: &Model) -> MouseArming {
-    let overlay_any = if let Some(menu) = model.menu.as_ref() {
-        Some(menu.mouse_keys)
-    } else {
-        model.popup.as_ref().map(|popup| {
-            model
-                .viewports
-                .get(&popup.pane)
-                .is_some_and(|viewport| viewport.mouse_tracking)
-        })
-    };
+    let overlay_any = model.menu.as_ref().map(|menu| menu.mouse_keys);
     if !model.mouse_option {
         let tracking = overlay_any.unwrap_or_else(|| {
             model
@@ -1533,8 +1508,6 @@ fn handle_core_event(
             *attempt = AttachAttempt::Idle;
             model.attached_session = Some(session);
             model.set_command_output(None, None);
-            model.set_popup(None);
-            model.popup_keys_down.clear();
             model.set_menu(None);
             model.confirm = None;
             model.confirm_reply_pending = false;
@@ -1621,10 +1594,6 @@ fn handle_core_event(
         }
         CoreEvent::DisplayPanesChanged => {
             model.display_panes = lock_core(core).display_panes().cloned();
-            Ok(ProtocolOutcome::RepaintAll)
-        }
-        CoreEvent::PopupChanged => {
-            model.set_popup(lock_core(core).popup().cloned());
             Ok(ProtocolOutcome::RepaintAll)
         }
         CoreEvent::MenuChanged => {
@@ -2167,7 +2136,7 @@ fn command_output_resize_message(model: &Model) -> Option<((u16, u16, u32, u32),
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zz_protocol::{MenuItem, MenuState, PopupBorderLines, PopupState};
+    use zz_protocol::{MenuItem, MenuState, PopupBorderLines};
     use zz_terminal::SearchDirection;
 
     fn paned_model() -> (Model, zz_protocol::PaneId) {
@@ -3417,28 +3386,6 @@ mod tests {
         }
     }
 
-    fn popup_state(pane: PaneId) -> PopupState {
-        PopupState {
-            pane,
-            left: 4,
-            top: 3,
-            width: 20,
-            height: 8,
-            client_columns: 79,
-            client_rows: 24,
-            cell_width_px: 8,
-            cell_height_px: 16,
-            title: "Popup".to_owned(),
-            style: "default".to_owned(),
-            border_style: "default".to_owned(),
-            border_lines: PopupBorderLines::Single,
-            close_on_exit: false,
-            close_on_exit_zero: false,
-            close_on_any_key: false,
-            dead: false,
-        }
-    }
-
     #[test]
     fn app_requested_mouse_lights_the_outer_modes_while_the_option_is_off() {
         let (mut model, pane) = paned_model();
@@ -3495,40 +3442,6 @@ mod tests {
         model.focus_follows_mouse = true;
         model.menu = Some(menu_state(false));
         assert_eq!(desired_mouse_arming(&model), MouseArming::Any);
-    }
-
-    #[test]
-    fn popup_descriptor_owns_outer_mouse_tracking_even_before_its_frame() {
-        let (mut model, pane) = paned_model();
-        model.mouse_option = false;
-        model.mouse_arming = MouseArming::Any;
-        model.viewports.insert(pane, tracking_viewport(true));
-        let popup = PaneId(u64::MAX - 1);
-        model.popup = Some(popup_state(popup));
-
-        assert_eq!(
-            sync_mouse_modes(&mut model, false).as_deref(),
-            Some(crate::tty::mouse_mode_sequence(MouseArming::Off, false).as_slice())
-        );
-        assert_eq!(model.mouse_arming, MouseArming::Off);
-
-        model.viewports.insert(popup, tracking_viewport(true));
-        assert_eq!(
-            sync_mouse_modes(&mut model, false).as_deref(),
-            Some(crate::tty::mouse_mode_sequence(MouseArming::Any, false).as_slice())
-        );
-        assert_eq!(model.mouse_arming, MouseArming::Any);
-
-        model.viewports.insert(popup, tracking_viewport(false));
-        assert_eq!(
-            sync_mouse_modes(&mut model, false).as_deref(),
-            Some(crate::tty::mouse_mode_sequence(MouseArming::Off, false).as_slice())
-        );
-        model.popup = None;
-        assert_eq!(
-            sync_mouse_modes(&mut model, false).as_deref(),
-            Some(crate::tty::mouse_mode_sequence(MouseArming::Any, false).as_slice())
-        );
     }
 
     #[test]

@@ -643,8 +643,7 @@ fn queue_event(queues: &EventQueues, event: &CoreEvent) {
         CoreEvent::ChooseTreeChanged
         | CoreEvent::ConfirmChanged
         | CoreEvent::CommandOutputChanged
-        | CoreEvent::MenuChanged
-        | CoreEvent::PopupChanged => (ZzEventKind::TmuxChanged, 0, 0, 0, 0),
+        | CoreEvent::MenuChanged => (ZzEventKind::TmuxChanged, 0, 0, 0, 0),
         CoreEvent::PrefixArmed { armed } => (ZzEventKind::PrefixArmed, u32::from(*armed), 0, 0, 0),
         CoreEvent::KeyTablesChanged => (ZzEventKind::KeyTablesChanged, 0, 0, 0, 0),
         CoreEvent::CommandPromptChanged => (ZzEventKind::CommandPromptChanged, 0, 0, 0, 0),

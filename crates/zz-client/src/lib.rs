@@ -16,6 +16,7 @@ pub mod completion;
 mod core;
 #[cfg(not(target_family = "wasm"))]
 pub mod element_picker;
+pub mod floating;
 mod input;
 mod layout;
 pub mod local_scroll;

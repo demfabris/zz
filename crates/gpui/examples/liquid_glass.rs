@@ -13,7 +13,7 @@ use gpui::{
     AnimationPhase, App, Bounds, Context, GlassMaterial, GlassShape, LiquidRect, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, SpringConfig,
     SpringState, Window, WindowBounds, WindowOptions, canvas, div, hsla, linear_color_stop,
-    linear_gradient, point, prelude::*, px, rgb, size,
+    linear_gradient, liquid_glass, point, prelude::*, px, rgb, size,
 };
 use gpui_platform::application;
 use web_time::Instant;
@@ -153,7 +153,6 @@ const PRESETS: [(&str, fn() -> GlassMaterial); 5] = [
 struct Press {
     spring: SpringState,
     down: bool,
-    at: Point<f32>,
 }
 
 impl Press {
@@ -189,7 +188,7 @@ struct LiquidGlassDemo {
     tab: usize,
     pill: LiquidRect,
     pill_lift: Press,
-    tools: [Press; 4],
+    card_shown: bool,
     knob_drag: Option<usize>,
     knob_tracks: Rc<RefCell<Vec<Bounds<Pixels>>>>,
     viewport: Bounds<Pixels>,
@@ -211,7 +210,7 @@ impl LiquidGlassDemo {
             tab: 0,
             pill: LiquidRect::new(Bounds::default(), SpringConfig::new(380., 30., 1.)),
             pill_lift: Press::default(),
-            tools: Default::default(),
+            card_shown: true,
             knob_drag: None,
             knob_tracks: Rc::new(RefCell::new(vec![Bounds::default(); KNOBS.len()])),
             viewport: Bounds::default(),
@@ -288,9 +287,6 @@ impl LiquidGlassDemo {
         let mut moving = self.lens.step(delta);
         moving |= self.pill.step(delta);
         moving |= self.pill_lift.step(delta.as_secs_f32());
-        for tool in &mut self.tools {
-            moving |= tool.step(delta.as_secs_f32());
-        }
         let speed = self.pill.velocity().x.as_f32().abs();
         self.pill_lift.down = speed > 120.;
         moving || self.animate_background
@@ -320,9 +316,6 @@ impl LiquidGlassDemo {
     fn on_mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) {
         self.lens_grab = None;
         self.knob_drag = None;
-        for tool in &mut self.tools {
-            tool.down = false;
-        }
         cx.notify();
     }
 
@@ -622,48 +615,69 @@ impl Render for LiquidGlassDemo {
         );
         for (index, label) in TOOLS.iter().enumerate() {
             let slot = self.tool_slot(index);
-            let press = &self.tools[index];
-            let phase = AnimationPhase(press.phase());
-            let grow = 1. + 0.18 * press.phase();
-            let bounds = centered(slot.center(), slot.size, grow);
-            let pressed = material
-                .glow(0.28)
-                .glow_center(press.at)
-                .glow_radius(px(60.))
-                .refraction(material.refraction * 1.2);
-            let button_material = phase.interpolate(material, pressed);
             layer = layer.child(
-                div()
-                    .id(("tool", index))
+                liquid_glass(("tool", index), material)
                     .absolute()
-                    .left(bounds.origin.x)
-                    .top(bounds.origin.y)
-                    .w(bounds.size.width)
-                    .h(bounds.size.height)
+                    .left(slot.origin.x)
+                    .top(slot.origin.y)
+                    .w(slot.size.width)
+                    .h(slot.size.height)
                     .rounded_full()
-                    .glass(button_material)
                     .flex()
                     .items_center()
                     .justify_center()
                     .text_color(gpui::white())
-                    .text_size(px(18.) * grow)
+                    .text_size(px(18.))
+                    .cursor_pointer()
                     .child(*label)
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, event: &MouseDownEvent, _, cx| {
-                            let slot = this.tool_slot(index);
-                            let local = event.position - slot.origin;
-                            let tool = &mut this.tools[index];
-                            tool.down = true;
-                            tool.at = point(
-                                (local.x / slot.size.width).clamp(0., 1.),
-                                (local.y / slot.size.height).clamp(0., 1.),
-                            );
-                            cx.notify();
-                        }),
-                    ),
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        match index {
+                            0 | 1 => {
+                                let step = if index == 0 { PRESETS.len() - 1 } else { 1 };
+                                this.preset = (this.preset + step) % PRESETS.len();
+                                this.material = (PRESETS[this.preset].1)();
+                            }
+                            2 => this.card_shown = !this.card_shown,
+                            _ => this.animate_background = !this.animate_background,
+                        }
+                        cx.notify();
+                    })),
             );
         }
+
+        // A card that lenses in and out with the "+" button.
+        let stage = self.stage();
+        layer = layer.child(
+            liquid_glass(
+                "card",
+                GlassMaterial::frosted().light_angle(material.light_angle),
+            )
+            .shown(self.card_shown)
+            .press_scale(1.03)
+            .absolute()
+            .left(stage.size.width - px(320.))
+            .top(px(110.))
+            .w(px(280.))
+            .h(px(150.))
+            .rounded(px(30.))
+            .p(px(20.))
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .text_color(gpui::white())
+            .child(
+                div()
+                    .text_size(px(17.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child("Now playing"),
+            )
+            .child(
+                div()
+                    .text_size(px(14.))
+                    .text_color(hsla(0., 0., 1., 0.8))
+                    .child("Glass appears by lensing in, not by fading. Press it."),
+            ),
+        );
 
         // Tab bar: the bar and the pill riding in it. The pill stretches as it
         // slides and lifts into a stronger lens until it settles.
@@ -741,7 +755,6 @@ impl Render for LiquidGlassDemo {
         }
 
         // Blobs that orbit close enough to melt into one body.
-        let stage = self.stage();
         let center = stage.center();
         let blobs = (0..3)
             .map(|index| {

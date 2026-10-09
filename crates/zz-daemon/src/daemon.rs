@@ -5892,6 +5892,7 @@ impl Shared {
             inner.pane_read_observations.clear();
             inner.terminal_spawns.clear();
             inner.terminal_geometries.clear();
+            inner.reported_pane_cells.clear();
             inner.attached.clear();
             for client in inner.clients.values_mut() {
                 client.visible_terminals = None;
@@ -10081,6 +10082,7 @@ impl Shared {
                             inner.claude_peer_states.remove(pane);
                             inner.terminal_spawns.remove(pane);
                             inner.terminal_geometries.remove(pane);
+                            inner.reported_pane_cells.remove(pane);
                             inner.pane_modes.remove(pane);
                             inner.pane_mode_zooms.remove(pane);
                             inner.paste_uploads.retain(|_, upload| upload.pane != *pane);
@@ -21358,6 +21360,9 @@ impl Shared {
                 inner
                     .engine
                     .set_pane_geometry(pane, reported.columns, reported.rows);
+            }
+            if let Some(cell) = inner.engine.pane_geometry(pane) {
+                inner.reported_pane_cells.insert(pane, cell);
             }
             terminal_resize_for_pane(&inner, pane)
         };
@@ -35374,6 +35379,7 @@ struct ServerState {
     attached: BTreeMap<SessionId, BTreeSet<ClientId>>,
     destroying_unattached: BTreeSet<SessionId>,
     terminal_geometries: BTreeMap<PaneId, BTreeMap<ClientId, TerminalGeometry>>,
+    reported_pane_cells: BTreeMap<PaneId, (u16, u16)>,
     terminal_input_sequence: u64,
     chooser_kill_panes: Vec<PaneId>,
     /// The pane a `copy-mode -k` in the current effect batch armed, consumed
@@ -46203,6 +46209,13 @@ fn write_back_terminal_geometries(inner: &mut ServerState, panes: &BTreeSet<Pane
         .iter()
         .filter_map(|pane| {
             if !inner.terminals.contains_key(pane) {
+                return None;
+            }
+            if inner
+                .reported_pane_cells
+                .get(pane)
+                .is_some_and(|cell| Some(*cell) != inner.engine.pane_geometry(*pane))
+            {
                 return None;
             }
             pane_geometry_from(inner, *pane, GeometrySource::ClientReport)
@@ -99208,6 +99221,93 @@ bind - split-window -v -c "#{pane_current_path}"
             ) && layout.contains(r#"{"t":"p","w":10,"h":23,"x":109,"y":0,"#),
             "{layout}"
         );
+    }
+
+    #[test]
+    fn a_detached_split_keeps_the_window_its_client_reported() {
+        for (axis, first, second) in [("-h", "40x23", "39x23"), ("-v", "80x11", "80x11")] {
+            let shared = Arc::new(Shared::new(1));
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                OutboundMailbox::new(),
+            );
+            let mut context = ExecutionContext::default();
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "new-session",
+                        [
+                            "-d",
+                            "-s",
+                            "detached-split",
+                            "-x",
+                            "80",
+                            "-y",
+                            "23",
+                            QUIET_PANE_COMMAND,
+                        ],
+                    ),
+                )
+                .expect("create session");
+            let session = context.session.expect("session id");
+            let pane = context.pane.expect("pane id");
+            shared.attach(client, session).expect("attach");
+            assert_eq!(
+                shared.inner.lock().engine.pane_geometry(pane),
+                Some((80, 23))
+            );
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::ResizeTerminal {
+                        pane,
+                        columns: 80,
+                        rows: 23,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                )
+                .expect("client measurement");
+            assert_eq!(
+                shared.inner.lock().engine.pane_geometry(pane),
+                Some((80, 23))
+            );
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("split-window", ["-d", axis, QUIET_PANE_COMMAND]),
+                )
+                .expect("split the window");
+            let panes = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new(
+                        "list-panes",
+                        [
+                            "-F",
+                            "#{pane_width}x#{pane_height} #{window_width}x#{window_height}",
+                        ],
+                    ),
+                )
+                .expect("list-panes")
+                .output;
+            assert_eq!(
+                panes,
+                format!("{first} 80x23\n{second} 80x23"),
+                "split-window -d {axis} keeps the window at the reported 80x23"
+            );
+        }
     }
 
     #[test]

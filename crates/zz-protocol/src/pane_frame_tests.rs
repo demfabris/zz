@@ -724,6 +724,7 @@ fn chooser_previews_carry_packed_viewports_through_postcard() {
         status: vec!["[0] 0:bash*".to_owned()],
         status_style: String::new(),
         status_width: 80,
+        border_style: "fg=red".to_owned(),
     };
     let bytes = postcard::to_stdvec(&client).expect("client preview encodes");
     assert_eq!(
@@ -735,6 +736,7 @@ fn chooser_previews_carry_packed_viewports_through_postcard() {
         status: Vec::new(),
         status_style: String::new(),
         status_width: 0,
+        border_style: String::new(),
     };
     let bytes = postcard::to_stdvec(&empty).expect("empty preview encodes");
     assert_eq!(

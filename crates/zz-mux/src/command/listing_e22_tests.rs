@@ -17,8 +17,7 @@ fn listing_chunks_keep_binding_order_padding_and_generation() {
             },
         );
     }
-    Arc::make_mut(&mut engine.server_user_options)
-        .insert("@frozen".to_owned(), "before".to_owned());
+    Arc::make_mut(&mut engine.server_user_options).insert("@frozen".to_owned(), "before".into());
     let context = ExecutionContext::default();
     let args = vec![
         RawText::from("-F"),
@@ -39,7 +38,7 @@ fn listing_chunks_keep_binding_order_padding_and_generation() {
             .is_none()
     );
     assert_eq!(listing.next, 64);
-    Arc::make_mut(&mut engine.server_user_options).insert("@frozen".to_owned(), "after".to_owned());
+    Arc::make_mut(&mut engine.server_user_options).insert("@frozen".to_owned(), "after".into());
     engine.keys.remove_table("table149");
     engine.keys.bind(
         "later",

@@ -3717,6 +3717,7 @@ mod tests {
             prompt: "Confirm? ".to_owned(),
             confirm_key,
             default_yes,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         }
     }
 

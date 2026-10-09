@@ -185,22 +185,9 @@ const WINDOW_CLIENT_INFO_LINES: &[&str] = &[
         "#{escape-time} ms"
     ),
 ];
-const TREE_MODE_BORDER_STYLE: &str = "bg=themedarkgrey,fg=themelightgrey";
-/// `#{E:tree-mode-border-style}`, which `window_client_info_lines` reads for
-/// the acs rule down column 14. The mode tree's box takes the same style from
-/// [`TREE_MODE_BORDER_STYLE`] rather than from the option, so the info lines
-/// take it from there too and the two agree on screen.
-const TREE_MODE_BORDER_STYLE_FORMAT: &str = "#{E:tree-mode-border-style}";
-const TREE_MODE_SELECTION_STYLE: &str = "#{E:mode-style}";
-const TREE_MODE_PREVIEW_FORMAT: &str =
-    "#{?pane_format,#{pane_index}:#{pane_title},#{window_index}:#{window_name}}";
-const TREE_MODE_PREVIEW_STYLE: &str = concat!(
-    "fg=#{?#{||:",
-    "#{&&:#{pane_format},#{pane_active}},",
-    "#{&&:#{window_format},#{window_active}}},",
-    "themered,",
-    "themeblue}"
-);
+const TREE_MODE_PREVIEW_FORMAT: &str = "#{E:tree-mode-preview-format}";
+const TREE_MODE_PREVIEW_STYLE: &str = "#{E:tree-mode-preview-style}";
+const TREE_MODE_BORDER_STYLE: &str = "#{E:tree-mode-border-style}";
 const MESSAGE_STYLE: &str = "bg=themeyellow,fg=themeblack";
 const MESSAGE_COMMAND_STYLE: &str = "bg=themeblack,fg=themeyellow";
 const PREVIEW_TEXT_LINES: usize = 256;
@@ -338,10 +325,9 @@ fn client_info_lines(inner: &ServerState, client: ClientId) -> Vec<String> {
     WINDOW_CLIENT_INFO_LINES
         .iter()
         .map(|line| {
-            let line = line.replace(TREE_MODE_BORDER_STYLE_FORMAT, TREE_MODE_BORDER_STYLE);
             let mut hooks = DaemonFormatHooks::command_with_variables(&facts, &variables)
                 .with_option_engine(&inner.engine);
-            expand_format_values(&line, &context, &mut hooks)
+            expand_format_values(line, &context, &mut hooks)
         })
         .collect()
 }
@@ -481,8 +467,23 @@ impl StatusHooks for ScopedHooks<'_> {
         String::new()
     }
 
-    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
-        self.engine.format_option_value(context, name)
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<RawText> {
+        self.engine
+            .format_option_value(context, name)
+            .map(RawText::from)
+            .or_else(|| {
+                name.starts_with('@')
+                    .then(|| {
+                        self.engine.format_user_option_bytes(
+                            &context.pane_id,
+                            &context.window_id,
+                            &context.session_id,
+                            name,
+                        )
+                    })
+                    .flatten()
+                    .cloned()
+            })
     }
 
     fn variable(&mut self, name: &str, _context: &zz_mux::StatusContext) -> Option<String> {
@@ -535,12 +536,21 @@ impl Styles<'_> {
         expand_format_values(value, &context, &mut hooks)
     }
 
-    fn selection(&self, pane: PaneId) -> String {
+    fn window_style(&self, pane: PaneId, name: &str) -> String {
         let state = &self.inner.engine.state;
         let window = state.window_for_pane(pane);
         let session =
             window.and_then(|window| state.windows.get(&window).map(|entry| entry.session));
-        self.expand(TREE_MODE_SELECTION_STYLE, session, window, Some(pane))
+        let value = self.expand(&format!("#{{{name}}}"), session, window, Some(pane));
+        expand_without_context(self.inner, &value)
+    }
+
+    fn selection(&self, pane: PaneId) -> String {
+        self.window_style(pane, "tree-mode-selection-style")
+    }
+
+    fn border(&self, pane: PaneId) -> String {
+        self.window_style(pane, "tree-mode-border-style")
     }
 
     fn tile(
@@ -553,7 +563,7 @@ impl Styles<'_> {
         ChooserPreviewTile {
             label: self.expand(TREE_MODE_PREVIEW_FORMAT, Some(session), Some(window), pane),
             label_style: self.expand(TREE_MODE_PREVIEW_STYLE, Some(session), Some(window), pane),
-            border_style: TREE_MODE_BORDER_STYLE.to_owned(),
+            border_style: self.expand(TREE_MODE_BORDER_STYLE, Some(session), Some(window), pane),
             viewport: pane_viewport(self.inner, shown),
         }
     }
@@ -676,12 +686,29 @@ pub(super) fn switch_match_style(inner: &ServerState, pane: PaneId) -> String {
     Styles { inner }.expand("#{E:switch-mode-match-style}", session, window, Some(pane))
 }
 
+pub(super) fn expand_without_context(inner: &ServerState, value: &str) -> String {
+    let engine = &inner.engine;
+    let context = server_format_context(engine, &inner.config_files, None, None, None);
+    let mut hooks = ScopedHooks {
+        engine,
+        variables: BTreeMap::new(),
+    };
+    expand_format_values(value, &context, &mut hooks)
+}
+
 pub(super) fn mode_style_for_pane(inner: &ServerState, pane: PaneId) -> String {
+    let state = &inner.engine.state;
+    let window = state.window_for_pane(pane);
+    let session = window.and_then(|window| state.windows.get(&window).map(|entry| entry.session));
+    Styles { inner }.expand("#{E:mode-style}", session, window, Some(pane))
+}
+
+pub(super) fn tree_selection_style_for_pane(inner: &ServerState, pane: PaneId) -> String {
     Styles { inner }.selection(pane)
 }
 
-pub(super) fn border_style_for_pane(_inner: &ServerState, _pane: PaneId) -> String {
-    TREE_MODE_BORDER_STYLE.to_owned()
+pub(super) fn border_style_for_pane(inner: &ServerState, pane: PaneId) -> String {
+    Styles { inner }.border(pane)
 }
 
 pub(super) fn prompt_style(command_mode: bool) -> String {
@@ -726,7 +753,7 @@ pub(super) fn chooser_presentation(
             },
             filter: chooser.filter.is_some(),
             selection_style: styles.selection(chooser.source_pane),
-            border_style: TREE_MODE_BORDER_STYLE.to_owned(),
+            border_style: styles.border(chooser.source_pane),
             prompt_style: MESSAGE_STYLE.to_owned(),
             preview_size: chooser.preview_size,
             preview,
@@ -761,7 +788,7 @@ pub(super) fn chooser_presentation(
         view: String::new(),
         filter: chooser.filter.is_some(),
         selection_style: styles.selection(chooser.source_pane),
-        border_style: TREE_MODE_BORDER_STYLE.to_owned(),
+        border_style: styles.border(chooser.source_pane),
         prompt_style: MESSAGE_STYLE.to_owned(),
         preview_size: chooser.preview_size,
         preview,
@@ -798,6 +825,9 @@ fn tree_preview(
                 status,
                 status_style,
                 status_width: u32::from(row.width),
+                border_style: row
+                    .pane
+                    .map_or_else(String::new, |pane| styles.border(pane)),
             })
         }
         ChooseTreeTarget::Session(session_id) => {

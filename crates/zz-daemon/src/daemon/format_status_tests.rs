@@ -37,7 +37,7 @@ fn daemon_option_proof_rejects_ordinary_snapshot_rows_and_preserves_scoped_nativ
         assert_eq!(hooks.option_variable("key_command", &context), None);
         assert_eq!(
             hooks.option_variable("status-left", &context),
-            Some(value.to_owned()),
+            Some(value.into()),
         );
         assert_eq!(
             zz_mux::expand_format_values("#{key_command}:#{status-left}", &context, &mut hooks),

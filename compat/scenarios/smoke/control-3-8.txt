@@ -1,0 +1,4 @@
+corpus: none
+stage: fixtures/control-3-8.sh ~/control-3-8.sh
+run-shell 'sh ~/control-3-8.sh'
+out: show-environment -g CONTROL_3_8

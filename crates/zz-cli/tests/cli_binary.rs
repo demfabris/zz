@@ -3176,10 +3176,12 @@ tmux set-option -g @plugin loaded
                 String::from_utf8_lossy(&output.stderr)
             );
         }
+        let split = fixture.run(&["split-window", "-d", "-t", "cold0"]);
+        assert_eq!(split.status.code(), Some(0));
         let selected = wait_with_deadline(
             fixture
                 .command()
-                .args(["select-pane", "-t", "cold0"])
+                .args(["select-pane", "-t", "cold0.1"])
                 .stdout(Stdio::piped())
                 .stderr(Stdio::piped())
                 .spawn()
@@ -8847,7 +8849,7 @@ tmux set-option -g @plugin loaded
             }
 
             stdin
-                .write_all(b"refresh-client -B watch::#{session_name}\n")
+                .write_all(b"refresh-client -B 'watch::#{session_name}'\n")
                 .expect("add subscription");
             stdin.flush().expect("flush subscription");
             thread::sleep(Duration::from_millis(1200));

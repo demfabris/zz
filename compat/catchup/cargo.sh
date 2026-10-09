@@ -55,9 +55,14 @@ if [ "$(uname -s)" != Linux ] || ! command -v flock >/dev/null 2>&1; then
   exec "${RUN[@]}"
 fi
 
-for ((i = 0; i < SLOTS; i++)); do
-  flock -n -E 75 -o "$LOCKDIR/zz-cargo-slot-$i.lock" "${RUN[@]}"
-  rc=$?
-  [ "$rc" -eq 75 ] || exit "$rc"
+DEADLINE=$((SECONDS + 3600))
+while [ "$SECONDS" -lt "$DEADLINE" ]; do
+  for ((i = 0; i < SLOTS; i++)); do
+    flock -n -E 75 -o "$LOCKDIR/zz-cargo-slot-$i.lock" "${RUN[@]}"
+    rc=$?
+    [ "$rc" -eq 75 ] || exit "$rc"
+  done
+  sleep 3
 done
-exec flock -w 3600 -o "$LOCKDIR/zz-cargo-slot-$((RANDOM % SLOTS)).lock" "${RUN[@]}"
+echo "cargo.sh: no cargo slot free for an hour" >&2
+exit 75

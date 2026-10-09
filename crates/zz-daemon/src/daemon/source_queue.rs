@@ -227,7 +227,11 @@ impl Replay {
                             {
                                 source_read_error_warning(&pending.path, &error)
                             } else {
-                                source_glob_error_warning(&pending.path, &error.to_string())
+                                client_source_read_error_warning(
+                                    frame.options.command_client,
+                                    &pending.path,
+                                    &error,
+                                )
                             };
                             self.report.note_located_source_error(
                                 &sources.command,
@@ -528,7 +532,7 @@ impl SourceExecution {
                             source_read_error_warning(&pending.path, &error)
                         } else {
                             client_source_read_error_warning(
-                                self.source_kind,
+                                self.source_kind == ClientKind::Command,
                                 &pending.path,
                                 &error,
                             )
@@ -665,7 +669,11 @@ impl SourceExecution {
                 let warning = if self.control_target.is_some() {
                     source_read_error_warning(&path, &error)
                 } else {
-                    client_source_read_error_warning(self.source_kind, &path, &error)
+                    client_source_read_error_warning(
+                        self.source_kind == ClientKind::Command,
+                        &path,
+                        &error,
+                    )
                 };
                 if !options.suppress_replay_output {
                     if let Some(target) = self.control_target {

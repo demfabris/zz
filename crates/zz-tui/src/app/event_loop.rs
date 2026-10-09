@@ -432,8 +432,8 @@ impl EventLoop {
         self.terminal_events.extend(decoded);
         self.escape_deadline = self
             .parser
-            .has_pending_escape()
-            .then(|| Instant::now() + Duration::from_millis(self.escape_ms));
+            .pending_escape_delay(self.escape_ms)
+            .map(|delay| Instant::now() + delay);
     }
 
     fn read_terminal(&mut self, escape_time: &AtomicU64) -> io::Result<()> {

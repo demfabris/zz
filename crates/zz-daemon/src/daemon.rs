@@ -11963,6 +11963,7 @@ impl Shared {
                             replay_client: (source_client != ClientId(u64::MAX))
                                 .then_some(source_client),
                             suppress_replay_output: suppress_source_replay_output,
+                            command_client: source_kind == ClientKind::Command,
                         },
                     });
                     continue;
@@ -12050,6 +12051,7 @@ impl Shared {
                         replay_client: (source_client != ClientId(u64::MAX))
                             .then_some(source_client),
                         suppress_replay_output: suppress_source_replay_output,
+                        command_client: source_kind == ClientKind::Command,
                     },
                 });
             }
@@ -12177,7 +12179,11 @@ impl Shared {
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&pending.path, &error)
                     } else {
-                        client_source_read_error_warning(source_kind, &pending.path, &error)
+                        client_source_read_error_warning(
+                            source_kind == ClientKind::Command,
+                            &pending.path,
+                            &error,
+                        )
                     };
                     if let Some(target) = control_target {
                         self.publish_control_source_read_error(
@@ -12248,7 +12254,11 @@ impl Shared {
                     let warning = if control_target.is_some() {
                         source_read_error_warning(&path, &error)
                     } else {
-                        client_source_read_error_warning(source_kind, &path, &error)
+                        client_source_read_error_warning(
+                            source_kind == ClientKind::Command,
+                            &path,
+                            &error,
+                        )
                     };
                     if !options.suppress_replay_output {
                         if let Some(target) = control_target {
@@ -32357,6 +32367,7 @@ impl Shared {
                     control_target: options.control_target,
                     replay_client: options.replay_client,
                     suppress_replay_output: options.suppress_replay_output,
+                    command_client: options.command_client,
                 };
                 for source in sources {
                     pending_sources.push(PendingConfigFile {
@@ -32397,7 +32408,11 @@ impl Shared {
                         {
                             source_read_error_warning(&pending.path, &error)
                         } else {
-                            source_glob_error_warning(&pending.path, &error.to_string())
+                            client_source_read_error_warning(
+                                options.command_client,
+                                &pending.path,
+                                &error,
+                            )
                         };
                         log::warn!("{warning}");
                         report.note_located_source_error(
@@ -32798,7 +32813,7 @@ impl Shared {
             let warning = if options.control_target.is_some() || source_invocations.is_startup() {
                 source_read_error_warning(path, &error)
             } else {
-                source_glob_error_warning(path, &error.to_string())
+                client_source_read_error_warning(options.command_client, path, &error)
             };
             log::warn!("{warning}");
             report.note_located_source_error(
@@ -34183,6 +34198,7 @@ struct SourceFileLoadOptions {
     control_target: Option<(ClientId, u8)>,
     replay_client: Option<ClientId>,
     suppress_replay_output: bool,
+    command_client: bool,
 }
 
 struct PendingConfigFile {
@@ -52720,14 +52736,11 @@ fn source_read_error_warning(path: &Path, error: &std::io::Error) -> String {
 }
 
 fn client_source_read_error_warning(
-    kind: ClientKind,
+    command_client: bool,
     path: &Path,
     error: &std::io::Error,
 ) -> String {
-    if kind != ClientKind::Command {
-        return source_glob_error_warning(path, &error.to_string());
-    }
-    if error.kind() == ErrorKind::IsADirectory {
+    if command_client && error.kind() == ErrorKind::IsADirectory {
         return source_glob_error_warning(path, "Input/output error");
     }
     source_read_error_warning(path, error)
@@ -66366,6 +66379,7 @@ mod tests {
         }));
     }
 
+    #[cfg(unix)]
     #[test]
     fn source_file_of_a_directory_answers_the_command_client_read_error() {
         let directory = tempfile::tempdir().expect("temporary directory");
@@ -66391,6 +66405,26 @@ mod tests {
             );
             assert!(!text.contains("os error"), "{text}");
         }
+        let nested = directory.path().join("nested.conf");
+        fs::write(&nested, format!("source-file '{path}'\n")).expect("nested source");
+        let response = shared.execute_command_request(
+            command,
+            ClientKind::Command,
+            &mut context,
+            3,
+            &CommandInvocation::new("source-file", [nested.display().to_string()]),
+        );
+        let text = format!("{response:?}");
+        assert!(
+            text.contains(&format!("Input/output error: {path}")),
+            "{text}"
+        );
+        assert!(!text.contains("os error"), "{text}");
+        let directory_error = || std::io::Error::from_raw_os_error(libc::EISDIR);
+        assert_eq!(
+            client_source_read_error_warning(false, directory.path(), &directory_error()),
+            format!("Is a directory: {path}")
+        );
     }
 
     #[test]

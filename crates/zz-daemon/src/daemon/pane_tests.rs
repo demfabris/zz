@@ -607,6 +607,46 @@ fn a_lookup_that_loses_the_foreground_process_answers_the_start_command() {
 
 #[cfg(unix)]
 #[test]
+fn a_lost_lookup_at_a_due_rename_names_the_window_from_the_start_command() {
+    let shared = Arc::new(Shared::new(1));
+    let mut context = ExecutionContext::default();
+    run(
+        &shared,
+        &mut context,
+        "new-session",
+        &["-d", "-s", "lost-name", "exec sh -c 'exec cat'"],
+    );
+    let pane = pane_of(&shared, &mut context, "lost-name:0.0");
+    let terminal = terminal(&shared, pane);
+    let names = |context: &mut ExecutionContext| {
+        run(
+            &shared,
+            context,
+            "display-message",
+            &[
+                "-p",
+                "-t",
+                "lost-name:0",
+                "#{window_name}|#{pane_current_command}",
+            ],
+        )
+        .trim_end()
+        .to_owned()
+    };
+    wait_until("cat in the foreground", || {
+        terminal_current_command(&terminal) == "cat"
+    });
+    thread::sleep(Duration::from_millis(600));
+    shared.synchronize_pane_runtime(pane, &terminal, "cat", None, false, Instant::now());
+    assert_eq!(names(&mut context), "cat|cat");
+    thread::sleep(Duration::from_millis(600));
+    shared.synchronize_pane_runtime(pane, &terminal, "", None, false, Instant::now());
+    assert_eq!(names(&mut context), "sh|sh");
+    shared.request_shutdown();
+}
+
+#[cfg(unix)]
+#[test]
 fn a_pane_without_a_process_answers_its_start_command_then_its_shell() {
     let shared = Arc::new(Shared::new(1));
     let mut context = ExecutionContext::default();

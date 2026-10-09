@@ -2,7 +2,7 @@
 type: Design Plan
 title: Native agent drivers
 description: Agent panes drive each vendor's own protocol from the daemon. Claude Code runs over stream-json and its control protocol, Codex over a private `codex app-server` per pane, and ACP stays for the agents that speak it natively, all emitting the stream the shared reducer already renders.
-status: In progress (Claude Code and Codex drivers, zz commands, and question cards, the task tray, and nested subagent steps on every client landed 2026-10-07; orchestration remains)
+status: In progress (Claude Code and Codex drivers, zz commands, question cards, the task tray and subagent steps landed 2026-10-07; the minimal pane with one trace line per turn landed 2026-10-08; the Changes pane and orchestration remain)
 resource: crates/zz-daemon/src/agent/claude/mod.rs
 tags:
 - agent
@@ -23,8 +23,10 @@ vendor's own apps use ([survey](/research/2026-10-06-native-agent-drivers-survey
 
 1. ACP stays as a fallback driver for agents that speak it natively (Gemini, opencode, Cursor,
    Grok, oh-my-pi). A configured command whose program is not `claude` runs as ACP.
-2. `/` passes the vendor's own commands through. `//` is zz's own verbs (fork, branch, side, btw),
-   mapped per vendor inside the driver.
+2. zz's own verbs (`/btw`, `/side`, `/steer`, `/fork`, `/rewind`) share the `/` menu with the
+   vendor's commands and are mapped per vendor inside the driver; every other `/` command passes
+   through to the vendor. (The 2026-10-07 build used a `//` prefix; that was a misreading of an
+   escaped `/` and was dropped on 2026-10-08.)
 3. Codex does what the other apps do. t3code, superset, happy, vibe-kanban, CodexMonitor, and
    Codex Desktop each spawn one private `codex app-server` child over stdio and send
    `experimentalApi: true`. Only hapi puts a socket in the path, to attach the real TUI to the same
@@ -95,20 +97,23 @@ the session with its memory.
 
 # zz commands
 
-A prompt that starts with `//` is a zz command when the driver's `Ready` capabilities set `verbs`.
-The host hands it to the runner outside the turn queue, so it works while a turn runs; `//steer` on
+A prompt `/name …` whose name is one of `zz_protocol::agent_stream::AGENT_VERBS` is a zz command when
+the driver's `Ready` capabilities set `verbs`; any other `/` command goes to the vendor, and the
+composer's `/` menu lists the vendor's commands with zz's in place of any it intercepts
+(`zz_client::agent_completion::pane_commands`).
+The host hands it to the runner outside the turn queue, so it works while a turn runs; `/steer` on
 an idle pane becomes a plain prompt. The fanout keeps commands out of projected turn headers.
 
 | Command | Claude Code | Codex |
 | --- | --- | --- |
-| `//btw`, `//side` | `side_question`; the answer never enters the conversation | an ephemeral `thread/fork` answers read-only, then is dropped |
-| `//steer <text>` | `user` frame with `priority: "now"` | `turn/steer` |
-| `//fork` | respawn with `--resume X --fork-session --session-id NEW` | `thread/fork` |
-| `//rewind [n]` | the same fork with `--resume-session-at` set to the entry before the nth-last prompt | `thread/fork` with `beforeTurnId` |
-| anything else | lists the commands | lists the commands |
+| `/btw`, `/side` | `side_question`; the answer never enters the conversation | an ephemeral `thread/fork` answers read-only, then is dropped |
+| `/steer <text>` | `user` frame with `priority: "now"` | `turn/steer` |
+| `/fork` | respawn with `--resume X --fork-session --session-id NEW` | `thread/fork` |
+| `/rewind [n]` | the same fork with `--resume-session-at` set to the entry before the nth-last prompt | `thread/fork` with `beforeTurnId` |
+| a verb without its argument | lists the commands | lists the commands |
 
-`//rewind [n]` continues from before the last n prompts (1 by default) in a copy, so the full
-conversation stays resumable; files on disk are not touched. `//rewind <id>` goes back to before
+`/rewind [n]` continues from before the last n prompts (1 by default) in a copy, so the full
+conversation stays resumable; files on disk are not touched. `/rewind <id>` goes back to before
 the prompt row with that message id: a prompt row's id is the id the vendor stores (the `uuid` zz
 puts on Claude's user frame, which lands in the session file, and Codex's `clientUserMessageId`,
 which comes back as the item's `clientId`), so live and replayed rows match. Rewinding every prompt opens a new
@@ -117,11 +122,65 @@ session. A Claude fork has no session file until its first prompt, so the driver
 under the same id.
 
 Prompt rows offer **Rewind to here** on hover while the pane is idle and its driver sets `verbs`;
-it sends `//rewind <id>` through the composer's send path. The shared reducer keeps each prompt
+it sends `/rewind <id>` through the composer's send path. The shared reducer keeps each prompt
 row's message id (`AgentThreadEntry::User.message_id`; a row the client added itself takes it from
 the daemon's echo) and `rewind_id` skips rows that start with `/`, since vendor and zz commands are
 not rewind points. Clients send a zz command without opening a local turn or prompt row, because
 the daemon echoes the command itself and never queues it.
+
+# Timeline status and zz replies (2026-10-08)
+
+- **Tool status.** A tool step's glyph spins while it runs in the live turn, turns warning while it
+  waits for approval, and turns danger when it fails, with an `exit N` tag when the driver sent
+  `_meta.zz.exitCode` (Codex `exitCode`, Claude's `Exit code N` line on a failed Bash) and `failed`
+  otherwise. A canceled step gets a `canceled` tag.
+- **zz replies.** The drivers put `_meta.zz.reply` (the echoed command's message id) on a `/btw`
+  answer and on a command's notice. The shared reducer records it as
+  `AgentThreadEntry::Assistant.aside { side, reply_to }`, and the timeline folds the reply into the
+  command's prompt row (`TimelineGroupKind::Reply`), drawn as a popover under the bubble. A side
+  answer is captioned "Side answer · not in the conversation". A notice whose command row is gone,
+  such as the note a fork leaves in the new session, is one muted line with an info glyph.
+- **Plan.** The plan's `- [ ]`, `- [~]`, `- [x]` lines render with their own markers: pending is an
+  empty box, in progress an accent box with a dot and medium text, done a filled check with muted,
+  struck-through text.
+- **Turns.** A prompt row that is not the first gets 16px more space above it.
+- The task tray chip's loader spins on the shared pulse clock, like the empty state's.
+
+# Minimal pane (2026-10-08)
+
+fabrico's direction: the agent pane does the conversation and nothing bigger. Anything larger than a
+line (a command's output, a file, later a diff) opens as its own zz pane, and the same widgets have
+to work on the desktop and the phone. The design board is the "Quiet timeline" artifact.
+
+- **One row per turn.** Every thought, tool call, plan update and message after a prompt folds into
+  one `TimelineGroupKind::Turn` row (`timeline_group_kind` takes `Assistant` without an aside and
+  `Plan` too). `split_turn` cuts it into the trace and the answer: the messages after the last
+  thought or tool call. Text followed by another tool call is narration and stays in the trace.
+- **The trace line.** While the turn runs it shows the current step (the running tool's label,
+  "Thinking", or "Waiting for you" with the tool that needs approval), the step count and a clock,
+  and the end of the latest thought in two muted lines. After the turn it reads "Worked 2m 14s"
+  with no leading icon, then one icon per kind (read, search, edit, command, fetch, other tool,
+  agent, and a red warning for failures), each with its count in a badge on its top right and a
+  tooltip naming it ("3 commands"). The clock lives in `AgentTimelineStore` (`tick_turn_clocks`,
+  run on every timeline render), so turns replayed from history show no time.
+- **Opened.** A click lists the turn in order: "Thought" with its text, narration in muted 12px, and
+  one line per tool. Subagent steps are counted on their agent's line ("N steps"); their own view is
+  the PiP work, parked.
+- **Failures.** When the turn ended on a failed tool, that tool's line and its last two output lines
+  stay under the trace.
+- **Open output.** A finished command with output opens it in a split beside the agent: the clients
+  run `split-window -h -T <command> sh -c 'printf %s "$0" | base64 -d | less -R --tilde +G' <base64>`
+  (`zz_client::agent_output::output_pane_args`), so the text reaches `less` without any shell
+  parsing it, capped to its last 256 KiB.
+- **Dropped.** Tool input and output blocks, inline diffs and edit rows, the plan card in the
+  timeline and nested step folds are gone, along with the tool content cache in the store. The
+  Changes pane for diffs comes later; there is no editor pane yet, so reads open nothing.
+- **Composer chips.** `task_tray` puts the plan chip ("Plan 2/4" and the current item) on the left
+  and the background-task chip on the right; each opens its list above them (`TrayPanel`). The plan
+  chip hides once every item is done and the agent is idle.
+- **Header status.** `agent_status_pill` shows Running, Stopping, Waiting for you, Exited (with
+  Restart, the same retry as the error card) and Offline next to the pane actions; idle shows
+  nothing. Desktop and the web client wire it; the iOS client compiles the same source.
 
 # Background work, questions, subagents (v108)
 
@@ -190,7 +249,7 @@ Claude driver. One `codex app-server` child per pane over stdio, as the other ap
 - **Sessions.** `thread/list` filtered by cwd.
 
 Verified live on 2026-10-07 with Codex 0.159.0: a plain reply, a turn with two approvals and both
-file changes applied, `restart-agent-pane` resuming the thread with its memory, and `//fork`.
+file changes applied, `restart-agent-pane` resuming the thread with its memory, and `/fork`.
 
 # Tested versions
 
@@ -206,11 +265,12 @@ Codex. The drivers have not been run against older versions.
 
 # Next
 
-1. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
+1. The Changes pane: a pane type for a session's diffs that the trace's edit steps open.
+2. Orchestration: PiP panes and a decision on in-session tools. The groundwork is in:
    `agent-send --notify` submits to another agent pane and, when that turn ends, posts the reply
    back into the calling agent pane as a prompt queued behind its own turn (t3code's async
    completion, over the CLI agents already use). Both vendors can also host tools without a
    process: Claude through `sdkMcpServers` and `mcp_message` control requests, Codex through
    `dynamicTools` on `thread/start` and `item/tool/call`.
-2. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema against the tested versions above.
+3. Keep-up: a weekly diff of `sdk.d.ts` and the Codex schema against the tested versions above.
    The survey's `archive/codex-host` tag is not in this clone; the Codex driver was written fresh.

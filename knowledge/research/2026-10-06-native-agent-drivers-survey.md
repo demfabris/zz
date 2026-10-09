@@ -343,6 +343,6 @@ branch actions) ~2.5k, against ~7k ACP lines and ~5k ACP tests removed. Estimate
 # Decisions
 
 Taken on 2026-10-07 and recorded in the [native agent drivers design](/designs/native-agent-drivers.md):
-ACP stays as a fallback driver; `//` is zz's own verbs next to the vendor's `/`; Codex runs one
+ACP stays as a fallback driver; zz's own verbs share the `/` menu with the vendor's commands; Codex runs one
 private `codex app-server` stdio child per pane, as t3code, superset, happy, vibe-kanban,
 CodexMonitor, and Codex Desktop do; the Claude driver comes first, then Codex, then orchestration.

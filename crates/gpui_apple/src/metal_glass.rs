@@ -1,7 +1,7 @@
 use anyhow::{Context as _, Result};
 use gpui::{
-    Bounds, GLASS_SHADER, Glass, GlassBlurPass, Size, WindowCornerMask, glass_level_size,
-    plan_glass,
+    Bounds, GLASS_SHADER, Glass, GlassBlurPass, GlassUniform, Size, WindowCornerMask,
+    glass_level_size, plan_glass,
 };
 use metal::MTLPixelFormat;
 use std::ffi::c_void;
@@ -203,7 +203,10 @@ impl MetalGlass {
     }
 
     /// Draws a batch of glass over `target`. The caller ends its encoder
-    /// first and opens a new one after.
+    /// first. Every run but the last draws in an encoder of its own; the last
+    /// run's draws come back, for the caller to issue with
+    /// [`Self::draw_pending`] in the encoder that resumes the scene, which
+    /// saves the tiled GPU a load and store of the whole target.
     pub(crate) fn draw(
         &mut self,
         device: &metal::DeviceRef,
@@ -211,12 +214,18 @@ impl MetalGlass {
         glasses: &[Glass],
         target: &metal::TextureRef,
         window_mask: Option<WindowCornerMask>,
-    ) {
+    ) -> Vec<(GlassUniform, Bounds<i32>)> {
         let viewport = Size {
             width: target.width() as i32,
             height: target.height() as i32,
         };
+        let mut pending = Vec::new();
         for run in plan_glass(glasses, viewport, window_mask) {
+            if !pending.is_empty() {
+                let encoder = render_encoder(command_buffer, target, metal::MTLLoadAction::Load);
+                self.draw_pending(encoder, &pending, viewport);
+                encoder.end_encoding();
+            }
             self.ensure_chain(device, run.extent, run.depth);
 
             let blit = command_buffer.new_blit_command_encoder();
@@ -251,21 +260,40 @@ impl MetalGlass {
                 self.blur_pass(command_buffer, pass);
             }
 
-            let encoder = render_encoder(command_buffer, target, metal::MTLLoadAction::Load);
-            encoder.set_render_pipeline_state(&self.glass_pipeline);
-            encoder.set_fragment_sampler_state(0, Some(&self.sampler));
-            encoder.set_fragment_texture(0, Some(&self.levels[0]));
-            encoder.set_fragment_texture(1, Some(&self.levels[1]));
-            for (uniform, scissor) in &run.draws {
-                let bytes = uniform.as_bytes();
-                encoder.set_vertex_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
-                encoder.set_fragment_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
-                if set_scissor(encoder, *scissor, viewport) {
-                    encoder.draw_primitives(metal::MTLPrimitiveType::TriangleStrip, 0, 4);
-                }
-            }
-            encoder.end_encoding();
+            pending = run.draws;
         }
+        pending
+    }
+
+    /// Issues a run's glass draws into `encoder`, an encoder over the
+    /// target, and gives it back its full scissor.
+    pub(crate) fn draw_pending(
+        &self,
+        encoder: &metal::RenderCommandEncoderRef,
+        draws: &[(GlassUniform, Bounds<i32>)],
+        viewport: Size<i32>,
+    ) {
+        if draws.is_empty() {
+            return;
+        }
+        encoder.set_render_pipeline_state(&self.glass_pipeline);
+        encoder.set_fragment_sampler_state(0, Some(&self.sampler));
+        encoder.set_fragment_texture(0, Some(&self.levels[0]));
+        encoder.set_fragment_texture(1, Some(&self.levels[1]));
+        for (uniform, scissor) in draws {
+            let bytes = uniform.as_bytes();
+            encoder.set_vertex_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
+            encoder.set_fragment_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);
+            if set_scissor(encoder, *scissor, viewport) {
+                encoder.draw_primitives(metal::MTLPrimitiveType::TriangleStrip, 0, 4);
+            }
+        }
+        encoder.set_scissor_rect(metal::MTLScissorRect {
+            x: 0,
+            y: 0,
+            width: viewport.width as u64,
+            height: viewport.height as u64,
+        });
     }
 
     fn blur_pass(&self, command_buffer: &metal::CommandBufferRef, pass: &GlassBlurPass) {

@@ -1180,6 +1180,27 @@ pub fn check_glass_rendering(
         "glass should stay inside the window's rounded clip, got {lensed_clipped:?} for {clipped:?}"
     );
 
+    // Whatever the scene paints after the glass draws in the same pass, so
+    // the glass must leave that pass's scissor as it found it.
+    let mut covered = glass_test_scene(Some(lens));
+    let corner = Bounds {
+        origin: point(ScaledPixels(2.), ScaledPixels(2.)),
+        size: size(ScaledPixels(8.), ScaledPixels(8.)),
+    };
+    covered.insert_primitive(crate::Quad {
+        bounds: corner,
+        content_mask: crate::ContentMask { bounds: corner },
+        background: hsla(1. / 3., 1., 0.5, 1.).into(),
+        corner_smoothing: 2.,
+        ..Default::default()
+    });
+    covered.finish();
+    let after = render(&covered)?.get_pixel(3, 3).0;
+    anyhow::ensure!(
+        after[1] > 200 && after[0] < 60,
+        "a quad painted after the glass should draw, got {after:?}"
+    );
+
     let frost = GlassMaterial::regular().vanished().blur(px(3.));
     let frosted = render(&glass_test_scene(Some(frost)))?;
     let seam = frosted.get_pixel(12, 32).0;

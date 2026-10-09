@@ -31,6 +31,12 @@ pub(crate) struct GlassResources {
     peak: Size<i32>,
 }
 
+/// Glass draws waiting for a pass over the target.
+pub(crate) struct PendingGlass {
+    bind_group: wgpu::BindGroup,
+    draws: Vec<(u32, Bounds<i32>)>,
+}
+
 struct Level {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
@@ -333,7 +339,11 @@ impl GlassResources {
     }
 
     /// Draws a batch of glass over `target`, which must be readable by copy.
-    /// The caller ends its render pass first and begins a new one after.
+    /// The caller ends its render pass first. Every run but the last draws
+    /// in a pass of its own; the last run's draws come back, for the caller
+    /// to issue with [`Self::draw_pending`] at the start of the pass that
+    /// resumes the scene, which saves a tiled GPU a load and store of the
+    /// whole target.
     pub(crate) fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -342,15 +352,32 @@ impl GlassResources {
         target: &wgpu::Texture,
         target_view: &wgpu::TextureView,
         window_mask: Option<WindowCornerMask>,
-    ) {
+    ) -> Option<PendingGlass> {
         let viewport = Size {
             width: target.width() as i32,
             height: target.height() as i32,
         };
+        let mut pending = None;
         for run in plan_glass(glasses, viewport, window_mask) {
+            if let Some(pending) = pending.take() {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("glass_pass"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: target_view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    ..Default::default()
+                });
+                self.draw_pending(&mut pass, pending, viewport);
+            }
             self.ensure_chain(device, run.extent, run.depth);
             let Some(bind_group) = self.glass_bind_group.clone() else {
-                return;
+                return None;
             };
 
             for (region, destination) in &run.copies {
@@ -387,36 +414,36 @@ impl GlassResources {
                 self.blur_pass(encoder, pass);
             }
 
-            let draws: Vec<(u32, Bounds<i32>)> = run
+            let draws = run
                 .draws
                 .iter()
                 .map(|(uniform, scissor)| (self.push_uniform(uniform.as_bytes()), *scissor))
                 .collect();
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("glass_pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                ..Default::default()
-            });
-            pass.set_pipeline(&self.glass_pipeline);
-            for (offset, scissor) in draws {
-                pass.set_bind_group(0, &bind_group, &[offset]);
-                pass.set_scissor_rect(
-                    scissor.origin.x as u32,
-                    scissor.origin.y as u32,
-                    scissor.size.width as u32,
-                    scissor.size.height as u32,
-                );
-                pass.draw(0..4, 0..1);
-            }
+            pending = Some(PendingGlass { bind_group, draws });
         }
+        pending
+    }
+
+    /// Issues a run's glass draws into `pass`, a pass over the target, and
+    /// gives the pass back its full scissor.
+    pub(crate) fn draw_pending(
+        &self,
+        pass: &mut wgpu::RenderPass<'_>,
+        pending: PendingGlass,
+        viewport: Size<i32>,
+    ) {
+        pass.set_pipeline(&self.glass_pipeline);
+        for (offset, scissor) in pending.draws {
+            pass.set_bind_group(0, &pending.bind_group, &[offset]);
+            pass.set_scissor_rect(
+                scissor.origin.x as u32,
+                scissor.origin.y as u32,
+                scissor.size.width as u32,
+                scissor.size.height as u32,
+            );
+            pass.draw(0..4, 0..1);
+        }
+        pass.set_scissor_rect(0, 0, viewport.width as u32, viewport.height as u32);
     }
 
     fn blur_pass(&mut self, encoder: &mut wgpu::CommandEncoder, pass: &GlassBlurPass) {

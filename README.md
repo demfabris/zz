@@ -78,8 +78,8 @@ animations can carry one into another; `vanished()` is the identity glass appear
 Metal and wgpu draw it from the same WGSL (`crates/gpui/src/glass.wgsl`; Metal translates it with
 naga). Each batch of glass costs one render pass break, a copy of only the glass regions, a dual
 Kawase blur over just those regions down to half resolution, and one analytic draw per body. At
-5344x2964 on Apple silicon the first glass in a frame costs about 0.06 ms and a frosted sidebar
-0.18 ms (`cargo test -p gpui_apple --release bench_glass -- --ignored --nocapture`). Renderers
+5344x2964 on Apple silicon the first glass in a frame costs about 0.03 ms and a frosted sidebar
+0.16 ms (`cargo test -p gpui_apple --release bench_glass -- --ignored --nocapture`). Renderers
 that cannot read back their frame (DirectX, WebGL) paint a translucent fill instead.
 
 Try it with `cargo run -p gpui --example liquid_glass`, or in a browser from the web gallery

@@ -1932,7 +1932,7 @@ impl WgpuRendererCore {
                         continue;
                     }
                     drop(pass);
-                    glass.draw(
+                    let pending = glass.draw(
                         &self.resources.device,
                         encoder,
                         &scene.glasses[range],
@@ -1946,6 +1946,17 @@ impl WgpuRendererCore {
                         wgpu::LoadOp::Load,
                         "main_pass_continued",
                     );
+                    if let (Some(pending), Some(glass)) = (pending, self.resources.glass.as_ref())
+                    {
+                        glass.draw_pending(
+                            &mut pass,
+                            pending,
+                            Size {
+                                width: size.width.0,
+                                height: size.height.0,
+                            },
+                        );
+                    }
                 }
             }
         }

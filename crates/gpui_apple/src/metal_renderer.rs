@@ -876,7 +876,7 @@ impl MetalRenderer {
                         continue;
                     };
                     command_encoder.end_encoding();
-                    glass.draw(
+                    let pending = glass.draw(
                         &self.device,
                         command_buffer,
                         &scene.glasses[range],
@@ -888,6 +888,14 @@ impl MetalRenderer {
                         texture,
                         viewport_size,
                         None,
+                    );
+                    glass.draw_pending(
+                        command_encoder,
+                        &pending,
+                        Size {
+                            width: viewport_size.width.0,
+                            height: viewport_size.height.0,
+                        },
                     );
                 }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),

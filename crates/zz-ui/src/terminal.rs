@@ -335,35 +335,14 @@ impl RowRenderCache {
         {
             return metrics.metrics;
         }
-        let probe_run = TextRun {
-            len: 1,
-            font: signature.font.clone(),
-            color: probe_color,
-            background_color: None,
-            underline: None,
-            strikethrough: None,
-        };
-        let probe =
-            window
-                .text_system()
-                .shape_line("m".into(), signature.font_size, &[probe_run], None);
         let scale = f32::from_bits(signature.scale_bits);
-        let width = snap_length(
-            if f32::from(probe.width) > 1.0 {
-                probe.width
-            } else {
-                px(8.0)
-            },
+        let (width, line_height, font_id) = measure_cell(
+            &signature.font,
+            signature.font_size,
             scale,
+            probe_color,
+            window,
         );
-        let font_id = probe.runs.first().map_or_else(
-            || window.text_system().resolve_font(&signature.font),
-            |run| run.font_id,
-        );
-        let line_height = (probe.ascent
-            + probe.descent
-            + window.text_system().line_gap(font_id, signature.font_size))
-        .max(px(1.0));
         let box_stroke = box_stroke_width(
             window
                 .text_system()
@@ -3195,6 +3174,61 @@ fn last_visible_row_has_content(viewport: &TerminalViewport, visible_rows: u16) 
                 || style_for(viewport, cell).background() != viewport.background
         })
     })
+}
+
+fn measure_cell(
+    font: &Font,
+    font_size: Pixels,
+    scale: f32,
+    probe_color: Hsla,
+    window: &Window,
+) -> (Pixels, Pixels, zpui::FontId) {
+    let probe_run = TextRun {
+        len: 1,
+        font: font.clone(),
+        color: probe_color,
+        background_color: None,
+        underline: None,
+        strikethrough: None,
+    };
+    let probe = window
+        .text_system()
+        .shape_line("m".into(), font_size, &[probe_run], None);
+    let width = snap_length(
+        if f32::from(probe.width) > 1.0 {
+            probe.width
+        } else {
+            px(8.0)
+        },
+        scale,
+    );
+    let font_id = probe.runs.first().map_or_else(
+        || window.text_system().resolve_font(font),
+        |run| run.font_id,
+    );
+    let line_height =
+        (probe.ascent + probe.descent + window.text_system().line_gap(font_id, font_size))
+            .max(px(1.0));
+    (width, line_height, font_id)
+}
+
+pub fn terminal_cell_size(
+    font: &Font,
+    font_size: Pixels,
+    appearance: &TerminalAppearance,
+    window: &Window,
+) -> zpui::Size<Pixels> {
+    let scale = window.scale_factor();
+    let (width, natural_line_height, _) =
+        measure_cell(font, font_size, scale, Hsla::default(), window);
+    let line_height = snap_length(
+        px(appearance
+            .cell_height_adjustment
+            .apply(f32::from(natural_line_height))
+            .max(1.0)),
+        scale,
+    );
+    size(width, line_height)
 }
 
 /// The whole cell grid one pane's pixel box carries, which is what the desktop

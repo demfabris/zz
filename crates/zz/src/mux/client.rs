@@ -34,8 +34,8 @@ use zz_protocol::{
     DisplayPanesState, Event, EventPayload, GitMark, GuiResponse, InputMessage, KeyBindingSnapshot,
     KeyTableSnapshot, LayoutNode, MenuState, MuxOptionKey, MuxSnapshot,
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat,
-    PathEntry, PathListRoot, PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello,
-    SessionId, TerminalUiCommand, WindowSnapshot,
+    PathEntry, PathListRoot, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId,
+    TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, IMAGE_PLACEHOLDER_SCHEME, PackedCell,
@@ -971,10 +971,8 @@ pub struct MuxClient {
     choose_tree_closed_revision: u64,
     choose_buffer_revision: u64,
     display_panes_revision: u64,
-    popup_revision: u64,
     menu_revision: u64,
     confirm_revision: u64,
-    popup_pane: Option<PaneId>,
     next_prefix_cancel_request: u64,
     prefix_cancelled_request: Option<u64>,
     sidebar_focus_revision: u64,
@@ -1121,10 +1119,8 @@ impl MuxClient {
             choose_tree_closed_revision: 0,
             choose_buffer_revision: 0,
             display_panes_revision: 0,
-            popup_revision: 0,
             menu_revision: 0,
             confirm_revision: 0,
-            popup_pane: None,
             next_prefix_cancel_request: 0,
             prefix_cancelled_request: None,
             sidebar_focus_revision: 0,
@@ -2502,16 +2498,6 @@ impl MuxClient {
     }
 
     #[must_use]
-    pub(crate) fn popup(&self) -> Option<&PopupState> {
-        self.core.popup()
-    }
-
-    #[must_use]
-    pub(crate) fn popup_revision(&self) -> u64 {
-        self.popup_revision
-    }
-
-    #[must_use]
     pub(crate) fn menu(&self) -> Option<&MenuState> {
         self.core.menu()
     }
@@ -2562,6 +2548,11 @@ impl MuxClient {
             .iter()
             .find(|window| window.id == focused_window)
             .map(|window| window.active_pane)
+    }
+
+    #[must_use]
+    pub(crate) fn modal_capture(&self) -> Option<PaneId> {
+        self.core.modal_capture()
     }
 
     pub(crate) fn send_input(&self, input: InputMessage) -> bool {
@@ -3073,8 +3064,6 @@ impl MuxClient {
         self.pending_commands_revision = self.pending_commands_revision.wrapping_add(1).max(1);
         self.command_output = None;
         self.command_output_diff.invalidate();
-        self.popup_pane = None;
-        self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
         self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
     }
@@ -3102,10 +3091,6 @@ impl MuxClient {
         self.choose_tree_closed_revision = self.choose_tree_revision;
         self.choose_buffer_revision = self.choose_buffer_revision.wrapping_add(1).max(1);
         self.display_panes_revision = self.display_panes_revision.wrapping_add(1).max(1);
-        if let Some(pane) = self.popup_pane.take() {
-            self.forget_pane(pane);
-        }
-        self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
         self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
         self.clear_all_kitty_images();
@@ -3991,16 +3976,6 @@ impl MuxClient {
             CoreEvent::DisplayPanesChanged => {
                 self.display_panes_revision = self.display_panes_revision.wrapping_add(1).max(1);
             }
-            CoreEvent::PopupChanged => {
-                let next = self.core.popup().map(|popup| popup.pane);
-                if let Some(previous) = self.popup_pane
-                    && Some(previous) != next
-                {
-                    self.forget_pane(previous);
-                }
-                self.popup_pane = next;
-                self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
-            }
             CoreEvent::MenuChanged => {
                 self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
             }
@@ -4442,17 +4417,14 @@ impl MuxClient {
         let connection = self.attached_connection_mut();
         connection.full_requests_pending.remove(&pane);
         connection.history.forget(pane);
-        if self.popup_pane != Some(pane) {
-            self.request_history_backfill(pane);
-        }
+        self.request_history_backfill(pane);
     }
 
     fn apply_terminal_patch(&mut self, pane: PaneId, patch: TerminalViewportPatch) {
         self.kitty_image_cache(pane);
         let retained = self.viewports.get(&pane).cloned();
-        let request_missing = retained.is_none()
-            && (snapshot_contains_pane(self.core.snapshot(), pane)
-                || self.popup_pane == Some(pane));
+        let request_missing =
+            retained.is_none() && snapshot_contains_pane(self.core.snapshot(), pane);
         let request_failed_patch = retained.is_some();
         let apply_result = if let Some(retained) = retained {
             let mut retained = retained.write();
@@ -4472,7 +4444,7 @@ impl MuxClient {
         };
         if apply_result.is_err() && (request_failed_patch || request_missing) {
             self.request_full_viewport(pane);
-        } else if apply_result.is_ok() && self.popup_pane != Some(pane) {
+        } else if apply_result.is_ok() {
             self.request_history_backfill(pane);
         }
     }

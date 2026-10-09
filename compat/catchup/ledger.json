@@ -13,7 +13,7 @@
       "id": "fix.tui-colour",
       "track": "fix",
       "title": "Raw TUI honours terminal-overrides, terminal-features and user-keys",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/client.rs",
@@ -34,13 +34,15 @@
       ],
       "branch": "catchup/fix.tui-colour",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at 5451831a4: all 4 clauses met; wire: EventPayload::TerminalNegotiation + KeyCode::User under 108; also fixed set -s extended-keys/focus-events not reaching the TUI hello"
+      ]
     },
     {
       "id": "fix.streams",
       "track": "fix",
       "title": "Close the last two caller-stream refusals",
-      "status": "todo",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon.rs",
@@ -55,15 +57,17 @@
         "`printf 'set -g @x a\\376b\\n' | zz source-file -` applies like the pin instead of failing with 'stream did not contain valid UTF-8'.",
         "protocol.binary-streams closes."
       ],
-      "branch": null,
+      "branch": "catchup/fix.streams",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at ad7a35ca9 (clauses met; show-buffer vis-escape claim in the clause was wrong for this pin: cmdq_print_data parses, matched the pin); integration pass merging main (3.8) sent"
+      ]
     },
     {
       "id": "fix.capture-links",
       "track": "fix",
       "title": "capture-pane -H and the derivable -F line flags",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-terminal/src/session.rs",
@@ -78,7 +82,7 @@
         "capture-pane -F emits the W, H, P and O line flags; D and X are recorded as native in the registry.",
         "capture.rich-transports keeps only -P, -R and the saved alternate grid."
       ],
-      "branch": null,
+      "branch": "catchup/fix.capture-links",
       "sha": null,
       "notes": []
     },
@@ -156,13 +160,38 @@
       ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: also from fix.streams: source-file <directory> from a command client prints 'Is a directory (os error 21): PATH' where the pin prints 'Input/output error: PATH'."
+      ]
+    },
+    {
+      "id": "fix.option-bytes",
+      "track": "fix",
+      "title": "User option values keep their bytes",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src/command.rs",
+        "crates/zz-mux/src/model.rs",
+        "crates/zz-mux/src/tmux_options.rs",
+        "crates/zz-daemon/src/daemon.rs"
+      ],
+      "gaps": [],
+      "accept": [
+        "set -g @x a\\376b (argv or source-file -) stores the bytes; show-options -g @x prints a\\376b as the pin does, and #{@x} expands to the same bytes as the pin for UTF-8 and non-UTF-8 clients.",
+        "A registry item records the divergence first if the store change is split across commits, and closes with it."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by fix.streams: UserOptions is BTreeMap<String,String> in zz-mux, so non-UTF-8 values read back as U+FFFD; set-option and show-options pass values as String."
+      ]
     },
     {
       "id": "pin.move",
       "track": "pin",
       "title": "Move the pin to the tmux 3.8 tag and register the whole delta",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "compat/tmux-oracle.py",
@@ -184,9 +213,11 @@
         "No zz behaviour changes in this item except what the gate forces (catalog flag shapes for new flags may be registered as unsupported until their item lands)."
       ],
       "branch": "catchup/pin.move",
-      "sha": null,
+      "sha": "338aad43a",
       "notes": [
-        "Measured delta and a soft-assert oracle runner: ~/.cache/zz-catchup/ on alienware (delta.md, tools/, oracle-38.json); rebuild from the research doc elsewhere."
+        "Measured delta and a soft-assert oracle runner: ~/.cache/zz-catchup/ on alienware (delta.md, tools/, oracle-38.json); rebuild from the research doc elsewhere.",
+        "2026-10-09: lane done at 6b8afcab3: just compat check green at 3.8; 7 new gaps keyed by ledger item; layout-v1.py added to the harness for v2 layouts",
+        "2026-10-09: codex review: 2 P2 fixed at 856d0e9a1; merged; just compat check green on main; main checkout's compat/.cache now holds tmux 3.8 (old pin kept as tmux-src-d77c9dc6)"
       ]
     },
     {
@@ -203,7 +234,9 @@
         "crates/zz-cli/src/lib.rs",
         "crates/zz-protocol/src/catalog.rs"
       ],
-      "gaps": [],
+      "gaps": [
+        "pin.contract-breaks"
+      ],
       "accept": [
         "The active-pane client flag is gone as in 1ce00006 (zz-client core.rs:1677, zz-cli lib.rs:3597).",
         "%% escapes ' as '\\'' (a177d0f5, cmd.c:843-916); %%%, %N% and %N unchanged.",
@@ -212,13 +245,15 @@
       ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: pin.move flagged clients.read-only-and-focus still holds semantic:per-client-active-pane although 3.8 removed the active-pane flag; revisit here."
+      ]
     },
     {
       "id": "pin.layout-v2",
       "track": "pin",
       "title": "JSON v2 layout strings",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -228,14 +263,16 @@
         "crates/zz-cli/src/control_mode.rs",
         "crates/zz-daemon/src/daemon"
       ],
-      "gaps": [],
+      "gaps": [
+        "pin.layout-v2"
+      ],
       "accept": [
         "#{window_layout}, #{window_visible_layout} and list-windows print the 3.8 JSON v2 form (bf43fdc0, d9692f7e).",
         "select-layout accepts both v1 and v2.",
         "Control clients get v1 unless they set the new-layouts flag.",
         "The v2 writer has a place for floating panes so float.core only fills it in."
       ],
-      "branch": null,
+      "branch": "catchup/pin.layout-v2",
       "sha": null,
       "notes": []
     },
@@ -253,7 +290,9 @@
         "crates/zz-tui/src",
         "crates/zz/src/workspace"
       ],
-      "gaps": [],
+      "gaps": [
+        "pin.display-panes"
+      ],
       "accept": [
         "-b removed; -k, -Z and -s source-window accepted; -t is a target pane (1a02c995).",
         "display-panes-active-colour, -colour, -format and -time are window options; display-panes-border-style exists.",
@@ -276,7 +315,9 @@
         "crates/zz-daemon/src/daemon.rs",
         "crates/zz-mux/src/command.rs"
       ],
-      "gaps": [],
+      "gaps": [
+        "pin.hooks-events"
+      ],
       "accept": [
         "The 21 new hooks fire where the pin fires them; after-queue removed. pane-command-started, pane-command-finished and pane-shell-prompt come from OSC 133, which zz's last-output tracking already parses.",
         "hook_<key> payload formats resolve; old names still resolve.",
@@ -300,7 +341,9 @@
         "crates/zz-daemon/src/status.rs",
         "crates/zz-mux/src/command.rs"
       ],
-      "gaps": [],
+      "gaps": [
+        "pin.formats-options"
+      ],
       "accept": [
         "The 16 new format_table names and the new context formats resolve (or are registered native with a reason).",
         "The A modifier works in status and border formats; q: change lands in pin.contract-breaks.",
@@ -325,7 +368,9 @@
         "crates/zz-tui/src",
         "crates/zz/src/workspace"
       ],
-      "gaps": [],
+      "gaps": [
+        "pin.keys-copy"
+      ],
       "accept": [
         "Default tables match 3.8 (303 to 308), except bindings whose commands belong to float.* (C-MouseDrag1 new-pane -M), which stay registered under float.keys.",
         "line-numbers-on/off/toggle and refresh-now copy commands work; copy-mode L and r rebind.",
@@ -402,7 +447,9 @@
       ],
       "branch": null,
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: pin.move moved semantic:move-pane-tiled-extension into adopted pane.floating-model; decide whether it closes or goes back to native."
+      ]
     },
     {
       "id": "float.clients",
@@ -456,6 +503,7 @@
         "compat/tmux-gaps.json"
       ],
       "gaps": [
+        "float.keys",
         "keys.move-table",
         "keys.default-prefix",
         "mouse.bound-context"

@@ -1135,7 +1135,7 @@ macro_rules! variable {
     };
 }
 
-const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
+const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("active_window_index", Session, ActiveWindowIndex),
     variable!("alternate_on", Terminal, StatusHook),
     variable!("alternate_saved_x", Terminal, Zero),
@@ -1183,8 +1183,11 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("cursor_very_visible", Terminal, Zero),
     variable!("cursor_x", Terminal, StatusHook),
     variable!("cursor_y", Terminal, StatusHook),
+    variable!("history_added", Terminal, Zero),
     variable!("history_all_bytes", Terminal, Zero),
     variable!("history_bytes", Terminal, Zero),
+    variable!("history_collected", Terminal, Zero),
+    variable!("history_generation", Terminal, Zero),
     variable!("history_limit", Terminal, HistoryLimit),
     variable!("history_size", Terminal, StatusHook),
     variable!("host", Server, Host),
@@ -1216,6 +1219,11 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_at_top", Pane, PaneAtTop),
     variable!("pane_bg", Pane, Empty),
     variable!("pane_bottom", Pane, PaneBottom),
+    variable!("pane_command_duration", Pane, Empty),
+    variable!("pane_command_end_time", Pane, Empty),
+    variable!("pane_command_running", Pane, Zero),
+    variable!("pane_command_start_time", Pane, Empty),
+    variable!("pane_command_status", Pane, Empty),
     variable!("pane_current_command", Pane, PaneCurrentCommand),
     variable!("pane_current_path", Pane, PaneCurrentPath),
     variable!("pane_dead", Pane, PaneDead),
@@ -1233,16 +1241,21 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_input_off", Pane, PaneInputOff),
     variable!("pane_key_mode", Pane, Empty),
     variable!("pane_last", Pane, PaneLast),
+    variable!("pane_last_output_time", Pane, Empty),
+    variable!("pane_last_prompt_time", Pane, Empty),
     variable!("pane_left", Pane, PaneLeft),
     variable!("pane_marked", Pane, PaneMarked),
     variable!("pane_marked_set", Pane, PaneMarkedSet),
+    variable!("pane_modal_flag", Pane, Zero),
     variable!("pane_mode", Pane, StatusHook),
+    variable!("pane_output_generation", Pane, Zero),
     variable!("pane_path", Pane, PanePath),
     variable!("pane_pb_progress", Pane, StatusHook),
     variable!("pane_pb_state", Pane, StatusHook),
     variable!("pane_pid", Pane, PanePid),
     variable!("pane_pipe", Pane, StatusHook),
     variable!("pane_pipe_pid", Pane, StatusHook),
+    variable!("pane_private_modes", Pane, Empty),
     variable!("pane_right", Pane, PaneRight),
     variable!("pane_search_string", Pane, StatusHook),
     variable!("pane_start_command", Pane, PaneStartCommand),
@@ -1254,6 +1267,8 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("pane_top", Pane, PaneTop),
     variable!("pane_tty", Pane, PaneTty),
     variable!("pane_unseen_changes", Pane, StatusHook),
+    variable!("pane_unzoomed_height", Pane, Zero),
+    variable!("pane_unzoomed_width", Pane, Zero),
     variable!("pane_width", Pane, PaneWidth),
     variable!("pane_x", Pane, PaneX),
     variable!("pane_y", Pane, PaneY),
@@ -1334,6 +1349,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 198] = [
     variable!("window_manual_height", Window, WindowManualHeight),
     variable!("window_manual_width", Window, WindowManualWidth),
     variable!("window_marked_flag", Window, WindowMarkedFlag),
+    variable!("window_modal_pane", Window, Empty),
     variable!("window_name", Window, WindowName),
     variable!("window_offset_x", Window, StatusHook),
     variable!("window_offset_y", Window, StatusHook),
@@ -3753,7 +3769,7 @@ const LISTING_CLIENT_WITNESS: &str = "client_name";
 /// `buffer_mode_format`.
 const LISTING_CLIENTLESS_CLIENT_NAME: &str = "client_mode_format";
 
-/// format.c `format_each`: walk the 198-entry table in declaration order,
+/// format.c `format_each`: walk the 214-entry table in declaration order,
 /// skipping every entry whose callback would return NULL, then the command's
 /// own tree in key order.
 pub(crate) fn format_listing(
@@ -7751,8 +7767,8 @@ mod tests {
     }
 
     #[test]
-    fn vocabulary_is_the_sorted_pinned_198_entry_table() {
-        assert_eq!(FORMAT_VARIABLES.len(), 198);
+    fn vocabulary_is_the_sorted_pinned_214_entry_table() {
+        assert_eq!(FORMAT_VARIABLES.len(), 214);
         assert!(
             FORMAT_VARIABLES
                 .windows(2)

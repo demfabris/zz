@@ -31,6 +31,12 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
             "",
             &[],
         ),
+        "clear-on-attach" => (
+            TmuxOptionKind::Flag,
+            "Whether to use the alternate screen and clear it when a client is attached. When disabled, tmux does not enter the alternate screen on attach so terminal content before tmux remains in scrollback.",
+            "",
+            &[],
+        ),
         "command-alias" => (
             TmuxOptionKind::String,
             "Array of command aliases. Each entry is an alias and a command separated by '='.",
@@ -762,6 +768,18 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
         "copy-mode-position-format" => (
             TmuxOptionKind::String,
             "Format of the position indicator in copy mode.",
+            "",
+            &[],
+        ),
+        "copy-mode-current-line-style" => (
+            TmuxOptionKind::Style,
+            "Style of the line containing the cursor in copy mode.",
+            "",
+            &[],
+        ),
+        "display-panes-border-style" => (
+            TmuxOptionKind::Style,
+            "Style of the pane borders in 'display-panes'.",
             "",
             &[],
         ),

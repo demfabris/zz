@@ -347,22 +347,8 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
         "cmdq_merge_formats",
         COMMAND_ITEM_CONTEXT_FORMATS,
     ),
-    ("notify.c", "notify_hook", &[HOOK_CONTEXT_FORMAT]),
-    (
-        "notify.c",
-        "notify_monitor_cb",
-        &[
-            HOOK_CONTEXT_FORMAT,
-            HOOK_LAST_CONTEXT_FORMAT,
-            HOOK_PANE_CONTEXT_FORMAT,
-            HOOK_SESSION_CONTEXT_FORMAT,
-            HOOK_SESSION_NAME_CONTEXT_FORMAT,
-            HOOK_VALUE_CONTEXT_FORMAT,
-            HOOK_WINDOW_CONTEXT_FORMAT,
-            HOOK_WINDOW_INDEX_CONTEXT_FORMAT,
-            HOOK_WINDOW_NAME_CONTEXT_FORMAT,
-        ],
-    ),
+    ("hooks.c", "hooks_insert_event", &[HOOK_CONTEXT_FORMAT]),
+    ("hooks.c", "hooks_run", &[HOOK_CONTEXT_FORMAT]),
     (
         "window-copy.c",
         "window_copy_formats",
@@ -370,13 +356,25 @@ const LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
     ),
 ];
 
-const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[
-    ("current-file", &[CURRENT_FILE_CONTEXT_FORMAT], &[]),
-    ("hook", &[HOOK_CONTEXT_FORMAT], &[]),
-    ("hook-arguments", &[HOOK_ARGUMENTS_CONTEXT_FORMAT], &[]),
-    ("hook-argument", &[], &[HOOK_ARGUMENT_CONTEXT_PATTERN]),
-    ("hook-flag", &[], &[HOOK_FLAG_CONTEXT_PATTERN]),
-    ("hook-flag-value", &[], &[HOOK_FLAG_VALUE_CONTEXT_PATTERN]),
+const DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] =
+    &[("current-file", &[CURRENT_FILE_CONTEXT_FORMAT], &[])];
+
+const HOOK_PAYLOAD_CONTEXT_FORMATS: &[&str] = &[
+    HOOK_ARGUMENTS_CONTEXT_FORMAT,
+    "hook_client",
+    HOOK_LAST_CONTEXT_FORMAT,
+    HOOK_PANE_CONTEXT_FORMAT,
+    HOOK_SESSION_CONTEXT_FORMAT,
+    HOOK_SESSION_NAME_CONTEXT_FORMAT,
+    HOOK_VALUE_CONTEXT_FORMAT,
+    HOOK_WINDOW_CONTEXT_FORMAT,
+    HOOK_WINDOW_INDEX_CONTEXT_FORMAT,
+    HOOK_WINDOW_NAME_CONTEXT_FORMAT,
+];
+const HOOK_PAYLOAD_CONTEXT_PATTERNS: &[&str] = &[
+    HOOK_ARGUMENT_CONTEXT_PATTERN,
+    HOOK_FLAG_CONTEXT_PATTERN,
+    HOOK_FLAG_VALUE_CONTEXT_PATTERN,
 ];
 
 const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
@@ -396,12 +394,12 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
             "mode_tree_selected",
         ],
     ),
+    ("prompt.c", "prompt_expand1", &["message"]),
     (
         "prompt.c",
-        "prompt_expand",
+        "prompt_format_tree",
         &[
             "command_prompt",
-            "message",
             "prompt_flags",
             "prompt_input",
             "prompt_type",
@@ -456,7 +454,95 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         ],
     ),
 ];
-const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[];
+const SHOW_OPTIONS_CONTEXT_FORMATS: &[&str] = &[
+    "hook_fire_count",
+    "hook_fire_time",
+    "option_array_key",
+    "option_has_array_key",
+    "option_has_value",
+    "option_is_array",
+    "option_is_hook",
+    "option_is_parent",
+    "option_is_string",
+    "option_is_user",
+    "option_name",
+    "option_value",
+    "option_value_only",
+];
+const SHOW_HOOKS_MONITOR_CONTEXT_FORMATS: &[&str] = &[
+    "hook_fire_count",
+    "hook_fire_time",
+    "hook_monitor_format",
+    "hook_monitor_target",
+    "option_array_key",
+    "option_has_array_key",
+    "option_has_value",
+    "option_is_array",
+    "option_is_hook",
+    "option_is_parent",
+    "option_is_string",
+    "option_is_user",
+    "option_name",
+    "option_value",
+    "option_value_only",
+];
+const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
+    (
+        "cmd-show-options.c",
+        "cmd_show_hooks_print_monitor",
+        SHOW_HOOKS_MONITOR_CONTEXT_FORMATS,
+    ),
+    (
+        "cmd-show-options.c",
+        "cmd_show_options_print",
+        SHOW_OPTIONS_CONTEXT_FORMATS,
+    ),
+    (
+        "window-border.c",
+        "window_set_fill_cell",
+        &["is_inside", "is_outside"],
+    ),
+    (
+        "window-client.c",
+        "window_client_draw_info",
+        &["clipboard_invalid"],
+    ),
+    (
+        "window-copy.c",
+        "window_copy_formats",
+        &["copy_line_numbers", "refresh_active"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build",
+        &["is_environment"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_environment",
+        &[
+            "environment_hidden",
+            "environment_is_global",
+            "environment_name",
+            "environment_removed",
+            "environment_scope",
+            "environment_value",
+            "is_environment",
+            "is_key",
+            "is_option",
+        ],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_keys",
+        &["is_environment"],
+    ),
+    (
+        "window-customize.c",
+        "window_customize_build_option",
+        &["option_is_hook", "option_is_monitor", "option_monitor"],
+    ),
+];
 const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[];
 
 #[doc(hidden)]
@@ -494,6 +580,11 @@ pub fn mux_derived_format_context_families() -> impl Iterator<
         .iter()
         .copied()
         .chain(crate::formats::derived_format_context_families())
+}
+
+#[doc(hidden)]
+pub fn mux_hook_payload_format_contexts() -> (&'static [&'static str], &'static [&'static str]) {
+    (HOOK_PAYLOAD_CONTEXT_FORMATS, HOOK_PAYLOAD_CONTEXT_PATTERNS)
 }
 
 #[doc(hidden)]
@@ -28374,7 +28465,7 @@ mod tests {
             ),
             (
                 &["F8", "display-message", "-?"][..],
-                "usage: display-message [-aCIlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+                "usage: display-message [-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
             ),
             (
                 &["F8", "lsk", "-O"][..],
@@ -32024,7 +32115,7 @@ mod tests {
             global.lines().collect::<Vec<_>>(),
             MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalSession)
         );
-        assert_eq!(global.lines().count(), 57);
+        assert_eq!(global.lines().count(), 63);
         assert_eq!(
             global
                 .lines()
@@ -32033,6 +32124,8 @@ mod tests {
             [
                 "client-active",
                 "client-attached",
+                "client-created",
+                "client-closed",
                 "client-detached",
                 "client-focus-in",
                 "client-focus-out",
@@ -32050,7 +32143,7 @@ mod tests {
             global_window.lines().collect::<Vec<_>>(),
             MuxEngine::hook_names_for_target(TmuxOptionTarget::GlobalWindow)
         );
-        assert_eq!(global_window.lines().count(), 11);
+        assert_eq!(global_window.lines().count(), 27);
         assert_eq!(
             engine
                 .execute(&mut context, &command("show-hooks", &[]))
@@ -32302,7 +32395,7 @@ mod tests {
             .execute(&mut context, &command("show-hooks", &["-g"]))
             .unwrap()
             .output;
-        assert_eq!(session_hooks.lines().count(), 57);
+        assert_eq!(session_hooks.lines().count(), 63);
         assert!(
             !session_hooks
                 .lines()
@@ -32313,7 +32406,7 @@ mod tests {
             .execute(&mut context, &command("show-hooks", &["-g", "-w"]))
             .unwrap()
             .output;
-        assert_eq!(window_hooks.lines().count(), 11);
+        assert_eq!(window_hooks.lines().count(), 27);
         assert!(
             window_hooks
                 .lines()
@@ -32348,25 +32441,25 @@ mod tests {
             (
                 &["-g", "-H"] as &[&str],
                 TmuxOptionTarget::GlobalSession,
-                57,
+                63,
                 false,
             ),
             (
                 &["-g", "-w", "-H"],
                 TmuxOptionTarget::GlobalWindow,
-                11,
+                27,
                 false,
             ),
             (
                 &["-A", "-H"],
                 TmuxOptionTarget::Session(context.session.unwrap()),
-                57,
+                63,
                 true,
             ),
             (
                 &["-p", "-A", "-H"],
                 TmuxOptionTarget::Pane(context.pane.unwrap()),
-                7,
+                19,
                 true,
             ),
         ] {
@@ -34795,7 +34888,7 @@ mod tests {
         let storage_only = tmux_options()
             .filter(|option| tmux_stored_scalar(option.name).is_some())
             .collect::<Vec<_>>();
-        assert_eq!(storage_only.len(), 63);
+        assert_eq!(storage_only.len(), 66);
         for option in storage_only {
             let metadata = tmux_stored_scalar(option.name).expect("storage-only metadata");
             let alternate = match metadata.kind {

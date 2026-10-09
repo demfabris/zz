@@ -79,13 +79,14 @@ behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new le
 
 ## Lane rules
 
-Each rule cost an earlier campaign real time. The source is in brackets
+Each rule cost a campaign real time. The source is in brackets
 (`compat/orchestration/CAMPAIGN-LOG.md` = LOG, `compat/tui/HANDOFF.md` = THO,
 `knowledge/playbooks/tui-parity-campaign.md` = PB).
 
 1. **Cargo only through `compat/catchup/cargo.sh`.** It caps memory, sets `--jobs` from RAM, and
    holds one of two cargo slots inside `flock -o`, so a killed lane's daemons cannot keep a slot
-   locked. [Five lanes OOMed alienware for hours; a leaked slot fd stalled every lane for 7 h.]
+   locked. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
+   it too when run as `PATH=$PWD/compat/catchup/bin:$PATH <script>`; always run them that way. [Five lanes OOMed alienware for hours; a leaked slot fd stalled every lane for 7 h.]
 2. **Iterate behind a filter**: `compat/catchup/cargo.sh test -p <crate> --lib <name>`. Run the full
    test package of each crate you touched once, before your final commit. Never
    `cargo test --workspace`. [A whole `zz-daemon` run per edit made every loop cost minutes.]
@@ -101,7 +102,8 @@ Each rule cost an earlier campaign real time. The source is in brackets
    [Twice a corpus row contradicted a lane and only the gate found it, PB.]
 6. **Registry**: edit only the gap entries your item names, plus new ones it needs. After any edit
    to `compat/tmux-gaps.json`, `compat/tmux-oracle.json` or `compat_manifest_tests.rs`, run
-   `just compat check` (zz-mux lib tests plus three daemon tests).
+   `PATH=$PWD/compat/catchup/bin:$PATH just compat check` (zz-mux lib tests plus three daemon
+   tests, plus the layout converter tests).
 7. **Wire**: `PROTOCOL_VERSION` 107 shipped in v0.16.0. If you change a serde type under
    `crates/zz-protocol/src` (not `catalog.rs` or `lib.rs`) and main still says 107, move it to 108,
    move both assertions (`message.rs`, `tests/hunt_claims.rs`) and open 108 in
@@ -123,7 +125,10 @@ Each rule cost an earlier campaign real time. The source is in brackets
 13. **Probes live in the repo** (tests or `compat/scenarios`), never only in `/tmp`, which is RAM
     and is lost on reboot. [A gate spent an hour rebuilding lost probes, LOG.]
 14. **Leave nothing running**: kill the daemons and fixtures you started; no binary copies in `/tmp`.
-15. **Commits**: plain English, what changed and why; end with `Co-Authored-By: <a funny name>`
+15. **Stay in your worktree.** Start every Bash command with `cd <your worktree> &&` or use
+    absolute paths; a `cd` inside a backgrounded subshell does not carry over. [fix.tui-colour ran a
+    test batch in the shared main checkout this way, 2026-10-09.]
+16. **Commits**: plain English, what changed and why; end with `Co-Authored-By: <a funny name>`
     (race-condition-slayer, deadbeef-hexlord); never Claude, Codex or an email. No comments in code.
 
 ## Full suite: milestones only
@@ -193,5 +198,8 @@ check `pgrep -af codex` on resume.
   both. Windows may hold only floating panes (a zz-only "keep one tile" rule needed more custom
   transfer rules than it saved), and the v2 layout writer keeps 3.8's structural position for
   floating leaves so `#{window_layout}` matches tmux.
+- 2026-10-09 orchestrator: pin.move merged (338aad43a); the pin is tmux 3.8. Any checkout's
+  `compat/.cache` must be refetched (`compat/fetch-tmux.sh`) before `just compat check` passes there;
+  `wt.sh add` copies the main checkout's cache, so refresh that one first.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

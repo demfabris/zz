@@ -47730,7 +47730,7 @@ fn resolve_buffer<'a>(
 #[path = "daemon/wait_queue.rs"]
 mod wait_queue;
 
-const WAIT_FOR_USAGE: &str = "usage: wait-for [-L|-S|-U] channel";
+const WAIT_FOR_USAGE: &str = "usage: wait-for [-ELSUlv] [-F format] [-w waiter] name";
 
 fn remove_wait_channel_if_unused(channels: &mut BTreeMap<String, WaitChannel>, name: &str) {
     if channels
@@ -52985,7 +52985,12 @@ mod tests {
         let literal_scopes = [
             (
                 "cmd-display-menu.c",
-                "cmd_display_menu_get_pos",
+                "cmd_display_menu_get_menu_pos",
+                POPUP_POSITION_CONTEXT_FORMATS.as_slice(),
+            ),
+            (
+                "cmd-display-menu.c",
+                "cmd_display_menu_get_popup_pos",
                 POPUP_POSITION_CONTEXT_FORMATS.as_slice(),
             ),
             (
@@ -52997,11 +53002,6 @@ mod tests {
                 "cmd-show-messages.c",
                 "cmd_show_messages_exec",
                 crate::status::SHOW_MESSAGES_CONTEXT_FORMATS.as_slice(),
-            ),
-            (
-                "notify.c",
-                "notify_add",
-                NOTIFY_ADD_CONTEXT_FORMATS.as_slice(),
             ),
             (
                 "window-buffer.c",
@@ -53019,8 +53019,18 @@ mod tests {
                 .iter()
                 .map(|(_, _, names)| names.len())
                 .sum::<usize>(),
-            32
+            44
         );
+        let (mux_hook_payload_names, _) = zz_mux::mux_hook_payload_format_contexts();
+        for name in NOTIFY_ADD_CONTEXT_FORMATS
+            .iter()
+            .filter(|name| **name != HOOK_CONTEXT_FORMAT)
+        {
+            assert!(
+                mux_hook_payload_names.contains(name),
+                "daemon hook payload format {name} is not registered"
+            );
+        }
 
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let oracle: serde_json::Value = serde_json::from_str(
@@ -53050,7 +53060,7 @@ mod tests {
                     })
             })
             .collect::<BTreeSet<_>>();
-        assert_eq!(oracle_literals.len(), 153);
+        assert_eq!(oracle_literals.len(), 204);
 
         let mut non_daemon_literals = BTreeSet::new();
         for (path, function, names) in zz_mux::mux_literal_format_context_scopes()
@@ -53065,7 +53075,7 @@ mod tests {
                 )));
             }
         }
-        assert_eq!(non_daemon_literals.len(), 121);
+        assert_eq!(non_daemon_literals.len(), 160);
         assert!(non_daemon_literals.is_subset(&oracle_literals));
         let delegated_literals = oracle_literals
             .difference(&non_daemon_literals)
@@ -53156,7 +53166,7 @@ mod tests {
             oracle_hooks.len(),
             "duplicate pinned hook"
         );
-        assert_eq!(pinned_hooks.len(), 68, "pinned hook count changed");
+        assert_eq!(pinned_hooks.len(), 89, "pinned hook count changed");
 
         let command_names = zz_protocol::command_specs()
             .map(|spec| spec.name)
@@ -53171,7 +53181,7 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert_eq!(
             produced_after_hooks.len(),
-            37,
+            38,
             "catalog-derived after-command hook count changed"
         );
 
@@ -53211,8 +53221,9 @@ mod tests {
                 }
             }
         }
-        assert!(
-            tracked_hooks.is_empty(),
+        assert_eq!(
+            tracked_hooks.len(),
+            21,
             "runtime hook gap roster changed: {tracked_hooks:?}"
         );
 
@@ -53220,38 +53231,32 @@ mod tests {
             .union(&produced_non_after_hooks)
             .cloned()
             .collect::<BTreeSet<_>>();
-        let explicit_only_hooks = ["after-queue"]
+        let zz_only_hooks = ["after-queue"]
             .into_iter()
             .map(str::to_owned)
             .collect::<BTreeSet<_>>();
-        assert_eq!(produced_hooks.len(), 67, "produced hook count changed");
-        assert_eq!(
-            explicit_only_hooks.len(),
-            1,
-            "explicit-only hook count changed"
-        );
-        assert!(tracked_hooks.is_empty(), "tracked hook count changed");
+        assert_eq!(produced_hooks.len(), 68, "produced hook count changed");
         assert!(
             produced_hooks.is_disjoint(&tracked_hooks),
             "produced and tracked hooks overlap"
         );
         assert!(
-            produced_hooks.is_disjoint(&explicit_only_hooks),
-            "produced and explicit-only hooks overlap"
+            zz_only_hooks.is_disjoint(&pinned_hooks),
+            "a zz-only hook is in the pin"
         );
         assert!(
-            explicit_only_hooks.is_disjoint(&tracked_hooks),
-            "explicit-only and tracked hooks overlap"
+            zz_only_hooks
+                .iter()
+                .all(|hook| zz_mux::MuxEngine::after_command_hook(
+                    hook.strip_prefix("after-").expect("after hook")
+                ) == Some(hook.as_str())),
+            "zz-only hook is no longer produced"
         );
-        let accounted_hooks = produced_hooks
-            .union(&explicit_only_hooks)
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let partition = accounted_hooks
+        let partition = produced_hooks
             .union(&tracked_hooks)
             .cloned()
             .collect::<BTreeSet<_>>();
-        assert_eq!(partition.len(), 68, "hook partition count changed");
+        assert_eq!(partition.len(), 89, "hook partition count changed");
         assert_eq!(
             partition, pinned_hooks,
             "hook partition differs from the pin"
@@ -81103,7 +81108,7 @@ set-option -g @alias-mixed-next yes
         }
         assert_eq!(spellings, 164);
         assert_eq!(diagnostic_cases, 656);
-        assert_eq!(required_cases, 431);
+        assert_eq!(required_cases, 444);
 
         let mut prefix_cases = 0;
         for spec in &specs {

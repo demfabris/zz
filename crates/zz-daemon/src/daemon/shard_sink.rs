@@ -821,6 +821,14 @@ impl ControlFeed {
         self.unblock(state);
     }
 
+    pub(super) fn reset_pane(&self, pane: PaneId) {
+        let mut state = self.state.lock();
+        if let Some(entry) = state.panes.get_mut(&pane) {
+            entry.clear();
+        }
+        self.unblock(state);
+    }
+
     pub(super) fn clear_pane(&self, pane: PaneId) {
         let mut state = self.state.lock();
         let before = state.committed();

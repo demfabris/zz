@@ -37,6 +37,7 @@ pub use control::{
     ClientView, ClientViewport, Hello, KeySubscription, MAX_BATCH_FRAMES, MouseBindings,
     Subscriptions, TTY_INPUT_CAPABILITY, TreeSubscription, Welcome, key_tables_hash,
 };
+pub const UNZOOMED_LAYOUT_VARIABLE: &str = "unzoomed_layout";
 pub use exec::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecExit, ExecFlags, ExecOutcome, ExecRequest,
     ExecResume, ExecResumeKind, MAX_EXEC_TTY_BYTES,

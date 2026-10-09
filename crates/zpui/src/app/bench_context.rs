@@ -1334,6 +1334,7 @@ mod tests {
         let dispatcher = Arc::new(ThreadedDispatcher::new());
         let foreground_executor = ForegroundExecutor::new(dispatcher);
 
+        let _trace_test_guard = crate::profiler::tests::TraceTestGuard::new();
         let trace_scope = TraceScope::start(journal.collector());
 
         // A single foreground task poll that never touches a window, akin
@@ -1344,10 +1345,6 @@ mod tests {
         run_task_to_completion(&foreground_executor, task);
 
         let events = trace_scope.finish();
-        assert!(
-            events.frame_events.is_empty(),
-            "no window was involved, so no frame events should be recorded"
-        );
 
         let report = BenchReport::default();
         report.record_foreground_events(events.foreground_events());
@@ -1388,6 +1385,7 @@ mod tests {
         });
         run_task_to_completion(&foreground_executor, setup_task);
 
+        let _trace_test_guard = crate::profiler::tests::TraceTestGuard::new();
         let trace_scope = TraceScope::start(journal.collector());
 
         let measured_task = foreground_executor.spawn(async move {

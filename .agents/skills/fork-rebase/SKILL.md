@@ -26,7 +26,7 @@ the same subjects.
 | `crates/collections`, `http_client`, `scheduler`, `sum_tree`, `util_macros`, `refineable` | `crates/zpui-collections`, `zpui-http-client`, `zpui-scheduler`, `zpui-sum-tree`, `zpui-util-macros`, `zpui-refineable` |
 | `crates/refineable/derive_refineable` | `crates/zpui-refineable-derive` |
 | `crates/zlog`, `ztracing`, `ztracing_macro` | `crates/zpui-log`, `zpui-tracing`, `zpui-tracing-macros` |
-| `tooling/perf` | `crates/zpui-perf` |
+| `tooling/perf`, screen capture (`scap`, ScreenCaptureKit), tracy | removed 2026-10-09: skip upstream patches that only touch them |
 
 The zpui crates are root workspace members. Each Zed-derived one carries Zed's relaxed
 `[lints]` table (cargo allows one shared lint set, and the workspace one is zz's pedantic set),
@@ -36,9 +36,9 @@ zpui crate needs both. `crates/zpui-kit` is zz's own widget kit and takes the wo
 ## Landing a zpui change
 
 1. Edit the zpui crates in the same commit as the zz code that needs it.
-2. CI's clippy lints the zpui libraries; CI leaves out their own tests and their `--all-features`
-   (`--exclude zpui --exclude 'zpui-[!k]*'`). Run the touched crates' tests (`cargo test -p zpui -p zpui-wgpu`)
-   plus the GPU tests for whatever the change touches.
+2. The root clippy covers zpui with all features, and `cargo ci-test` runs zpui's headless tests.
+   The renderer and platform crates' tests need a GPU, so run them yourself when you touch them
+   (`cargo test -p zpui-wgpu -p zpui-apple`).
    `zpui-ios` builds its UIKit modules only for iOS: check it with
    `cargo clippy -p zpui-ios --target aarch64-apple-ios`.
 3. Run the workspace gates and `just web build`, then an isolated app run for anything visual.

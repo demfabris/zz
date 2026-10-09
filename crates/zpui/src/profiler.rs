@@ -1262,7 +1262,7 @@ impl FrameTimingCollector {
 }
 
 #[cfg(all(test, feature = "profiler"))]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::{Mutex, MutexGuard};
 
@@ -1572,13 +1572,13 @@ mod tests {
     const FRAME: Duration = Duration::from_millis(16);
     static TRACE_TEST_LOCK: Mutex<()> = Mutex::new(());
 
-    struct TraceTestGuard {
+    pub(crate) struct TraceTestGuard {
         was_enabled: bool,
         _lock: MutexGuard<'static, ()>,
     }
 
     impl TraceTestGuard {
-        fn new() -> Self {
+        pub(crate) fn new() -> Self {
             let lock = TRACE_TEST_LOCK
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());

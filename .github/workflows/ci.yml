@@ -72,7 +72,7 @@ jobs:
 
       - name: Lint
         if: runner.os == 'Linux'
-        run: cargo clippy --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-targets --all-features -- -D warnings
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
       - name: Lint daemon without agent support
         if: runner.os == 'Linux'
@@ -98,7 +98,7 @@ jobs:
       - name: Test workspace
         continue-on-error: ${{ runner.os == 'Windows' }}
         timeout-minutes: ${{ runner.os == 'Windows' && 90 || 360 }}
-        run: cargo test --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-features ${{ runner.os == 'Windows' && '--no-fail-fast' || '' }}
+        run: cargo ci-test ${{ runner.os == 'Windows' && '--no-fail-fast' || '' }}
 
       - name: Test zz-mux release profile
         if: runner.os == 'Linux'

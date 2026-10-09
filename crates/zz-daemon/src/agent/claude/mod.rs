@@ -17,6 +17,7 @@ use async_channel::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
+use zz_protocol::agent_stream::agent_verb;
 use zz_protocol::{
     AgentAutoApprove, AgentProvider, AgentQuestionAnswer, AgentTaskWire, MAX_AGENT_TASKS,
 };
@@ -46,7 +47,7 @@ const CONTROL_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REPLAY_UPDATES: usize = 4096;
 const SESSION_PAGE: usize = 50;
 const SIDE_TIMEOUT: Duration = Duration::from_mins(2);
-const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Claude without adding to the conversation, `//steer <text>` redirects the running turn, `//fork` continues in a copy of this conversation, and `//rewind [n]` continues from before your last n prompts (1 by default) without changing files. A single `/` sends Claude Code's own commands.";
+const VERB_HELP: &str = "zz commands: `/btw <question>` (or `/side`) asks Claude without adding to the conversation, `/steer <text>` redirects the running turn, `/fork` continues in a copy of this conversation, and `/rewind [n]` continues from before your last n prompts (1 by default) without changing files. Every other `/` command goes to Claude Code.";
 const AGENT_NAME: &str = "Claude Code";
 const AGENT_KEY: &str = "claude-code";
 const BASE_ARGS: [&str; 11] = [
@@ -170,6 +171,7 @@ pub(crate) async fn run_claude_runtime(
         stale_commands: HashSet::new(),
         lifecycle_seen: false,
         verbs: 0,
+        reply: None,
     };
     let commands = channels.commands;
     let controls = channels.controls;
@@ -246,7 +248,7 @@ enum Outgoing {
     Interrupt,
     Setting { option_id: String, value: String },
     Mode { mode_id: String },
-    Side { message_id: String },
+    Side { message_id: String, reply: String },
     StopTask,
 }
 
@@ -418,6 +420,7 @@ struct Runtime {
     lifecycle_seen: bool,
     settings: Settings,
     verbs: u64,
+    reply: Option<String>,
 }
 
 impl Runtime {
@@ -974,10 +977,7 @@ impl Runtime {
     }
 
     async fn verb(&mut self, text: &str) -> Result<(), String> {
-        let line = text.trim_start().strip_prefix("//").unwrap_or(text).trim();
-        let (name, rest) = line
-            .split_once(char::is_whitespace)
-            .map_or((line, ""), |(name, rest)| (name, rest.trim()));
+        let (name, rest) = agent_verb(text).unwrap_or(("", ""));
         self.verbs += 1;
         let id = format!(
             "zz-command-{}-{:08x}",
@@ -993,6 +993,13 @@ impl Runtime {
             true,
         )
         .await?;
+        self.reply = Some(format!("{id}-in"));
+        let answered = self.answer_verb(name, rest, &id).await;
+        self.reply = None;
+        answered
+    }
+
+    async fn answer_verb(&mut self, name: &str, rest: &str, id: &str) -> Result<(), String> {
         if self.session.is_none() || self.process.is_none() {
             return self.notice("Claude Code is not running.").await;
         }
@@ -1002,6 +1009,7 @@ impl Runtime {
                     &json!({ "subtype": "side_question", "question": rest }),
                     Outgoing::Side {
                         message_id: format!("{id}-out"),
+                        reply: format!("{id}-in"),
                     },
                     SIDE_TIMEOUT,
                 );
@@ -1074,7 +1082,16 @@ impl Runtime {
     }
 
     async fn notice(&mut self, text: &str) -> Result<(), String> {
-        self.say(text, json!({ "notice": true })).await
+        let reply = self.reply.clone();
+        self.notice_to(text, reply.as_deref()).await
+    }
+
+    async fn notice_to(&mut self, text: &str, reply: Option<&str>) -> Result<(), String> {
+        let mut zz = json!({ "notice": true });
+        if let Some(reply) = reply {
+            zz["reply"] = json!(reply);
+        }
+        self.say(text, zz).await
     }
 
     async fn say(&mut self, text: &str, zz: Value) -> Result<(), String> {
@@ -1166,15 +1183,16 @@ impl Runtime {
                 self.notice(&format!("Could not stop the task: {error}"))
                     .await
             }
-            (Outgoing::Side { message_id }, Ok(response)) => {
+            (Outgoing::Side { message_id, reply }, Ok(response)) => {
                 let answer = response["response"]
                     .as_str()
                     .filter(|text| !text.trim().is_empty())
                     .unwrap_or("Claude had no answer.");
-                self.update(side_answer(&message_id, answer), true).await
+                self.update(side_answer(&message_id, &reply, answer), true)
+                    .await
             }
-            (Outgoing::Side { .. }, Err(error)) => {
-                self.notice(&format!("The side question failed: {error}"))
+            (Outgoing::Side { reply, .. }, Err(error)) => {
+                self.notice_to(&format!("The side question failed: {error}"), Some(&reply))
                     .await
             }
             (Outgoing::Setting { option_id, value }, Ok(_)) => {
@@ -1819,12 +1837,12 @@ fn answered(input: &Value, questions: &[AgentQuestion], answers: &[AgentQuestion
     json!({ "behavior": "allow", "updatedInput": input })
 }
 
-fn side_answer(message_id: &str, answer: &str) -> Value {
+fn side_answer(message_id: &str, reply: &str, answer: &str) -> Value {
     json!({
         "sessionUpdate": "agent_message_chunk",
         "messageId": message_id,
         "content": { "type": "text", "text": answer },
-        "_meta": { "zz": { "side": true } },
+        "_meta": { "zz": { "side": true, "reply": reply } },
     })
 }
 
@@ -2223,18 +2241,18 @@ while read -r line; do :; done
                 event_rx.recv().await.expect("event"),
                 AgentStreamPayload::SessionReady { .. }
             ) {}
-            commands.send(verb("//btw what is 2+2")).await.expect("btw");
-            assert_eq!(next_text().await.0, "//btw what is 2+2");
+            commands.send(verb("/btw what is 2+2")).await.expect("btw");
+            assert_eq!(next_text().await.0, "/btw what is 2+2");
             let (answer, payload) = next_text().await;
             assert_eq!(answer, "4");
             assert!(
                 matches!(payload, AgentStreamPayload::Update { update } if update["_meta"]["zz"]["side"] == true)
             );
-            commands.send(verb("//steer left")).await.expect("steer");
-            assert_eq!(next_text().await.0, "//steer left");
+            commands.send(verb("/steer left")).await.expect("steer");
+            assert_eq!(next_text().await.0, "/steer left");
             assert_eq!(next_text().await.0, "Nothing is running to steer.");
-            commands.send(verb("//what")).await.expect("unknown");
-            assert_eq!(next_text().await.0, "//what");
+            commands.send(verb("/what")).await.expect("unknown");
+            assert_eq!(next_text().await.0, "/what");
             assert_eq!(next_text().await.0, VERB_HELP);
             commands
                 .send(RuntimeCommand::Shutdown)

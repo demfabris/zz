@@ -17,9 +17,15 @@ const TASK_ROW_LINE_HEIGHT: f32 = 16.0;
 const TASK_ICON_SIZE: f32 = 13.0;
 const TASK_ICON_OPTICAL_DROP: f32 = 0.5;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrayPanel {
+    Plan,
+    Tasks,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TaskTrayAction {
-    Toggle,
+    Toggle(TrayPanel),
     Stop(String),
     Reveal(String),
 }
@@ -37,15 +43,24 @@ pub fn task_tray_label(count: usize) -> String {
     format!("{count} running")
 }
 
+pub fn plan_chip_label(source: &str) -> Option<(String, Option<String>)> {
+    let (done, total, current) = super::plan_progress(source);
+    (total > 0).then(|| (format!("Plan {done}/{total}"), current.map(str::to_owned)))
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn task_tray(
     id: &str,
+    plan: Option<&str>,
     tasks: &[AgentTaskWire],
-    expanded: bool,
+    open: Option<TrayPanel>,
     enabled: bool,
+    phase: f32,
     on_action: impl Fn(TaskTrayAction, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Option<Div> {
-    if tasks.is_empty() {
+    let plan = plan.and_then(|source| plan_chip_label(source).map(|label| (source, label)));
+    if tasks.is_empty() && plan.is_none() {
         return None;
     }
     let on_action: Rc<dyn Fn(TaskTrayAction, &mut Window, &mut App)> = Rc::new(on_action);
@@ -105,39 +120,112 @@ pub fn task_tray(
                     }),
             )
     });
+    let plan_toggle = Rc::clone(&on_action);
+    let panel = match open {
+        Some(TrayPanel::Tasks) if !tasks.is_empty() => Some(v_flex().children(rows)),
+        Some(TrayPanel::Plan) => plan.as_ref().map(|(source, _)| {
+            v_flex()
+                .px_2()
+                .py_1()
+                .child(super::render_plan_items(source, cx))
+        }),
+        _ => None,
+    };
+    let plan_chip = plan.map(|(_, (label, current))| {
+        let open = open == Some(TrayPanel::Plan);
+        h_flex()
+            .id(SharedString::from(format!("{id}-plan")))
+            .debug_selector(|| "agent-plan-chip".to_owned())
+            .min_w_0()
+            .h(px(24.0))
+            .px_2()
+            .gap_1p5()
+            .rounded(cx.theme().radius)
+            .cursor_pointer()
+            .text_size(crate::rems_from_px(TASK_ROW_FONT_SIZE))
+            .line_height(px(TASK_ROW_LINE_HEIGHT))
+            .text_color(cx.theme().foreground)
+            .hover(|chip| chip.bg(cx.theme().background.washed(2)))
+            .when(open, |chip| chip.bg(cx.theme().background.washed(2)))
+            .child(
+                div()
+                    .flex_none()
+                    .relative()
+                    .top(px(TASK_ICON_OPTICAL_DROP))
+                    .child(Icon::new(IconName::CircleCheck).size(px(TASK_ROW_FONT_SIZE))),
+            )
+            .child(div().flex_none().child(label))
+            .when_some(current, |chip, current| {
+                chip.child(
+                    div()
+                        .min_w_0()
+                        .overflow_hidden()
+                        .text_ellipsis()
+                        .whitespace_nowrap()
+                        .text_color(cx.theme().foreground.muted())
+                        .child(current),
+                )
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .relative()
+                    .top(px(TASK_ICON_OPTICAL_DROP))
+                    .text_color(cx.theme().foreground.muted())
+                    .child(
+                        Icon::new(if open {
+                            IconName::ChevronDown
+                        } else {
+                            IconName::ChevronUp
+                        })
+                        .size(px(TASK_ROW_FONT_SIZE)),
+                    ),
+            )
+            .on_click(move |_, window, cx| {
+                plan_toggle(TaskTrayAction::Toggle(TrayPanel::Plan), window, cx);
+                cx.stop_propagation();
+            })
+    });
+    let tasks_open = open == Some(TrayPanel::Tasks);
+    let tasks_chip = (!tasks.is_empty()).then(|| {
+        agent_chrome_button(SharedString::from(format!("{id}-tasks")))
+            .debug_selector(|| "agent-task-tray".to_owned())
+            .flex_none()
+            .icon(super::presentation::spinner(phase))
+            .label(task_tray_label(tasks.len()))
+            .tooltip(if tasks_open {
+                "Hide background tasks"
+            } else {
+                "Show background tasks"
+            })
+            .text_color(cx.theme().foreground.muted())
+            .on_click(move |_, window, cx| {
+                toggle(TaskTrayAction::Toggle(TrayPanel::Tasks), window, cx);
+                cx.stop_propagation();
+            })
+    });
     Some(
         v_flex()
             .w_full()
             .gap_1()
-            .when(expanded, |tray| {
+            .when_some(panel, |tray, panel| {
                 tray.child(
-                    v_flex()
+                    panel
                         .w_full()
                         .p_1()
                         .rounded(cx.theme().radius)
                         .border_1()
                         .border_color(cx.theme().border())
-                        .bg(cx.theme().background.raised(1).opaque())
-                        .children(rows),
+                        .bg(cx.theme().background.raised(1).opaque()),
                 )
             })
             .child(
-                h_flex().w_full().justify_end().child(
-                    agent_chrome_button(SharedString::from(format!("{id}-tasks")))
-                        .debug_selector(|| "agent-task-tray".to_owned())
-                        .icon(IconName::Loader)
-                        .label(task_tray_label(tasks.len()))
-                        .tooltip(if expanded {
-                            "Hide background tasks"
-                        } else {
-                            "Show background tasks"
-                        })
-                        .text_color(cx.theme().foreground.muted())
-                        .on_click(move |_, window, cx| {
-                            toggle(TaskTrayAction::Toggle, window, cx);
-                            cx.stop_propagation();
-                        }),
-                ),
+                h_flex()
+                    .w_full()
+                    .gap_2()
+                    .justify_between()
+                    .child(div().min_w_0().children(plan_chip))
+                    .children(tasks_chip),
             ),
     )
 }

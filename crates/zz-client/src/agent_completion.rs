@@ -9,6 +9,43 @@ pub struct AgentCommand {
     pub input_hint: Option<String>,
 }
 
+const ZZ_COMMAND_DESCRIPTIONS: [(&str, &str, Option<&str>); 5] = [
+    (
+        "btw",
+        "Ask on the side without adding to the conversation",
+        Some("question"),
+    ),
+    ("side", "Same as /btw", Some("question")),
+    ("steer", "Redirect the running turn", Some("text")),
+    ("fork", "Continue in a copy of this conversation", None),
+    (
+        "rewind",
+        "Continue from before your last n prompts; files stay as they are",
+        Some("n or prompt id"),
+    ),
+];
+
+pub fn pane_commands(vendor: &[AgentCommand], verbs: bool) -> Vec<AgentCommand> {
+    if !verbs {
+        return vendor.to_vec();
+    }
+    let own = ZZ_COMMAND_DESCRIPTIONS
+        .iter()
+        .map(|(name, description, input_hint)| AgentCommand {
+            name: (*name).to_owned(),
+            description: (*description).to_owned(),
+            input_hint: input_hint.map(str::to_owned),
+        });
+    vendor
+        .iter()
+        .filter(|command| {
+            !zz_protocol::agent_stream::AGENT_VERBS.contains(&bare_command_name(&command.name))
+        })
+        .cloned()
+        .chain(own)
+        .collect()
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandCompletion {
     pub command: AgentCommand,
@@ -175,6 +212,27 @@ mod tests {
         assert!(completion_query("$rev", 4).is_none());
         assert!(completion_query("https://zed.dev", 15).is_none());
         assert!(completion_query("/review branch", 14).is_none());
+    }
+
+    #[test]
+    fn zz_commands_replace_the_vendor_commands_they_intercept() {
+        let vendor = [command("review"), command("btw")];
+        let names = |commands: Vec<AgentCommand>| {
+            commands
+                .into_iter()
+                .map(|command| (command.name, command.description))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(names(pane_commands(&vendor, false)).len(), 2);
+        let merged = names(pane_commands(&vendor, true));
+        assert_eq!(merged.len(), 6);
+        assert!(merged.iter().any(|(name, description)| {
+            name == "btw" && description.starts_with("Ask on the side")
+        }));
+        assert_eq!(
+            active_command_hint("/rewind ", &pane_commands(&[], true)),
+            Some("Argument · n or prompt id".to_owned())
+        );
     }
 
     #[test]

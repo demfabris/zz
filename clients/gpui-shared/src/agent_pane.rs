@@ -14,7 +14,7 @@ use gpui::{
 use serde_json::Value;
 use zz_client::agent_completion::{
     AgentCommand, CommandCompletion, active_command_hint, bare_command_name, completion_query,
-    completion_score, meaningful_command_description, ranked_completions,
+    completion_score, meaningful_command_description, pane_commands, ranked_completions,
 };
 use zz_client::agent_config::{
     AgentCatalogCache, AgentSettingsApply, AgentSettingsSelection, config_option_models,
@@ -33,10 +33,10 @@ use zz_ui::{
     ActiveTheme as _, Colorize as _, Disableable as _, ElementExt as _, IconName, Sizable as _,
     StyledExt as _,
     agent::{
-        AgentEntry, AgentMarkdown, AgentTimeline, AgentTimelineStore, AgentToolEntry,
-        AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText, COMPOSER_ATTACHMENT,
-        MarkdownSlot, TimelineRow, TimelineStick, agent_attachment_thumbnail,
-        agent_jump_to_bottom_button, agent_pane_header,
+        AgentEntry, AgentMarkdown, AgentPaneStatus, AgentTimeline, AgentTimelineStore,
+        AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText,
+        COMPOSER_ATTACHMENT, MarkdownSlot, TimelineRow, TimelineStick, agent_attachment_thumbnail,
+        agent_jump_to_bottom_button, agent_pane_header, agent_status_pill,
         composer::{AgentComposer, COMPOSER_OUTER_PADDING},
         controls::{
             AgentControlChoice, AgentControlSelection, ComposerAction, agent_chrome_button,
@@ -48,8 +48,9 @@ use zz_ui::{
             empty_state, error_card, permission_card, permission_option, welcome_state,
         },
         question::{QuestionCardAction, QuestionCardState, QuestionCardStep},
-        tasks::{TaskTrayAction, task_tray},
+        tasks::{TaskTrayAction, TrayPanel, task_tray},
         title::{agent_thread_title_editor, agent_title_is_editing},
+        tool_output_text,
     },
     button::{Button, ButtonVariants as _},
     input::{IndentInline, InputEvent, InputState, MoveDown, MoveUp},
@@ -94,7 +95,7 @@ pub(super) struct AgentPane {
     permission_selected: usize,
     permission_answered: HashSet<u64>,
     question: Option<QuestionCardState>,
-    tasks_expanded: bool,
+    tray_open: Option<TrayPanel>,
     usage: Option<(u64, u64)>,
     history_open: bool,
     history_compact: bool,
@@ -282,7 +283,7 @@ impl AgentPane {
             permission_selected: 0,
             permission_answered: HashSet::new(),
             question: None,
-            tasks_expanded: false,
+            tray_open: None,
             usage: None,
             history_open: false,
             history_compact: true,
@@ -382,7 +383,14 @@ impl AgentPane {
         let input = self.input.read(cx);
         let value = input.value().to_string();
         let cursor = input.cursor();
-        let commands = self.connection.read(cx).agent_commands(self.pane);
+        let commands: Arc<[AgentCommand]> = {
+            let connection = self.connection.read(cx);
+            pane_commands(
+                &connection.agent_commands(self.pane),
+                connection.agent_verbs_supported(self.pane),
+            )
+            .into()
+        };
         let input_changed = value != self.last_input || cursor != self.last_cursor;
         if !input_changed && self.commands == commands {
             return false;
@@ -984,7 +992,7 @@ impl AgentPane {
             for entry in &self.transcript.entries {
                 match entry {
                     AgentEntry::User { id, markdown, .. }
-                    | AgentEntry::Assistant { id, markdown }
+                    | AgentEntry::Assistant { id, markdown, .. }
                     | AgentEntry::Reasoning { id, markdown, .. }
                     | AgentEntry::Plan { id, markdown } => {
                         timeline.synchronize_markdown(
@@ -994,13 +1002,7 @@ impl AgentPane {
                             cx,
                         );
                     }
-                    AgentEntry::Tool(tool) => timeline.synchronize_tool_content(
-                        tool.id,
-                        tool.location.clone(),
-                        tool.input.clone(),
-                        tool.output.clone(),
-                        cx,
-                    ),
+                    AgentEntry::Tool(_) => {}
                 }
             }
         });
@@ -2147,9 +2149,82 @@ impl AgentPane {
         true
     }
 
+    fn render_status(
+        &self,
+        state: &zz_protocol::AgentPaneWire,
+        connected: bool,
+        writable: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        let status = if connected {
+            match state.phase {
+                AgentConnectionPhase::Running => AgentPaneStatus::Running,
+                AgentConnectionPhase::AwaitingPermission => AgentPaneStatus::Waiting,
+                AgentConnectionPhase::Failed { .. } => AgentPaneStatus::Exited,
+                AgentConnectionPhase::Starting | AgentConnectionPhase::Ready => return None,
+            }
+        } else {
+            AgentPaneStatus::Offline
+        };
+        let phase = if status == AgentPaneStatus::Running {
+            zz_ui::agent::presentation::spinner_phase(cx.entity_id(), cx)
+        } else {
+            0.0
+        };
+        let restart = (status == AgentPaneStatus::Exited && writable && !self.lifecycle_pending)
+            .then(|| {
+                let entity = cx.entity();
+                Rc::new(move |_: &mut Window, cx: &mut App| {
+                    entity.update(cx, |this, cx| this.lifecycle_command(None, cx));
+                }) as Rc<dyn Fn(&mut Window, &mut App)>
+            });
+        Some(
+            agent_status_pill(
+                ("web-agent-status", self.pane.0),
+                status,
+                phase,
+                restart,
+                cx,
+            )
+            .into_any_element(),
+        )
+    }
+
+    fn open_output(&self, tool: &AgentToolEntry, cx: &mut Context<Self>) {
+        let cwd = self.descriptor.cwd.clone().unwrap_or_default();
+        let Some(args) = zz_client::agent_output::output_pane_args(
+            self.pane,
+            &cwd,
+            &tool.label,
+            tool.exit_code,
+            &tool_output_text(tool),
+        ) else {
+            return;
+        };
+        self.connection.update(cx, |connection, cx| {
+            connection.command("split-window", args, cx);
+        });
+    }
+
+    fn current_plan(&self, running: bool) -> Option<String> {
+        let source = self
+            .transcript
+            .entries
+            .iter()
+            .rev()
+            .find_map(|entry| match entry {
+                AgentEntry::Plan { markdown, .. } => Some(markdown.full_text()),
+                _ => None,
+            })?;
+        let (done, total, _) = zz_ui::agent::plan_progress(&source);
+        (total > 0 && (done < total || running)).then_some(source)
+    }
+
     fn task_action(&mut self, action: TaskTrayAction, cx: &mut Context<Self>) {
         match action {
-            TaskTrayAction::Toggle => self.tasks_expanded = !self.tasks_expanded,
+            TaskTrayAction::Toggle(panel) => {
+                self.tray_open = (self.tray_open != Some(panel)).then_some(panel);
+            }
             TaskTrayAction::Stop(task_id) => {
                 let pane = self.pane;
                 self.connection.update(cx, |connection, cx| {
@@ -2440,8 +2515,8 @@ impl Render for AgentPane {
             self.permission_selected = 0;
         }
         self.synchronize_question_card(permissions.first(), window, cx);
-        if state.tasks.is_empty() {
-            self.tasks_expanded = false;
+        if state.tasks.is_empty() && self.tray_open == Some(TrayPanel::Tasks) {
+            self.tray_open = None;
         }
         self.stick.set_bottom_padding(COMPOSER_OUTER_PADDING);
         self.drive_stick(window, cx);
@@ -2506,13 +2581,21 @@ impl Render for AgentPane {
                     .into_any_element(),
             );
         }
+        let plan = self.current_plan(running);
         let entity = cx.entity();
+        let phase = if state.tasks.is_empty() {
+            0.0
+        } else {
+            zz_ui::agent::presentation::spinner_phase(entity.entity_id(), cx)
+        };
         prefix.extend(
             task_tray(
                 &format!("web-agent-{}", self.pane.0),
+                plan.as_deref(),
                 &state.tasks,
-                self.tasks_expanded,
+                self.tray_open,
                 writable,
+                phase,
                 move |action, _, cx| {
                     entity.update(cx, |this, cx| this.task_action(action, cx));
                 },
@@ -2774,7 +2857,7 @@ impl Render for AgentPane {
                     }
                 }
             } else {
-                "The ACP agent is offline.".to_owned()
+                "The agent is offline.".to_owned()
             };
             empty_state(
                 empty_message,
@@ -2793,7 +2876,11 @@ impl Render for AgentPane {
             self.timeline.clone(),
         )
         .active_turn(running)
-        .bottom_padding(COMPOSER_OUTER_PADDING);
+        .bottom_padding(COMPOSER_OUTER_PADDING)
+        .open_output({
+            let entity = cx.entity();
+            move |tool, _, cx| entity.update(cx, |this, cx| this.open_output(tool, cx))
+        });
         let timeline = if self.connection.read(cx).agent_verbs_supported(pane) {
             let rewind_view = cx.entity();
             timeline.rewind(
@@ -2833,6 +2920,7 @@ impl Render for AgentPane {
                     .flat_map(|session| &session.windows)
                     .any(|window| window.active_pane == self.pane),
                 header_controls,
+                self.render_status(&state, connected, writable, cx),
                 zz_ui::h_flex()
                     .gap(px(zz_ui::CHROME_GAP))
                     .children(
@@ -3224,9 +3312,18 @@ fn ui_entry_with_markdown(
             images: images.clone().into(),
             rewind_id: entry.rewind_id().map(gpui::SharedString::from),
         },
-        AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
+        AgentThreadEntry::Assistant {
+            id,
+            markdown,
+            aside,
+            ..
+        } => AgentEntry::Assistant {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
+            aside: aside.map(|aside| zz_ui::agent::AgentAside {
+                side: aside.side,
+                reply_to: aside.reply_to,
+            }),
         },
         AgentThreadEntry::Reasoning {
             id,
@@ -3248,6 +3345,7 @@ fn ui_entry_with_markdown(
             input,
             output,
             default_expanded,
+            exit_code,
             ..
         } => {
             tool_payloads.retain(|(entry_id, slot), _| {
@@ -3293,6 +3391,7 @@ fn ui_entry_with_markdown(
                     .into(),
                 default_expanded: *default_expanded,
                 parent,
+                exit_code: *exit_code,
             })
         }
         AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
@@ -3537,8 +3636,8 @@ mod tests {
         assert_eq!(parents, [None, None, Some(agent)]);
         assert_eq!(
             fold_timeline_rows(&transcript.entries).entry_to_row,
-            [0, 1, 0],
-            "the step joins its agent's row past the reply"
+            [0, 0, 0],
+            "the agent, the message and the step share the turn's row"
         );
     }
 
@@ -3584,8 +3683,8 @@ mod tests {
         );
         assert_eq!(
             fold_timeline_rows(&transcript.entries).entry_to_row,
-            [1, 0, 1],
-            "the step moves past the reply into its agent's row"
+            [0, 0, 0],
+            "a step that came before its agent still lands in the turn's row"
         );
     }
 
@@ -3595,7 +3694,7 @@ mod tests {
         let mut transcript = Transcript::default();
         transcript.apply(
             1,
-            &json!({"item":"sessionSwitched","replay":[prompt("u-1", "first"), prompt("zz-command-1-in", "//btw why")]}),
+            &json!({"item":"sessionSwitched","replay":[prompt("u-1", "first"), prompt("zz-command-1-in", "/btw why")]}),
         );
         transcript.local_prompt("second", &[]);
         transcript.apply(

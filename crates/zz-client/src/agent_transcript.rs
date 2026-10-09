@@ -68,6 +68,8 @@ pub enum AgentThreadEntry<I> {
     Assistant {
         id: u64,
         markdown: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        aside: Option<AgentAside>,
     },
     Reasoning {
         id: u64,
@@ -85,11 +87,19 @@ pub enum AgentThreadEntry<I> {
         input: Option<ToolPayload>,
         output: Vec<ToolPayload>,
         default_expanded: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i64>,
     },
     Plan {
         id: u64,
         markdown: String,
     },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct AgentAside {
+    pub side: bool,
+    pub reply_to: Option<u64>,
 }
 
 impl<I> AgentThreadEntry<I> {
@@ -116,11 +126,11 @@ impl<I> AgentThreadEntry<I> {
 }
 
 pub fn is_zz_command(text: &str) -> bool {
-    text.trim_start().starts_with("//")
+    zz_protocol::agent_stream::agent_verb(text).is_some()
 }
 
 pub fn rewind_command(message_id: &str) -> String {
-    format!("//rewind {message_id}")
+    format!("/rewind {message_id}")
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize)]
@@ -366,7 +376,40 @@ impl<I> AgentTranscript<I> {
             return;
         }
         let message_id = chunk.message_id.map(|message_id| message_id.0.to_string());
+        let aside = (role == StreamRole::Assistant)
+            .then(|| self.aside(chunk.meta.as_ref()))
+            .flatten();
         self.append_stream_content(role, message_id, &markdown, images);
+        if let Some(aside) = aside
+            && let Some((_, entry_id)) = self.active_stream.take()
+            && let Some(index) = self.entry_index(entry_id)
+            && let AgentThreadEntry::Assistant { aside: slot, .. } = &mut self.entries[index]
+            && slot.is_none()
+        {
+            *slot = Some(aside);
+            self.touch_entry(index);
+        }
+    }
+
+    fn aside(
+        &self,
+        meta: Option<&serde_json::Map<String, serde_json::Value>>,
+    ) -> Option<AgentAside> {
+        let zz = meta?.get("zz")?;
+        let side = zz.get("side").and_then(serde_json::Value::as_bool) == Some(true);
+        let notice = zz.get("notice").and_then(serde_json::Value::as_bool) == Some(true);
+        if !side && !notice {
+            return None;
+        }
+        let reply_to = zz
+            .get("reply")
+            .and_then(serde_json::Value::as_str)
+            .and_then(|reply| {
+                self.message_entries
+                    .get(&(StreamRole::User, reply.to_owned()))
+                    .copied()
+            });
+        Some(AgentAside { side, reply_to })
     }
 
     fn append_stream_content(
@@ -434,6 +477,7 @@ impl<I> AgentTranscript<I> {
             StreamRole::Assistant => AgentThreadEntry::Assistant {
                 id,
                 markdown: String::new(),
+                aside: None,
             },
             StreamRole::Reasoning => AgentThreadEntry::Reasoning {
                 id,
@@ -463,6 +507,7 @@ impl<I> AgentTranscript<I> {
         let location = tool_location(&tool);
         let input = tool_input(&tool);
         let output = tool_output(&tool);
+        let exit = exit_code(tool.meta.as_ref());
         if let Some(entry_id) = self.tool_entries.get(&protocol_id).copied()
             && let Some(index) = self.entry_index(entry_id)
             && let AgentThreadEntry::Tool {
@@ -472,6 +517,7 @@ impl<I> AgentTranscript<I> {
                 location: entry_location,
                 input: entry_input,
                 output: entry_output,
+                exit_code: entry_exit,
                 ..
             } = &mut self.entries[index]
         {
@@ -481,6 +527,9 @@ impl<I> AgentTranscript<I> {
             *entry_location = location;
             *entry_input = input;
             *entry_output = output;
+            if exit.is_some() {
+                *entry_exit = exit;
+            }
             self.touch_entry(index);
             return;
         }
@@ -505,6 +554,7 @@ impl<I> AgentTranscript<I> {
             input,
             output,
             default_expanded: matches!(tool.status, ToolCallStatus::Failed),
+            exit_code: exit,
         });
         for child in self
             .awaiting_parent
@@ -530,6 +580,7 @@ impl<I> AgentTranscript<I> {
             return;
         };
         let had_structured_output = self.structured_tool_outputs.contains(&protocol_id);
+        let exit = exit_code(update.meta.as_ref());
         let AgentThreadEntry::Tool {
             kind,
             status,
@@ -537,12 +588,17 @@ impl<I> AgentTranscript<I> {
             location,
             input,
             output,
+            exit_code: entry_exit,
             ..
         } = &mut self.entries[index]
         else {
             return;
         };
         let mut changed = false;
+        if exit.is_some() && *entry_exit != exit {
+            *entry_exit = exit;
+            changed = true;
+        }
         if let Some(next) = update.fields.kind
             && reclassifies_tool(*kind, next, carries_shape)
         {
@@ -812,6 +868,10 @@ fn map_tool_kind(kind: ToolKind) -> AgentToolKindModel {
     }
 }
 
+fn exit_code(meta: Option<&serde_json::Map<String, serde_json::Value>>) -> Option<i64> {
+    meta?.get("zz")?.get("exitCode")?.as_i64()
+}
+
 fn map_tool_status(status: ToolCallStatus) -> AgentToolStatusModel {
     match status {
         ToolCallStatus::InProgress => AgentToolStatusModel::Running,
@@ -1061,6 +1121,62 @@ mod tests {
     }
 
     #[test]
+    fn zz_replies_attach_to_their_command_and_failed_tools_keep_the_exit_code() {
+        let mut transcript = AgentTranscript::<()>::new(|_, _| None);
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "user_message_chunk", "messageId": "zz-command-1-in",
+            "content": { "type": "text", "text": "/btw why" },
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk", "messageId": "zz-command-1-out",
+            "content": { "type": "text", "text": "because" },
+            "_meta": { "zz": { "side": true, "reply": "zz-command-1-in" } },
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "agent_message_chunk", "messageId": "zz-notice-1",
+            "content": { "type": "text", "text": "Forked." },
+            "_meta": { "zz": { "notice": true } },
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call", "toolCallId": "bash-1", "title": "false", "kind": "execute",
+        })));
+        transcript.apply_update(update(serde_json::json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "bash-1", "status": "failed",
+            "_meta": { "zz": { "exitCode": 2 } },
+        })));
+        let prompt = transcript.entries()[0].id();
+        let asides = transcript
+            .entries()
+            .iter()
+            .filter_map(|entry| match entry {
+                AgentThreadEntry::Assistant { aside, .. } => Some(*aside),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            asides,
+            [
+                Some(AgentAside {
+                    side: true,
+                    reply_to: Some(prompt)
+                }),
+                Some(AgentAside {
+                    side: false,
+                    reply_to: None
+                }),
+            ]
+        );
+        assert!(matches!(
+            transcript.entries().last(),
+            Some(AgentThreadEntry::Tool {
+                status: AgentToolStatusModel::Failed,
+                exit_code: Some(2),
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn prompt_rows_keep_the_message_id_a_rewind_targets() {
         let mut transcript = AgentTranscript::<()>::new(|_, _| None);
         let prompt = |id: &str, text: &str| {
@@ -1070,7 +1186,7 @@ mod tests {
             }))
         };
         transcript.apply_update(prompt("u-1", "first"));
-        transcript.apply_update(prompt("zz-command-1-in", "//btw what now"));
+        transcript.apply_update(prompt("zz-command-1-in", "/btw what now"));
         transcript.apply_update(prompt("u-2", "/compact"));
         transcript.finish_replay();
         transcript.begin_prompt("second".to_owned(), Vec::new());
@@ -1081,7 +1197,7 @@ mod tests {
             Some(vec![3]),
             "the echo names the row it echoes"
         );
-        transcript.apply_update(prompt("zz-command-2-in", "//steer faster"));
+        transcript.apply_update(prompt("zz-command-2-in", "/steer faster"));
         transcript.apply_update(prompt("u-3", "second"));
 
         let message_ids = transcript
@@ -1107,8 +1223,9 @@ mod tests {
             .map(AgentThreadEntry::rewind_id)
             .collect::<Vec<_>>();
         assert_eq!(rewind_ids, [Some("u-1"), None, None, Some("u-3")]);
-        assert_eq!(rewind_command("u-3"), "//rewind u-3");
-        assert!(is_zz_command("  //rewind u-3"));
+        assert_eq!(rewind_command("u-3"), "/rewind u-3");
+        assert!(is_zz_command("  /rewind u-3"));
+        assert!(!is_zz_command("//rewind u-3"));
         assert!(!is_zz_command("/compact"));
     }
 

@@ -4563,7 +4563,7 @@ mod tests {
                 let thread = controller.panes.get_mut(&pane).expect("pane");
                 thread.session_capabilities.verbs = true;
                 controller
-                    .prompt(pane, "//rewind u-1", Vec::new(), cx)
+                    .prompt(pane, "/rewind u-1", Vec::new(), cx)
                     .expect("the command is sent");
                 let thread = &controller.panes[&pane];
                 assert_eq!(thread.connection, AgentConnectionState::Ready);
@@ -4575,13 +4575,13 @@ mod tests {
                     .prompt(pane, "first", Vec::new(), cx)
                     .expect("first prompt");
                 controller
-                    .prompt(pane, "//steer faster", Vec::new(), cx)
+                    .prompt(pane, "/steer faster", Vec::new(), cx)
                     .expect("a command goes out mid-turn");
                 assert_eq!(controller.queued_count(pane), 0);
                 let thread = controller.panes.get_mut(&pane).expect("pane");
                 thread.session_capabilities.verbs = false;
                 controller
-                    .prompt(pane, "//steer later", Vec::new(), cx)
+                    .prompt(pane, "/steer later", Vec::new(), cx)
                     .expect("a plain prompt is queued");
                 assert_eq!(controller.queued_count(pane), 1);
             });
@@ -4595,7 +4595,7 @@ mod tests {
                     _ => "",
                 })
                 .collect::<Vec<_>>(),
-            ["//rewind u-1", "first", "//steer faster", "//steer later"]
+            ["/rewind u-1", "first", "/steer faster", "/steer later"]
         );
     }
 

@@ -16,6 +16,7 @@ use async_channel::Sender;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use parking_lot::Mutex;
 use serde_json::{Map, Value, json};
+use zz_protocol::agent_stream::agent_verb;
 use zz_protocol::{
     AgentAutoApprove, AgentProvider, AgentQuestionAnswer, AgentTaskWire, MAX_AGENT_TASKS,
 };
@@ -44,7 +45,7 @@ const SESSION_PAGE: u64 = 50;
 const MAX_CHILD_THREADS: usize = 16;
 const AGENT_NAME: &str = "Codex";
 const AGENT_KEY: &str = "codex";
-const VERB_HELP: &str = "zz commands: `//btw <question>` (or `//side`) asks Codex in a throwaway copy of the thread, `//steer <text>` redirects the running turn, `//fork` continues in a copy of this conversation, and `//rewind [n]` continues from before your last n prompts (1 by default) without changing files. `/compact` and `/review` run Codex's own compaction and review.";
+const VERB_HELP: &str = "zz commands: `/btw <question>` (or `/side`) asks Codex in a throwaway copy of the thread, `/steer <text>` redirects the running turn, `/fork` continues in a copy of this conversation, and `/rewind [n]` continues from before your last n prompts (1 by default) without changing files. `/compact` and `/review` run Codex's own compaction and review.";
 const SIDE_PREFIX: &str = "Answer this side question briefly from what you already know. Do not run commands, edit files, or call tools.\n\n";
 const MODES: [(&str, &str, &str); 3] = [
     (
@@ -130,6 +131,7 @@ pub(crate) async fn run_codex_runtime(
         deferred_cancels: HashSet::new(),
         settings: Settings::default(),
         notices: 0,
+        reply: None,
         sides: HashMap::new(),
         tasks: Vec::new(),
         loading: None,
@@ -204,6 +206,7 @@ enum Outgoing {
     SideFork {
         question: String,
         message_id: String,
+        reply: String,
     },
     SideTurn {
         thread: String,
@@ -404,6 +407,7 @@ struct Runtime {
     deferred_cancels: HashSet<u64>,
     settings: Settings,
     notices: u64,
+    reply: Option<String>,
     sides: HashMap<String, Side>,
     tasks: Vec<AgentTaskWire>,
     loading: Option<Loading>,
@@ -418,6 +422,7 @@ struct Loading {
 
 struct Side {
     message_id: String,
+    reply: String,
     text: String,
     streamed: bool,
 }
@@ -446,6 +451,15 @@ impl Runtime {
     }
 
     async fn notice(&mut self, text: &str) -> Result<(), String> {
+        let reply = self.reply.clone();
+        self.notice_to(text, reply.as_deref()).await
+    }
+
+    async fn notice_to(&mut self, text: &str, reply: Option<&str>) -> Result<(), String> {
+        let mut zz = json!({ "notice": true });
+        if let Some(reply) = reply {
+            zz["reply"] = json!(reply);
+        }
         self.notices += 1;
         let id = format!(
             "zz-notice-{}-{:08x}",
@@ -457,7 +471,7 @@ impl Runtime {
                 "sessionUpdate": "agent_message_chunk",
                 "messageId": id,
                 "content": { "type": "text", "text": text },
-                "_meta": { "zz": { "notice": true } },
+                "_meta": { "zz": zz },
             }),
             true,
         )
@@ -1103,20 +1117,29 @@ impl Runtime {
     }
 
     async fn verb(&mut self, text: &str) -> Result<(), String> {
-        let line = text.trim_start().strip_prefix("//").unwrap_or(text).trim();
-        let (name, rest) = line
-            .split_once(char::is_whitespace)
-            .map_or((line, ""), |(name, rest)| (name, rest.trim()));
+        let (name, rest) = agent_verb(text).unwrap_or(("", ""));
         self.notices += 1;
+        let echo = format!(
+            "zz-command-{}-{:08x}",
+            self.notices,
+            random_u64() & 0xffff_ffff
+        );
         self.update(
             json!({
                 "sessionUpdate": "user_message_chunk",
-                "messageId": format!("zz-command-{}-{:08x}", self.notices, random_u64() & 0xffff_ffff),
+                "messageId": echo,
                 "content": { "type": "text", "text": text.trim() },
             }),
             true,
         )
         .await?;
+        self.reply = Some(echo);
+        let answered = self.answer_verb(name, rest).await;
+        self.reply = None;
+        answered
+    }
+
+    async fn answer_verb(&mut self, name: &str, rest: &str) -> Result<(), String> {
         let Some(thread) = self.thread_id() else {
             return self.notice("Codex is not running.").await;
         };
@@ -1170,6 +1193,7 @@ impl Runtime {
                     Outgoing::SideFork {
                         question: rest.to_owned(),
                         message_id,
+                        reply: self.reply.clone().unwrap_or_default(),
                     },
                 );
                 Ok(())
@@ -1354,16 +1378,20 @@ impl Runtime {
                 Outgoing::SideFork {
                     question,
                     message_id,
+                    reply,
                 },
                 Ok(response),
             ) => {
                 let Some(side) = response["thread"]["id"].as_str().map(str::to_owned) else {
-                    return self.notice("Codex did not open the side thread.").await;
+                    return self
+                        .notice_to("Codex did not open the side thread.", Some(&reply))
+                        .await;
                 };
                 self.sides.insert(
                     side.clone(),
                     Side {
                         message_id,
+                        reply,
                         text: String::new(),
                         streamed: false,
                     },
@@ -1380,14 +1408,17 @@ impl Runtime {
                 );
                 Ok(())
             }
-            (Outgoing::SideFork { .. }, Err(error)) => {
-                self.notice(&format!("The side question failed: {error}"))
+            (Outgoing::SideFork { reply, .. }, Err(error)) => {
+                self.notice_to(&format!("The side question failed: {error}"), Some(&reply))
                     .await
             }
             (Outgoing::SideTurn { thread }, Err(error)) => {
-                self.sides.remove(&thread);
-                self.notice(&format!("The side question failed: {error}"))
-                    .await
+                let reply = self.sides.remove(&thread).map(|side| side.reply);
+                self.notice_to(
+                    &format!("The side question failed: {error}"),
+                    reply.as_deref(),
+                )
+                .await
             }
             (Outgoing::Terminals, Ok(response)) => {
                 let tasks = response["data"]
@@ -1711,7 +1742,7 @@ impl Runtime {
                             "sessionUpdate": "agent_message_chunk",
                             "messageId": side.message_id,
                             "content": { "type": "text", "text": answer },
-                            "_meta": { "zz": { "side": true } },
+                            "_meta": { "zz": { "side": true, "reply": side.reply } },
                         }),
                         true,
                     )
@@ -2391,7 +2422,7 @@ done
                     ..Default::default()
                 },
             };
-            commands.send(verb("//rewind gone")).await.expect("verb");
+            commands.send(verb("/rewind gone")).await.expect("verb");
             let AgentStreamPayload::Update { update } = until(&events, |payload| {
                 matches!(payload, AgentStreamPayload::Update { update } if update["_meta"]["zz"]["notice"] == true)
             })
@@ -2404,7 +2435,7 @@ done
                 "That prompt is no longer in this conversation."
             );
             commands
-                .send(verb("//rewind zz-prompt-2-x"))
+                .send(verb("/rewind zz-prompt-2-x"))
                 .await
                 .expect("verb");
             let AgentStreamPayload::SessionSwitched { session_id, .. } =

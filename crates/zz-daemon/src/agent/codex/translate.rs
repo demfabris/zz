@@ -211,6 +211,9 @@ impl Translator {
                     "toolCallId": id,
                     "status": status,
                 });
+                if let Some(code) = item["exitCode"].as_i64() {
+                    update["_meta"] = json!({ "zz": { "exitCode": code } });
+                }
                 let streamed = self.commands.remove(&id);
                 if let Some(output) = tool_output(item)
                     .or(streamed)

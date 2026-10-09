@@ -1,6 +1,7 @@
 use std::{
     collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
+    rc::Rc,
     sync::Arc,
 };
 use zz_ui::agent::composer::COMPOSER_OUTER_PADDING;
@@ -14,10 +15,11 @@ use zz_ui::agent::controls::{context_usage_fraction, context_usage_tooltip, git_
 #[cfg(test)]
 use zz_ui::agent::presentation::MAX_RENDERED_ERROR_BYTES;
 use zz_ui::agent::presentation::{
-    empty_state, error_card, permission_card, permission_option, rendered_error, welcome_state,
+    empty_state, error_card, permission_card, permission_option, rendered_error, spinner_phase,
+    welcome_state,
 };
 use zz_ui::agent::question::{QuestionCardAction, QuestionCardState, QuestionCardStep};
-use zz_ui::agent::tasks::{TaskTrayAction, task_tray};
+use zz_ui::agent::tasks::{TaskTrayAction, TrayPanel, task_tray};
 use zz_ui::agent::title::{agent_thread_title_editor, agent_title_is_editing};
 
 use chrono::{DateTime, Datelike as _, Local, NaiveDate, Timelike as _};
@@ -28,18 +30,18 @@ use gpui::{
 };
 use zz_client::agent_completion::{
     CommandCompletion, active_command_hint, bare_command_name, completion_query, completion_score,
-    meaningful_command_description, ranked_completions,
+    meaningful_command_description, pane_commands, ranked_completions,
 };
 use zz_client::agent_transcript::rewind_command;
 use zz_protocol::{AgentDescriptor, AgentProvider, Axis, CommandInvocation, PaneId};
-#[cfg(all(test, not(target_os = "macos")))]
 use zz_ui::agent::DisclosureKind;
 use zz_ui::agent::{
-    AGENT_CONTENT_MAX_WIDTH, AgentEntry, AgentMarkdown, AgentTimeline, AgentTimelineStore,
-    AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus, AgentToolText,
-    COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow, TimelineStick,
-    agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
-    append_timeline_row, fold_timeline_rows, timeline_group_kind, timeline_parent,
+    AGENT_CONTENT_MAX_WIDTH, AgentAside, AgentEntry, AgentMarkdown, AgentPaneStatus, AgentTimeline,
+    AgentTimelineStore, AgentToolEntry, AgentToolKind, AgentToolPayload, AgentToolStatus,
+    AgentToolText, COMPOSER_ATTACHMENT, FoldedTimelineRows, MarkdownSlot, TimelineRow,
+    TimelineStick, agent_attachment_thumbnail, agent_jump_to_bottom_button, agent_pane_header,
+    agent_status_pill, append_timeline_row, fold_timeline_rows, plan_progress, timeline_group_kind,
+    timeline_parent, tool_output_text,
 };
 use zz_ui::command::palette_shortcut_hint;
 use zz_ui::{
@@ -117,6 +119,14 @@ struct TimelineModel {
     entry_to_row: Vec<usize>,
     markdown: HashMap<u64, AgentMarkdown>,
     tool_payloads: HashMap<(u64, usize), AgentToolPayload>,
+    plan: Option<u64>,
+}
+
+fn plan_entry_id(entries: &[AgentThreadEntry]) -> Option<u64> {
+    entries.iter().rev().find_map(|entry| match entry {
+        AgentThreadEntry::Plan { id, .. } => Some(*id),
+        _ => None,
+    })
 }
 
 impl TimelineModel {
@@ -141,6 +151,7 @@ impl TimelineModel {
             entry_to_row,
             markdown,
             tool_payloads,
+            plan: plan_entry_id(entries),
         }
     }
 
@@ -151,6 +162,7 @@ impl TimelineModel {
         self.entry_to_row.clear();
         self.markdown.clear();
         self.tool_payloads.clear();
+        self.plan = None;
     }
 
     fn rebuild(
@@ -280,6 +292,9 @@ impl TimelineModel {
             if !row_added && row_index < old_row_count {
                 remeasure_rows.push(row_index);
             }
+        }
+        if let Some(plan) = plan_entry_id(&entries[old_entry_count..]) {
+            self.plan = Some(plan);
         }
         self.entry_ids
             .extend(entries[old_entry_count..].iter().map(AgentThreadEntry::id));
@@ -481,7 +496,7 @@ pub(crate) struct AgentView {
     submission_error: Option<Arc<str>>,
     permission_wizard: PermissionWizard,
     question: Option<QuestionCardState>,
-    tasks_expanded: bool,
+    tray_open: Option<TrayPanel>,
     attachments: Vec<Arc<Image>>,
     completions: Arc<[CommandCompletion]>,
     completion_selected: Option<usize>,
@@ -605,7 +620,7 @@ impl AgentView {
             submission_error: None,
             permission_wizard: PermissionWizard::default(),
             question: None,
-            tasks_expanded: false,
+            tray_open: None,
             attachments: Vec::new(),
             completions: Arc::from([]),
             completion_selected: None,
@@ -676,7 +691,10 @@ impl AgentView {
         self.last_input.clone_from(&value);
         self.last_cursor = cursor;
         self.completion_dismissed = false;
-        let commands = self.pane_state.available_commands.clone();
+        let commands = pane_commands(
+            &self.pane_state.available_commands,
+            self.pane_state.session_capabilities.verbs,
+        );
         self.recompute_completions(&commands);
         cx.notify();
     }
@@ -777,7 +795,10 @@ impl AgentView {
             );
         }
         if commands_changed {
-            let commands = self.pane_state.available_commands.clone();
+            let commands = pane_commands(
+                &self.pane_state.available_commands,
+                self.pane_state.session_capabilities.verbs,
+            );
             self.recompute_completions(&commands);
         }
 
@@ -1510,7 +1531,7 @@ impl AgentView {
             AgentConnectionState::Running => format!("Waiting for {agent}’s first update…").into(),
             AgentConnectionState::Cancelling => "Cancelling the current turn…".into(),
             AgentConnectionState::Failed => "The agent could not start this session.".into(),
-            AgentConnectionState::Disconnected => "The ACP agent is offline.".into(),
+            AgentConnectionState::Disconnected => "The agent is offline.".into(),
         };
         empty_state(message, pane_is_busy(state.connection), view, cx)
     }
@@ -1797,7 +1818,9 @@ impl AgentView {
 
     fn task_action(&mut self, action: TaskTrayAction, cx: &mut Context<Self>) {
         match action {
-            TaskTrayAction::Toggle => self.tasks_expanded = !self.tasks_expanded,
+            TaskTrayAction::Toggle(panel) => {
+                self.tray_open = (self.tray_open != Some(panel)).then_some(panel);
+            }
             TaskTrayAction::Stop(task_id) => {
                 let pane = self.pane;
                 self.controller.update(cx, |controller, cx| {
@@ -1809,7 +1832,7 @@ impl AgentView {
         cx.notify();
     }
 
-    fn reveal_tool(&mut self, tool_call_id: &str, cx: &gpui::App) {
+    fn reveal_tool(&mut self, tool_call_id: &str, cx: &mut Context<Self>) {
         let Some(entry) = self.controller.read(cx).tool_entry(self.pane, tool_call_id) else {
             return;
         };
@@ -1822,21 +1845,99 @@ impl AgentView {
         else {
             return;
         };
+        if let Some(turn) = self.timeline.rows.get(row).map(TimelineRow::id) {
+            self.timeline_store.update(cx, |store, cx| {
+                store.set_expanded(turn, DisclosureKind::Turn, true, cx);
+            });
+        }
         self.stick.reveal(&self.timeline_scroll, row);
+    }
+
+    fn current_plan(&self, state: &AgentPaneState) -> Option<String> {
+        let source = self
+            .timeline
+            .markdown
+            .get(&self.timeline.plan?)?
+            .full_text();
+        let (done, total, _) = plan_progress(&source);
+        (total > 0 && (done < total || state.connection.has_active_turn())).then_some(source)
+    }
+
+    fn pane_status(state: &AgentPaneState) -> Option<AgentPaneStatus> {
+        if !state.pending_permissions.is_empty() {
+            return Some(AgentPaneStatus::Waiting);
+        }
+        match state.connection {
+            AgentConnectionState::Running => Some(AgentPaneStatus::Running),
+            AgentConnectionState::Cancelling => Some(AgentPaneStatus::Stopping),
+            AgentConnectionState::Failed => Some(AgentPaneStatus::Exited),
+            AgentConnectionState::Disconnected => Some(AgentPaneStatus::Offline),
+            AgentConnectionState::Starting
+            | AgentConnectionState::Restoring
+            | AgentConnectionState::Ready => None,
+        }
+    }
+
+    fn render_status(
+        &self,
+        state: &AgentPaneState,
+        view: &Entity<Self>,
+        cx: &mut gpui::App,
+    ) -> Option<AnyElement> {
+        let status = Self::pane_status(state)?;
+        let phase = if matches!(status, AgentPaneStatus::Running | AgentPaneStatus::Stopping) {
+            spinner_phase(view.entity_id(), cx)
+        } else {
+            0.0
+        };
+        let restart = (status == AgentPaneStatus::Exited).then(|| {
+            let controller = self.controller.clone();
+            let pane = self.pane;
+            Rc::new(move |_: &mut Window, cx: &mut gpui::App| {
+                controller.update(cx, |controller, cx| controller.retry(pane, cx));
+            }) as Rc<dyn Fn(&mut Window, &mut gpui::App)>
+        });
+        Some(
+            agent_status_pill(("agent-status", self.pane.0), status, phase, restart, cx)
+                .into_any_element(),
+        )
+    }
+
+    fn open_output(&self, tool: &AgentToolEntry, cx: &mut Context<Self>) {
+        let Some(args) = zz_client::agent_output::output_pane_args(
+            self.pane,
+            &self.pane_state.cwd,
+            &tool.label,
+            tool.exit_code,
+            &tool_output_text(tool),
+        ) else {
+            return;
+        };
+        self.mux
+            .read(cx)
+            .execute(CommandInvocation::new("split-window", args));
     }
 
     fn render_task_tray(
         &self,
         state: &AgentPaneState,
         view: &Entity<Self>,
-        cx: &gpui::App,
+        cx: &mut gpui::App,
     ) -> Option<impl IntoElement> {
+        let phase = if state.tasks.is_empty() {
+            0.0
+        } else {
+            spinner_phase(view.entity_id(), cx)
+        };
+        let plan = self.current_plan(state);
         let view = view.clone();
         task_tray(
             &format!("agent-{}", self.pane.0),
+            plan.as_deref(),
             &state.tasks,
-            self.tasks_expanded,
+            self.tray_open,
             true,
+            phase,
             move |action, _, cx| {
                 view.update(cx, |view, cx| view.task_action(action, cx));
             },
@@ -2820,7 +2921,10 @@ impl AgentView {
             self.render_directory_picker(state, view.clone(), cx)
                 .into_any_element(),
         ];
-        let command_hint = active_command_hint(&self.last_input, &state.available_commands);
+        let command_hint = active_command_hint(
+            &self.last_input,
+            &pane_commands(&state.available_commands, state.session_capabilities.verbs),
+        );
         let completions = self.render_completions(view, cx);
         zz_ui::agent::composer::AgentComposer {
             input: self.input.clone(),
@@ -2933,8 +3037,8 @@ impl Render for AgentView {
         self.permission_wizard
             .sync(&self.pane_state.pending_permissions);
         self.synchronize_question_card(window, cx);
-        if self.pane_state.tasks.is_empty() {
-            self.tasks_expanded = false;
+        if self.pane_state.tasks.is_empty() && self.tray_open == Some(TrayPanel::Tasks) {
+            self.tray_open = None;
         }
         let state = self.pane_state.clone();
         let rows = self.timeline.rows.clone();
@@ -3054,7 +3158,11 @@ impl Render for AgentView {
             self.timeline_store.clone(),
         )
         .active_turn(state.connection.has_active_turn())
-        .bottom_padding(COMPOSER_OUTER_PADDING);
+        .bottom_padding(COMPOSER_OUTER_PADDING)
+        .open_output({
+            let view = view.clone();
+            move |tool, _, cx| view.update(cx, |view, cx| view.open_output(tool, cx))
+        });
         let timeline = if state.session_capabilities.verbs {
             let rewind_view = view.clone();
             timeline.rewind(
@@ -3090,6 +3198,7 @@ impl Render for AgentView {
                     .flat_map(|session| &session.windows)
                     .any(|window| window.active_pane == self.pane),
                 header_controls,
+                self.render_status(&state, &view, cx),
                 header_actions,
                 has_timeline,
                 cx,
@@ -3219,9 +3328,18 @@ fn ui_entry_with_markdown(
             images: images.clone().into(),
             rewind_id: entry.rewind_id().map(SharedString::from),
         },
-        AgentThreadEntry::Assistant { id, markdown, .. } => AgentEntry::Assistant {
+        AgentThreadEntry::Assistant {
+            id,
+            markdown,
+            aside,
+            ..
+        } => AgentEntry::Assistant {
             id: *id,
             markdown: streaming_markdown(markdown_sources, *id, markdown),
+            aside: aside.map(|aside| AgentAside {
+                side: aside.side,
+                reply_to: aside.reply_to,
+            }),
         },
         AgentThreadEntry::Reasoning {
             id,
@@ -3243,6 +3361,7 @@ fn ui_entry_with_markdown(
             input,
             output,
             default_expanded,
+            exit_code,
             ..
         } => {
             tool_payloads.retain(|(entry_id, slot), _| {
@@ -3288,6 +3407,7 @@ fn ui_entry_with_markdown(
                     .into(),
                 default_expanded: *default_expanded,
                 parent: None,
+                exit_code: *exit_code,
             })
         }
         AgentThreadEntry::Plan { id, markdown } => AgentEntry::Plan {
@@ -3304,24 +3424,14 @@ fn synchronize_entry_store(
 ) {
     match entry {
         AgentEntry::User { id, markdown, .. }
-        | AgentEntry::Assistant { id, markdown }
+        | AgentEntry::Assistant { id, markdown, .. }
         | AgentEntry::Reasoning { id, markdown, .. }
         | AgentEntry::Plan { id, markdown } => {
             store.update(cx, |store, cx| {
                 store.synchronize_markdown(*id, MarkdownSlot::Body, markdown.clone(), cx);
             });
         }
-        AgentEntry::Tool(tool) => {
-            store.update(cx, |store, cx| {
-                store.synchronize_tool_content(
-                    tool.id,
-                    tool.location.clone(),
-                    tool.input.clone(),
-                    tool.output.clone(),
-                    cx,
-                );
-            });
-        }
+        AgentEntry::Tool(_) => {}
     }
 }
 
@@ -3990,10 +4100,8 @@ mod completion_tests {
                 cx.new(|_| AgentController::new(crate::config::AgentConfig::default()));
             let timeline_store = cx.new(|_| AgentTimelineStore::default());
             timeline_store.update(cx, |store, cx| {
-                assert!(!store.expanded(1, DisclosureKind::Tool, false));
-                assert!(!store.expanded(1, DisclosureKind::Group, false));
-                store.toggle_expanded(1, DisclosureKind::Tool, false, cx);
-                store.toggle_expanded(1, DisclosureKind::Group, false, cx);
+                assert!(!store.expanded(1, DisclosureKind::Turn, false));
+                store.toggle_expanded(1, DisclosureKind::Turn, false, cx);
                 store.markdown(1, MarkdownSlot::Body, "old session".into(), cx);
             });
             let timeline_entries = [
@@ -4006,6 +4114,7 @@ mod completion_tests {
                 AgentThreadEntry::Assistant {
                     id: 2,
                     markdown: "old response".to_owned(),
+                    aside: None,
                 },
             ];
 
@@ -4028,7 +4137,7 @@ mod completion_tests {
                 submission_error: None,
                 permission_wizard: PermissionWizard::default(),
                 question: None,
-                tasks_expanded: false,
+                tray_open: None,
                 attachments: Vec::new(),
                 completions: Arc::from([]),
                 completion_selected: None,
@@ -4073,12 +4182,7 @@ mod completion_tests {
         let timeline_store = cx.update(|_, cx| view.read(cx).timeline_store.clone());
         assert!(!cx.update(|_, cx| {
             timeline_store.update(cx, |store, _| {
-                store.expanded(1, DisclosureKind::Tool, false)
-            })
-        }));
-        assert!(!cx.update(|_, cx| {
-            timeline_store.update(cx, |store, _| {
-                store.expanded(1, DisclosureKind::Group, false)
+                store.expanded(1, DisclosureKind::Turn, false)
             })
         }));
     }
@@ -4124,7 +4228,7 @@ mod completion_tests {
                 submission_error: None,
                 permission_wizard: PermissionWizard::default(),
                 question: None,
-                tasks_expanded: false,
+                tray_open: None,
                 attachments: Vec::new(),
                 completions: vec![
                     CommandCompletion {
@@ -4423,7 +4527,10 @@ mod completion_tests {
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
-        assert!(cx.update(|_, cx| view.read(cx).tasks_expanded));
+        assert_eq!(
+            cx.update(|_, cx| view.read(cx).tray_open),
+            Some(TrayPanel::Tasks)
+        );
         let stop = cx
             .debug_bounds("agent-task-stop-0")
             .expect("an open tray lists the task");
@@ -4904,7 +5011,7 @@ mod completion_tests {
         assert_eq!(
             sent_answers(&sink),
             [crate::mux::client::AgentRequest::Prompt {
-                text: "//rewind u-1".to_owned(),
+                text: "/rewind u-1".to_owned(),
                 images: Vec::new(),
             }]
         );
@@ -5049,11 +5156,16 @@ mod tests {
             AgentThreadEntry::Assistant {
                 id: 3,
                 markdown: "meanwhile".to_owned(),
+                aside: None,
             },
         ];
         let mut revisions = vec![1, 1, 1];
         let mut timeline = TimelineModel::new(&entries, &revisions, &parents);
-        assert_eq!(timeline.entry_to_row, [0, 0, 1]);
+        assert_eq!(
+            timeline.entry_to_row,
+            [0, 0, 0],
+            "the message joins the turn"
+        );
 
         entries.push(thread_tool(4, "Read b.rs", AgentToolStatusModel::Running));
         revisions.push(1);
@@ -5067,11 +5179,11 @@ mod tests {
         };
         assert_eq!(remeasure_rows, [0]);
         assert_eq!(added_rows, 0);
-        assert_eq!(timeline.entry_to_row, [0, 0, 1, 0]);
+        assert_eq!(timeline.entry_to_row, [0, 0, 0, 0]);
         assert!(matches!(
             &timeline.rows[0],
             TimelineRow::Group { entries, .. }
-                if entries.iter().map(AgentEntry::id).eq([1, 2, 4])
+                if entries.iter().map(AgentEntry::id).eq([1, 3, 2, 4])
         ));
         assert!(matches!(
             timeline.rows[0].entry(4),
@@ -5087,7 +5199,7 @@ mod tests {
             timeline.synchronize(&entries, &revisions, None, &no_parent),
             TimelineModelUpdate::Rebuild
         ));
-        assert_eq!(timeline.entry_to_row, [0, 0, 1, 2]);
+        assert_eq!(timeline.entry_to_row, [0, 0, 0, 0]);
     }
 
     fn thread_tool(id: u64, label: &str, status: AgentToolStatusModel) -> AgentThreadEntry {
@@ -5101,6 +5213,7 @@ mod tests {
             input: None,
             output: Vec::new(),
             default_expanded: false,
+            exit_code: None,
         }
     }
 
@@ -5278,6 +5391,7 @@ mod tests {
                 ToolPayload::Terminal("$ cargo check\nok\n[exit status: 0]".to_owned()),
             ],
             default_expanded: false,
+            exit_code: None,
         });
         let AgentEntry::Tool(AgentToolEntry {
             location,
@@ -5322,6 +5436,7 @@ mod tests {
                 ToolPayload::Text("three".to_owned()),
             ],
             default_expanded: false,
+            exit_code: None,
         };
         let mut markdown = HashMap::new();
         let mut tool_payloads = HashMap::new();
@@ -5352,6 +5467,7 @@ mod tests {
             AgentThreadEntry::Assistant {
                 id: 2,
                 markdown: "assistant".to_owned(),
+                aside: None,
             },
             AgentThreadEntry::Reasoning {
                 id: 3,
@@ -5369,6 +5485,7 @@ mod tests {
                 input: None,
                 output: Vec::new(),
                 default_expanded: false,
+                exit_code: None,
             },
             AgentThreadEntry::Plan {
                 id: 5,

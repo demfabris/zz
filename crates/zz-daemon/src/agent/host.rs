@@ -13,6 +13,7 @@ use parking_lot::Mutex;
 use serde_json::Value;
 #[cfg(test)]
 use zz_protocol::ClientInstanceId;
+use zz_protocol::agent_stream::agent_verb;
 use zz_protocol::{
     AgentAutoApprove, AgentGitSummary, AgentProvider, AgentQuestionAnswer, AgentTaskWire, ClientId,
     MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_TASKS, PaneId,
@@ -1364,11 +1365,9 @@ impl PanePump {
                 state.phase == AgentConnectionPhase::Running,
             )
         };
-        if verbs && let Some(line) = queued.prompt.text.trim_start().strip_prefix("//") {
-            let idle_steer = line
-                .strip_prefix("steer")
-                .filter(|rest| !running && rest.starts_with(char::is_whitespace))
-                .map(|rest| rest.trim_start().to_owned());
+        if verbs && let Some((verb, rest)) = agent_verb(&queued.prompt.text) {
+            let idle_steer =
+                (verb == "steer" && !running && !rest.is_empty()).then(|| rest.to_owned());
             if let Some(text) = idle_steer {
                 queued.prompt.text = text;
             } else {
@@ -2247,19 +2246,19 @@ mod tests {
             })
         }));
         fixture.wait_for_session();
-        fixture.prompt("//btw what now");
+        fixture.prompt("/btw what now");
         fixture.recorder.wait("the side question", |payload| {
-            chunk_text(payload) == Some("verb //btw what now")
+            chunk_text(payload) == Some("verb /btw what now")
         });
         assert_eq!(fixture.state().phase, AgentConnectionPhase::Ready);
-        fixture.prompt("//steer go left");
+        fixture.prompt("/steer go left");
         let payloads = fixture.recorder.wait("the steer prompt", |payload| {
             chunk_text(payload) == Some("prompt go left")
         });
         assert!(
             !chunk_texts(&payloads)
                 .iter()
-                .any(|text| text.starts_with("verb //steer"))
+                .any(|text| text.starts_with("verb /steer"))
         );
         fixture.close();
     }

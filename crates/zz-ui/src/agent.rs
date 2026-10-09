@@ -7,7 +7,6 @@ pub mod tasks;
 pub mod title;
 
 use std::{
-    cell::Cell,
     collections::{HashMap, HashSet, VecDeque},
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
@@ -23,7 +22,6 @@ use crate::{
     button::{Button, ButtonVariants as _},
     h_flex,
     mend::{PENDING_LINK_URL, mend},
-    scroll::ScrollableElement as _,
     text::{
         CodeBlock, MarkdownExtensions, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
         TextView, TextViewState, TextViewStyle, markdown_ast,
@@ -31,24 +29,19 @@ use crate::{
     v_flex,
 };
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, DispatchPhase, Div, ElementId, Entity, FollowMode,
-    FontWeight, Global, Hsla, Image, ImageSource, IntoElement, ListOffset, ListSizingBehavior,
-    ListState, ObjectFit, Pixels, RenderImage, Rgba, ScrollStrategy, ScrollWheelEvent,
-    SharedString, Stateful, Task, UniformListScrollHandle, Window, canvas, div, img, list,
-    prelude::*, px, relative, uniform_list,
+    AnyElement, App, ClipboardItem, Context, Div, ElementId, Entity, FollowMode, FontWeight,
+    Global, Hsla, Image, ImageSource, IntoElement, ListOffset, ListSizingBehavior, ListState,
+    ObjectFit, Pixels, RenderImage, Rgba, SharedString, Stateful, Task, Window, div, img, list,
+    prelude::*, px, relative,
 };
 use parking_lot::RwLock;
-use similar::{ChangeTag, TextDiff};
+use presentation::{spinner, spinner_phase};
 
 const MERMAID_NODE_NAME: &str = "zz-mermaid";
 const RICH_MARKDOWN_NODE_NAME: &str = "zz-rich-markdown";
 const MERMAID_MAX_HEIGHT: f32 = 560.0;
 const MERMAID_MAX_SOURCE_BYTES: usize = 32 * 1024;
 const MERMAID_RENDER_DEBOUNCE: Duration = Duration::from_millis(250);
-const TOOL_CONTENT_MAX_HEIGHT: f32 = 360.0;
-const TOOL_CONTENT_MAX_LINES: usize = 2_000;
-const TOOL_CONTENT_MAX_BYTES: usize = 64 * 1024;
-const TOOL_CONTENT_ROW_HEIGHT: f32 = 20.0;
 const ACTIVITY_ROW_HEIGHT: f32 = 28.0;
 const ACTIVITY_ROW_FONT_SIZE: f32 = 13.0;
 /// Tall enough to clear the system font's ascent-plus-descent at
@@ -71,6 +64,7 @@ const MARKDOWN_PREVIEW_MARKER: &str =
 /// to open `data:` URLs, which is what keeps the mend sentinel inert.
 const INERT_LINK_URL: &str = "data:,";
 pub const AGENT_CONTENT_MAX_WIDTH: f32 = 680.0;
+const TURN_GAP: f32 = 16.0;
 /// Side of a square attachment tile in a sent message.
 pub const TRANSCRIPT_ATTACHMENT: Pixels = px(140.0);
 /// Side of a square attachment tile in the composer.
@@ -134,15 +128,6 @@ impl AgentToolText {
     #[must_use]
     pub fn contains(&self, pattern: &str) -> bool {
         self.0.read().source.contains(pattern)
-    }
-
-    fn revisions(&self) -> (u64, u64) {
-        let buffer = self.0.read();
-        (buffer.revision, buffer.replaced_at)
-    }
-
-    fn is_same(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.0, &other.0)
     }
 
     fn inspect<R>(&self, inspect: impl FnOnce(&str) -> R) -> R {
@@ -215,49 +200,6 @@ pub enum AgentToolPayload {
     Terminal(AgentToolText),
 }
 
-impl AgentToolPayload {
-    fn revisions(&self) -> ((u64, u64), (u64, u64)) {
-        match self {
-            Self::Diff { old, new, .. } => (
-                old.as_ref().map_or((0, 0), AgentToolText::revisions),
-                new.revisions(),
-            ),
-            Self::Text(text) | Self::Json(text) | Self::Terminal(text) => {
-                (text.revisions(), (0, 0))
-            }
-        }
-    }
-
-    fn is_same_source(&self, other: &Self) -> bool {
-        match (self, other) {
-            (
-                Self::Diff {
-                    path: left_path,
-                    old: left_old,
-                    new: left_new,
-                },
-                Self::Diff {
-                    path: right_path,
-                    old: right_old,
-                    new: right_new,
-                },
-            ) => {
-                left_path == right_path
-                    && match (left_old, right_old) {
-                        (Some(left), Some(right)) => left.is_same(right),
-                        (None, None) => true,
-                        _ => false,
-                    }
-                    && left_new.is_same(right_new)
-            }
-            (Self::Text(left), Self::Text(right))
-            | (Self::Json(left), Self::Json(right))
-            | (Self::Terminal(left), Self::Terminal(right)) => left.is_same(right),
-            _ => false,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum MarkdownSlot {
     Body,
@@ -265,15 +207,7 @@ pub enum MarkdownSlot {
 
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum DisclosureKind {
-    Reasoning,
-    Tool,
-    Group,
-    Steps,
-}
-
-#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
-enum ToolContentSlot {
-    Combined,
+    Turn,
 }
 
 struct MarkdownState {
@@ -470,101 +404,16 @@ impl From<SharedString> for AgentMarkdown {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct ToolContentSource {
-    location: Option<SharedString>,
-    input: Option<AgentToolPayload>,
-    output: Arc<[AgentToolPayload]>,
-    revisions: Arc<[((u64, u64), (u64, u64))]>,
-}
-
-impl ToolContentSource {
-    fn is_same_snapshot(&self, other: &Self) -> bool {
-        self.location == other.location
-            && self.revisions == other.revisions
-            && match (&self.input, &other.input) {
-                (Some(left), Some(right)) => left.is_same_source(right),
-                (None, None) => true,
-                _ => false,
-            }
-            && self.output.len() == other.output.len()
-            && self
-                .output
-                .iter()
-                .zip(other.output.iter())
-                .all(|(left, right)| left.is_same_source(right))
-    }
-}
-
-#[derive(Clone, Debug)]
-struct ToolContentState {
-    source: ToolContentSource,
-    rows: Arc<[ToolContentRow]>,
-}
-
-#[derive(Clone, Debug)]
-enum CachedToolContent {
-    Source(ToolContentSource),
-    Materialized(Arc<ToolContentState>),
-}
-
-impl CachedToolContent {
-    fn source(&self) -> &ToolContentSource {
-        match self {
-            Self::Source(source) => source,
-            Self::Materialized(content) => &content.source,
-        }
-    }
-}
-
-fn tool_content_source(
-    location: Option<SharedString>,
-    input: Option<AgentToolPayload>,
-    output: Arc<[AgentToolPayload]>,
-) -> ToolContentSource {
-    let revisions = input
-        .iter()
-        .chain(output.iter())
-        .map(AgentToolPayload::revisions)
-        .collect::<Vec<_>>()
-        .into();
-    ToolContentSource {
-        location,
-        input,
-        output,
-        revisions,
-    }
-}
-
-#[derive(Clone, Debug)]
-enum ToolContentRow {
-    Section {
-        label: &'static str,
-        copy: Option<Arc<[AgentToolPayload]>>,
-    },
-    Path(SharedString),
-    Plain(SharedString),
-    Diff {
-        kind: DiffLineKind,
-        text: SharedString,
-    },
-    Footer(SharedString),
-    Spacer,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum DiffLineKind {
-    Equal,
-    Added,
-    Removed,
+struct TurnClock {
+    started: Instant,
+    finished: Option<Duration>,
 }
 
 #[derive(Default)]
 pub struct AgentTimelineStore {
     markdown: HashMap<(u64, MarkdownSlot), MarkdownState>,
-    tool_content: HashMap<(u64, ToolContentSlot), CachedToolContent>,
     expanded: HashMap<(u64, DisclosureKind), bool>,
-    tool_scrolls: HashMap<u64, UniformListScrollHandle>,
+    turn_clocks: HashMap<u64, TurnClock>,
     cwd: Option<PathBuf>,
     markdown_extensions: HashMap<bool, MarkdownExtensions>,
     /// The entry still receiving deltas, whose display copy is mended.
@@ -576,13 +425,6 @@ enum MarkdownUpdate {
     Missing,
     Unchanged,
     Appended,
-    Replaced,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ToolContentUpdate {
-    Missing,
-    Unchanged,
     Replaced,
 }
 
@@ -760,6 +602,18 @@ impl AgentTimelineStore {
         *self.expanded.entry((id, kind)).or_insert(default_expanded)
     }
 
+    pub fn set_expanded(
+        &mut self,
+        id: u64,
+        kind: DisclosureKind,
+        expanded: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if self.expanded.insert((id, kind), expanded) != Some(expanded) {
+            cx.notify();
+        }
+    }
+
     pub fn toggle_expanded(
         &mut self,
         id: u64,
@@ -772,89 +626,34 @@ impl AgentTimelineStore {
         cx.notify();
     }
 
-    fn tool_content(
-        &mut self,
-        id: u64,
-        location: Option<SharedString>,
-        input: Option<AgentToolPayload>,
-        output: Arc<[AgentToolPayload]>,
-    ) -> Arc<ToolContentState> {
-        let source = tool_content_source(location, input, output);
-        let key = (id, ToolContentSlot::Combined);
-        if let Some(CachedToolContent::Materialized(content)) = self.tool_content.get(&key)
-            && content.source.is_same_snapshot(&source)
-        {
-            return content.clone();
+    pub fn tick_turn_clocks(&mut self, live: Option<u64>) {
+        for (id, clock) in &mut self.turn_clocks {
+            if Some(*id) != live && clock.finished.is_none() {
+                clock.finished = Some(clock.started.elapsed());
+            }
         }
-
-        let tail_terminal = source
-            .output
-            .iter()
-            .any(|payload| matches!(payload, AgentToolPayload::Terminal(_)));
-        let content = Arc::new(materialize_tool_content(source));
-        if tail_terminal {
-            self.tool_scrolls
-                .entry(id)
-                .or_default()
-                .scroll_to_item(content.rows.len().saturating_sub(1), ScrollStrategy::Bottom);
+        if let Some(live) = live {
+            self.turn_clocks.entry(live).or_insert_with(|| TurnClock {
+                started: Instant::now(),
+                finished: None,
+            });
         }
-        self.tool_content
-            .insert(key, CachedToolContent::Materialized(content.clone()));
-        content
     }
 
-    pub fn synchronize_tool_content(
-        &mut self,
-        id: u64,
-        location: Option<SharedString>,
-        input: Option<AgentToolPayload>,
-        output: Arc<[AgentToolPayload]>,
-        cx: &mut Context<Self>,
-    ) {
-        _ = self.update_tool_content(id, location, input, output, cx);
-    }
-
-    fn update_tool_content(
-        &mut self,
-        id: u64,
-        location: Option<SharedString>,
-        input: Option<AgentToolPayload>,
-        output: Arc<[AgentToolPayload]>,
-        cx: &mut Context<Self>,
-    ) -> ToolContentUpdate {
-        let source = tool_content_source(location, input, output);
-        let key = (id, ToolContentSlot::Combined);
-        let Some(content) = self.tool_content.get_mut(&key) else {
-            self.tool_content
-                .insert(key, CachedToolContent::Source(source));
-            return ToolContentUpdate::Missing;
-        };
-        if content.source().is_same_snapshot(&source) {
-            return ToolContentUpdate::Unchanged;
-        }
-
-        *content = CachedToolContent::Source(source);
-        cx.notify();
-        ToolContentUpdate::Replaced
-    }
-
-    pub fn tool_scroll(&mut self, id: u64) -> UniformListScrollHandle {
-        self.tool_scrolls.entry(id).or_default().clone()
+    #[must_use]
+    pub fn turn_elapsed(&self, id: u64) -> Option<Duration> {
+        let clock = self.turn_clocks.get(&id)?;
+        Some(clock.finished.unwrap_or_else(|| clock.started.elapsed()))
     }
 
     pub fn clear(&mut self, cx: &mut Context<Self>) -> bool {
         self.streaming = None;
-        if self.markdown.is_empty()
-            && self.tool_content.is_empty()
-            && self.expanded.is_empty()
-            && self.tool_scrolls.is_empty()
-        {
+        if self.markdown.is_empty() && self.expanded.is_empty() && self.turn_clocks.is_empty() {
             return false;
         }
         self.markdown.clear();
-        self.tool_content.clear();
         self.expanded.clear();
-        self.tool_scrolls.clear();
+        self.turn_clocks.clear();
         cx.notify();
         true
     }
@@ -872,6 +671,7 @@ pub enum AgentEntry {
     Assistant {
         id: u64,
         markdown: AgentMarkdown,
+        aside: Option<AgentAside>,
     },
     Reasoning {
         id: u64,
@@ -886,6 +686,12 @@ pub enum AgentEntry {
     Tool(AgentToolEntry),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AgentAside {
+    pub side: bool,
+    pub reply_to: Option<u64>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AgentToolEntry {
     pub id: u64,
@@ -897,6 +703,7 @@ pub struct AgentToolEntry {
     pub output: Arc<[AgentToolPayload]>,
     pub default_expanded: bool,
     pub parent: Option<u64>,
+    pub exit_code: Option<i64>,
 }
 
 impl AgentEntry {
@@ -912,17 +719,19 @@ impl AgentEntry {
     }
 }
 
-/// Consecutive tools and reasoning collapse into one activity row.
-/// Every other kind stands alone.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TimelineGroupKind {
-    Tool,
+    Turn,
+    Reply,
 }
 
 #[must_use]
 pub const fn timeline_group_kind(entry: &AgentEntry) -> Option<TimelineGroupKind> {
     match entry {
-        AgentEntry::Tool(_) | AgentEntry::Reasoning { .. } => Some(TimelineGroupKind::Tool),
+        AgentEntry::Tool(_)
+        | AgentEntry::Reasoning { .. }
+        | AgentEntry::Plan { .. }
+        | AgentEntry::Assistant { aside: None, .. } => Some(TimelineGroupKind::Turn),
         _ => None,
     }
 }
@@ -938,6 +747,14 @@ pub enum TimelineRow {
 }
 
 impl TimelineRow {
+    #[must_use]
+    pub fn id(&self) -> u64 {
+        match self {
+            Self::Single(entry) => entry.id(),
+            Self::Group { id, .. } => *id,
+        }
+    }
+
     #[must_use]
     pub fn entry(&self, id: u64) -> Option<&AgentEntry> {
         match self {
@@ -1022,9 +839,14 @@ fn nest_in_row(row: &mut TimelineRow, entry: AgentEntry) {
         TimelineRow::Group { entries, .. } => Arc::make_mut(entries).push(entry),
         TimelineRow::Single(previous) => {
             let id = previous.id();
+            let kind = if matches!(previous, AgentEntry::User { .. }) {
+                TimelineGroupKind::Reply
+            } else {
+                TimelineGroupKind::Turn
+            };
             let previous = previous.clone();
             *row = TimelineRow::Group {
-                kind: TimelineGroupKind::Tool,
+                kind,
                 id,
                 entries: Arc::new(vec![previous, entry]),
             };
@@ -1036,6 +858,9 @@ fn nest_in_row(row: &mut TimelineRow, entry: AgentEntry) {
 pub const fn timeline_parent(entry: &AgentEntry) -> Option<u64> {
     match entry {
         AgentEntry::Tool(tool) => tool.parent,
+        AgentEntry::Assistant {
+            aside: Some(aside), ..
+        } => aside.reply_to,
         _ => None,
     }
 }
@@ -1421,6 +1246,7 @@ impl TimelineStick {
 }
 
 type RewindHandler = Rc<dyn Fn(&SharedString, &mut Window, &mut App)>;
+type OpenOutputHandler = Rc<dyn Fn(&AgentToolEntry, &mut Window, &mut App)>;
 
 #[derive(Clone)]
 struct TimelineRewind {
@@ -1436,6 +1262,7 @@ pub struct AgentTimeline {
     active_turn: bool,
     bottom_padding: f32,
     rewind: Option<TimelineRewind>,
+    open_output: Option<OpenOutputHandler>,
 }
 
 impl AgentTimeline {
@@ -1452,6 +1279,7 @@ impl AgentTimeline {
             active_turn: false,
             bottom_padding: 4.0,
             rewind: None,
+            open_output: None,
         }
     }
 
@@ -1479,12 +1307,20 @@ impl AgentTimeline {
         });
         self
     }
+
+    #[must_use]
+    pub fn open_output(
+        mut self,
+        handler: impl Fn(&AgentToolEntry, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.open_output = Some(Rc::new(handler));
+        self
+    }
 }
 
 impl gpui::RenderOnce for AgentTimeline {
-    fn render(self, _window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, _window: &mut Window, cx: &mut App) -> impl IntoElement {
         let rows = self.rows;
-        let timeline_scroll = self.list_state.clone();
         let store = self.store;
         let copyable_assistant = if self.active_turn {
             None
@@ -1497,25 +1333,43 @@ impl gpui::RenderOnce for AgentTimeline {
             handler: rewind.handler,
         });
 
+        let open_output = self.open_output;
+        let live_row = self
+            .active_turn
+            .then(|| rows.len().checked_sub(1))
+            .flatten()
+            .filter(|last| is_turn_row(&rows[*last]));
+        let live_turn = live_row.map(|row| rows[row].id());
+        store.update(cx, |store, _| store.tick_turn_clocks(live_turn));
         list(self.list_state, move |index, _window, cx| {
             let Some(row) = rows.get(index).cloned() else {
                 return div().into_any_element();
             };
+            let starts_turn = matches!(
+                row,
+                TimelineRow::Single(AgentEntry::User { .. })
+                    | TimelineRow::Group {
+                        kind: TimelineGroupKind::Reply,
+                        ..
+                    }
+            );
             div()
                 .w_full()
                 .px_3()
                 .pb_3()
+                .when(index > 0 && starts_turn, |row| row.pt(px(TURN_GAP)))
                 .child(
                     div()
                         .w_full()
                         .max_w(px(AGENT_CONTENT_MAX_WIDTH))
                         .mx_auto()
                         .child(render_timeline_row(
-                            &timeline_scroll,
                             &store,
                             row,
                             copyable_assistant,
                             rewind.as_ref(),
+                            live_row == Some(index),
+                            open_output.as_ref(),
                             cx,
                         )),
                 )
@@ -1530,21 +1384,33 @@ impl gpui::RenderOnce for AgentTimeline {
 
 fn final_assistant_entry_id(rows: &[TimelineRow]) -> Option<u64> {
     rows.iter().rev().find_map(|row| match row {
-        TimelineRow::Single(AgentEntry::Assistant { id, .. }) => Some(*id),
+        TimelineRow::Single(AgentEntry::Assistant {
+            id, aside: None, ..
+        }) => Some(*id),
         TimelineRow::Group { entries, .. } => entries.iter().rev().find_map(|entry| match entry {
-            AgentEntry::Assistant { id, .. } => Some(*id),
+            AgentEntry::Assistant {
+                id, aside: None, ..
+            } => Some(*id),
             _ => None,
         }),
         TimelineRow::Single(_) => None,
     })
 }
 
+fn is_turn_row(row: &TimelineRow) -> bool {
+    match row {
+        TimelineRow::Group { kind, .. } => *kind == TimelineGroupKind::Turn,
+        TimelineRow::Single(entry) => timeline_group_kind(entry) == Some(TimelineGroupKind::Turn),
+    }
+}
+
 fn render_timeline_row(
-    timeline_scroll: &ListState,
     store: &Entity<AgentTimelineStore>,
     row: TimelineRow,
     copyable_assistant: Option<u64>,
     rewind: Option<&TimelineRewind>,
+    live: bool,
+    open_output: Option<&OpenOutputHandler>,
     cx: &mut App,
 ) -> AnyElement {
     match row {
@@ -1554,76 +1420,638 @@ fn render_timeline_row(
             images,
             rewind_id,
         }) => render_user_entry(store, id, markdown, &images, rewind.zip(rewind_id), cx),
+        TimelineRow::Single(AgentEntry::Assistant {
+            id,
+            markdown,
+            aside: Some(_),
+        }) => render_notice(store, id, markdown, cx),
         TimelineRow::Single(entry) => {
-            render_entry(timeline_scroll, store, entry, copyable_assistant, cx)
+            let id = entry.id();
+            render_turn(
+                store,
+                id,
+                std::slice::from_ref(&entry),
+                copyable_assistant,
+                live,
+                open_output,
+                cx,
+            )
         }
-        TimelineRow::Group { id, entries, .. } => {
-            render_group(timeline_scroll, store, id, &entries, copyable_assistant, cx)
-        }
+        TimelineRow::Group {
+            kind: TimelineGroupKind::Reply,
+            entries,
+            ..
+        } => render_replied_prompt(store, &entries, rewind, cx),
+        TimelineRow::Group { id, entries, .. } => render_turn(
+            store,
+            id,
+            &entries,
+            copyable_assistant,
+            live,
+            open_output,
+            cx,
+        ),
     }
 }
 
-fn render_group(
-    timeline_scroll: &ListState,
+struct Trace<'a> {
+    members: &'a [AgentEntry],
+    nesting: &'a StepNesting,
+    steps: &'a [usize],
+    answering: bool,
+}
+
+impl Trace<'_> {
+    fn entries(&self) -> impl DoubleEndedIterator<Item = &AgentEntry> {
+        self.steps.iter().map(|index| &self.members[*index])
+    }
+
+    fn tools(&self) -> impl DoubleEndedIterator<Item = &AgentToolEntry> {
+        self.entries().filter_map(|entry| match entry {
+            AgentEntry::Tool(tool) => Some(tool),
+            _ => None,
+        })
+    }
+
+    fn substeps(&self, id: u64) -> usize {
+        self.nesting.steps.get(&id).map_or(0, Vec::len)
+    }
+
+    fn ending_failure(&self) -> Option<&AgentToolEntry> {
+        self.tools()
+            .next_back()
+            .filter(|tool| tool.status == AgentToolStatus::Failed)
+    }
+
+    fn latest_thought(&self) -> Option<SharedString> {
+        self.entries().rev().find_map(|entry| match entry {
+            AgentEntry::Reasoning { markdown, .. } | AgentEntry::Assistant { markdown, .. } => {
+                markdown.inspect(|text, _, _| thought_tail(text))
+            }
+            _ => None,
+        })
+    }
+}
+
+fn split_turn(members: &[AgentEntry], nesting: &StepNesting) -> (Vec<usize>, Vec<usize>) {
+    let mut shown = nesting
+        .top
+        .iter()
+        .copied()
+        .filter(|index| !matches!(members[*index], AgentEntry::Plan { .. }))
+        .collect::<Vec<_>>();
+    let answer_start = shown
+        .iter()
+        .rposition(|index| !matches!(members[*index], AgentEntry::Assistant { .. }))
+        .map_or(0, |last| last + 1);
+    let answer = shown.split_off(answer_start);
+    (shown, answer)
+}
+
+fn render_turn(
     store: &Entity<AgentTimelineStore>,
     id: u64,
     members: &[AgentEntry],
     copyable_assistant: Option<u64>,
+    live: bool,
+    open_output: Option<&OpenOutputHandler>,
     cx: &mut App,
 ) -> AnyElement {
     let nesting = StepNesting::new(members);
-    if let [only] = nesting.top.as_slice() {
-        return render_member(
-            timeline_scroll,
-            store,
-            members,
-            &nesting,
-            *only,
-            copyable_assistant,
-            cx,
-        );
-    }
-    let expanded = store.update(cx, |store, _| {
-        store.expanded(id, DisclosureKind::Group, false)
-    });
-    let toggle = store.clone();
-    let icon = match members.first() {
-        Some(AgentEntry::Reasoning { .. }) => IconName::Cpu,
-        Some(AgentEntry::Tool(tool)) => tool_icon(tool.kind),
-        _ => tool_icon(AgentToolKind::Other),
+    let (steps, answer) = split_turn(members, &nesting);
+    let trace = Trace {
+        members,
+        nesting: &nesting,
+        steps: &steps,
+        answering: !answer.is_empty(),
     };
-    let label = tool_group_label(nesting.top.iter().map(|index| &members[*index]));
-
     v_flex()
-        .id(("agent-timeline-group", id))
+        .id(("agent-turn", id))
+        .w_full()
+        .gap_3()
+        .when(!steps.is_empty(), |turn| {
+            turn.child(render_trace(store, id, &trace, live, open_output, cx))
+        })
+        .children(answer.iter().filter_map(|index| match &members[*index] {
+            AgentEntry::Assistant { id, markdown, .. } => Some(render_answer(
+                store,
+                *id,
+                markdown.clone(),
+                copyable_assistant == Some(*id),
+                cx,
+            )),
+            _ => None,
+        }))
+        .into_any_element()
+}
+
+fn render_answer(
+    store: &Entity<AgentTimelineStore>,
+    id: u64,
+    markdown: AgentMarkdown,
+    copyable: bool,
+    cx: &mut App,
+) -> AnyElement {
+    let copy = markdown.clone();
+    v_flex()
+        .id(("agent-assistant-entry", id))
+        .w_full()
+        .gap_1()
+        .text_size(crate::rems_from_px(13.0))
+        .child(assistant_markdown_view(store, id, markdown, cx))
+        .when(copyable, |this| {
+            this.child(
+                h_flex().w_full().h(px(28.0)).items_center().child(
+                    div()
+                        .debug_selector(|| "agent-assistant-copy".to_owned())
+                        .child(
+                            Button::compact_icon(("agent-copy-assistant", id), IconName::Copy)
+                                .tooltip("Copy message")
+                                .on_click(move |_, _, cx| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(
+                                        copy.full_text(),
+                                    ));
+                                }),
+                        ),
+                ),
+            )
+        })
+        .into_any_element()
+}
+
+fn render_trace(
+    store: &Entity<AgentTimelineStore>,
+    id: u64,
+    trace: &Trace<'_>,
+    live: bool,
+    open_output: Option<&OpenOutputHandler>,
+    cx: &mut App,
+) -> AnyElement {
+    let elapsed = store.read(cx).turn_elapsed(id);
+    let expanded = store.update(cx, |store, _| {
+        store.expanded(id, DisclosureKind::Turn, false)
+    });
+    let (mark, label) = trace_header(trace, live, elapsed, store, cx);
+    let thought = (live && !expanded && !trace.answering)
+        .then(|| trace.latest_thought())
+        .flatten();
+    let failure = (!live && !expanded)
+        .then(|| trace.ending_failure())
+        .flatten();
+    let toggle = store.clone();
+    v_flex()
+        .id(("agent-trace", id))
         .w_full()
         .child(
-            activity_row(
-                ("agent-timeline-group-toggle", id),
-                icon,
+            activity_row_marked(
+                ("agent-trace-toggle", id),
+                mark,
                 label,
-                Some(expanded),
+                RowEnd::Disclosure(expanded),
                 cx,
             )
+            .debug_selector(|| "agent-trace".to_owned())
             .on_click(move |_, _, cx| {
                 toggle.update(cx, |store, cx| {
-                    store.toggle_expanded(id, DisclosureKind::Group, false, cx);
+                    store.toggle_expanded(id, DisclosureKind::Turn, false, cx);
                 });
             }),
         )
-        .when(expanded, |this| {
-            this.child(v_flex().w_full().children(nesting.top.iter().map(|index| {
-                render_member(
-                    timeline_scroll,
-                    store,
-                    members,
-                    &nesting,
-                    *index,
-                    copyable_assistant,
-                    cx,
-                )
-            })))
+        .when_some(thought, |this, thought| {
+            this.child(
+                div()
+                    .debug_selector(|| "agent-trace-thought".to_owned())
+                    .pl(px(TRACE_INDENT))
+                    .text_size(crate::rems_from_px(12.0))
+                    .line_height(px(18.0))
+                    .text_color(timeline_affordance_color(cx))
+                    .line_clamp(2)
+                    .child(thought),
+            )
         })
+        .when(expanded, |this| {
+            this.child(render_trace_steps(store, trace, live, open_output, cx))
+        })
+        .when_some(failure, |this, tool| {
+            this.child(render_failure(store, tool, open_output, cx))
+        })
+        .into_any_element()
+}
+
+const TRACE_INDENT: f32 = ACTIVITY_ROW_FONT_SIZE + 8.0;
+
+fn trace_header(
+    trace: &Trace<'_>,
+    live: bool,
+    elapsed: Option<Duration>,
+    store: &Entity<AgentTimelineStore>,
+    cx: &mut App,
+) -> (ActivityMark, SharedString) {
+    let mut mark = ActivityMark::bare();
+    if live && !trace.answering {
+        if let Some(waiting) = trace
+            .tools()
+            .find(|tool| tool.status == AgentToolStatus::NeedsApproval)
+        {
+            let warning = cx.theme().warning;
+            mark.icon = Some(IconName::TriangleAlert);
+            mark.tint = Some(warning);
+            mark.label_color = Some(warning);
+            mark.detail = Some(single_line(waiting.label.clone()));
+            return (mark, "Waiting for you".into());
+        }
+        mark.spin = Some(spinner_phase(store.entity_id(), cx));
+        let steps = trace.tools().count();
+        mark.trailing = Some(match elapsed {
+            Some(elapsed) if steps > 0 => {
+                format!("{} · {}", step_count(steps), clock_label(elapsed)).into()
+            }
+            Some(elapsed) => clock_label(elapsed).into(),
+            None => step_count(steps).into(),
+        });
+        let label = match trace.entries().next_back() {
+            Some(AgentEntry::Tool(tool)) if tool_running(tool.status) => {
+                mark.label_color = Some(cx.theme().foreground);
+                single_line(tool.label.clone())
+            }
+            Some(AgentEntry::Reasoning { .. }) => "Thinking".into(),
+            _ => "Working".into(),
+        };
+        return (mark, label);
+    }
+    mark.counts = trace_counts(trace);
+    let thought_only = trace.tools().next().is_none();
+    let label = match (thought_only, elapsed) {
+        (true, Some(elapsed)) => format!("Thought for {}", duration_label(elapsed)),
+        (true, None) => "Thought".to_owned(),
+        (false, Some(elapsed)) => format!("Worked {}", duration_label(elapsed)),
+        (false, None) => "Worked".to_owned(),
+    };
+    (mark, label.into())
+}
+
+fn step_count(count: usize) -> String {
+    if count == 1 {
+        "1 step".to_owned()
+    } else {
+        format!("{count} steps")
+    }
+}
+
+fn trace_counts(trace: &Trace<'_>) -> Vec<TraceCount> {
+    let mut counts = [0_usize; 7];
+    let mut failed = 0;
+    for tool in trace.tools() {
+        if tool.status == AgentToolStatus::Failed {
+            failed += 1;
+        }
+        let slot = if trace.substeps(tool.id) > 0 {
+            6
+        } else {
+            match tool.kind {
+                AgentToolKind::Read => 0,
+                AgentToolKind::Search => 1,
+                AgentToolKind::Edit => 2,
+                AgentToolKind::Execute => 3,
+                AgentToolKind::Fetch => 4,
+                AgentToolKind::Other => 5,
+                AgentToolKind::Think => continue,
+            }
+        };
+        counts[slot] += 1;
+    }
+    const KINDS: [(IconName, (&str, &str)); 7] = [
+        (IconName::File, ("read", "reads")),
+        (IconName::Search, ("search", "searches")),
+        (IconName::Pencil, ("edit", "edits")),
+        (IconName::SquareTerminal, ("command", "commands")),
+        (IconName::Globe, ("fetch", "fetches")),
+        (IconName::Asterisk, ("tool call", "tool calls")),
+        (IconName::Bot, ("agent", "agents")),
+    ];
+    KINDS
+        .into_iter()
+        .zip(counts)
+        .map(|((icon, noun), count)| TraceCount {
+            icon,
+            count,
+            noun,
+            failed: false,
+        })
+        .chain((failed > 0).then_some(TraceCount {
+            icon: IconName::TriangleAlert,
+            count: failed,
+            noun: ("failed", "failed"),
+            failed: true,
+        }))
+        .filter(|count| count.count > 0)
+        .collect()
+}
+
+fn clock_label(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+fn duration_label(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs().max(1);
+    match (seconds / 3600, seconds / 60 % 60, seconds % 60) {
+        (0, 0, seconds) => format!("{seconds}s"),
+        (0, minutes, seconds) => format!("{minutes}m {seconds}s"),
+        (hours, minutes, _) => format!("{hours}h {minutes}m"),
+    }
+}
+
+fn thought_tail(text: &str) -> Option<SharedString> {
+    const KEEP: usize = 220;
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.is_empty() {
+        return None;
+    }
+    if flat.len() <= KEEP {
+        return Some(flat.into());
+    }
+    let mut start = flat.len() - KEEP;
+    while !flat.is_char_boundary(start) {
+        start += 1;
+    }
+    let tail = &flat[start..];
+    let tail = tail.split_once(' ').map_or(tail, |(_, rest)| rest);
+    Some(format!("…{tail}").into())
+}
+
+fn render_trace_steps(
+    store: &Entity<AgentTimelineStore>,
+    trace: &Trace<'_>,
+    live: bool,
+    open_output: Option<&OpenOutputHandler>,
+    cx: &mut App,
+) -> Div {
+    v_flex()
+        .debug_selector(|| "agent-trace-steps".to_owned())
+        .w_full()
+        .ml_1()
+        .pl_4()
+        .border_l_1()
+        .border_color(cx.theme().border())
+        .children(trace.steps.iter().map(|index| {
+            match &trace.members[*index] {
+                AgentEntry::Reasoning { id, markdown, .. } => {
+                    render_thought(store, *id, markdown.clone(), cx)
+                }
+                AgentEntry::Assistant { id, markdown, .. } => div()
+                    .py_1()
+                    .text_size(crate::rems_from_px(12.0))
+                    .text_color(timeline_affordance_color(cx))
+                    .child(markdown_view(
+                        store,
+                        *id,
+                        MarkdownSlot::Body,
+                        markdown.clone(),
+                        cx,
+                    ))
+                    .into_any_element(),
+                AgentEntry::Tool(tool) => {
+                    render_trace_tool(store, tool, trace.substeps(tool.id), live, open_output, cx)
+                }
+                AgentEntry::User { .. } | AgentEntry::Plan { .. } => div().into_any_element(),
+            }
+        }))
+}
+
+fn render_thought(
+    store: &Entity<AgentTimelineStore>,
+    id: u64,
+    markdown: AgentMarkdown,
+    cx: &mut App,
+) -> AnyElement {
+    let empty = markdown.trim_is_empty();
+    v_flex()
+        .id(("agent-trace-thought", id))
+        .w_full()
+        .child(activity_row_marked(
+            ("agent-trace-thought-row", id),
+            ActivityMark::plain(IconName::Cpu),
+            "Thought".into(),
+            RowEnd::None,
+            cx,
+        ))
+        .when(!empty, |this| {
+            this.child(
+                div()
+                    .pl(px(TRACE_INDENT))
+                    .pb_1()
+                    .text_size(crate::rems_from_px(12.0))
+                    .text_color(timeline_affordance_color(cx))
+                    .child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx)),
+            )
+        })
+        .into_any_element()
+}
+
+fn render_trace_tool(
+    store: &Entity<AgentTimelineStore>,
+    tool: &AgentToolEntry,
+    substeps: usize,
+    live: bool,
+    open_output: Option<&OpenOutputHandler>,
+    cx: &mut App,
+) -> AnyElement {
+    let mut mark = tool_mark(tool, live, store, cx);
+    if substeps > 0 {
+        if mark.spin.is_none() {
+            mark.icon = Some(IconName::Bot);
+        }
+        mark.trailing = Some(step_count(substeps).into());
+    }
+    let open = open_output.filter(|_| tool_opens_output(tool)).cloned();
+    let row = activity_row_marked(
+        ("agent-trace-tool", tool.id),
+        mark,
+        tool.label.clone(),
+        if open.is_some() {
+            RowEnd::Open
+        } else {
+            RowEnd::None
+        },
+        cx,
+    );
+    match open {
+        Some(open) => {
+            let tool = tool.clone();
+            row.tooltip(|window, cx| {
+                crate::tooltip::Tooltip::new("Open the output in a pane").build(window, cx)
+            })
+            .on_click(move |_, window, cx| open(&tool, window, cx))
+            .into_any_element()
+        }
+        None => row.into_any_element(),
+    }
+}
+
+fn render_failure(
+    store: &Entity<AgentTimelineStore>,
+    tool: &AgentToolEntry,
+    open_output: Option<&OpenOutputHandler>,
+    cx: &mut App,
+) -> AnyElement {
+    let output = tool_output_text(tool);
+    let tail = output
+        .lines()
+        .rev()
+        .map(str::trim_end)
+        .filter(|line| !line.trim().is_empty())
+        .take(2)
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    v_flex()
+        .debug_selector(|| "agent-trace-failure".to_owned())
+        .w_full()
+        .child(render_trace_tool(store, tool, 0, false, open_output, cx))
+        .children(tail.into_iter().rev().map(|line| {
+            div()
+                .pl(px(TRACE_INDENT))
+                .h(px(18.0))
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .font_family(cx.theme().mono_font_family.clone())
+                .text_size(crate::rems_from_px(11.0))
+                .text_color(timeline_affordance_color(cx))
+                .child(line)
+        }))
+        .into_any_element()
+}
+
+#[must_use]
+pub fn tool_opens_output(tool: &AgentToolEntry) -> bool {
+    tool.kind == AgentToolKind::Execute
+        && !tool_running(tool.status)
+        && tool.output.iter().any(|payload| match payload {
+            AgentToolPayload::Text(text) | AgentToolPayload::Terminal(text) => {
+                text.inspect(|text| !text.trim().is_empty())
+            }
+            AgentToolPayload::Json(_) | AgentToolPayload::Diff { .. } => false,
+        })
+}
+
+#[must_use]
+pub fn tool_output_text(tool: &AgentToolEntry) -> String {
+    let mut output = String::new();
+    for payload in tool.output.iter() {
+        if let AgentToolPayload::Text(text) | AgentToolPayload::Terminal(text) = payload {
+            if !output.is_empty() && !output.ends_with('\n') {
+                output.push('\n');
+            }
+            text.inspect(|text| output.push_str(text));
+        }
+    }
+    output
+}
+
+fn render_replied_prompt(
+    store: &Entity<AgentTimelineStore>,
+    entries: &[AgentEntry],
+    rewind: Option<&TimelineRewind>,
+    cx: &mut App,
+) -> AnyElement {
+    let Some((
+        AgentEntry::User {
+            id,
+            markdown,
+            images,
+            rewind_id,
+        },
+        replies,
+    )) = entries.split_first()
+    else {
+        return div().into_any_element();
+    };
+    let prompt = render_user_entry(
+        store,
+        *id,
+        markdown.clone(),
+        images,
+        rewind.zip(rewind_id.clone()),
+        cx,
+    );
+    v_flex()
+        .w_full()
+        .items_end()
+        .gap(px(CHROME_GAP))
+        .child(prompt)
+        .children(replies.iter().filter_map(|entry| match entry {
+            AgentEntry::Assistant {
+                id,
+                markdown,
+                aside,
+            } => Some(reply_popover(
+                store,
+                *id,
+                markdown.clone(),
+                aside.is_some_and(|aside| aside.side),
+                cx,
+            )),
+            _ => None,
+        }))
+        .into_any_element()
+}
+
+fn reply_popover(
+    store: &Entity<AgentTimelineStore>,
+    id: u64,
+    markdown: AgentMarkdown,
+    side: bool,
+    cx: &mut App,
+) -> Div {
+    v_flex()
+        .debug_selector(|| "agent-reply-popover".to_owned())
+        .max_w(relative(0.85))
+        .gap_1()
+        .px_3()
+        .py_2()
+        .popover_style(cx)
+        .text_size(crate::rems_from_px(13.0))
+        .when(side, |popover| {
+            popover.child(
+                div()
+                    .text_size(crate::rems_from_px(10.0))
+                    .text_color(cx.theme().foreground.muted())
+                    .child("Side answer · not in the conversation"),
+            )
+        })
+        .child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx))
+}
+
+fn render_notice(
+    store: &Entity<AgentTimelineStore>,
+    id: u64,
+    markdown: AgentMarkdown,
+    cx: &mut App,
+) -> AnyElement {
+    h_flex()
+        .id(("agent-notice-entry", id))
+        .debug_selector(|| "agent-notice".to_owned())
+        .w_full()
+        .items_start()
+        .gap_2()
+        .text_size(crate::rems_from_px(12.0))
+        .text_color(timeline_affordance_color(cx))
+        .child(
+            div()
+                .flex_none()
+                .h(px(ACTIVITY_ROW_HEIGHT - 8.0))
+                .flex()
+                .items_center()
+                .child(Icon::new(IconName::Info).size(px(ACTIVITY_ROW_FONT_SIZE))),
+        )
+        .child(div().flex_1().min_w_0().child(markdown_view(
+            store,
+            id,
+            MarkdownSlot::Body,
+            markdown,
+            cx,
+        )))
         .into_any_element()
 }
 
@@ -1664,148 +2092,6 @@ impl StepNesting {
             }
         }
         Self { top, steps }
-    }
-}
-
-fn render_member(
-    timeline_scroll: &ListState,
-    store: &Entity<AgentTimelineStore>,
-    members: &[AgentEntry],
-    nesting: &StepNesting,
-    index: usize,
-    copyable_assistant: Option<u64>,
-    cx: &mut App,
-) -> AnyElement {
-    let entry = members[index].clone();
-    let id = entry.id();
-    let row = render_entry(timeline_scroll, store, entry, copyable_assistant, cx);
-    let Some(steps) = nesting.steps.get(&id) else {
-        return row;
-    };
-    v_flex()
-        .w_full()
-        .child(row)
-        .child(render_steps(
-            timeline_scroll,
-            store,
-            members,
-            nesting,
-            id,
-            steps,
-            copyable_assistant,
-            cx,
-        ))
-        .into_any_element()
-}
-
-pub fn subagent_steps_label(count: usize, latest: Option<&str>) -> SharedString {
-    let steps = if count == 1 { "step" } else { "steps" };
-    match latest {
-        Some(latest) => format!("{count} {steps} · {latest}").into(),
-        None => format!("{count} {steps}").into(),
-    }
-}
-
-fn render_steps(
-    timeline_scroll: &ListState,
-    store: &Entity<AgentTimelineStore>,
-    members: &[AgentEntry],
-    nesting: &StepNesting,
-    parent: u64,
-    steps: &[usize],
-    copyable_assistant: Option<u64>,
-    cx: &mut App,
-) -> AnyElement {
-    let expanded = store.update(cx, |store, _| {
-        store.expanded(parent, DisclosureKind::Steps, false)
-    });
-    let toggle = store.clone();
-    let latest = steps.last().map(|index| &members[*index]);
-    let icon = match latest {
-        Some(AgentEntry::Tool(tool)) => tool_icon(tool.kind),
-        _ => IconName::Bot,
-    };
-    let latest_label = latest.and_then(|entry| match entry {
-        AgentEntry::Tool(tool) => Some(tool.label.as_ref()),
-        AgentEntry::Reasoning { label, .. } => Some(label.as_ref()),
-        _ => None,
-    });
-    let label = subagent_steps_label(steps.len(), latest_label);
-    v_flex()
-        .id(("agent-subagent-steps", parent))
-        .debug_selector(|| "agent-subagent-steps".to_owned())
-        .w_full()
-        .ml_1()
-        .pl_4()
-        .border_l_1()
-        .border_color(cx.theme().border())
-        .child(
-            activity_row(
-                ("agent-subagent-steps-toggle", parent),
-                icon,
-                label,
-                Some(expanded),
-                cx,
-            )
-            .on_click(move |_, _, cx| {
-                toggle.update(cx, |store, cx| {
-                    store.toggle_expanded(parent, DisclosureKind::Steps, false, cx);
-                });
-            }),
-        )
-        .when(expanded, |this| {
-            this.children(steps.iter().map(|index| {
-                render_member(
-                    timeline_scroll,
-                    store,
-                    members,
-                    nesting,
-                    *index,
-                    copyable_assistant,
-                    cx,
-                )
-            }))
-        })
-        .into_any_element()
-}
-
-fn group_action(entry: &AgentEntry) -> Option<(&'static str, &'static str)> {
-    match entry {
-        AgentEntry::Reasoning { .. } => Some(("Reasoning", "Reasoning")),
-        AgentEntry::Tool(tool) => Some(match tool.kind {
-            AgentToolKind::Read | AgentToolKind::Search => ("Read file", "Read files"),
-            AgentToolKind::Edit => ("Edit file", "Edit files"),
-            AgentToolKind::Execute => ("Ran command", "Ran commands"),
-            AgentToolKind::Fetch => ("Fetched resource", "Fetched resources"),
-            AgentToolKind::Think => ("Thought", "Thought"),
-            AgentToolKind::Other => ("Used tool", "Used tools"),
-        }),
-        _ => None,
-    }
-}
-
-fn tool_group_label<'a>(entries: impl IntoIterator<Item = &'a AgentEntry>) -> SharedString {
-    let mut actions = Vec::new();
-    for (singular, plural) in entries.into_iter().filter_map(group_action) {
-        if let Some((_, _, count)) = actions
-            .iter_mut()
-            .find(|(existing, _, _)| *existing == singular)
-        {
-            *count += 1;
-        } else {
-            actions.push((singular, plural, 1));
-        }
-    }
-
-    if actions.is_empty() {
-        "Used tools".into()
-    } else {
-        actions
-            .into_iter()
-            .map(|(singular, plural, count)| if count == 1 { singular } else { plural })
-            .collect::<Vec<_>>()
-            .join(", ")
-            .into()
     }
 }
 
@@ -1859,17 +2145,125 @@ fn activity_row_glyph(icon: IconName, size: f32) -> Div {
         .child(Icon::new(icon).size(px(size)))
 }
 
-/// The one row shape every folded activity wears: tool call, thought, or a
-/// whole run of them. One builder so the font, the metrics and the hover can
-/// never drift apart between the three callers.
-fn activity_row(
-    id: impl Into<ElementId>,
+struct ActivityMark {
+    icon: Option<IconName>,
+    spin: Option<f32>,
+    tint: Option<Hsla>,
+    label_color: Option<Hsla>,
+    detail: Option<SharedString>,
+    counts: Vec<TraceCount>,
+    tag: Option<(SharedString, Hsla)>,
+    trailing: Option<SharedString>,
+}
+
+impl ActivityMark {
+    const fn bare() -> Self {
+        Self {
+            icon: None,
+            spin: None,
+            tint: None,
+            label_color: None,
+            detail: None,
+            counts: Vec::new(),
+            tag: None,
+            trailing: None,
+        }
+    }
+
+    const fn plain(icon: IconName) -> Self {
+        let mut mark = Self::bare();
+        mark.icon = Some(icon);
+        mark
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TraceCount {
     icon: IconName,
+    count: usize,
+    noun: (&'static str, &'static str),
+    failed: bool,
+}
+
+impl TraceCount {
+    fn describe(&self) -> String {
+        let (one, many) = self.noun;
+        format!(
+            "{} {}",
+            self.count,
+            if self.count == 1 { one } else { many }
+        )
+    }
+}
+
+const fn tool_running(status: AgentToolStatus) -> bool {
+    matches!(status, AgentToolStatus::Pending | AgentToolStatus::Running)
+}
+
+fn tool_mark(
+    tool: &AgentToolEntry,
+    live: bool,
+    store: &Entity<AgentTimelineStore>,
+    cx: &mut App,
+) -> ActivityMark {
+    let mut mark = ActivityMark::plain(tool_icon(tool.kind));
+    match tool.status {
+        status if tool_running(status) && live => {
+            mark.spin = Some(spinner_phase(store.entity_id(), cx));
+        }
+        AgentToolStatus::NeedsApproval => mark.tint = Some(cx.theme().warning),
+        AgentToolStatus::Failed => {
+            let danger = cx.theme().danger;
+            mark.tint = Some(danger);
+            let tag = tool
+                .exit_code
+                .filter(|code| *code != 0)
+                .map_or_else(|| "failed".to_owned(), |code| format!("exit {code}"));
+            mark.tag = Some((tag.into(), danger));
+        }
+        AgentToolStatus::Canceled => {
+            mark.tag = Some(("canceled".into(), timeline_affordance_color(cx)));
+        }
+        _ => {}
+    }
+    mark
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RowEnd {
+    None,
+    Disclosure(bool),
+    Open,
+}
+
+/// The one row shape every activity wears: the trace line, a thought, a tool
+/// call. One builder so the font, the metrics and the hover can never drift
+/// apart between the callers.
+fn activity_row_marked(
+    id: impl Into<ElementId>,
+    mark: ActivityMark,
     label: SharedString,
-    disclosure: Option<bool>,
+    end: RowEnd,
     cx: &App,
 ) -> Stateful<Div> {
     let foreground = cx.theme().foreground;
+    let glyph = match (mark.spin, mark.icon) {
+        (Some(phase), _) => Some(spinner(phase)),
+        (None, Some(icon)) => Some(Icon::new(icon)),
+        (None, None) => None,
+    }
+    .map(|glyph| {
+        let glyph = glyph.size(px(ACTIVITY_ROW_FONT_SIZE));
+        match mark.tint {
+            Some(tint) => glyph.text_color(tint),
+            None => glyph,
+        }
+    });
+    let end_icon = match end {
+        RowEnd::None => None,
+        RowEnd::Disclosure(expanded) => Some(disclosure_icon(expanded)),
+        RowEnd::Open => Some(IconName::ExternalLink),
+    };
     h_flex()
         .id(id)
         .w_full()
@@ -1881,26 +2275,132 @@ fn activity_row(
         .text_size(crate::rems_from_px(ACTIVITY_ROW_FONT_SIZE))
         .line_height(px(ACTIVITY_ROW_LINE_HEIGHT))
         .text_color(timeline_affordance_color(cx))
-        .when(disclosure.is_some(), |this| {
+        .when(end != RowEnd::None, |this| {
             this.cursor_pointer()
                 .hover(move |this| this.text_color(foreground))
         })
-        .child(activity_row_glyph(icon, ACTIVITY_ROW_FONT_SIZE))
+        .when_some(glyph, |this, glyph| {
+            this.child(
+                div()
+                    .debug_selector(|| "agent-activity-glyph".to_owned())
+                    .flex_none()
+                    .relative()
+                    .top(px(ACTIVITY_ICON_OPTICAL_DROP))
+                    .child(glyph),
+            )
+        })
         .child(
             div()
                 .debug_selector(|| "agent-activity-label".to_owned())
                 .min_w_0()
+                .flex_shrink_0()
+                .max_w_full()
                 .overflow_hidden()
                 .text_ellipsis()
                 .whitespace_nowrap()
+                .when_some(mark.label_color, gpui::Styled::text_color)
                 .child(single_line(label)),
         )
-        .when_some(disclosure, |this, expanded| {
+        .when_some(mark.detail, |this, detail| {
             this.child(
-                activity_row_glyph(disclosure_icon(expanded), ACTIVITY_DISCLOSURE_SIZE)
+                div()
+                    .debug_selector(|| "agent-activity-detail".to_owned())
+                    .min_w_0()
+                    .overflow_hidden()
+                    .text_ellipsis()
+                    .whitespace_nowrap()
+                    .text_color(timeline_affordance_color(cx).opacity(0.7))
+                    .child(detail),
+            )
+        })
+        .when(!mark.counts.is_empty(), |this| {
+            this.child(
+                h_flex()
+                    .debug_selector(|| "agent-activity-counts".to_owned())
+                    .flex_none()
+                    .gap(px(TRACE_COUNT_GAP))
+                    .pl_1()
+                    .pr(px(TRACE_COUNT_BADGE_OVERHANG))
+                    .children(
+                        mark.counts
+                            .into_iter()
+                            .enumerate()
+                            .map(|(slot, count)| trace_count_glyph(slot, count, cx)),
+                    ),
+            )
+        })
+        .when_some(mark.tag, |this, (tag, color)| {
+            this.child(
+                div()
+                    .debug_selector(|| "agent-activity-tag".to_owned())
+                    .flex_none()
+                    .text_size(crate::rems_from_px(12.0))
+                    .text_color(color)
+                    .child(tag),
+            )
+        })
+        .when_some(end_icon, |this, icon| {
+            this.child(
+                activity_row_glyph(icon, ACTIVITY_DISCLOSURE_SIZE)
                     .debug_selector(|| "agent-activity-chevron".to_owned()),
             )
         })
+        .when_some(mark.trailing, |this, trailing| {
+            this.child(div().flex_1()).child(
+                div()
+                    .debug_selector(|| "agent-activity-trailing".to_owned())
+                    .flex_none()
+                    .text_size(crate::rems_from_px(11.0))
+                    .text_color(timeline_affordance_color(cx).opacity(0.7))
+                    .child(trailing),
+            )
+        })
+}
+
+const TRACE_COUNT_BADGE: f32 = 15.0;
+const TRACE_COUNT_RING: f32 = 1.5;
+const TRACE_COUNT_BADGE_LEFT: f32 = 7.5;
+const TRACE_COUNT_BADGE_OVERHANG: f32 =
+    TRACE_COUNT_BADGE_LEFT + TRACE_COUNT_BADGE - ACTIVITY_ROW_FONT_SIZE;
+const TRACE_COUNT_GAP: f32 = TRACE_COUNT_BADGE_OVERHANG + 6.0;
+
+fn trace_count_glyph(slot: usize, count: TraceCount, cx: &App) -> Stateful<Div> {
+    let theme = cx.theme();
+    let (badge, number) = if count.failed {
+        (theme.danger, theme.background)
+    } else {
+        (theme.background.raised(3), theme.foreground)
+    };
+    let tooltip = SharedString::from(count.describe());
+    div()
+        .id(("agent-trace-count", slot))
+        .debug_selector(|| "agent-trace-count".to_owned())
+        .flex_none()
+        .relative()
+        .top(px(ACTIVITY_ICON_OPTICAL_DROP))
+        .when(count.failed, |this| this.text_color(theme.danger))
+        .child(Icon::new(count.icon).size(px(ACTIVITY_ROW_FONT_SIZE)))
+        .child(
+            h_flex()
+                .debug_selector(|| "agent-trace-count-badge".to_owned())
+                .absolute()
+                .top(px(-6.5))
+                .left(px(TRACE_COUNT_BADGE_LEFT))
+                .min_w(px(TRACE_COUNT_BADGE))
+                .h(px(TRACE_COUNT_BADGE))
+                .px(px(3.0))
+                .justify_center()
+                .rounded_full()
+                .border(px(TRACE_COUNT_RING))
+                .border_color(theme.background)
+                .bg(badge)
+                .text_color(number)
+                .text_size(crate::rems_from_px(8.5))
+                .line_height(px(TRACE_COUNT_BADGE - 2.0 * TRACE_COUNT_RING))
+                .font_weight(gpui::FontWeight::SEMIBOLD)
+                .child(count.count.to_string()),
+        )
+        .tooltip(move |window, cx| crate::tooltip::Tooltip::new(tooltip.clone()).build(window, cx))
 }
 
 const USER_ENTRY_GROUP: &str = "agent-user-entry";
@@ -1985,130 +2485,106 @@ fn rewind_button(id: u64, rewind: &TimelineRewind, message_id: SharedString) -> 
         )
 }
 
-fn render_entry(
-    timeline_scroll: &ListState,
-    store: &Entity<AgentTimelineStore>,
-    entry: AgentEntry,
-    copyable_assistant: Option<u64>,
-    cx: &mut App,
-) -> AnyElement {
-    match entry {
-        AgentEntry::User {
-            id,
-            markdown,
-            images,
-            ..
-        } => render_user_entry(store, id, markdown, &images, None, cx),
-        AgentEntry::Assistant { id, markdown } => {
-            let copy = markdown.clone();
-            v_flex()
-                .id(("agent-assistant-entry", id))
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PlanItemState {
+    Pending,
+    InProgress,
+    Done,
+}
+
+pub(crate) fn plan_items(source: &str) -> Vec<(PlanItemState, &str)> {
+    source
+        .lines()
+        .filter_map(|line| {
+            let rest = line.trim_start().strip_prefix("- [")?;
+            let mut characters = rest.chars();
+            let state = match characters.next()? {
+                'x' | 'X' => PlanItemState::Done,
+                '~' => PlanItemState::InProgress,
+                _ => PlanItemState::Pending,
+            };
+            let text = characters.as_str().strip_prefix(']')?.trim();
+            Some((state, text))
+        })
+        .collect()
+}
+
+#[must_use]
+pub fn plan_progress(source: &str) -> (usize, usize, Option<&str>) {
+    let items = plan_items(source);
+    let done = items
+        .iter()
+        .filter(|(state, _)| *state == PlanItemState::Done)
+        .count();
+    let current = items
+        .iter()
+        .find(|(state, _)| *state == PlanItemState::InProgress)
+        .or_else(|| {
+            items
+                .iter()
+                .find(|(state, _)| *state == PlanItemState::Pending)
+        })
+        .map(|(_, text)| *text);
+    (done, items.len(), current)
+}
+
+pub(crate) fn render_plan_items(source: &str, cx: &App) -> Div {
+    const MARKER: f32 = 12.0;
+    const LINE: f32 = 19.0;
+    let foreground = cx.theme().foreground;
+    let muted = cx.theme().foreground.muted();
+    let accent = cx.theme().accent;
+    v_flex()
+        .w_full()
+        .text_size(crate::rems_from_px(12.0))
+        .line_height(px(LINE))
+        .children(plan_items(source).into_iter().map(|(state, text)| {
+            let marker = div()
+                .size(px(MARKER))
+                .flex_none()
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(cx.theme().radius / 2.0)
+                .border_1();
+            let marker = match state {
+                PlanItemState::Pending => marker.border_color(muted),
+                PlanItemState::InProgress => marker
+                    .border_color(accent)
+                    .child(div().size(px(6.0)).rounded(px(1.5)).bg(accent)),
+                PlanItemState::Done => marker.border_color(foreground).bg(foreground).child(
+                    Icon::new(IconName::Check)
+                        .size(px(MARKER * 0.65))
+                        .text_color(foreground.on()),
+                ),
+            };
+            h_flex()
                 .w_full()
-                .gap_1()
-                .text_size(crate::rems_from_px(13.0))
-                .child(assistant_markdown_view(store, id, markdown, cx))
-                .when(copyable_assistant == Some(id), |this| {
-                    this.child(
-                        h_flex().w_full().h(px(28.0)).items_center().child(
-                            div()
-                                .debug_selector(|| "agent-assistant-copy".to_owned())
-                                .child(
-                                    Button::compact_icon(
-                                        ("agent-copy-assistant", id),
-                                        IconName::Copy,
-                                    )
-                                    .tooltip("Copy message")
-                                    .on_click(
-                                        move |_, _, cx| {
-                                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                                copy.full_text(),
-                                            ));
-                                        },
-                                    ),
-                                ),
-                        ),
-                    )
-                })
-                .into_any_element()
-        }
-        AgentEntry::Reasoning {
-            id,
-            label,
-            markdown,
-            default_expanded,
-        } => {
-            let expanded = store.update(cx, |store, _| {
-                store.expanded(id, DisclosureKind::Reasoning, default_expanded)
-            });
-            let toggle = store.clone();
-            v_flex()
-                .id(("agent-reasoning-entry", id))
-                .w_full()
-                .gap_1()
+                .items_start()
+                .gap(px(CHROME_GAP))
                 .child(
-                    activity_row(
-                        ("agent-reasoning-toggle", id),
-                        IconName::Cpu,
-                        label,
-                        Some(expanded),
-                        cx,
-                    )
-                    .on_click(move |_, _, cx| {
-                        toggle.update(cx, |store, cx| {
-                            store.toggle_expanded(
-                                id,
-                                DisclosureKind::Reasoning,
-                                default_expanded,
-                                cx,
-                            );
-                        });
-                    }),
+                    div()
+                        .h(px(LINE))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .relative()
+                        .top(px(ACTIVITY_ICON_OPTICAL_DROP))
+                        .child(marker),
                 )
-                .when(expanded, |this| {
-                    this.child(
-                        div()
-                            .ml_1()
-                            .pl_4()
-                            .py_1()
-                            .border_l_1()
-                            .border_color(cx.theme().border())
-                            .text_size(crate::rems_from_px(12.0))
-                            .text_color(cx.theme().foreground.muted())
-                            .child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx)),
-                    )
-                })
-                .into_any_element()
-        }
-        AgentEntry::Plan { id, markdown } => v_flex()
-            .id(("agent-plan-entry", id))
-            .w_full()
-            .gap_2()
-            .rounded(cx.theme().radius)
-            .border_1()
-            .border_color(cx.theme().border())
-            .px_3()
-            .py_2()
-            .child(
-                h_flex()
-                    .gap_2()
-                    .text_size(crate::rems_from_px(12.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(cx.theme().foreground.muted())
-                    .child(
-                        Icon::new(IconName::CircleCheck)
-                            .small()
-                            .text_color(cx.theme().foreground.muted()),
-                    )
-                    .child("Plan"),
-            )
-            .child(
-                div()
-                    .text_size(crate::rems_from_px(12.0))
-                    .child(markdown_view(store, id, MarkdownSlot::Body, markdown, cx)),
-            )
-            .into_any_element(),
-        AgentEntry::Tool(tool) => render_tool_entry(timeline_scroll, store, tool, cx),
-    }
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .when(state == PlanItemState::Done, |text| {
+                            text.text_color(muted).line_through()
+                        })
+                        .when(state == PlanItemState::InProgress, |text| {
+                            text.font_weight(FontWeight::MEDIUM)
+                        })
+                        .child(text.to_owned()),
+                )
+        }))
 }
 
 const fn disclosure_icon(expanded: bool) -> IconName {
@@ -2119,473 +2595,10 @@ const fn disclosure_icon(expanded: bool) -> IconName {
     }
 }
 
-fn render_tool_entry(
-    timeline_scroll: &ListState,
-    store: &Entity<AgentTimelineStore>,
-    tool: AgentToolEntry,
-    cx: &mut App,
-) -> AnyElement {
-    let AgentToolEntry {
-        id,
-        kind,
-        status: _,
-        label,
-        location,
-        input,
-        output,
-        default_expanded,
-        parent: _,
-    } = tool;
-    let expandable = location.is_some() || input.is_some() || !output.is_empty();
-    let expanded = expandable
-        && store.update(cx, |store, _| {
-            store.expanded(id, DisclosureKind::Tool, default_expanded)
-        });
-    let content = expanded.then(|| {
-        store.update(cx, |store, _| {
-            store.tool_content(id, location, input, output)
-        })
-    });
-    let toggle = store.clone();
-
-    v_flex()
-        .id(("agent-tool-entry", id))
-        .w_full()
-        .child(
-            activity_row(
-                ("agent-tool-toggle", id),
-                tool_icon(kind),
-                label,
-                expandable.then_some(expanded),
-                cx,
-            )
-            .when(expandable, |this| {
-                this.on_click(move |_, _, cx| {
-                    toggle.update(cx, |store, cx| {
-                        store.toggle_expanded(id, DisclosureKind::Tool, default_expanded, cx);
-                    });
-                })
-            }),
-        )
-        .when_some(
-            content.filter(|content| !content.rows.is_empty()),
-            |this, content| {
-                this.child(render_tool_content(
-                    timeline_scroll,
-                    store,
-                    id,
-                    &content,
-                    cx,
-                ))
-            },
-        )
-        .into_any_element()
-}
-
-fn materialize_tool_content(source: ToolContentSource) -> ToolContentState {
-    let mut rows = Vec::new();
-
-    if let Some(location) = &source.location {
-        rows.push(ToolContentRow::Section {
-            label: "Location",
-            copy: None,
-        });
-        rows.push(ToolContentRow::Path(location.clone()));
-    }
-
-    if let Some(input) = &source.input {
-        if !rows.is_empty() {
-            rows.push(ToolContentRow::Spacer);
-        }
-        let copy = Arc::<[AgentToolPayload]>::from([input.clone()]);
-        rows.push(ToolContentRow::Section {
-            label: "Input",
-            copy: Some(copy),
-        });
-        let materialized = materialize_tool_payload(input);
-        rows.extend(materialized.rows);
-    }
-
-    if !source.output.is_empty() {
-        if !rows.is_empty() {
-            rows.push(ToolContentRow::Spacer);
-        }
-        rows.push(ToolContentRow::Section {
-            label: "Output",
-            copy: Some(source.output.clone()),
-        });
-        for (index, payload) in source.output.iter().enumerate() {
-            if index > 0 {
-                rows.push(ToolContentRow::Spacer);
-            }
-            let materialized = materialize_tool_payload(payload);
-            rows.extend(materialized.rows);
-        }
-    }
-
-    ToolContentState {
-        source,
-        rows: rows.into(),
-    }
-}
-
-struct MaterializedToolPayload {
-    rows: Vec<ToolContentRow>,
-}
-
-fn materialize_tool_payload(payload: &AgentToolPayload) -> MaterializedToolPayload {
-    match payload {
-        AgentToolPayload::Diff { path, old, new } => {
-            let old = old.as_ref().map(|old| old.0.read());
-            let new = new.0.read();
-            let (old, old_truncated) =
-                bounded_tool_diff_prefix(old.as_ref().map_or("", |old| old.source.as_str()));
-            let (new, new_truncated) = bounded_tool_diff_prefix(new.source.as_str());
-            let diff = TextDiff::from_lines(old, new);
-            let mut rows = Vec::new();
-            let mut total_lines = 0;
-            rows.push(ToolContentRow::Path(path.clone()));
-            for change in diff.iter_all_changes() {
-                let kind = match change.tag() {
-                    ChangeTag::Equal => DiffLineKind::Equal,
-                    ChangeTag::Insert => DiffLineKind::Added,
-                    ChangeTag::Delete => DiffLineKind::Removed,
-                };
-                total_lines += 1;
-                if total_lines <= TOOL_CONTENT_MAX_LINES {
-                    rows.push(ToolContentRow::Diff {
-                        kind,
-                        text: SharedString::from(
-                            change.value().trim_end_matches(['\r', '\n']).to_owned(),
-                        ),
-                    });
-                }
-            }
-            append_line_truncation_footer(&mut rows, total_lines, old_truncated || new_truncated);
-            MaterializedToolPayload { rows }
-        }
-        AgentToolPayload::Text(text) | AgentToolPayload::Json(text) => {
-            let mut rows = Vec::new();
-            let mut total_lines = 0;
-            text.inspect(|text| {
-                let (text, bytes_truncated) = bounded_tool_prefix(text);
-                for line in text.split('\n').take(TOOL_CONTENT_MAX_LINES + 1) {
-                    total_lines += 1;
-                    if total_lines <= TOOL_CONTENT_MAX_LINES {
-                        rows.push(ToolContentRow::Plain(
-                            line.strip_suffix('\r').unwrap_or(line).to_owned().into(),
-                        ));
-                    }
-                }
-                append_line_truncation_footer(&mut rows, total_lines, bytes_truncated);
-            });
-            MaterializedToolPayload { rows }
-        }
-        AgentToolPayload::Terminal(text) => text.inspect(|text| {
-            let (text, bytes_truncated) = bounded_tool_suffix(text);
-            let mut lines = text
-                .rsplit('\n')
-                .take(TOOL_CONTENT_MAX_LINES + 1)
-                .collect::<Vec<_>>();
-            let lines_truncated = lines.len() > TOOL_CONTENT_MAX_LINES;
-            if lines_truncated {
-                lines.pop();
-            }
-            lines.reverse();
-            let mut rows =
-                Vec::with_capacity(lines.len() + usize::from(bytes_truncated || lines_truncated));
-            if bytes_truncated || lines_truncated {
-                rows.push(ToolContentRow::Footer(
-                    "truncated: showing the latest output; copy to view it all".into(),
-                ));
-            }
-            rows.extend(lines.iter().map(|line| {
-                ToolContentRow::Plain(line.strip_suffix('\r').unwrap_or(line).to_string().into())
-            }));
-            MaterializedToolPayload { rows }
-        }),
-    }
-}
-
-fn bounded_tool_prefix(text: &str) -> (&str, bool) {
-    if text.len() <= TOOL_CONTENT_MAX_BYTES {
-        return (text, false);
-    }
-    let mut end = TOOL_CONTENT_MAX_BYTES;
-    while !text.is_char_boundary(end) {
-        end -= 1;
-    }
-    (&text[..end], true)
-}
-
-fn bounded_tool_diff_prefix(text: &str) -> (&str, bool) {
-    let (text, bytes_truncated) = bounded_tool_prefix(text);
-    let Some((newline, _)) = text.match_indices('\n').nth(TOOL_CONTENT_MAX_LINES - 1) else {
-        return (text, bytes_truncated);
-    };
-    let end = newline + 1;
-    (&text[..end], bytes_truncated || end < text.len())
-}
-
-fn bounded_tool_suffix(text: &str) -> (&str, bool) {
-    if text.len() <= TOOL_CONTENT_MAX_BYTES {
-        return (text, false);
-    }
-    let mut start = text.len() - TOOL_CONTENT_MAX_BYTES;
-    while !text.is_char_boundary(start) {
-        start += 1;
-    }
-    (&text[start..], true)
-}
-
-fn append_line_truncation_footer(
-    rows: &mut Vec<ToolContentRow>,
-    total_lines: usize,
-    bytes_truncated: bool,
-) {
-    if bytes_truncated {
-        rows.push(ToolContentRow::Footer(
-            "truncated: copy to view the full output".into(),
-        ));
-    } else if total_lines > TOOL_CONTENT_MAX_LINES {
-        rows.push(ToolContentRow::Footer(
-            format!("truncated: showing first {TOOL_CONTENT_MAX_LINES} of {total_lines} lines")
-                .into(),
-        ));
-    }
-}
-
-fn render_tool_content(
-    timeline_scroll: &ListState,
-    store: &Entity<AgentTimelineStore>,
-    id: u64,
-    content: &ToolContentState,
-    cx: &mut App,
-) -> impl IntoElement {
-    let scroll_handle = store.update(cx, |store, _| store.tool_scroll(id));
-    let rows = content.rows.clone();
-    let line_list = uniform_list(
-        ("agent-tool-content-lines", id),
-        rows.len(),
-        move |range, _, cx| {
-            range
-                .filter_map(|index| {
-                    rows.get(index)
-                        .cloned()
-                        .map(|row| render_tool_content_row(id, index, row, cx))
-                })
-                .collect::<Vec<_>>()
-        },
-    )
-    .w_full()
-    .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
-    .overflow_hidden()
-    .with_sizing_behavior(ListSizingBehavior::Infer)
-    .track_scroll(&scroll_handle);
-
-    div()
-        .w_full()
-        .border_t_1()
-        .border_color(cx.theme().border())
-        .child(tool_content_scroll_area(
-            ("agent-tool-content-scroll", id),
-            &scroll_handle,
-            timeline_scroll,
-            line_list,
-        ))
-}
-
-fn tool_content_scroll_area(
-    id: impl Into<ElementId>,
-    scroll_handle: &UniformListScrollHandle,
-    timeline_scroll: &ListState,
-    content: impl IntoElement,
-) -> impl IntoElement {
-    let base_scroll_handle = scroll_handle.0.borrow().base_handle.clone();
-    let wheel_scroll_handle = base_scroll_handle.clone();
-    let scrollbar_handle = base_scroll_handle;
-    let timeline_scroll = timeline_scroll.clone();
-    let event_timeline_offset = Rc::new(Cell::new(None));
-    let capture_timeline_offset = Rc::clone(&event_timeline_offset);
-    let capture_timeline_scroll = timeline_scroll.clone();
-    div()
-        .id(id)
-        .w_full()
-        .min_h_0()
-        .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
-        .relative()
-        .flex()
-        .flex_col()
-        .overflow_hidden()
-        .child(
-            canvas(
-                |_, _, _| (),
-                move |bounds, (), window, _| {
-                    let event_timeline_offset = Rc::clone(&capture_timeline_offset);
-                    let timeline_scroll = capture_timeline_scroll.clone();
-                    window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _, _| {
-                        if phase == DispatchPhase::Capture && bounds.contains(&event.position) {
-                            event_timeline_offset
-                                .set(Some(timeline_scroll.scroll_px_offset_for_scrollbar()));
-                        }
-                    });
-                },
-            )
-            .absolute()
-            .inset_0(),
-        )
-        .on_scroll_wheel(move |event, window, cx| {
-            let live_timeline_offset = timeline_scroll.scroll_px_offset_for_scrollbar();
-            let timeline_offset = event_timeline_offset.take().unwrap_or(live_timeline_offset);
-            let current = wheel_scroll_handle.offset();
-            let delta = event.delta.pixel_delta(window.line_height());
-            let minimum_y = -wheel_scroll_handle.max_offset().y;
-            let next_y = (current.y + delta.y).clamp(minimum_y, px(0.0));
-            if next_y == current.y {
-                return;
-            }
-
-            wheel_scroll_handle.set_offset(gpui::point(current.x, next_y));
-            timeline_scroll.set_offset_from_scrollbar(timeline_offset);
-            window.refresh();
-            cx.stop_propagation();
-        })
-        .child(content)
-        .vertical_scrollbar(&scrollbar_handle)
-}
-
-fn render_tool_content_row(id: u64, index: usize, row: ToolContentRow, cx: &App) -> AnyElement {
-    let base = h_flex()
-        .w_full()
-        .min_w_0()
-        .h(px(TOOL_CONTENT_ROW_HEIGHT))
-        .px_2()
-        .font_family(cx.theme().mono_font_family.clone())
-        .text_size(crate::rems_from_px(11.0))
-        .overflow_hidden();
-
-    match row {
-        ToolContentRow::Section { label, copy } => base
-            .justify_between()
-            .items_center()
-            .font_family(cx.theme().font_family.clone())
-            .text_size(crate::rems_from_px(10.0))
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(cx.theme().foreground.muted())
-            .child(label)
-            .when_some(copy, |this, copy| {
-                let hover_background = cx.theme().background.washed(2);
-                this.child(
-                    div()
-                        .id(format!("agent-tool-copy-{id}-{index}"))
-                        .px_1()
-                        .rounded(cx.theme().radius)
-                        .cursor_pointer()
-                        .text_color(cx.theme().foreground)
-                        .hover(move |style| style.bg(hover_background))
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(
-                                tool_payload_copy_text(&copy),
-                            ));
-                        })
-                        .child("Copy"),
-                )
-            })
-            .into_any_element(),
-        ToolContentRow::Path(path) => base
-            .items_center()
-            .bg(cx.theme().background.raised(2).wash())
-            .font_weight(FontWeight::MEDIUM)
-            .child(
-                div()
-                    .min_w_0()
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .whitespace_nowrap()
-                    .child(single_line(path)),
-            )
-            .into_any_element(),
-        ToolContentRow::Plain(text) => render_machine_line(base, "", text, None, None),
-        ToolContentRow::Diff { kind, text } => {
-            let (gutter, foreground, background) = match kind {
-                DiffLineKind::Equal => (" ", None, None),
-                DiffLineKind::Added => (
-                    "+",
-                    Some(cx.theme().success),
-                    Some(cx.theme().success.fill()),
-                ),
-                DiffLineKind::Removed => {
-                    ("−", Some(cx.theme().danger), Some(cx.theme().danger.fill()))
-                }
-            };
-            render_machine_line(base, gutter, text, foreground, background)
-        }
-        ToolContentRow::Footer(note) => base
-            .items_center()
-            .text_size(crate::rems_from_px(10.0))
-            .text_color(cx.theme().foreground.muted())
-            .child(note)
-            .into_any_element(),
-        ToolContentRow::Spacer => base.into_any_element(),
-    }
-}
-
-fn render_machine_line(
-    row: gpui::Div,
-    gutter: &'static str,
-    text: SharedString,
-    gutter_color: Option<Hsla>,
-    background: Option<Hsla>,
-) -> AnyElement {
-    row.when_some(background, gpui::Styled::bg)
-        .child(
-            div()
-                .w(px(18.0))
-                .flex_none()
-                .text_color(gutter_color.unwrap_or_default())
-                .child(gutter),
-        )
-        .child(
-            div()
-                .min_w_0()
-                .flex_1()
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .child(text),
-        )
-        .into_any_element()
-}
-
-fn tool_payload_copy_text(payloads: &[AgentToolPayload]) -> String {
-    let mut copied = String::new();
-    for (index, payload) in payloads.iter().enumerate() {
-        if index > 0 {
-            copied.push_str("\n\n");
-        }
-        match payload {
-            AgentToolPayload::Text(text)
-            | AgentToolPayload::Json(text)
-            | AgentToolPayload::Terminal(text) => text.inspect(|text| copied.push_str(text)),
-            AgentToolPayload::Diff { path, old, new } => {
-                copied.push_str("Path: ");
-                copied.push_str(path);
-                copied.push_str("\n\nOld:\n");
-                if let Some(old) = old {
-                    old.inspect(|old| copied.push_str(old));
-                } else {
-                    copied.push_str("<new file>");
-                }
-                copied.push_str("\n\nNew:\n");
-                new.inspect(|new| copied.push_str(new));
-            }
-        }
-    }
-    copied
-}
-
 fn tool_icon(kind: AgentToolKind) -> IconName {
     match kind {
-        AgentToolKind::Read | AgentToolKind::Edit => IconName::File,
+        AgentToolKind::Read => IconName::File,
+        AgentToolKind::Edit => IconName::Pencil,
         AgentToolKind::Search => IconName::Search,
         AgentToolKind::Execute => IconName::SquareTerminal,
         AgentToolKind::Fetch => IconName::Globe,
@@ -3573,6 +3586,7 @@ pub const AGENT_HEADER_HEIGHT: f32 = 36.0;
 pub fn agent_pane_header(
     active: bool,
     leading: impl IntoElement,
+    status: Option<AnyElement>,
     trailing: impl IntoElement,
     show_separator: bool,
     cx: &App,
@@ -3591,6 +3605,7 @@ pub fn agent_pane_header(
             header.border_b_1().border_color(cx.theme().border())
         })
         .child(div().flex_1().min_w_0().overflow_hidden().child(leading))
+        .children(status)
         .child(
             h_flex()
                 .flex_none()
@@ -3601,6 +3616,93 @@ pub fn agent_pane_header(
                 })
                 .child(trailing),
         )
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AgentPaneStatus {
+    Running,
+    Stopping,
+    Waiting,
+    Exited,
+    Offline,
+}
+
+pub fn agent_status_pill(
+    id: impl Into<ElementId>,
+    status: AgentPaneStatus,
+    phase: f32,
+    restart: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    cx: &App,
+) -> Stateful<Div> {
+    let theme = cx.theme();
+    let (icon, label, color, fill) = match status {
+        AgentPaneStatus::Running => (
+            None,
+            "Running",
+            theme.foreground,
+            theme.background.washed(2),
+        ),
+        AgentPaneStatus::Stopping => (
+            None,
+            "Stopping",
+            theme.foreground.muted(),
+            theme.background.washed(2),
+        ),
+        AgentPaneStatus::Waiting => (
+            Some(IconName::TriangleAlert),
+            "Waiting for you",
+            theme.warning,
+            theme.warning.opacity(0.12),
+        ),
+        AgentPaneStatus::Exited => (
+            Some(IconName::CircleX),
+            "Exited",
+            theme.danger,
+            theme.danger.opacity(0.12),
+        ),
+        AgentPaneStatus::Offline => (
+            None,
+            "Offline",
+            theme.foreground.muted(),
+            theme.background.washed(2),
+        ),
+    };
+    let spinning = matches!(status, AgentPaneStatus::Running | AgentPaneStatus::Stopping);
+    let foreground = theme.foreground;
+    let divider = theme.foreground.opacity(0.1);
+    h_flex()
+        .id(id)
+        .debug_selector(|| "agent-status-pill".to_owned())
+        .flex_none()
+        .h(px(22.0))
+        .px_2()
+        .gap_1()
+        .rounded(px(11.0))
+        .bg(fill)
+        .text_size(crate::rems_from_px(11.0))
+        .line_height(px(14.0))
+        .text_color(color)
+        .when(spinning, |pill| pill.child(spinner(phase).size(px(11.0))))
+        .when_some(icon, |pill, icon| {
+            pill.child(Icon::new(icon).size(px(11.0)))
+        })
+        .child(label)
+        .when_some(restart, |pill, restart| {
+            pill.child(
+                div()
+                    .id("agent-status-restart")
+                    .debug_selector(|| "agent-status-restart".to_owned())
+                    .pl_1p5()
+                    .ml_0p5()
+                    .border_l_1()
+                    .border_color(divider)
+                    .text_color(foreground)
+                    .cursor_pointer()
+                    .hover(gpui::Styled::underline)
+                    .child("Restart")
+                    .on_click(move |_, window, cx| restart(window, cx)),
+            )
+        })
 }
 
 #[cfg(test)]
@@ -3684,11 +3786,6 @@ mod tests {
     use super::*;
     use gpui::{Render, ScrollDelta, ScrollWheelEvent, TestAppContext, VisualTestContext, point};
 
-    struct ToolContentScrollTest {
-        scroll_handle: UniformListScrollHandle,
-        timeline_scroll: ListState,
-    }
-
     struct EmptyAgentTimelineTest {
         store: Entity<AgentTimelineStore>,
     }
@@ -3754,47 +3851,6 @@ mod tests {
         }
     }
 
-    impl Render for ToolContentScrollTest {
-        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            let scroll_handle = self.scroll_handle.clone();
-            let timeline_scroll = self.timeline_scroll.clone();
-            list(timeline_scroll.clone(), move |index, _window, _cx| {
-                if index == 0 {
-                    let rows = uniform_list("tool-content-scroll-test-lines", 5, |range, _, _| {
-                        range
-                            .map(|index| {
-                                div().h(px(100.0)).flex_none().when(index == 3, |this| {
-                                    this.debug_selector(|| "tool-scroll-visible-row".to_owned())
-                                })
-                            })
-                            .collect::<Vec<_>>()
-                    })
-                    .w_full()
-                    .max_h(px(TOOL_CONTENT_MAX_HEIGHT))
-                    .overflow_hidden()
-                    .with_sizing_behavior(ListSizingBehavior::Infer)
-                    .track_scroll(&scroll_handle);
-                    tool_content_scroll_area(
-                        "tool-content-scroll-test",
-                        &scroll_handle,
-                        &timeline_scroll,
-                        rows,
-                    )
-                    .into_any_element()
-                } else {
-                    div().h(px(400.0)).flex_none().into_any_element()
-                }
-            })
-            .with_sizing_behavior(ListSizingBehavior::Auto)
-            .w(px(500.0))
-            .h(px(400.0))
-        }
-    }
-
-    fn tool_scroll_y(scroll_handle: &UniformListScrollHandle) -> gpui::Pixels {
-        scroll_handle.0.borrow().base_handle.offset().y
-    }
-
     fn test_tool(id: u64, label: &str, status: AgentToolStatus) -> AgentEntry {
         test_tool_kind(id, label, AgentToolKind::Edit, status)
     }
@@ -3824,112 +3880,271 @@ mod tests {
             output: Arc::from([]),
             default_expanded: false,
             parent: None,
+            exit_code: None,
         }
     }
 
     #[test]
-    fn timeline_rows_fold_all_consecutive_tools() {
-        let entries = vec![
-            test_tool(1, "Editing files", AgentToolStatus::Completed),
-            test_tool(2, "Editing files", AgentToolStatus::Completed),
-            test_tool_kind(
-                3,
-                "Running command",
-                AgentToolKind::Execute,
-                AgentToolStatus::Completed,
-            ),
+    fn zz_replies_fold_into_their_prompt_row() {
+        let entries = [
+            AgentEntry::User {
+                id: 1,
+                markdown: "/btw why".into(),
+                images: Arc::from([]),
+                rewind_id: None,
+            },
+            test_tool(2, "Read file", AgentToolStatus::Running),
+            AgentEntry::Assistant {
+                id: 3,
+                markdown: "because".into(),
+                aside: Some(AgentAside {
+                    side: true,
+                    reply_to: Some(1),
+                }),
+            },
             AgentEntry::Assistant {
                 id: 4,
-                markdown: "done".into(),
+                markdown: "Forked.".into(),
+                aside: Some(AgentAside {
+                    side: false,
+                    reply_to: None,
+                }),
             },
-            test_tool(5, "Editing files", AgentToolStatus::Completed),
-            test_tool(6, "Editing files", AgentToolStatus::Completed),
-            test_tool(7, "Editing files", AgentToolStatus::Completed),
+        ];
+        let folded = fold_timeline_rows(&entries).rows;
+        let mut appended = Vec::new();
+        for entry in &entries {
+            let _ = append_timeline_row(&mut appended, entry.clone());
+        }
+        assert_eq!(*folded, appended);
+        assert_eq!(folded.len(), 3);
+        assert!(matches!(
+            &folded[0],
+            TimelineRow::Group {
+                kind: TimelineGroupKind::Reply,
+                entries,
+                ..
+            } if entries.len() == 2
+        ));
+        assert_eq!(final_assistant_entry_id(&folded), None);
+    }
+
+    #[test]
+    fn plan_items_give_the_item_in_progress_its_own_state() {
+        assert_eq!(
+            plan_items("- [x] a\n- [~] b\n- [ ] c\nnot an item"),
+            [
+                (PlanItemState::Done, "a"),
+                (PlanItemState::InProgress, "b"),
+                (PlanItemState::Pending, "c"),
+            ]
+        );
+    }
+
+    fn test_assistant(id: u64, text: &str) -> AgentEntry {
+        AgentEntry::Assistant {
+            id,
+            markdown: text.into(),
+            aside: None,
+        }
+    }
+
+    fn test_reasoning(id: u64) -> AgentEntry {
+        AgentEntry::Reasoning {
+            id,
+            label: "Reasoning".into(),
+            markdown: format!("thought {id}").into(),
+            default_expanded: false,
+        }
+    }
+
+    #[test]
+    fn a_turn_folds_into_one_row_until_the_next_prompt() {
+        let entries = vec![
+            test_reasoning(1),
+            test_tool(2, "Edit a.rs", AgentToolStatus::Completed),
+            test_assistant(3, "now the tests"),
+            AgentEntry::Plan {
+                id: 4,
+                markdown: "- [x] edit\n- [~] test".into(),
+            },
+            test_tool_kind(
+                5,
+                "cargo test",
+                AgentToolKind::Execute,
+                AgentToolStatus::Failed,
+            ),
+            test_assistant(6, "done"),
+            AgentEntry::User {
+                id: 7,
+                markdown: "again".into(),
+                images: Arc::from([]),
+                rewind_id: None,
+            },
             test_tool_kind(
                 8,
-                "Reading file",
+                "Read a.rs",
                 AgentToolKind::Read,
                 AgentToolStatus::Completed,
             ),
         ];
 
         let folded = fold_timeline_rows(&entries);
+        let mut appended = Vec::new();
+        for entry in &entries {
+            let _ = append_timeline_row(&mut appended, entry.clone());
+        }
 
-        assert_eq!(folded.rows.len(), 3);
-        assert_eq!(folded.entry_to_row, [0, 0, 0, 1, 2, 2, 2, 2]);
+        assert_eq!(*folded.rows, appended);
+        assert_eq!(folded.entry_to_row, [0, 0, 0, 0, 0, 0, 1, 2]);
         assert!(matches!(
             &folded.rows[0],
             TimelineRow::Group {
-                kind: TimelineGroupKind::Tool,
+                kind: TimelineGroupKind::Turn,
                 id: 1,
                 entries
-            } if entries.len() == 3
+            } if entries.len() == 6
         ));
-        assert!(matches!(
-            &folded.rows[1],
-            TimelineRow::Single(AgentEntry::Assistant { id: 4, .. })
-        ));
-        assert!(matches!(
-            &folded.rows[2],
-            TimelineRow::Group {
-                kind: TimelineGroupKind::Tool,
-                id: 5,
-                entries
-            } if entries.len() == 4
-        ));
-        assert_eq!(
-            tool_group_label(match &folded.rows[0] {
-                TimelineRow::Group { entries, .. } => entries.iter(),
-                TimelineRow::Single(_) => unreachable!(),
-            }),
-            "Edit files, Ran command"
-        );
-        assert_eq!(
-            tool_group_label(match &folded.rows[2] {
-                TimelineRow::Group { entries, .. } => entries.iter(),
-                TimelineRow::Single(_) => unreachable!(),
-            }),
-            "Edit files, Read file"
-        );
+        assert!(is_turn_row(&folded.rows[2]));
+        assert!(!is_turn_row(&folded.rows[1]));
+        assert_eq!(final_assistant_entry_id(&folded.rows), Some(6));
     }
 
     #[test]
-    fn timeline_rows_fold_reasoning_with_tools() {
-        let reasoning = |id: u64| AgentEntry::Reasoning {
-            id,
-            label: "Reasoning".into(),
-            markdown: format!("thought {id}").into(),
-            default_expanded: false,
-        };
-        let entries = vec![
-            reasoning(1),
-            test_tool(2, "Editing files", AgentToolStatus::Completed),
-            reasoning(3),
-            reasoning(4),
-            reasoning(5),
-            test_tool(6, "Editing files", AgentToolStatus::Completed),
-            test_tool(7, "Editing files", AgentToolStatus::Completed),
+    fn a_turn_splits_into_its_trace_and_the_messages_that_close_it() {
+        let members = [
+            test_reasoning(1),
+            test_assistant(2, "first"),
+            test_tool(3, "Edit a.rs", AgentToolStatus::Completed),
+            AgentEntry::Plan {
+                id: 4,
+                markdown: "- [x] edit".into(),
+            },
+            test_assistant(5, "done"),
+            test_assistant(6, "and one more thing"),
         ];
+        let nesting = StepNesting::new(&members);
+        assert_eq!(split_turn(&members, &nesting), (vec![0, 1, 2], vec![4, 5]));
 
-        let folded = fold_timeline_rows(&entries);
-
-        assert_eq!(folded.rows.len(), 1);
-        assert_eq!(folded.entry_to_row, [0, 0, 0, 0, 0, 0, 0]);
-        assert!(matches!(
-            &folded.rows[0],
-            TimelineRow::Group {
-                kind: TimelineGroupKind::Tool,
-                id: 1,
-                entries
-            } if entries.len() == 7
-        ));
+        let still_working = &members[..3];
+        let nesting = StepNesting::new(still_working);
         assert_eq!(
-            tool_group_label(match &folded.rows[0] {
-                TimelineRow::Group { entries, .. } => entries.iter(),
-                TimelineRow::Single(_) => unreachable!(),
-            }),
-            "Reasoning, Edit files"
+            split_turn(still_working, &nesting),
+            (vec![0, 1, 2], Vec::new()),
+            "text followed by a tool call is narration"
         );
+
+        let answer_only = [test_assistant(1, "hi")];
+        let nesting = StepNesting::new(&answer_only);
+        assert_eq!(split_turn(&answer_only, &nesting), (Vec::new(), vec![0]));
+    }
+
+    #[test]
+    fn the_trace_counts_each_kind_once_and_agents_by_their_steps() {
+        let members = [
+            test_tool_kind(
+                1,
+                "Read a.rs",
+                AgentToolKind::Read,
+                AgentToolStatus::Completed,
+            ),
+            test_tool_kind(
+                2,
+                "Read b.rs",
+                AgentToolKind::Read,
+                AgentToolStatus::Completed,
+            ),
+            test_tool_kind(
+                3,
+                "cargo test",
+                AgentToolKind::Execute,
+                AgentToolStatus::Failed,
+            ),
+            test_tool(4, "Edit a.rs", AgentToolStatus::Completed),
+            test_tool_kind(
+                5,
+                "Survey",
+                AgentToolKind::Other,
+                AgentToolStatus::Completed,
+            ),
+            test_step(6, 5),
+            test_reasoning(7),
+        ];
+        let nesting = StepNesting::new(&members);
+        let (steps, answer) = split_turn(&members, &nesting);
+        let trace = Trace {
+            members: &members,
+            nesting: &nesting,
+            steps: &steps,
+            answering: !answer.is_empty(),
+        };
+        assert_eq!(
+            trace_counts(&trace)
+                .iter()
+                .map(TraceCount::describe)
+                .collect::<Vec<_>>(),
+            ["2 reads", "1 edit", "1 command", "1 agent", "1 failed"]
+        );
+        assert_eq!(trace.ending_failure().map(|tool| tool.id), None);
+        assert_eq!(trace.latest_thought().as_deref(), Some("thought 7"));
+
+        let failing = &members[..3];
+        let nesting = StepNesting::new(failing);
+        let (steps, _) = split_turn(failing, &nesting);
+        let trace = Trace {
+            members: failing,
+            nesting: &nesting,
+            steps: &steps,
+            answering: false,
+        };
+        assert_eq!(trace.ending_failure().map(|tool| tool.id), Some(3));
+    }
+
+    #[test]
+    fn trace_times_read_as_a_clock_while_live_and_words_after() {
+        assert_eq!(clock_label(Duration::from_secs(42)), "0:42");
+        assert_eq!(clock_label(Duration::from_secs(134)), "2:14");
+        assert_eq!(duration_label(Duration::from_millis(300)), "1s");
+        assert_eq!(duration_label(Duration::from_secs(38)), "38s");
+        assert_eq!(duration_label(Duration::from_secs(134)), "2m 14s");
+        assert_eq!(duration_label(Duration::from_mins(63)), "1h 3m");
+    }
+
+    #[test]
+    fn the_live_thought_keeps_the_end_of_the_text_on_one_line() {
+        assert_eq!(thought_tail("  \n "), None);
+        assert_eq!(
+            thought_tail("one\n\ntwo   three").as_deref(),
+            Some("one two three")
+        );
+        let long = "word ".repeat(100);
+        let tail = thought_tail(&long).expect("text");
+        assert!(tail.starts_with('…'));
+        assert!(tail.len() <= 230);
+        assert!(tail.ends_with("word"));
+    }
+
+    #[test]
+    fn only_finished_commands_with_output_open_in_a_pane() {
+        let mut tool = test_tool_entry(
+            1,
+            "cargo test",
+            AgentToolKind::Execute,
+            AgentToolStatus::Failed,
+        );
+        assert!(!tool_opens_output(&tool), "nothing printed");
+        tool.output = Arc::from([
+            AgentToolPayload::Json("{}".into()),
+            AgentToolPayload::Terminal("running 3 tests".into()),
+            AgentToolPayload::Text("error: 1 failed".into()),
+        ]);
+        assert!(tool_opens_output(&tool));
+        assert_eq!(tool_output_text(&tool), "running 3 tests\nerror: 1 failed");
+        tool.status = AgentToolStatus::Running;
+        assert!(!tool_opens_output(&tool), "still running");
+        tool.status = AgentToolStatus::Completed;
+        tool.kind = AgentToolKind::Read;
+        assert!(!tool_opens_output(&tool), "reads open nowhere yet");
     }
 
     fn test_step(id: u64, parent: u64) -> AgentEntry {
@@ -3944,127 +4159,36 @@ mod tests {
     }
 
     #[test]
-    fn subagent_steps_join_their_agents_row_wherever_it_sits() {
+    fn subagent_steps_nest_under_their_agent_inside_the_turn() {
         let entries = vec![
             test_tool_kind(1, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
             test_step(2, 1),
-            AgentEntry::Assistant {
-                id: 3,
-                markdown: "meanwhile".into(),
-            },
+            test_assistant(3, "meanwhile"),
             test_step(4, 1),
             test_step(5, 99),
-            test_tool_kind(
-                6,
-                "Read a.rs",
-                AgentToolKind::Read,
-                AgentToolStatus::Completed,
-            ),
             test_tool_kind(7, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
             test_step(8, 7),
-            test_tool_kind(
-                9,
-                "Edit a.rs",
-                AgentToolKind::Edit,
-                AgentToolStatus::Completed,
-            ),
         ];
 
         let folded = fold_timeline_rows(&entries);
 
-        assert_eq!(folded.entry_to_row, [0, 0, 1, 0, 2, 2, 2, 2, 2]);
+        assert_eq!(folded.entry_to_row, [0; 7]);
         let TimelineRow::Group { id: 1, entries, .. } = &folded.rows[0] else {
-            panic!("the agent row became a group: {:?}", folded.rows[0]);
+            panic!("the turn is one row: {:?}", folded.rows[0]);
         };
-        let ids = entries.iter().map(AgentEntry::id).collect::<Vec<_>>();
-        assert_eq!(ids, [1, 2, 4], "steps keep their order under the agent");
-        let nesting = StepNesting::new(entries);
-        assert_eq!(nesting.top, [0]);
-        assert_eq!(nesting.steps[&1], [1, 2]);
-        let TimelineRow::Group { entries, .. } = &folded.rows[2] else {
-            panic!("tools fold together: {:?}", folded.rows[2]);
-        };
+        assert_eq!(
+            entries.iter().map(AgentEntry::id).collect::<Vec<_>>(),
+            [1, 3, 5, 7, 2, 4, 8],
+            "steps follow the turn's own rows, in arrival order"
+        );
         let nesting = StepNesting::new(entries);
         assert_eq!(
             nesting.top,
             [0, 1, 2, 3],
             "a step whose agent is unknown stands alone"
         );
-        assert_eq!(nesting.steps[&7], [4]);
-        assert_eq!(
-            tool_group_label(nesting.top.iter().map(|index| &entries[*index])),
-            "Read files, Thought, Edit file"
-        );
-        assert_eq!(
-            subagent_steps_label(2, Some("Read 4.rs")),
-            "2 steps · Read 4.rs"
-        );
-        assert_eq!(subagent_steps_label(1, None), "1 step");
-    }
-
-    #[test]
-    fn steps_leave_their_place_for_their_agents_row_in_arrival_order() {
-        let entries = vec![
-            test_step(1, 4),
-            AgentEntry::Assistant {
-                id: 2,
-                markdown: "working".into(),
-            },
-            test_tool_kind(
-                3,
-                "Read a.rs",
-                AgentToolKind::Read,
-                AgentToolStatus::Completed,
-            ),
-            test_tool_kind(4, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
-            AgentEntry::Assistant {
-                id: 5,
-                markdown: "meanwhile".into(),
-            },
-            test_step(6, 4),
-            test_step(7, 6),
-            test_step(8, 99),
-        ];
-
-        let folded = fold_timeline_rows(&entries);
-
-        assert_eq!(folded.entry_to_row, [1, 0, 1, 1, 2, 1, 1, 3]);
-        let TimelineRow::Group { id: 3, entries, .. } = &folded.rows[1] else {
-            panic!("the agent's row holds its steps: {:?}", folded.rows[1]);
-        };
-        assert_eq!(
-            entries.iter().map(AgentEntry::id).collect::<Vec<_>>(),
-            [3, 4, 1, 6, 7]
-        );
-        let nesting = StepNesting::new(entries);
-        assert_eq!(nesting.top, [0, 1]);
-        assert_eq!(nesting.steps[&4], [2, 3], "steps keep their arrival order");
-        assert_eq!(nesting.steps[&6], [4], "a step's own steps nest under it");
-        assert!(matches!(
-            &folded.rows[3],
-            TimelineRow::Single(AgentEntry::Tool(tool)) if tool.id == 8
-        ));
-
-        let mut agent =
-            test_tool_entry(3, "Survey", AgentToolKind::Think, AgentToolStatus::Running);
-        agent.parent = Some(1);
-        let looped = [
-            test_step(1, 3),
-            AgentEntry::Assistant {
-                id: 2,
-                markdown: "between".into(),
-            },
-            AgentEntry::Tool(agent),
-            test_step(4, 4),
-        ];
-        let folded = fold_timeline_rows(&looped);
-        assert_eq!(folded.entry_to_row, [0, 1, 0, 2]);
-        let TimelineRow::Group { entries, .. } = &folded.rows[0] else {
-            panic!("a loop shares one row: {:?}", folded.rows[0]);
-        };
-        let nesting = StepNesting::new(entries);
-        assert_eq!(nesting.top, [0, 1], "a loop of parents renders flat");
-        assert!(nesting.steps.is_empty());
+        assert_eq!(nesting.steps[&1], [4, 5]);
+        assert_eq!(nesting.steps[&7], [6]);
     }
 
     #[test]
@@ -4109,12 +4233,24 @@ mod tests {
     }
 
     #[gpui::test]
-    fn subagent_steps_fold_under_their_agent_until_opened(cx: &mut TestAppContext) {
+    fn a_turn_shows_one_trace_line_until_opened(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let rows = fold_timeline_rows(&[
-            test_tool_kind(1, "Survey", AgentToolKind::Think, AgentToolStatus::Running),
+            test_tool_kind(
+                1,
+                "Survey",
+                AgentToolKind::Other,
+                AgentToolStatus::Completed,
+            ),
             test_step(2, 1),
             test_step(3, 1),
+            test_tool_kind(
+                4,
+                "Read a.rs",
+                AgentToolKind::Read,
+                AgentToolStatus::Completed,
+            ),
+            test_assistant(5, "done"),
         ])
         .rows;
         let (_, cx) = cx.add_window_view(|window, cx| {
@@ -4129,21 +4265,26 @@ mod tests {
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
-        let collapsed = cx
-            .debug_bounds("agent-subagent-steps")
-            .expect("the steps fold should be painted");
-        assert!(collapsed.size.height <= px(ACTIVITY_ROW_HEIGHT + 1.0));
+        let trace = cx
+            .debug_bounds("agent-trace")
+            .expect("the trace line should be painted");
+        assert!(trace.size.height <= px(ACTIVITY_ROW_HEIGHT + 1.0));
+        assert!(cx.debug_bounds("agent-trace-steps").is_none());
+        assert!(
+            cx.debug_bounds("agent-assistant-copy").is_some(),
+            "the answer stays out"
+        );
 
-        cx.simulate_click(collapsed.center(), gpui::Modifiers::none());
+        cx.simulate_click(trace.center(), gpui::Modifiers::none());
         cx.run_until_parked();
         cx.update(|window, cx| {
             _ = window.draw(cx);
         });
-        let expanded = cx
-            .debug_bounds("agent-subagent-steps")
-            .expect("the open steps should be painted");
-        assert!(expanded.size.height >= px(ACTIVITY_ROW_HEIGHT * 3.0));
-        assert_eq!(expanded.top(), collapsed.top());
+        let steps = cx
+            .debug_bounds("agent-trace-steps")
+            .expect("the open trace lists its steps");
+        assert!(steps.size.height >= px(ACTIVITY_ROW_HEIGHT * 2.0));
+        assert!(steps.top() >= trace.bottom());
     }
 
     #[test]
@@ -4166,11 +4307,13 @@ mod tests {
             TimelineRow::Single(AgentEntry::Assistant {
                 id: 20,
                 markdown: "first".into(),
+                aside: None,
             }),
             TimelineRow::Single(test_tool(21, "Read file", AgentToolStatus::Completed)),
             TimelineRow::Single(AgentEntry::Assistant {
                 id: 22,
                 markdown: "second".into(),
+                aside: None,
             }),
             TimelineRow::Single(AgentEntry::Reasoning {
                 id: 23,
@@ -4199,6 +4342,7 @@ mod tests {
         let entry = AgentEntry::Assistant {
             id: 17,
             markdown: RAW.into(),
+            aside: None,
         };
         let (_, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| UserEntryTest {
@@ -4245,6 +4389,7 @@ mod tests {
         let entry = AgentEntry::Assistant {
             id: 25,
             markdown: "Still streaming".into(),
+            aside: None,
         };
         let (_, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| UserEntryTest {
@@ -4271,6 +4416,7 @@ mod tests {
         let entry = AgentEntry::Assistant {
             id: 31,
             markdown: "A tiny bot named `cronkitty` had a single mission: `sleep(5)`.".into(),
+            aside: None,
         };
         let (_, cx) = cx.add_window_view(|window, cx| {
             let view = cx.new(|cx| UserEntryTest {
@@ -4290,7 +4436,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn tool_disclosure_sits_beside_the_label(cx: &mut TestAppContext) {
+    fn trace_disclosure_sits_right_after_the_counts(cx: &mut TestAppContext) {
         cx.update(crate::init);
         const PANE_WIDTH: Pixels = px(520.0);
         let mut tool = test_tool_entry(
@@ -4317,14 +4463,19 @@ mod tests {
             _ = window.draw(cx);
         });
 
-        let label = cx
-            .debug_bounds("agent-activity-label")
-            .expect("the tool label should be painted");
+        let counts = cx
+            .debug_bounds("agent-activity-counts")
+            .expect("the trace counts should be painted");
+        let badge = cx
+            .debug_bounds("agent-trace-count-badge")
+            .expect("the count should sit in a badge");
         let chevron = cx
             .debug_bounds("agent-activity-chevron")
-            .expect("the tool disclosure should be painted");
-        assert!(chevron.left() >= label.right());
-        assert!(chevron.left() - label.right() <= px(8.0));
+            .expect("the trace disclosure should be painted");
+        assert!(cx.debug_bounds("agent-activity-glyph").is_none());
+        assert!(chevron.left() >= counts.right());
+        assert!(chevron.left() - counts.right() <= px(8.0));
+        assert!(chevron.left() > badge.right());
         assert!(PANE_WIDTH - chevron.right() > px(200.0));
     }
 
@@ -4697,43 +4848,37 @@ mod tests {
             store.markdown(7, MarkdownSlot::Body, "before".into(), cx)
         });
         assert!(!store.update(cx, |store, _| {
-            store.expanded(7, DisclosureKind::Tool, false)
-        }));
-        assert!(!store.update(cx, |store, _| {
-            store.expanded(7, DisclosureKind::Group, false)
+            store.expanded(7, DisclosureKind::Turn, false)
         }));
         store.update(cx, |store, cx| {
-            store.toggle_expanded(7, DisclosureKind::Tool, false, cx);
-            store.toggle_expanded(7, DisclosureKind::Group, false, cx);
+            store.toggle_expanded(7, DisclosureKind::Turn, false, cx);
         });
-        let payloads = Arc::<[AgentToolPayload]>::from([AgentToolPayload::Text("output".into())]);
-        let content = store.update(cx, |store, _| {
-            store.tool_content(7, None, None, payloads.clone())
-        });
-        let scroll = store.update(cx, |store, _| store.tool_scroll(7));
-        scroll
-            .0
-            .borrow()
-            .base_handle
-            .set_offset(gpui::point(px(0.0), px(-42.0)));
+        store.update(cx, |store, _| store.tick_turn_clocks(Some(7)));
+        assert!(
+            store
+                .read_with(cx, |store, _| store.turn_elapsed(7))
+                .is_some()
+        );
+        assert_eq!(store.read_with(cx, |store, _| store.turn_elapsed(8)), None);
 
         cx.run_until_parked();
 
         let retained_markdown = store.update(cx, |store, cx| {
             store.markdown(7, MarkdownSlot::Body, "before".into(), cx)
         });
-        let retained_content =
-            store.update(cx, |store, _| store.tool_content(7, None, None, payloads));
-        let retained_scroll = store.update(cx, |store, _| store.tool_scroll(7));
         assert_eq!(retained_markdown, markdown);
-        assert!(Arc::ptr_eq(&retained_content, &content));
         assert!(store.update(cx, |store, _| {
-            store.expanded(7, DisclosureKind::Tool, false)
+            store.expanded(7, DisclosureKind::Turn, false)
         }));
-        assert!(store.update(cx, |store, _| {
-            store.expanded(7, DisclosureKind::Group, false)
-        }));
-        assert_eq!(retained_scroll.0.borrow().base_handle.offset().y, px(-42.0));
+        store.update(cx, |store, _| store.tick_turn_clocks(None));
+        let finished = store.read_with(cx, |store, _| store.turn_elapsed(7));
+        assert!(finished.is_some());
+        store.update(cx, |store, _| store.tick_turn_clocks(Some(9)));
+        assert_eq!(
+            store.read_with(cx, |store, _| store.turn_elapsed(7)),
+            finished,
+            "a finished turn keeps its time"
+        );
     }
 
     #[gpui::test]
@@ -4983,212 +5128,6 @@ mod tests {
         );
     }
 
-    #[gpui::test]
-    fn equal_tool_payload_sync_does_not_rematerialize(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let payloads = Arc::<[AgentToolPayload]>::from([AgentToolPayload::Json(
-            "{\n  \"ok\": true\n}".into(),
-        )]);
-        let store = cx.new(|_| AgentTimelineStore::default());
-        let content = store.update(cx, |store, _| {
-            store.tool_content(10, None, None, payloads.clone())
-        });
-        let update = store.update(cx, |store, cx| {
-            store.update_tool_content(10, None, None, payloads.clone(), cx)
-        });
-        let retained = store.update(cx, |store, _| store.tool_content(10, None, None, payloads));
-
-        assert_eq!(update, ToolContentUpdate::Unchanged);
-        assert!(Arc::ptr_eq(&content, &retained));
-    }
-
-    #[test]
-    fn diff_materialization_computes_lines() {
-        let materialized = materialize_tool_payload(&AgentToolPayload::Diff {
-            path: "/workspace/src/lib.rs".into(),
-            old: Some("same\nremoved\n".into()),
-            new: "same\nadded one\nadded two\n".into(),
-        });
-
-        assert_eq!(
-            materialized
-                .rows
-                .iter()
-                .filter(|row| matches!(
-                    row,
-                    ToolContentRow::Diff {
-                        kind: DiffLineKind::Added,
-                        ..
-                    }
-                ))
-                .count(),
-            2
-        );
-        assert_eq!(
-            materialized
-                .rows
-                .iter()
-                .filter(|row| matches!(
-                    row,
-                    ToolContentRow::Diff {
-                        kind: DiffLineKind::Removed,
-                        ..
-                    }
-                ))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn diff_materialization_caps_inputs_before_myers() {
-        use std::fmt::Write as _;
-
-        let mut old = String::new();
-        let mut new = String::new();
-        for line in 0..TOOL_CONTENT_MAX_LINES * 2 {
-            writeln!(&mut old, "old-{line}").expect("write old diff fixture");
-            writeln!(&mut new, "new-{line}").expect("write new diff fixture");
-        }
-        let (bounded_old, old_truncated) = bounded_tool_diff_prefix(&old);
-        let (bounded_new, new_truncated) = bounded_tool_diff_prefix(&new);
-
-        assert_eq!(bounded_old.lines().count(), TOOL_CONTENT_MAX_LINES);
-        assert_eq!(bounded_new.lines().count(), TOOL_CONTENT_MAX_LINES);
-        assert!(old_truncated && new_truncated);
-
-        let materialized = materialize_tool_payload(&AgentToolPayload::Diff {
-            path: "/workspace/src/lib.rs".into(),
-            old: Some(old.into()),
-            new: new.into(),
-        });
-        assert!(materialized.rows.len() <= TOOL_CONTENT_MAX_LINES + 2);
-        assert!(matches!(
-            materialized.rows.last(),
-            Some(ToolContentRow::Footer(note)) if note.contains("truncated")
-        ));
-    }
-
-    #[test]
-    fn tool_content_line_cap_adds_a_truncation_footer() {
-        let text = (0..TOOL_CONTENT_MAX_LINES + 2)
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n");
-        let payload = AgentToolPayload::Text(text.clone().into());
-        let materialized = materialize_tool_payload(&payload);
-
-        assert_eq!(materialized.rows.len(), TOOL_CONTENT_MAX_LINES + 1);
-        assert!(matches!(
-            materialized.rows.last(),
-            Some(ToolContentRow::Footer(note))
-                if note.contains("truncated")
-        ));
-        assert_eq!(tool_payload_copy_text(std::slice::from_ref(&payload)), text);
-    }
-
-    #[test]
-    fn terminal_payload_keeps_the_latest_lines_for_tail_following() {
-        let text = (0..TOOL_CONTENT_MAX_LINES + 2)
-            .map(|line| format!("line-{line}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let materialized = materialize_tool_payload(&AgentToolPayload::Terminal(text.into()));
-
-        assert_eq!(materialized.rows.len(), TOOL_CONTENT_MAX_LINES + 1);
-        assert!(matches!(
-            &materialized.rows[0],
-            ToolContentRow::Footer(label) if label.contains("latest output")
-        ));
-        assert!(matches!(
-            &materialized.rows[1],
-            ToolContentRow::Plain(line) if line == "line-2"
-        ));
-        assert!(matches!(
-            materialized.rows.last(),
-            Some(ToolContentRow::Plain(line))
-                if line == &format!("line-{}", TOOL_CONTENT_MAX_LINES + 1)
-        ));
-    }
-
-    #[gpui::test]
-    fn expanded_tool_content_scrolls_inside_its_bounded_viewport(cx: &mut TestAppContext) {
-        cx.update(crate::init);
-        let scroll_handle = UniformListScrollHandle::new();
-        let timeline_scroll = ListState::new(2, gpui::ListAlignment::Top, px(360.0));
-        let (_, cx) = cx.add_window_view({
-            let scroll_handle = scroll_handle.clone();
-            let timeline_scroll = timeline_scroll.clone();
-            move |_, _| ToolContentScrollTest {
-                scroll_handle: scroll_handle.clone(),
-                timeline_scroll: timeline_scroll.clone(),
-            }
-        });
-        let cx: &mut VisualTestContext = cx;
-        cx.run_until_parked();
-        cx.update(|window, cx| {
-            _ = window.draw(cx);
-        });
-
-        let initial_y = cx
-            .debug_bounds("tool-scroll-visible-row")
-            .expect("visible row bounds")
-            .origin
-            .y;
-        cx.simulate_event(ScrollWheelEvent {
-            position: point(px(10.0), px(10.0)),
-            delta: ScrollDelta::Pixels(point(px(0.0), px(-80.0))),
-            ..Default::default()
-        });
-        cx.update(|window, cx| {
-            _ = window.draw(cx);
-        });
-
-        let scrolled_y = cx
-            .debug_bounds("tool-scroll-visible-row")
-            .expect("visible row bounds after scroll")
-            .origin
-            .y;
-        assert!(scrolled_y < initial_y);
-        assert!(tool_scroll_y(&scroll_handle) < px(0.0));
-        assert_eq!(timeline_scroll.scroll_px_offset_for_scrollbar().y, px(0.0));
-
-        cx.simulate_event(ScrollWheelEvent {
-            position: point(px(10.0), px(10.0)),
-            delta: ScrollDelta::Pixels(point(px(0.0), px(-80.0))),
-            ..Default::default()
-        });
-        cx.update(|window, cx| {
-            _ = window.draw(cx);
-        });
-        assert_eq!(tool_scroll_y(&scroll_handle), px(-140.0));
-        assert_eq!(timeline_scroll.scroll_px_offset_for_scrollbar().y, px(0.0));
-
-        cx.simulate_event(ScrollWheelEvent {
-            position: point(px(10.0), px(10.0)),
-            delta: ScrollDelta::Pixels(point(px(0.0), px(-80.0))),
-            ..Default::default()
-        });
-        cx.update(|window, cx| {
-            _ = window.draw(cx);
-        });
-        let outer_offset = timeline_scroll.scroll_px_offset_for_scrollbar();
-        assert!(outer_offset.y < px(0.0));
-
-        cx.simulate_event(ScrollWheelEvent {
-            position: point(px(10.0), px(10.0)),
-            delta: ScrollDelta::Pixels(point(px(0.0), px(80.0))),
-            ..Default::default()
-        });
-        cx.update(|window, cx| {
-            _ = window.draw(cx);
-        });
-        assert!(tool_scroll_y(&scroll_handle) > px(-140.0));
-        assert_eq!(
-            timeline_scroll.scroll_px_offset_for_scrollbar(),
-            outer_offset
-        );
-    }
     fn tail_pin_window(
         cx: &mut TestAppContext,
         rows: usize,

@@ -437,6 +437,12 @@ impl Translator {
             "toolCallId": id,
             "status": status,
         });
+        if is_error
+            && matches!(name.as_str(), "Bash" | "PowerShell")
+            && let Some(code) = exit_code(output.as_deref().unwrap_or_default())
+        {
+            update["_meta"] = json!({ "zz": { "exitCode": code } });
+        }
         if let Some(output) = output.filter(|output| !output.trim().is_empty()) {
             update["content"] = json!([text_content(&output)]);
         }
@@ -488,6 +494,16 @@ fn chunk(kind: &str, message_id: &str, text: &str) -> Value {
         "messageId": message_id,
         "content": { "type": "text", "text": text },
     })
+}
+
+fn exit_code(output: &str) -> Option<i64> {
+    output
+        .lines()
+        .next()?
+        .trim()
+        .strip_prefix("Exit code ")?
+        .parse()
+        .ok()
 }
 
 fn text_content(text: &str) -> Value {

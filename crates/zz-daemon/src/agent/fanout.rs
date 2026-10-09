@@ -21,6 +21,7 @@ use std::{
 use agent_client_protocol::schema::v1::SessionUpdate;
 use parking_lot::{Condvar, Mutex};
 use serde_json::Value;
+use zz_protocol::agent_stream::agent_verb;
 use zz_protocol::{
     AgentAutoApprove, AgentPaneWire, AgentPermissionWire, AgentProvider, ClientId,
     ClientInstanceId, MAX_AGENT_PROMPT_BYTES, MAX_AGENT_QUEUED_PROMPTS, MAX_AGENT_RESULT_BYTES,
@@ -1004,7 +1005,7 @@ impl AgentFanout {
     }
 
     fn is_zz_command(&self, pane: PaneId, text: &str) -> bool {
-        text.trim_start().starts_with("//")
+        agent_verb(text).is_some()
             && self.lanes.lock().get(&pane).is_some_and(|lane| {
                 matches!(
                     lane.ready,

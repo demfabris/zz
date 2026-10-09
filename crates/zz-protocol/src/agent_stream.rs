@@ -276,6 +276,20 @@ mod base64_text {
     }
 }
 
+pub const AGENT_VERBS: [&str; 5] = ["btw", "side", "steer", "fork", "rewind"];
+
+#[must_use]
+pub fn agent_verb(text: &str) -> Option<(&'static str, &str)> {
+    let line = text.trim().strip_prefix('/')?;
+    let (name, rest) = line
+        .split_once(char::is_whitespace)
+        .map_or((line, ""), |(name, rest)| (name, rest.trim()));
+    AGENT_VERBS
+        .into_iter()
+        .find(|verb| *verb == name)
+        .map(|verb| (verb, rest))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

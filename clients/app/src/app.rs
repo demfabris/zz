@@ -173,6 +173,7 @@ pub struct AppShell {
     pane_drag: Option<PaneDragState>,
     pane_layout_override: Option<PaneLayoutOverride>,
     pane_canvas_bounds: Rc<Cell<Bounds<Pixels>>>,
+    float_canvas_bounds: Rc<Cell<Bounds<Pixels>>>,
     pane_bounds: Rc<RefCell<HashMap<PaneId, Bounds<Pixels>>>>,
     rendered_drop_preview: Rc<Cell<DropPreviewFrame>>,
     compact: compact::CompactState,
@@ -392,6 +393,7 @@ impl AppShell {
             pane_drag: None,
             pane_layout_override: None,
             pane_canvas_bounds: Rc::default(),
+            float_canvas_bounds: Rc::default(),
             pane_bounds: Rc::default(),
             rendered_drop_preview: Rc::default(),
             compact: compact::CompactState::default(),
@@ -1625,11 +1627,12 @@ impl AppShell {
             let Some(pane) = active_window.panes.get(&pane_id) else {
                 continue;
             };
-            let radii = Corners::all(if self.preferences.gaps {
-                px(self.preferences.pane_radius)
-            } else {
-                px(0.0)
-            });
+            let frame = floating::pane_frame(
+                matches!(pane.kind, PaneKindSnapshot::Terminal),
+                is_float,
+                &self.preferences,
+            );
+            let radii = Corners::all(px(frame.radius));
             let dead_label = pane.dead.then(|| {
                 pane.dead_status
                     .map_or_else(|| "Dead".to_owned(), |status| format!("Dead · {status}"))
@@ -1738,7 +1741,7 @@ impl AppShell {
                     picker.into_any_element()
                 }
             };
-            let content = if matches!(pane.kind, PaneKindSnapshot::Terminal) {
+            let content = if frame.header {
                 let title = zz_client::navigation::pane_label(pane);
                 let view = cx.entity();
                 let touch_view = cx.weak_entity();
@@ -1822,13 +1825,9 @@ impl AppShell {
             };
             let chrome = PaneChrome::new(
                 radii,
-                px(if self.preferences.gaps {
-                    self.preferences.pane_border_width
-                } else {
-                    0.0
-                }),
+                px(frame.border_width),
                 pane_border_color(active_window.active_pane == pane_id, cx),
-                self.preferences.gaps,
+                frame.shadow,
             )
             .active(active_window.active_pane == pane_id)
             .dimmed(
@@ -1882,7 +1881,7 @@ impl AppShell {
                         zz_ui::pane::PaneOverlayCorner::TopRight,
                         status_tags,
                     )
-                    .when(terminal_pane, |stack| {
+                    .when(frame.header, |stack| {
                         stack.top(px(zz_ui::pane::TERMINAL_HEADER_HEIGHT + 8.0))
                     })
                     .occlude()
@@ -2042,9 +2041,11 @@ impl AppShell {
         }
         let content = self.render_layout(&layout, &active_window, &mut panes, cx);
         let float_layer = self.float_layer(&active_window, &floats, &mut panes, cx);
+        let float_canvas = Rc::clone(&self.float_canvas_bounds);
         let content = div()
             .relative()
             .size_full()
+            .on_prepaint(move |bounds, _, _| float_canvas.set(bounds))
             .child(content)
             .children(float_layer)
             .into_any_element();
@@ -2796,22 +2797,34 @@ impl Render for AppShell {
             } else if unobstructed {
                 self.active_window(cx)
                     .map(|window| {
+                        let cell = self.cell_size(&window, cx);
                         let layout = window
                             .zoomed_pane
                             .map_or(window.layout, zz_protocol::LayoutNode::Pane);
-                        let floats: Vec<PaneId> = window
+                        let canvas = self.float_canvas_bounds.get();
+                        let floats: Vec<_> = window
                             .floating
                             .iter()
                             .filter(|float| float.visible)
-                            .map(|float| float.pane)
+                            .filter_map(|float| {
+                                let placed = floating::float_placement(float, cell, canvas.size)?;
+                                Some((
+                                    float.pane,
+                                    floating::FloatPlacement {
+                                        frame: placed.frame + canvas.origin,
+                                        content: placed.content + canvas.origin,
+                                    },
+                                ))
+                            })
                             .collect();
-                        let front = floats.first().copied();
-                        pane_rects(&layout)
-                            .into_iter()
-                            .map(|(pane, _)| pane)
-                            .filter(|_| floats.is_empty())
-                            .chain(front)
-                            .collect()
+                        let bounds = self.pane_bounds.borrow();
+                        floating::native_panes_shown(
+                            pane_rects(&layout)
+                                .into_iter()
+                                .map(|(pane, _)| (pane, bounds.get(&pane).copied())),
+                            &floats,
+                            window.modal.map(|modal| modal.pane),
+                        )
                     })
                     .unwrap_or_default()
             } else {

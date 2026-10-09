@@ -434,6 +434,8 @@ fn completed_status_does_not_retain_oversized_sources_callbacks_or_borders() {
                     zz_protocol::PaneBorderPresentation {
                         pane: request.context.pane_id.parse().unwrap(),
                         style: large,
+                        window_style: String::new(),
+                        window_active_style: String::new(),
                     },
                 );
             }
@@ -1087,6 +1089,8 @@ fn completed_status_parts_recheck_facts_layout_targets_modes_and_sources() {
             _ => Arc::make_mut(&mut next.pane_borders).push(zz_protocol::PaneBorderPresentation {
                 pane: next.context.pane_id.parse().unwrap(),
                 style: "fg=red".to_owned(),
+                window_style: String::new(),
+                window_active_style: String::new(),
             }),
         }
         let actual = renderer.render_forced_at(&next, 1_700_000_001);

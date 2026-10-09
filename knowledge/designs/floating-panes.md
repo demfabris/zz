@@ -308,13 +308,26 @@ Recorded by float.clients (2026-10-09).
 - `compat/tui-floating.sh` compares the decoded glyphs of every cell, the cursor and the pane list
   against tmux 3.8; it does not compare colours. While `display-popup` is up it compares the screen
   only, because 3.8's popup is a client overlay and zz's is a modal pane.
-- The drag commit `resize-pane -x -y ; move-pane -X -Y` is two `CommandInvocation`s sent in order
-  on one connection (`zz_client::floating::float_drag_commands`), which is how a GUI client sends a
-  command list.
+- The drag commit `resize-pane -x -y ; move-pane -X -Y` is one request,
+  `run-shell -C "resize-pane ... ; move-pane ..."`, which zz parses as a tmux command list
+  (`zz_client::floating::float_drag_command`); the daemon still publishes a snapshot after each
+  command of the list. The height it sends takes back the row `resize-pane -y` adds for a float on
+  the row under a top pane status or above a bottom one.
 - `EventPayload::Popup` and `InputMessage::Popup` are renamed `RetiredPopup` in Rust with their serde
   names kept, so clients match the retired tag without naming the popup.
 - The raw TUI fills a window with no tiled pane with the default `fill-character` inside cell
   (`bg=themedarkgrey`); a user `fill-character` is not read.
+- `WindowSnapshot` and `TreeOp::WindowLayout` also append the window's `sx` and `sy`: with no tiled
+  pane the layout dump carries no window height, and the drag's bottom-status correction needs it.
+- `PaneBorderPresentation` also appends each pane's expanded `window-style` and, for the active
+  pane, `window-active-style`. The raw TUI paints a pane's default cells in them, per ground as
+  `tty_default_colours` takes them, with theme colours resolved through the status line's slots, so
+  a `display-popup`'s `popup-style` (`bg=themedarkgrey,fg=themewhite`) matches 3.8. The desktop and
+  the web/iOS clients keep drawing the daemon's pane appearance, where `window-style` is already
+  applied but a theme colour maps to zz's own terminal palette slot.
+- `compat/tui-overlays.sh` asserts its popup cases with three known differences rewritten out, each
+  from the modal-pane ruling (gap `display-popup.modal-pane`): the title one column right of 3.8's
+  box, the window's `O` flag on the status row, and a centred popup a row higher at an odd height.
 
 # Where the float.keys build differs
 

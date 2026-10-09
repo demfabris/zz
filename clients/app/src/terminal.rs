@@ -576,59 +576,61 @@ impl TerminalPane {
             cx.stop_propagation();
             return;
         }
-        if !self.connection.read(cx).core.claims_prefix_input(&input) {
-            match self
-                .chrome
-                .resolve(TERMINAL_TABLE, &input)
-                .or_else(|| self.apple_chrome.resolve(TERMINAL_TABLE, &input))
-            {
-                Some(
-                    action @ (ChromeAction::TerminalFontIncrease
-                    | ChromeAction::TerminalFontDecrease),
-                ) => {
-                    let increment = action == ChromeAction::TerminalFontIncrease;
-                    self.font_delta =
-                        (self.font_delta + if increment { 1. } else { -1. }).clamp(-6., 24.);
-                    cx.notify();
-                    cx.stop_propagation();
-                    return;
-                }
-                Some(ChromeAction::TerminalCopy) => {
-                    self.view(
-                        TerminalViewAction::CopySelection {
-                            request_id: 1,
-                            target: zz_terminal::ClipboardTarget::Clipboard,
-                        },
-                        cx,
-                    );
-                    cx.stop_propagation();
-                    return;
-                }
-                Some(ChromeAction::TerminalSelectAll) => {
-                    self.view(TerminalViewAction::SelectAll, cx);
-                    cx.stop_propagation();
-                    return;
-                }
-                Some(ChromeAction::TerminalClearHistory) => {
-                    self.view(TerminalViewAction::ClearHistory, cx);
-                    cx.stop_propagation();
-                    return;
-                }
-                Some(ChromeAction::TerminalPaste) => {
-                    #[cfg(target_os = "ios")]
-                    {
-                        zpui_ios::request_paste();
-                        cx.stop_propagation();
-                    }
-                    return;
-                }
-                Some(ChromeAction::TerminalSearch) => {
-                    self.open_search(window, cx);
-                    cx.stop_propagation();
-                    return;
-                }
-                _ => {}
+        let shortcut = {
+            let core = &self.connection.read(cx).core;
+            terminal_shortcut(
+                [&self.chrome, &self.apple_chrome],
+                core.claims_prefix_input(&input),
+                core.modal_capture(),
+                &input,
+            )
+        };
+        match shortcut {
+            Some(
+                action @ (ChromeAction::TerminalFontIncrease | ChromeAction::TerminalFontDecrease),
+            ) => {
+                let increment = action == ChromeAction::TerminalFontIncrease;
+                self.font_delta =
+                    (self.font_delta + if increment { 1. } else { -1. }).clamp(-6., 24.);
+                cx.notify();
+                cx.stop_propagation();
+                return;
             }
+            Some(ChromeAction::TerminalCopy) => {
+                self.view(
+                    TerminalViewAction::CopySelection {
+                        request_id: 1,
+                        target: zz_terminal::ClipboardTarget::Clipboard,
+                    },
+                    cx,
+                );
+                cx.stop_propagation();
+                return;
+            }
+            Some(ChromeAction::TerminalSelectAll) => {
+                self.view(TerminalViewAction::SelectAll, cx);
+                cx.stop_propagation();
+                return;
+            }
+            Some(ChromeAction::TerminalClearHistory) => {
+                self.view(TerminalViewAction::ClearHistory, cx);
+                cx.stop_propagation();
+                return;
+            }
+            Some(ChromeAction::TerminalPaste) => {
+                #[cfg(target_os = "ios")]
+                {
+                    zpui_ios::request_paste();
+                    cx.stop_propagation();
+                }
+                return;
+            }
+            Some(ChromeAction::TerminalSearch) => {
+                self.open_search(window, cx);
+                cx.stop_propagation();
+                return;
+            }
+            _ => {}
         }
         let raw = cfg!(target_os = "ios")
             || self
@@ -2246,6 +2248,20 @@ fn sticky_keystroke(text: &str, cx: &mut App) -> Option<zpui::Keystroke> {
     Some(zz_ui::compact::StickyModifiers::apply(&keystroke, cx))
 }
 
+fn terminal_shortcut(
+    keymaps: [&ChromeKeymap; 2],
+    claims_prefix: bool,
+    modal_capture: Option<PaneId>,
+    input: &KeyInput,
+) -> Option<ChromeAction> {
+    if claims_prefix || modal_capture.is_some() {
+        return None;
+    }
+    keymaps
+        .into_iter()
+        .find_map(|keymap| keymap.resolve(TERMINAL_TABLE, input))
+}
+
 #[must_use]
 pub fn key_input(event: &KeyDownEvent) -> KeyInput {
     keystroke_input(
@@ -2400,6 +2416,8 @@ mod tests {
                             pane_z_order: vec![PaneId(1)],
                             floating: Vec::new(),
                             modal: None,
+                            sx: 0,
+                            sy: 0,
                         }],
                     }],
                     focused_window: Some(WindowId(1)),
@@ -2622,6 +2640,33 @@ mod tests {
         assert_eq!(accumulate_scroll(&mut remainder, 0.5), 0);
         assert_eq!(accumulate_scroll(&mut remainder, 0.75), 1);
         assert_eq!(remainder, 0.);
+    }
+
+    #[test]
+    fn a_capture_keys_modal_takes_terminal_shortcuts_from_the_chrome() {
+        let desktop = ChromeKeymap::for_profile(ChromeProfile::Desktop);
+        let apple = ChromeKeymap::for_profile(ChromeProfile::DesktopApple);
+        for (key, action) in [
+            ("ctrl-shift-f", ChromeAction::TerminalSearch),
+            ("ctrl-shift-c", ChromeAction::TerminalCopy),
+            ("ctrl-shift-v", ChromeAction::TerminalPaste),
+        ] {
+            let input = keystroke_input(&Keystroke::parse(key).unwrap(), KeyAction::Press);
+            assert_eq!(
+                terminal_shortcut([&desktop, &apple], false, None, &input),
+                Some(action),
+                "{key}"
+            );
+            assert_eq!(
+                terminal_shortcut([&desktop, &apple], false, Some(PaneId(4)), &input),
+                None,
+                "{key}"
+            );
+            assert_eq!(
+                terminal_shortcut([&desktop, &apple], true, None, &input),
+                None
+            );
+        }
     }
 
     #[test]

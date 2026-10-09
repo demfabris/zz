@@ -23,16 +23,18 @@ use zz_client::{
     ChromeAction, Disposition, DropZone, Effect, InputEvent, InputRouter, MenuPointerKind,
     NormalizedPaneRect, PaneRect, PrefixView, SurfaceKind, coerced_drop_zone, drop_preview_bounds,
     drop_zone_at,
-    floating::{FloatCells, FloatGrip, float_drag_commands, float_drag_preview, float_pixels},
+    floating::{
+        FloatCells, FloatGrip, FloatWindow, float_drag_command, float_drag_preview, float_pixels,
+    },
     pane_drop_command, pane_rects, predicted_drop_layout,
 };
 use zz_mux::display_width;
 use zz_protocol::{
     AgentCommand, Axis, ClientMessageKind, CommandInvocation, DisplayPanesAction,
     FloatingPaneSnapshot, GuiResponse, InputMessage, LayoutNode, MenuState, ModalPaneSnapshot,
-    MuxSnapshot, PROTOCOL_VERSION, PaneBorderLines, PaneId, PaneIndicator, PaneKindSnapshot,
-    PathEntry, PathListRoot, PopupBorderLines, SPLIT_RATIO_BASIS, SessionId, SplitId, WindowId,
-    WindowSnapshot,
+    MuxSnapshot, PROTOCOL_VERSION, PaneBorderLines, PaneBorderStatus, PaneId, PaneIndicator,
+    PaneKindSnapshot, PathEntry, PathListRoot, PopupBorderLines, SPLIT_RATIO_BASIS, SessionId,
+    SplitId, WindowId, WindowSnapshot,
 };
 use zz_terminal::KeyAction as TerminalKeyAction;
 use zz_ui::attachment::open_attachment_preview;
@@ -308,12 +310,14 @@ struct FloatDragState {
     pane: PaneId,
     grip: FloatGrip,
     lines: PaneBorderLines,
+    area: FloatWindow,
     start: FloatCells,
     press: Point<Pixels>,
     cell: Size<Pixels>,
     delta: (i32, i32),
     started: bool,
     committed_snapshot_revision: Option<u64>,
+    request: Option<u64>,
 }
 
 impl FloatDragState {
@@ -923,6 +927,14 @@ impl AppView {
                         cx.notify();
                     });
                 }
+            }
+            if view
+                .float_drag
+                .and_then(|drag| drag.request)
+                .is_some_and(|request| mux.read(cx).command_settled(request))
+            {
+                view.float_drag = None;
+                cx.notify();
             }
             if revision_changed || snapshot_arrived {
                 view.synchronize_panes(window, cx);
@@ -2672,30 +2684,44 @@ impl AppView {
     fn begin_float_drag(
         &mut self,
         window: WindowId,
+        border_status: PaneBorderStatus,
         float: FloatingPaneSnapshot,
         grip: FloatGrip,
         cell: Size<Pixels>,
         press: Point<Pixels>,
         cx: &mut Context<Self>,
     ) {
-        self.mux.read(cx).execute(pane_select_command(float.pane));
+        let mux = self.mux.read(cx);
+        mux.execute(pane_select_command(float.pane));
         if self
             .float_drag
             .is_some_and(|drag| drag.committed_snapshot_revision.is_some())
         {
             return;
         }
+        let rows = mux
+            .snapshot()
+            .sessions
+            .iter()
+            .flat_map(|session| &session.windows)
+            .find(|snapshot| snapshot.id == window)
+            .map_or(0, |snapshot| snapshot.sy);
         self.float_drag = Some(FloatDragState {
             window,
             pane: float.pane,
             grip,
             lines: float.border_lines,
+            area: FloatWindow {
+                border_status,
+                rows,
+            },
             start: FloatCells::from(&float),
             press,
             cell,
             delta: (0, 0),
             started: false,
             committed_snapshot_revision: None,
+            request: None,
         });
     }
 
@@ -2748,11 +2774,10 @@ impl AppView {
             return;
         }
         drag.committed_snapshot_revision = Some(self.snapshot_revision);
-        self.float_drag = Some(drag);
-        let mux = self.mux.read(cx);
-        for command in float_drag_commands(drag.pane, drag.grip, target, drag.lines) {
-            mux.execute(command);
-        }
+        drag.request = self.mux.read(cx).execute_tracked(float_drag_command(
+            drag.pane, drag.grip, drag.start, target, drag.lines, drag.area,
+        ));
+        self.float_drag = drag.request.is_some().then_some(drag);
     }
 
     fn reconcile_float_drag(&mut self, active_window: Option<&WindowSnapshot>, cx: &App) {
@@ -3708,7 +3733,14 @@ impl AppView {
             .unwrap_or_default();
         let inset = if bordered { cell } else { Size::default() };
         let grips = if bordered {
-            self.float_grips(window_snapshot.id, *float, cell, frame.size, cx)
+            self.float_grips(
+                window_snapshot.id,
+                window_snapshot.pane_border_status,
+                *float,
+                cell,
+                frame.size,
+                cx,
+            )
         } else {
             Vec::new()
         };
@@ -3740,6 +3772,7 @@ impl AppView {
     fn float_grips(
         &self,
         window: WindowId,
+        border_status: PaneBorderStatus,
         float: FloatingPaneSnapshot,
         cell: Size<Pixels>,
         frame: Size<Pixels>,
@@ -3834,7 +3867,15 @@ impl AppView {
                 .on_mouse_down(
                     MouseButton::Left,
                     cx.listener(move |view, event: &MouseDownEvent, _, cx| {
-                        view.begin_float_drag(window, float, grip, cell, event.position, cx);
+                        view.begin_float_drag(
+                            window,
+                            border_status,
+                            float,
+                            grip,
+                            cell,
+                            event.position,
+                            cx,
+                        );
                     }),
                 )
                 .on_drag(FloatDrag { pane: float.pane }, |_, _, _, cx| {
@@ -4390,6 +4431,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
         let attached = SessionId(1);
         let session = zz_protocol::SessionSnapshot {
@@ -4670,6 +4713,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
         MuxSnapshot {
             generation,
@@ -6580,6 +6625,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
         MuxSnapshot {
             generation: 10 + active.0 + generation_bias,
@@ -6756,6 +6803,230 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(workspace.read_with(cx, |workspace, _| workspace.split_drag.is_none()));
+    }
+
+    fn settled_float_drag_drops_its_preview(
+        cx: &mut TestAppContext,
+        reply: impl Fn(u64) -> zz_protocol::CommandResponse,
+    ) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let tiled = PaneId(0);
+        let floating = PaneId(1);
+        let mut snapshot = one_pane_snapshot(1);
+        let window = &mut snapshot.sessions[0].windows[0];
+        let mut float_pane = window.panes[&tiled].clone();
+        float_pane.id = floating;
+        window.panes.insert(floating, float_pane);
+        let float = FloatingPaneSnapshot {
+            pane: floating,
+            xoff: 4,
+            yoff: 2,
+            sx: 20,
+            sy: 6,
+            visible: true,
+            border_lines: PaneBorderLines::Single,
+            border_status: PaneBorderStatus::Off,
+        };
+        window.floating = vec![float];
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), snapshot, cx);
+        });
+        cx.run_until_parked();
+        let drawn = |cx: &mut zpui::VisualTestContext| {
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+            cx.debug_bounds("floating-pane-1")
+                .expect("a visible float is drawn")
+                .origin
+        };
+        let resting = drawn(cx);
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.float_drag = Some(FloatDragState {
+                window: WindowId(0),
+                pane: floating,
+                grip: FloatGrip::MOVE,
+                lines: PaneBorderLines::Single,
+                area: FloatWindow {
+                    border_status: PaneBorderStatus::Off,
+                    rows: 24,
+                },
+                start: FloatCells::from(&float),
+                press: Point::default(),
+                cell: zpui::size(px(8.0), px(16.0)),
+                delta: (3, 2),
+                started: true,
+                committed_snapshot_revision: Some(workspace.snapshot_revision),
+                request: Some(7),
+            });
+            cx.notify();
+        });
+        mux.read_with(cx, |mux, _| mux.watch_command_for_test(7));
+        cx.run_until_parked();
+        assert_ne!(drawn(cx), resting, "a committed drag previews the move");
+        let revision = workspace.read_with(cx, |workspace, _| workspace.snapshot_revision);
+
+        let settle = |request_id, cx: &mut zpui::VisualTestContext| {
+            mux.update(cx, |mux, cx| {
+                mux.handle_message_for_test(
+                    zz_protocol::ProtocolMessage::CommandResponse(reply(request_id)),
+                    cx,
+                );
+            });
+            cx.run_until_parked();
+        };
+        settle(6, cx);
+        assert!(
+            workspace.read_with(cx, |workspace, _| workspace.float_drag.is_some()),
+            "another request's reply leaves the drag alone"
+        );
+
+        settle(7, cx);
+        workspace.read_with(cx, |workspace, _| {
+            assert!(workspace.float_drag.is_none());
+            assert_eq!(workspace.snapshot_revision, revision);
+        });
+        assert_eq!(drawn(cx), resting, "the settled drag left its preview up");
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.begin_float_drag(
+                WindowId(0),
+                PaneBorderStatus::Off,
+                float,
+                FloatGrip::MOVE,
+                zpui::size(px(8.0), px(16.0)),
+                Point::default(),
+                cx,
+            );
+            assert!(
+                workspace
+                    .float_drag
+                    .is_some_and(|drag| drag.committed_snapshot_revision.is_none()),
+                "a settled drag no longer blocks the next one"
+            );
+        });
+    }
+
+    #[zpui::test]
+    fn a_refused_float_drag_drops_its_preview_without_a_snapshot(cx: &mut TestAppContext) {
+        settled_float_drag_drops_its_preview(cx, |request_id| {
+            zz_protocol::CommandResponse::Error {
+                request_id,
+                error: zz_protocol::ServerError::InvalidCommand("client is read-only".to_owned()),
+                output: zz_protocol::RawText::default(),
+            }
+        });
+    }
+
+    #[zpui::test]
+    fn an_accepted_float_drag_that_changed_nothing_drops_its_preview(cx: &mut TestAppContext) {
+        settled_float_drag_drops_its_preview(cx, |request_id| {
+            zz_protocol::CommandResponse::Success {
+                request_id,
+                output: zz_protocol::RawText::default(),
+                exit_code: 0,
+                stderr: String::new(),
+                stdout_claim: zz_protocol::StdoutClaim::None,
+            }
+        });
+    }
+
+    #[zpui::test]
+    fn a_float_drag_measures_rows_from_the_daemon_window(cx: &mut TestAppContext) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
+                    zz_daemon::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        let tiled = PaneId(0);
+        let floating = PaneId(1);
+        let mut snapshot = one_pane_snapshot(1);
+        let window = &mut snapshot.sessions[0].windows[0];
+        let mut float_pane = window.panes.remove(&tiled).expect("the one pane to float");
+        float_pane.id = floating;
+        window.panes.insert(floating, float_pane);
+        window.layout = LayoutNode::Empty;
+        window.active_pane = floating;
+        window.pane_order = vec![floating];
+        window.pane_z_order = vec![floating];
+        window.sx = 100;
+        window.sy = 37;
+        let float = FloatingPaneSnapshot {
+            pane: floating,
+            xoff: 4,
+            yoff: 30,
+            sx: 20,
+            sy: 6,
+            visible: true,
+            border_lines: PaneBorderLines::Single,
+            border_status: PaneBorderStatus::Off,
+        };
+        window.floating = vec![float];
+        window.pane_border_status = PaneBorderStatus::Bottom;
+        window.layout_dump =
+            r#"{"V":2,"L":{"t":"p","w":22,"h":8,"x":3,"y":29,"a":true,"i":0,"z":0,"I":"%1"}}"#
+                .to_owned();
+        window.visible_layout_dump.clone_from(&window.layout_dump);
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), snapshot, cx);
+        });
+        cx.run_until_parked();
+
+        workspace.update(cx, |workspace, cx| {
+            workspace.begin_float_drag(
+                WindowId(0),
+                PaneBorderStatus::Bottom,
+                float,
+                FloatGrip::MOVE,
+                zpui::size(px(8.0), px(16.0)),
+                Point::default(),
+                cx,
+            );
+            assert_eq!(
+                workspace.float_drag.map(|drag| drag.area.rows),
+                Some(37),
+                "a window with no tiled pane judges the bottom status row on the daemon's height"
+            );
+        });
     }
 
     /// `rendering.geometry-residue`'s probe. The desktop client measures its
@@ -7542,6 +7813,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
 
         assert!(pending.still_predicts(Some(&window), 12));

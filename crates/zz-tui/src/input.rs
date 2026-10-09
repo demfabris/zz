@@ -22,7 +22,7 @@ use crate::{
         BrowserState, ProviderModifiers, ProviderPointerButton, ProviderPointerInput,
         ProviderPointerPhase,
     },
-    layout::Rect,
+    layout::{PaneRect, Rect},
     picker::{self, Action as PickerAction},
     sidebar::{self, EditKind as SidebarEditKind, Target as SidebarTarget},
     state::{ClientMessage, HostSwitch, Model},
@@ -1208,7 +1208,7 @@ fn handle_mouse(
     if let Some(action) = pane_mouse_action(
         &model.size,
         event,
-        content,
+        entry,
         global_column,
         global_row,
         global_x,
@@ -1447,18 +1447,13 @@ fn bound_mouse_view_action(
     global_x: u32,
     global_y: u32,
 ) -> Option<TerminalViewAction> {
-    let content = model
-        .layout
-        .panes
-        .iter()
-        .find(|entry| entry.pane == pane)?
-        .content();
+    let entry = *model.layout.panes.iter().find(|entry| entry.pane == pane)?;
     let viewport = model.viewports.get(&pane)?;
     let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking;
     pane_mouse_action(
         &model.size,
         event,
-        content,
+        entry,
         global_column,
         global_row,
         global_x,
@@ -1818,7 +1813,7 @@ pub(crate) fn app_mouse_forward_action(
     let action = pane_mouse_action(
         &model.size,
         event,
-        content,
+        entry,
         global_column,
         global_row,
         global_x,
@@ -1832,17 +1827,28 @@ pub(crate) fn app_mouse_forward_action(
 fn pane_mouse_action(
     size: &crate::tty::TerminalSize,
     event: MouseEvent,
-    content: Rect,
+    entry: PaneRect,
     global_column: u16,
     global_row: u16,
     global_x: u32,
     global_y: u32,
     force_selection: bool,
 ) -> Option<TerminalViewAction> {
-    let column = global_column.saturating_sub(content.x);
-    let row = global_row.saturating_sub(content.y);
-    let x = global_x.saturating_sub(u32::from(content.x).saturating_mul(size.cell_width_px));
-    let y = global_y.saturating_sub(u32::from(content.y).saturating_mul(size.cell_height_px));
+    let content = entry.content();
+    let (left, top) = entry.source;
+    let column = global_column.saturating_sub(content.x).saturating_add(left);
+    let row = global_row.saturating_sub(content.y).saturating_add(top);
+    let x = global_x
+        .saturating_sub(u32::from(content.x).saturating_mul(size.cell_width_px))
+        .saturating_add(u32::from(left).saturating_mul(size.cell_width_px));
+    let y = global_y
+        .saturating_sub(u32::from(content.y).saturating_mul(size.cell_height_px))
+        .saturating_add(u32::from(top).saturating_mul(size.cell_height_px));
+    let content = Rect {
+        width: content.width.saturating_add(left),
+        height: content.height.saturating_add(top),
+        ..content
+    };
     let (phase, button) = mouse_routing(event.kind);
     let input = TerminalMouseInput::new(
         phase,
@@ -2201,6 +2207,8 @@ mod tests {
                     pane_z_order: Vec::new(),
                     floating: Vec::new(),
                     modal: None,
+                    sx: 0,
+                    sy: 0,
                 }],
                 viewers: Vec::new(),
             }],

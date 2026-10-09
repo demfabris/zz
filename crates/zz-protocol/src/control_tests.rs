@@ -50,6 +50,8 @@ fn snapshot() -> MuxSnapshot {
                 pane_z_order: vec![pane],
                 floating: Vec::new(),
                 modal: None,
+                sx: 0,
+                sy: 0,
             }],
         }],
     }

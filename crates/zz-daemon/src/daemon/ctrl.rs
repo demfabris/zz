@@ -274,7 +274,19 @@ fn client_view(
                     pane_border_indicators: window.pane_border_indicators,
                 });
             }
-            if !engine.has_pane_border_style_settings() && !window.pane_border_status.is_on() {
+            let float_status = |pane: PaneId| {
+                window
+                    .floating
+                    .iter()
+                    .any(|float| float.pane == pane && float.border_status.is_on())
+            };
+            if !engine.has_pane_border_style_settings()
+                && !window.pane_border_status.is_on()
+                && !window
+                    .floating
+                    .iter()
+                    .any(|float| float.border_status.is_on())
+            {
                 continue;
             }
             for (pane, entry) in &window.panes {
@@ -298,7 +310,8 @@ fn client_view(
                     border_colour = colour(styles.border);
                     active_border_colour = colour(styles.active_border);
                 }
-                let border_status_text = if window.pane_border_status.is_on() {
+                let border_status_text = if window.pane_border_status.is_on() || float_status(*pane)
+                {
                     expand_status(&engine.pane_border_format(*pane), &context, &mut hooks)
                 } else {
                     String::new()
@@ -1581,3 +1594,70 @@ impl Shared {
 #[cfg(test)]
 #[path = "ctrl_config_tests.rs"]
 mod config_tests;
+
+#[cfg(test)]
+mod float_view_tests {
+    use super::*;
+
+    #[test]
+    fn a_titled_float_keeps_its_status_text_in_a_client_view() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, float) = {
+            let mut inner = shared.inner.lock();
+            let (session, window, pane) = inner
+                .engine
+                .state
+                .create_session("titled-float-view")
+                .expect("session");
+            let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+            inner
+                .engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("new-pane", ["-T", "VIEW-TITLE"]),
+                )
+                .expect("new float");
+            let float = context.pane.expect("float pane");
+            let target = float.to_string();
+            for (option, value) in [
+                ("pane-border-status", "top"),
+                ("pane-border-format", "#{pane_title}"),
+                ("pane-border-style", "fg=red"),
+                ("window-style", "fg=red"),
+            ] {
+                inner
+                    .engine
+                    .execute(
+                        &mut context,
+                        &CommandInvocation::new("set-option", ["-p", "-t", &target, option, value]),
+                    )
+                    .expect("set float option");
+            }
+            (session, float)
+        };
+        let (client, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("titled-float-view-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(client, session).expect("attach client");
+        let mut inner = shared.inner.lock();
+        let snapshot = inner.engine.state.snapshot();
+        let facts = format_hook_facts(&inner);
+        let raw = shared_tree(&inner, &snapshot, (0, None), &facts);
+        assert_eq!(
+            raw.sessions[0].windows[0].panes[&float].border_status_text,
+            "VIEW-TITLE"
+        );
+        let view = client_view(&mut inner, client, &raw, &facts);
+        let blanked = view.overlay.iter().any(|op| {
+            matches!(
+                op,
+                zz_protocol::TreeOp::PanePresentation { pane, border_status_text, .. }
+                    if *pane == float && border_status_text.is_empty()
+            )
+        });
+        assert!(!blanked, "{:?}", view.overlay);
+    }
+}

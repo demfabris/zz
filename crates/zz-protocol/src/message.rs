@@ -602,6 +602,10 @@ pub struct PaneBorderPresentation {
     pub pane: PaneId,
     #[serde(deserialize_with = "deserialize_status_text")]
     pub style: String,
+    #[serde(default, deserialize_with = "deserialize_status_text")]
+    pub window_style: String,
+    #[serde(default, deserialize_with = "deserialize_status_text")]
+    pub window_active_style: String,
 }
 
 fn deserialize_pane_border_presentations<'de, D>(
@@ -699,10 +703,18 @@ impl StatusLine {
             return Err("status pane border presentations exceed the wire limit");
         }
         for border in &self.pane_borders {
-            if border.style.len() > MAX_STATUS_TEXT_BYTES {
+            let styles = [
+                &border.style,
+                &border.window_style,
+                &border.window_active_style,
+            ];
+            if styles
+                .iter()
+                .any(|style| style.len() > MAX_STATUS_TEXT_BYTES)
+            {
                 return Err("status pane border style exceeds the wire byte limit");
             }
-            if !style_or_empty_parses(&border.style) {
+            if !styles.iter().all(|style| style_or_empty_parses(style)) {
                 return Err("status pane border style does not parse as a style");
             }
         }

@@ -8140,9 +8140,7 @@ impl MuxEngine {
                 .windows
                 .get_mut(&mut self.state.journal, &window)
                 .expect("resolved pane window exists")
-                .zoomed_pane
-                .take()
-                .is_some()
+                .unzoom()
             {
                 self.state.bump_generation();
             }
@@ -8452,7 +8450,9 @@ impl MuxEngine {
         } else {
             Axis::Vertical
         };
-        let placement = if apply_tmux_zoom {
+        let placement = if floating.is_some() {
+            None
+        } else if apply_tmux_zoom {
             let size = match size {
                 None => LayoutSplitSize::Default,
                 Some(SplitSize::Percentage(value)) => LayoutSplitSize::Percent(
@@ -8478,14 +8478,14 @@ impl MuxEngine {
                     }
                 }
             };
-            SplitPlacement {
+            Some(SplitPlacement {
                 size,
                 before: options.has("-b"),
                 full_size: options.has("-f"),
                 detached: options.has("-d"),
-            }
+            })
         } else {
-            self.split_placement(options, size)?
+            Some(self.split_placement(options, size)?)
         };
         let snapshot_kind = pane_kind_snapshot(&kind);
         let (inherit_cwd_from, cwd) =
@@ -8511,9 +8511,13 @@ impl MuxEngine {
             self.state.toggle_zoom(target)?;
         }
         let is_floating = floating.is_some();
-        let pane = match floating {
-            Some(spawn) => self.state.float_pane_with(target, kind, &spawn)?,
-            None => self.state.split_pane_with(target, axis, kind, placement)?,
+        let detached = placement
+            .as_ref()
+            .map_or(options.has("-d"), |placement| placement.detached);
+        let pane = match (floating, placement) {
+            (Some(spawn), _) => self.state.float_pane_with(target, kind, &spawn)?,
+            (None, Some(placement)) => self.state.split_pane_with(target, axis, kind, placement)?,
+            (None, None) => unreachable!("a tiled split has a placement"),
         };
         if let Some((true, pushed)) = float_zoom {
             self.state.pop_zoom(target_window, pushed);
@@ -8521,7 +8525,7 @@ impl MuxEngine {
         if empty {
             self.state.mark_pane_empty(pane)?;
         }
-        if !placement.detached {
+        if !detached {
             let target =
                 ExecutionContext::for_pane(&self.state, pane).expect("new pane has a context");
             context.retarget(&target);

@@ -746,6 +746,7 @@ struct HostConnection {
     reconnect_attempt_in_flight: Option<u32>,
     reconnect_attach: Option<ReconnectAttachState>,
     in_flight_commands: RwLock<VecDeque<(u64, String)>>,
+    watched_commands: RwLock<VecDeque<(u64, bool)>>,
     ssh_auth_declined: bool,
     background_core: ClientCore,
 }
@@ -773,6 +774,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
+            watched_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         }
@@ -844,6 +846,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
+            watched_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         })
@@ -861,6 +864,23 @@ impl HostConnection {
         let mut in_flight = self.in_flight_commands.write();
         let index = in_flight.iter().position(|(id, _)| *id == request_id)?;
         in_flight.remove(index).map(|(_, name)| name)
+    }
+
+    fn watch_command(&self, request_id: u64) {
+        let mut watched = self.watched_commands.write();
+        while watched.len() >= MAX_TRACKED_COMMANDS {
+            watched.pop_front();
+        }
+        watched.push_back((request_id, false));
+    }
+
+    fn settle_command(&self, request_id: u64) -> bool {
+        let mut watched = self.watched_commands.write();
+        let Some((_, settled)) = watched.iter_mut().find(|(id, _)| *id == request_id) else {
+            return false;
+        };
+        *settled = true;
+        true
     }
 
     fn reroute(&self, host: HostId) {
@@ -2763,7 +2783,27 @@ impl MuxClient {
         self.execute_on_host(self.attached_host, command);
     }
 
-    pub fn execute_on_host(&self, host: HostId, command: CommandInvocation) {
+    pub fn execute_tracked(&self, command: CommandInvocation) -> Option<u64> {
+        let request_id = self.execute_on_host(self.attached_host, command)?;
+        self.attached_connection().watch_command(request_id);
+        Some(request_id)
+    }
+
+    #[must_use]
+    pub fn command_settled(&self, request_id: u64) -> bool {
+        self.attached_connection()
+            .watched_commands
+            .read()
+            .iter()
+            .any(|&(id, settled)| id == request_id && settled)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn watch_command_for_test(&self, request_id: u64) {
+        self.attached_connection().watch_command(request_id);
+    }
+
+    pub fn execute_on_host(&self, host: HostId, command: CommandInvocation) -> Option<u64> {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         log::trace!(
             target: "zz::diagnostics::mux",
@@ -2771,33 +2811,41 @@ impl MuxClient {
         );
         let Some(connection) = self.connections.get(&host) else {
             log::warn!("cannot send mux command to unknown fleet host {host:?}");
-            return;
+            return None;
         };
         let name = command.name.clone();
-        if let Some(client) = &connection.client {
-            match client.execute(command) {
-                Ok(request_id) => connection.track_command(request_id, name),
-                Err(error) => log::warn!("failed to send mux command: {error}"),
-            }
+        let sent = if let Some(client) = &connection.client {
+            client.execute(command)
         } else {
             #[cfg(test)]
             if let Some(client) = &connection.fake_client {
-                match client.execute(command) {
-                    Ok(request_id) => connection.track_command(request_id, name),
-                    Err(error) => log::warn!("failed to send mux command: {error}"),
+                let sent = client.execute(command);
+                if let Ok(request_id) = sent {
+                    connection.track_command(request_id, name);
                 }
-                return;
+                return sent.ok();
             }
             log::trace!(
                 target: "zz::diagnostics::mux",
                 "execute skipped: no client for host={host:?}",
             );
-        }
+            return None;
+        };
         log::trace!(
             target: "zz::diagnostics::mux",
             "execute end elapsed_us={}",
             diagnostics::elapsed_us(started)
         );
+        match sent {
+            Ok(request_id) => {
+                connection.track_command(request_id, name);
+                Some(request_id)
+            }
+            Err(error) => {
+                log::warn!("failed to send mux command: {error}");
+                None
+            }
+        }
     }
 
     pub fn new_session(&self, host: HostId) {
@@ -3666,7 +3714,7 @@ impl MuxClient {
     }
 
     fn report_command_failure(
-        &self,
+        &mut self,
         host: HostId,
         request_id: u64,
         error: &ServerError,
@@ -3675,10 +3723,10 @@ impl MuxClient {
         if request_id == 0 {
             return false;
         }
-        let tracked = self
-            .connections
-            .get(&host)
-            .and_then(|connection| connection.take_command(request_id));
+        let tracked = self.connections.get(&host).and_then(|connection| {
+            connection.settle_command(request_id);
+            connection.take_command(request_id)
+        });
         match tracked {
             Some(name)
                 if matches!(
@@ -3842,6 +3890,7 @@ impl MuxClient {
                 }) => {
                     if let Some(connection) = self.connections.get(&host) {
                         connection.take_command(request_id);
+                        connection.settle_command(request_id);
                     }
                 }
                 _ => {}
@@ -4352,7 +4401,11 @@ impl MuxClient {
                 }
             }
             CommandResponse::Success { request_id, .. } => {
-                self.attached_connection().take_command(request_id);
+                let connection = self.attached_connection();
+                connection.take_command(request_id);
+                if connection.settle_command(request_id) {
+                    cx.notify();
+                }
                 self.error = None;
             }
         }
@@ -9207,6 +9260,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         }
     }
 

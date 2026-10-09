@@ -1938,6 +1938,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         }
     }
 
@@ -1971,6 +1973,8 @@ mod tests {
             pane_z_order: Vec::new(),
             floating: Vec::new(),
             modal: None,
+            sx: 0,
+            sy: 0,
         };
         MuxSnapshot {
             generation: 7,

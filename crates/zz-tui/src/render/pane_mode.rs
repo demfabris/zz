@@ -282,6 +282,15 @@ fn switch_surface(view: &SwitchView<'_>, rect: Rect, theme: &ThemeColours) -> Mo
     }
 }
 
+/// The pane's whole box for a rect a clipped float shows from `source` on.
+pub(super) const fn full_rect(rect: Rect, source: (u16, u16)) -> Rect {
+    Rect {
+        width: rect.width.saturating_add(source.0),
+        height: rect.height.saturating_add(source.1),
+        ..rect
+    }
+}
+
 pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> ModeSurface {
     match mode {
         PaneMode::Customize {
@@ -332,12 +341,24 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
 }
 
 impl Renderer {
-    pub(super) fn paint_pane_mode(&mut self, mode: &PaneMode, rect: Rect, model: &Model) {
+    pub(super) fn paint_pane_mode(
+        &mut self,
+        mode: &PaneMode,
+        rect: Rect,
+        source: (u16, u16),
+        model: &Model,
+    ) {
         if rect.width == 0 || rect.height == 0 {
             return;
         }
         let reaches_edge = rect.x.saturating_add(rect.width) >= model.size.columns;
-        surface(mode, rect, &model.status.theme).grid.emit_into(
+        let grid = surface(mode, full_rect(rect, source), &model.status.theme).grid;
+        let grid = if source == (0, 0) {
+            grid
+        } else {
+            grid.cropped(source.0, source.1, rect.width, rect.height)
+        };
+        grid.emit_into(
             &mut self.output,
             rect.x,
             rect.y,

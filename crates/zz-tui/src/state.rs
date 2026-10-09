@@ -970,6 +970,32 @@ impl Model {
         crate::mode_view::resolved_style(&border.style, &self.status.theme)
     }
 
+    /// `tty_default_colours`: the pane's grounds from `window-style`, each
+    /// replaced by `window-active-style`'s where the active pane sets one.
+    pub fn pane_window_style(&self, pane: PaneId) -> zz_protocol::TmuxStyle {
+        let Some(border) = self
+            .status
+            .pane_borders
+            .iter()
+            .find(|border| border.pane == pane)
+        else {
+            return zz_protocol::TmuxStyle::default();
+        };
+        let resolve = |value: &str| {
+            crate::mode_view::resolved_style(value, &self.status.theme).unwrap_or_default()
+        };
+        let base = resolve(&border.window_style);
+        let active = resolve(&border.window_active_style);
+        let set = |colour: Option<zz_protocol::TmuxColour>| {
+            colour.filter(|colour| *colour != zz_protocol::TmuxColour::Default)
+        };
+        zz_protocol::TmuxStyle {
+            fg: set(active.fg).or(set(base.fg)),
+            bg: set(active.bg).or(set(base.bg)),
+            ..zz_protocol::TmuxStyle::default()
+        }
+    }
+
     pub fn pane_rect(&self, pane: PaneId) -> Option<PaneRect> {
         self.layout
             .panes
@@ -1003,6 +1029,25 @@ impl Model {
             .iter()
             .find(|entry| entry.rect.contains(column, row))
             .copied()
+    }
+
+    /// Whether a float drawn above `pane` covers the cell, which hides the
+    /// pane's cursor there as tmux 3.8's scene does.
+    pub fn covered_above(&self, pane: PaneId, column: u16, row: u16) -> bool {
+        let tiled = self.layout.tiled().len();
+        let front = self
+            .layout
+            .panes
+            .iter()
+            .position(|entry| entry.pane == pane)
+            .map_or(0, |index| {
+                index.saturating_sub(tiled) + usize::from(index >= tiled)
+            });
+        self.layout.floats.get(front..).is_some_and(|floats| {
+            floats
+                .iter()
+                .any(|float| float.hit_rect().contains(column, row))
+        })
     }
 
     pub fn is_float(&self, pane: PaneId) -> bool {
@@ -1088,6 +1133,7 @@ impl Model {
                             rect: canvas,
                             border_status: window.pane_border_status,
                             status_on_border: false,
+                            source: (0, 0),
                         }],
                         dividers: Vec::new(),
                         floats: Vec::new(),

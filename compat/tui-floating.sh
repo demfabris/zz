@@ -13,6 +13,13 @@
 # and zz's is a modal pane (tmux master 34cd5da4), so only the screen is the
 # contract there.
 #
+# THE POPUP TITLE COLUMN. tmux 3.8 draws a display-popup title with
+# screen_write_box at the box's x + 2; zz's popup is tmux master's modal pane
+# (34cd5da4), whose title is pane-border-format drawn at the pane's xoff + 2,
+# one column further right. On the popup-titled checkpoint only, the dashes
+# around the title on its top border are dropped from both captures before the
+# compare, so the box, its corners and the title text are still asserted.
+#
 # Cases (catch-up item float.clients, knowledge/designs/floating-panes.md):
 #   overlap          two overlapping floats over a vertical split
 #   raised           select-pane raises the back float over the front one
@@ -23,6 +30,14 @@
 #   no-tiled         a window with no tiled pane and two floats
 #   modal-click      a click outside a modal changes nothing
 #   modal-close      a click outside a new-pane -O -C modal kills it
+#   popup-titled     display-popup -T over a split, with the per-pane styles
+#                    display-popup sets (pane-border-style, window-style)
+#   clipped          a float pushed past the left and top window edges shows
+#                    its own columns and rows from the clipped offset on
+#   clipped-update   a clipped float's later output lands on its visible rows
+#   clipped-clock    clock-mode in a float past the left edge is cropped, not
+#                    centred again in what is left
+#   cursor-covered   a tiled pane's cursor under a float is hidden
 #
 # CONTROLLED VALUES, set on both sides: status-right '' and status-left L (the
 # clock and the host are not this surface's), window-status-current-format and
@@ -159,7 +174,13 @@ wait_for() {
 
 CURSOR_FORMAT='#{cursor_x},#{cursor_y} flag=#{cursor_flag}'
 
+TITLE_RULE=""
 capture_plain() {
+  if [ -n "$TITLE_RULE" ]; then
+    tmux_outer_command capture-pane -p -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
+      -t "=$OUTER_SESSION:$1" | sed -E "s/┌─*($TITLE_RULE)─*┐/┌\1┐/"
+    return
+  fi
   tmux_outer_command capture-pane -p -S 0 -E "$((ROWS_UNDER_TEST - 1))" \
     -t "=$OUTER_SESSION:$1"
 }
@@ -345,6 +366,7 @@ attach_both() {
   set_on_both default-shell /bin/sh
   set_on_both mouse on
   run_on_both bind-key -T prefix P display-popup -w 30 -h 8 -E "$POPUP_JOB"
+  run_on_both bind-key -T prefix T display-popup -w 30 -h 8 -T POPUP-TITLE -E "$POPUP_JOB"
   tmux_outer_command -f /dev/null new-session -d -s "$OUTER_SESSION" -n zz \
     -x "$COLUMNS_UNDER_TEST" -y "$ROWS_UNDER_TEST" "$SCRATCH_DIR/attach-zz.sh" ||
     die "could not create the outer session"
@@ -658,6 +680,65 @@ editor_cases() {
     "$(side_command zz show-options -gv status-left)" "$(side_command tmux show-options -gv status-left)"
 }
 
+popup_titled_case() {
+  CASE_LABEL=popup-titled
+  attach_both
+  run_on_both split-window -h "$INNER_SHELL"
+  press_on_both T
+  both_screen_has POPUP-BODY 'the titled popup job'
+  both_screen_has POPUP-TITLE 'the popup title'
+  COMPARE_FACTS=0
+  TITLE_RULE=POPUP-TITLE
+  verdict popup-titled
+  TITLE_RULE=""
+  COMPARE_FACTS=1
+  type_on_both Enter
+  both_screen_lacks POPUP-BODY 'the closed titled popup'
+}
+
+clipped_case() {
+  CASE_LABEL=clipped
+  attach_both
+  run_on_both new-pane -x 24 -y 8 -X 10 -Y 6 \
+    "printf 'R0-ABCDEFGHIJKLMNOP\\nR1-ABCDEFGHIJKLMNOP\\nR2-ABCDEFGHIJKLMNOP\\n'; exec cat"
+  both_screen_has R2-ABCDEFGH 'the clipped float'
+  run_on_both move-pane -X -4 -Y -2
+  verdict clipped
+  CASE_LABEL=clipped-update
+  local side
+  for side in zz tmux; do
+    side_command "$side" send-keys -t "$(float_pane "$side" 1)" ECHO-LINE-SEEN Enter ||
+      die "$side refused send-keys"
+  done
+  wait_for 'the zz echo' screen_has zz LINE-SEEN
+  wait_for 'the tmux echo' screen_has tmux LINE-SEEN
+  verdict clipped-update
+}
+
+clipped_clock_case() {
+  CASE_LABEL=clipped-clock
+  attach_both
+  set_on_both clock-mode-style 24
+  new_float_on_both CLOCKF -x 30 -y 8 -X 10 -Y 6
+  run_on_both move-pane -X -12 -Y 2
+  local side
+  for side in zz tmux; do
+    side_command "$side" clock-mode -t "$(float_pane "$side" 1)" || die "$side refused clock-mode"
+  done
+  both_screen_lacks CLOCKF 'the float under clock-mode'
+  verdict clipped-clock
+}
+
+cursor_covered_case() {
+  CASE_LABEL=cursor-covered
+  attach_both
+  new_float_on_both FLOAT-Q -x 20 -y 5 -X 0 -Y 0
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  wait_for 'the zz tiled pane active' active_index_is zz 0
+  wait_for 'the tmux tiled pane active' active_index_is tmux 0
+  verdict cursor-covered
+}
+
 printf 'floating pane differential at %sx%s (%s)\n' \
   "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$("$TMUX_BIN" -V)"
 overlap_cases
@@ -666,6 +747,10 @@ borderless_case
 popup_zoomed_case
 no_tiled_case
 modal_cases
+popup_titled_case
+clipped_case
+clipped_clock_case
+cursor_covered_case
 key_cases
 pane_menu_cases
 editor_cases

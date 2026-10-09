@@ -396,7 +396,7 @@
       "id": "pin.formats-options",
       "track": "pin",
       "title": "3.8 formats, modifiers, options and show -F",
-      "status": "active",
+      "status": "review",
       "deps": [
         "pin.move"
       ],
@@ -417,7 +417,45 @@
       ],
       "branch": "catchup/pin.formats-options",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: lane done at 3f09fc58a: 21/32 registry items closed (failed-key, 3.8 defaults, show -F, split-window -B, 11 formats, 2 native); the rest moved to pin.formats-options-2"
+      ]
+    },
+    {
+      "id": "pin.formats-options-2",
+      "track": "pin",
+      "title": "Rest of the 3.8 formats and options",
+      "status": "todo",
+      "deps": [
+        "pin.formats-options",
+        "pin.layout-v2"
+      ],
+      "zones": [
+        "crates/zz-mux/src/formats.rs",
+        "crates/zz-mux/src/command.rs",
+        "crates/zz-daemon/src/status.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "crates/zz-terminal/src/session.rs",
+        "crates/zz-tui/src",
+        "compat/tmux-gaps.json"
+      ],
+      "gaps": [
+        "pin.formats-options"
+      ],
+      "accept": [
+        "display-message -j works as 3.8 (reuse the JSON parser pin.layout-v2 ported).",
+        "history_added, history_collected and history_generation resolve as 3.8 (engine-side counters) or are registered native with a measured reason.",
+        "clear-on-attach changes the raw TUI's attach the way 3.8 changes a terminal client's (no alternate screen, existing content scrolled into scrollback); the GUI's answer is recorded native if it has none.",
+        "copy-mode-current-line-style styles the cursor line in the raw TUI's copy mode as 3.8 does.",
+        "The A modifier animates in status and pane-border formats at 3.8's cadence without breaking the status render cache.",
+        "hook_fire_count and hook_fire_time resolve; the 3.8 mode context formats (copy_line_numbers, refresh_active, clipboard_invalid and the customize-mode rows) resolve.",
+        "The pin.formats-options gap closes except pane_modal_flag and window_modal_pane, which move to pane.floating-model."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: leftovers of pin.formats-options; see its lane report in the ledger notes."
+      ]
     },
     {
       "id": "pin.keys-copy",

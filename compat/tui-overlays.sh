@@ -891,7 +891,7 @@ display_panes_case() {
   wait_for 'zz selected pane 1' active_pane_index_is zz 1
   wait_for 'tmux selected pane 1' active_pane_index_is tmux 1
   settle_both MARK-panes 'the digit selection'
-  verdict panes-selected "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-selected same
 
   mark_both panesz
   zz_before="$(capture_screen zz)"
@@ -999,7 +999,7 @@ odd_size_case() {
   wait_for 'zz selected pane 1 from the coloured labels' active_pane_index_is zz 1
   wait_for 'tmux selected pane 1 from the coloured labels' active_pane_index_is tmux 1
   settle_both MARK-colours 'the coloured labels closed by a digit'
-  verdict panes-coloured-selected "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  verdict panes-coloured-selected same
   DIVIDER_RULE=0
 }
 

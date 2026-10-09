@@ -82,7 +82,7 @@ against whatever `compat/tmux-oracle.json` pins now, which is the 3.8 tag since 
 3.8 changed and zz has not caught up with is recorded, not asserted, with a reason opening
 `PIN 3.8, gap:<id>` and that open `pin.*` gap as its owner, through `known_drift` in
 `tui-client-commands.sh` and `tui-caps.sh`, the version-aware display-panes and status-menu cases in
-`tui-overlays.sh` and `tui-mouse.sh`, and the status-format checkpoints in `tui-screen-diff.sh`. A
+`tui-overlays.sh` and `tui-mouse.sh`. A
 case that differs against both pins is not 3.8 drift: where it is recorded its reason opens
 `REGRESSION` and its owner is the verified obligation it breaks, so `verify-claims.py --run` charges
 that obligation until the regression is fixed. The lane that closes a `pin.*` gap or a regression

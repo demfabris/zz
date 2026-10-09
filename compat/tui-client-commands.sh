@@ -727,15 +727,11 @@ known_drift() {
     customize-unbound-* | customize-retained-* | customize-interrupt-* | customize-sabotage | \
     customize-array-screen-* | customize-right-sabotage | customize-preview-sabotage | \
     customize-markup-sabotage | customize-prompt-sabotage | \
-    customize-array-status-format | customize-array-child-status-format | \
     customize-array-key-values)
     printf 'gap:pin.formats-options'
     ;;
   hooks-show-global)
     printf 'gap:pin.hooks-events'
-    ;;
-  lock-target-*-list-windows | list-windows-*-equivalence)
-    printf 'gap:pin.layout-v2'
     ;;
   switch-mode-kill-visible | switch-mode-kill-covered | switch-mode-kill-uncovered | \
     switch-mode-kill-survives-cover | switch-mode-kill-control)
@@ -750,13 +746,10 @@ known_drift_reason() {
     printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 asks the terminal for synchronized output with DECRQM ?2026 and adds the sync feature when it answers, so the attached client's terminal lists Sync where zz's lists it missing; the three capabilities 3.8 added (Dsesc, Enesc, ind) match"
     ;;
   customize-*)
-    printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 rebuilt customize mode (window-customize.c: Session Hooks, Window & Pane Hooks, Global and Session Environment sections in the tree, e to edit, C for changed only, editable array keys) and changed the status-format[1] and [2] defaults; zz still draws the d77c9dc6 tree and keeps the old defaults"
+    printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 rebuilt customize mode (window-customize.c: Session Hooks, Window & Pane Hooks, Global and Session Environment sections in the tree, e to edit, C for changed only, editable array keys); zz still draws the d77c9dc6 tree"
     ;;
   hooks-*)
     printf '%s' "PIN 3.8, gap:pin.hooks-events: 3.8 removed the after-queue hook, which zz still lists under show-hooks -g"
-    ;;
-  lock-*)
-    printf '%s' "PIN 3.8, gap:pin.layout-v2: list-windows prints #{window_layout} in the 3.8 JSON v2 form, {\"V\":2,\"L\":{...}}, where zz still prints the v1 checksum string (bf43fdc0)"
     ;;
   switch-mode-*)
     printf '%s' "REGRESSION measured 2026-10-09, not 3.8 drift: with a client attached, zz split-window -d -h shrinks an 80x23 window to 78 columns (-d -v takes one row instead), so the two panes read 39 and 38 where both pins read 40 and 39; split-window without -d, and the same split with no client attached, keep 80. These cases were asserted green at d77c9dc6 through TUI-014 attempt 20"
@@ -767,7 +760,6 @@ known_drift_reason() {
 known_drift_channel() {
   case "$1" in
   gap:pin.formats-options) printf 'screen' ;;
-  gap:pin.layout-v2) printf 'stdout' ;;
   TUI-014) printf 'state' ;;
   esac
 }

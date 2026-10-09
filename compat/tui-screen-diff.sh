@@ -601,9 +601,6 @@ owner_tally() {
   printf 'owners %s' "${entries[*]}"
 }
 
-STATUS_FORMAT_OWNER=gap:pin.formats-options
-STATUS_FORMAT_DRIFT='PIN 3.8, gap:pin.formats-options: 3.8 changed the status-format[1] default (the pane list is padded by #{e|-:#{w;T;=/#{status-left-length}:status-left},3} and separated by window-status-separator), and zz still draws the d77c9dc6 default'
-
 checkpoint() {
   local name="$1"
   local mode="$2"
@@ -707,9 +704,9 @@ run_size() {
   # every height alone, and the round trip back to `status on` restores 4/4,
   # 2/2 and 11/11. Both checkpoints assert at every size the file drives.
   set_on_both status 2
-  checkpoint status-two-rows record "$STATUS_FORMAT_DRIFT" "$STATUS_FORMAT_OWNER"
+  checkpoint status-two-rows "$mode"
   set_on_both status-position top
-  checkpoint status-top record "$STATUS_FORMAT_DRIFT" "$STATUS_FORMAT_OWNER"
+  checkpoint status-top "$mode"
   set_on_both status-position bottom
   set_on_both status on
 

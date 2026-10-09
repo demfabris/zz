@@ -45,7 +45,7 @@
       "id": "fix.tui-regressions",
       "track": "fix",
       "title": "Regressions the 3.8 fixture rebaseline found on main",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-tui/src",
@@ -63,7 +63,7 @@
         "tui-launch-diff's command-chain case writes a valid separator so the fixture can pass, and the fixture is mapped in verify-claims."
       ],
       "branch": "catchup/fix.tui-regressions",
-      "sha": null,
+      "sha": "f6cb47465",
       "notes": [
         "2026-10-09: found by pin.tui-fixtures; all six reproduce against both pins, so they are main regressions, not 3.8 drift. High priority: two break verified TUI obligations.",
         "2026-10-09: TUI-009 (extended keys) held for fix.tui-colour, whose branch already fixed set -s extended-keys reaching the TUI hello",
@@ -76,7 +76,8 @@
         "2026-10-09: RESUMED: main merged at ce1ebd317 (both sides deleted a fixed known_drift case); Codex review running.",
         "2026-10-09: Codex review 1 (fix.tui-regressions-1.md): 1 P1, the stale-report guard in write_back_terminal_geometries drops control-client geometry too; fix pass launched in slot d.",
         "2026-10-09: Fix pass fbc898683: stale interactive report replaced per client in terminal_geometry_for_mode_from, control-client size still writes back (a_stale_report_leaves_the_latest_control_size_to_write_back; zz-daemon 1689; tui-client-commands 406/406; clippy; fmt); review 2 running.",
-        "2026-10-09: Codex review 2 (fix.tui-regressions-2.md): 2 P1 (place marker per pane not per client; stale-report substitution keeps a smaller control size under window-size smallest); final fix pass sent, merges after it without a third review."
+        "2026-10-09: Codex review 2 (fix.tui-regressions-2.md): 2 P1 (place marker per pane not per client; stale-report substitution keeps a smaller control size under window-size smallest); final fix pass sent, merges after it without a third review.",
+        "2026-10-09: Merged after the final fix pass (72d3b5f11): per-client report places, stale reports sized from the client's window size; merge checks green (clippy zz-daemon/zz-cli, zz-daemon 1692, zz-cli, verify-claims)."
       ]
     },
     {
@@ -160,7 +161,7 @@
       "id": "fix.chooser-preview",
       "track": "fix",
       "title": "choose-tree/choose-client/choose-buffer -N and -NN",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-mux/src/command.rs",
@@ -172,7 +173,7 @@
         "-N opens the chooser with the preview off and -NN with the big preview, as mode-tree.c:578-584; today -NN is refused (command.rs:17025-17030) and -N is ignored (daemon.rs:35784, 36635).",
         "The stale 'choosers have no preview pane' text in divergences.md:710-713 is removed."
       ],
-      "branch": null,
+      "branch": "catchup/fix.chooser-preview",
       "sha": null,
       "notes": []
     },

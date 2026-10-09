@@ -37,11 +37,11 @@ struct TtyFeature {
     flags: u32,
 }
 
-/// tty-term.c `tty_term_codes`: the 233 capability names tmux reads for a
+/// tty-term.c `tty_term_codes`: the 236 capability names tmux reads for a
 /// client terminal, with the type it reads each one as. `tty_term_has_name`
 /// answers 0 for every name outside this table, whatever the terminfo entry
 /// carries.
-const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
+const TTY_TERM_CODES: [(&str, CapabilityKind); 236] = [
     ("acsc", CapabilityKind::Text),
     ("am", CapabilityKind::Flag),
     ("AX", CapabilityKind::Flag),
@@ -76,6 +76,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("dl1", CapabilityKind::Text),
     ("Dsbp", CapabilityKind::Text),
     ("Dseks", CapabilityKind::Text),
+    ("Dsesc", CapabilityKind::Text),
     ("Dsfcs", CapabilityKind::Text),
     ("Dsmg", CapabilityKind::Text),
     ("E3", CapabilityKind::Text),
@@ -86,6 +87,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("enacs", CapabilityKind::Text),
     ("Enbp", CapabilityKind::Text),
     ("Eneks", CapabilityKind::Text),
+    ("Enesc", CapabilityKind::Text),
     ("Enfcs", CapabilityKind::Text),
     ("Enmg", CapabilityKind::Text),
     ("fsl", CapabilityKind::Text),
@@ -96,6 +98,7 @@ const TTY_TERM_CODES: [(&str, CapabilityKind); 233] = [
     ("ich1", CapabilityKind::Text),
     ("il", CapabilityKind::Text),
     ("il1", CapabilityKind::Text),
+    ("ind", CapabilityKind::Text),
     ("indn", CapabilityKind::Text),
     ("invis", CapabilityKind::Text),
     ("kcbt", CapabilityKind::Text),
@@ -1244,12 +1247,12 @@ mod tests {
             &stock_terminal_overrides(),
         );
         let lines = term.describe();
-        assert_eq!(lines.len(), 233);
+        assert_eq!(lines.len(), 236);
         assert_eq!(lines[1], "   1: am: (flag) true");
         assert_eq!(lines[3], "   3: bce: (flag) true");
         assert_eq!(lines[5], "   5: Bidi: [missing]");
         assert_eq!(lines[13], "  13: colors: (number) 256");
-        assert_eq!(lines[232], " 232: XT: (flag) true");
+        assert_eq!(lines[235], " 235: XT: (flag) true");
 
         let vt100 = TtyTerm::create(
             "zzdescribe",

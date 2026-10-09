@@ -591,15 +591,30 @@ compare_plain_screens() {
 # to inherit. `text` is the split: every glyph, every column and the cursor are
 # ASSERTED, and only the styles are recorded, for a case whose colours are a
 # divergence somebody else owns and whose geometry is this obligation's claim.
+declare -A RECORD_OWNERS=([unattributed]=0)
+
+owner_tally() {
+  local key entries=()
+  for key in $(printf '%s\n' "${!RECORD_OWNERS[@]}" | LC_ALL=C sort); do
+    entries+=("$key=${RECORD_OWNERS[$key]}")
+  done
+  printf 'owners %s' "${entries[*]}"
+}
+
+STATUS_FORMAT_OWNER=gap:pin.formats-options
+STATUS_FORMAT_DRIFT='PIN 3.8, gap:pin.formats-options: 3.8 changed the status-format[1] default (the pane list is padded by #{e|-:#{w;T;=/#{status-left-length}:status-left},3} and separated by window-status-separator), and zz still draws the d77c9dc6 default'
+
 checkpoint() {
   local name="$1"
   local mode="$2"
   local reason="${3:-}"
+  local owner="${4:-unattributed}"
   send_both "printf 'MARK-%s\\n' $name"
   settle_both "MARK-$name" "$name"
   if [ "$mode" = text ]; then
     CHECKS=$((CHECKS + 1))
     RECORDS=$((RECORDS + 1))
+    RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
     [ -n "$reason" ] || die "recorded style at $name says nothing about why"
     if compare_plain_screens "$name"; then
       printf 'ok    %s %s every glyph, column and the cursor identical\n' "$SIZE_LABEL" "$name"
@@ -618,6 +633,7 @@ checkpoint() {
     CHECKS=$((CHECKS + 1))
   else
     RECORDS=$((RECORDS + 1))
+    RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
   fi
   if compare_screens "$name"; then
     printf 'ok    %s %s\n' "$SIZE_LABEL" "$name"
@@ -691,9 +707,9 @@ run_size() {
   # every height alone, and the round trip back to `status on` restores 4/4,
   # 2/2 and 11/11. Both checkpoints assert at every size the file drives.
   set_on_both status 2
-  checkpoint status-two-rows "$mode"
+  checkpoint status-two-rows record "$STATUS_FORMAT_DRIFT" "$STATUS_FORMAT_OWNER"
   set_on_both status-position top
-  checkpoint status-top "$mode"
+  checkpoint status-top record "$STATUS_FORMAT_DRIFT" "$STATUS_FORMAT_OWNER"
   set_on_both status-position bottom
   set_on_both status on
 
@@ -1204,9 +1220,9 @@ done
 run_sidebar_case
 
 if [ "$FAILURES" -ne 0 ]; then
-  printf '%s of %s asserted checkpoints differ, %s recorded\n' \
-    "$FAILURES" "$CHECKS" "$RECORDS"
+  printf '%s of %s asserted checkpoints differ, %s recorded (%s)\n' \
+    "$FAILURES" "$CHECKS" "$RECORDS" "$(owner_tally)"
   exit 1
 fi
-printf 'all %s asserted checkpoints identical, %s recorded not asserted\n' \
-  "$CHECKS" "$RECORDS"
+printf 'all %s asserted checkpoints identical, %s recorded not asserted (%s)\n' \
+  "$CHECKS" "$RECORDS" "$(owner_tally)"

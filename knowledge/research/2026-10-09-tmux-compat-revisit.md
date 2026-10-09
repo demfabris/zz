@@ -177,6 +177,17 @@ Pane menus gain line-number and refresh items. New copy commands: `line-numbers-
 propagation moved from `notify.c` to `hooks.c:hooks_parse`, modifiers go from 36 to 37. It records
 option names only, so default and scope changes do not show in its diff.
 
+**Seen only by the attached fixtures** (catch-up item `pin.tui-fixtures`, every `compat/tui-*.sh`
+re-run at 3.8): the mode-tree branch arrow is ACS `+` (`├─→`) where the pin drew `>`
+(`mode-tree.c` MODE_TREE_PREFIX_FORMAT), which zz now draws; `tty_term_codes` grows from 233 to 236
+with `Dsesc`, `Enesc` and `ind`, which zz now lists; the client asks its terminal `DECRQM ?2026` and
+adds `sync` to `client_termfeatures` when it answers; the new `appesc` and `utf8` features, `@` to
+remove a feature in `terminal-features`, and the fixed `?7727h` replaced by `Enesc`; a centred
+`display-menu` centres on the window, not the client, and a status-line window menu for a window the
+client is not showing is drawn on that window, so the client sees nothing (both from menus belonging
+to the window); and in the `display-panes` pane mode a resize keeps the labels and any key that is
+not a pane index is consumed.
+
 ## 3.8 to master (not pinned, for awareness)
 
 `display-popup -N` removed and `display-popup` becomes an undocumented compatibility command that

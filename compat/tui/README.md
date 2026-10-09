@@ -76,6 +76,18 @@ a fixture prints no tally at all, when the tally does not add up to the total, o
 token is neither a ledger obligation nor a registry gap: a case added without an owner fails closed
 against every obligation mapped to that fixture rather than sliding past one.
 
+The campaign proved its obligations against d77c9dc6 and its ledger keeps that pin; the fixtures run
+against whatever `compat/tmux-oracle.json` pins now, which is the 3.8 tag since catch-up item
+`pin.move`. Catch-up item `pin.tui-fixtures` re-ran every fixture there on 2026-10-09. A case that
+3.8 changed and zz has not caught up with is recorded, not asserted, with a reason opening
+`PIN 3.8, gap:<id>` and that open `pin.*` gap as its owner, through `known_drift` in
+`tui-client-commands.sh` and `tui-caps.sh`, the version-aware display-panes and status-menu cases in
+`tui-overlays.sh` and `tui-mouse.sh`, and the status-format checkpoints in `tui-screen-diff.sh`. A
+case that differs against both pins is not 3.8 drift: where it is recorded its reason opens
+`REGRESSION` and its owner is the verified obligation it breaks, so `verify-claims.py --run` charges
+that obligation until the regression is fixed. The lane that closes a `pin.*` gap or a regression
+deletes its entries, and the cases assert again.
+
 ## State
 
 The count is **12/12 baseline verified** and **6/6 added scope verified**, at wire protocol 105

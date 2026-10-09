@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
-Tracked gap groups: **51**. Classified items: **451**.
+Tracked gap groups: **51**. Classified items: **453**.
 
 - Status: open: 11, accepted: 40.
 - Decision: adopt: 11, native: 31, never: 9.
 - Priority: now: 1, next: 10, none: 40.
 - Closed history entries: 212.
-- Surface: command: 3, flag: 45, extension-flag: 11, native-command: 26, option: 34, option-scope: 4, option-default: 4, format: 58, hook: 21, native-hook: 1, key: 33, binding: 42, native-key: 92, semantic: 68, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 45, extension-flag: 11, native-command: 26, option: 34, option-scope: 4, option-default: 4, format: 58, hook: 21, native-hook: 1, key: 33, binding: 42, native-key: 92, semantic: 70, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -934,14 +934,14 @@ Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6
 
 ### `pin.formats-options`: Adopt the 3.8 formats, modifiers and options
 
-Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item.
+Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6 to the tmux 3.8 tag. Closed by catch-up ledger item pin.formats-options. 3.8 adds formats, a modifier, three options and new context formats, and changes several defaults; the oracle records option scope and default so each one shows as an item. Widened 2026-10-09 by catch-up item pin.tui-fixtures, which re-ran every TUI fixture at the 3.8 tag: semantic:customize-mode-3-8 holds the customize-mode tree, keys and array-key editing that 3.8 rebuilt (155 tui-client-commands.sh cases differed at main, all on that tree or the status-format default it shows; once zz drew the 3.8 tree arrow 132 stay recorded, with 14 customize-mouse screens in tui-mouse.sh), and semantic:terminal-features-3-8 holds the 3.8 terminal feature negotiation, the DECRQM ?2026 query that adds sync to client_termfeatures among it (five tui-caps.sh rows and four show-messages -T cases). compat/tui-screen-diff.sh records its status-two-rows and status-top checkpoints here for option-default:status-format.
 
 - Decision: `adopt`
 - Status: `open`
 - Priority and ease: `next` / `medium`
 - Owner: `mux`
 - User impact: daily, scripts
-- Items: `flag:capture-pane:-I`, `flag:display-message:-j`, `flag:show-hooks:-F`, `flag:show-options:-F`, `flag:show-window-options:-F`, `flag:split-window:-B`, `format:history_added`, `format:history_collected`, `format:history_generation`, `format:pane_command_duration`, `format:pane_command_end_time`, `format:pane_command_running`, `format:pane_command_start_time`, `format:pane_command_status`, `format:pane_last_output_time`, `format:pane_last_prompt_time`, `format:pane_modal_flag`, `format:pane_output_generation`, `format:pane_private_modes`, `format:pane_unzoomed_height`, `format:pane_unzoomed_width`, `format:window_modal_pane`, `option-default:fill-character`, `option-default:pane-active-border-style`, `option-default:status-format`, `option:clear-on-attach`, `option:copy-mode-current-line-style`, `semantic:fill-character-format-contexts`, `semantic:format-modifier-animation`, `semantic:mode-format-contexts-3-8`, `semantic:remain-on-exit-failed-key`, `semantic:show-options-format-contexts`
+- Items: `flag:capture-pane:-I`, `flag:display-message:-j`, `flag:show-hooks:-F`, `flag:show-options:-F`, `flag:show-window-options:-F`, `flag:split-window:-B`, `format:history_added`, `format:history_collected`, `format:history_generation`, `format:pane_command_duration`, `format:pane_command_end_time`, `format:pane_command_running`, `format:pane_command_start_time`, `format:pane_command_status`, `format:pane_last_output_time`, `format:pane_last_prompt_time`, `format:pane_modal_flag`, `format:pane_output_generation`, `format:pane_private_modes`, `format:pane_unzoomed_height`, `format:pane_unzoomed_width`, `format:window_modal_pane`, `option-default:fill-character`, `option-default:pane-active-border-style`, `option-default:status-format`, `option:clear-on-attach`, `option:copy-mode-current-line-style`, `semantic:customize-mode-3-8`, `semantic:fill-character-format-contexts`, `semantic:format-modifier-animation`, `semantic:mode-format-contexts-3-8`, `semantic:remain-on-exit-failed-key`, `semantic:show-options-format-contexts`, `semantic:terminal-features-3-8`
 - Depends on: none
 - Evidence:
   - `resource:compat/tmux-oracle.json`
@@ -955,6 +955,7 @@ Registered 2026-10-09 by catch-up item pin.move when the pin moved from d77c9dc6
   - `show-options, show-window-options and show-hooks accept -F with the option_* and hook_* contexts; display-message -j prints JSON; capture-pane -I is adopted or recorded native, since libghostty keeps no per-row time; split-window -B takes border lines.`
   - `clear-on-attach and copy-mode-current-line-style behave instead of only being stored, remain-on-exit takes failed-key, and the 3.8 defaults of fill-character, pane-active-border-style and status-format[1] and [2] match.`
   - `The new context formats resolve: is_inside and is_outside for fill-character, clipboard_invalid, copy_line_numbers and refresh_active, and the customize-mode environment and monitor rows.`
+  - `customize-mode draws the 3.8 tree (window-customize.c): Session Hooks, Window & Pane Hooks, Global Environment and Session Environment sections, C for changed only and editable array keys, and the status-format[1] and [2] defaults it lists; compat/tui-client-commands.sh records its customize-* cases under gap:pin.formats-options until it does. The raw TUI negotiates terminal features as 3.8 tty.c, tty-keys.c and tty-features.c do: it asks DECRQM ?2026 and adds sync to client_termfeatures when the terminal answers, knows the appesc and utf8 features and writes Enesc and Dsesc instead of the fixed ?7727h, and lets terminal-features remove a feature with @; compat/tui-caps.sh records the client_termfeatures rows and tui-client-commands.sh the show-messages -T cases under gap:pin.formats-options until it does.`
 
 ### `pin.hooks-events`: Fire the 3.8 hooks and event payloads
 

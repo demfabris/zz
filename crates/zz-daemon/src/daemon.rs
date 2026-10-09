@@ -19287,42 +19287,35 @@ impl Shared {
                 overlay_style(&defaults.selected_style, parsed.selected_style.as_deref());
             let border_style =
                 overlay_style(&defaults.border_style, parsed.border_style.as_deref());
-            let (window_rows, window_top) = menu_window_rows(&inner.engine, &target, geometry.rows);
+            let frame = menu_window_frame(&inner.engine, &target, geometry.columns, geometry.rows);
             let mut variables = popup_position_variables(
                 &inner.engine,
                 &target,
                 None,
-                geometry.columns,
-                window_rows,
+                frame.columns,
+                frame.rows,
                 width,
                 height,
             );
             if let Some(mouse) = context.invoking_mouse() {
                 variables.extend(
-                    menu_mouse_position_values(
-                        &inner.engine,
-                        &target,
-                        mouse,
-                        (geometry.rows, window_rows, window_top),
-                        width,
-                        height,
-                    )
-                    .into_iter()
-                    .map(|(name, value)| (name.to_owned(), value.to_string())),
+                    menu_mouse_position_values(&inner.engine, &target, mouse, frame, width, height)
+                        .into_iter()
+                        .map(|(name, value)| (name.to_owned(), value.to_string())),
                 );
             }
             if variables.contains_key(POPUP_STATUS_LINE_Y_CONTEXT_FORMAT) {
                 variables.insert(
                     POPUP_STATUS_LINE_Y_CONTEXT_FORMAT.to_owned(),
-                    if window_top > 0 { height } else { window_rows }.to_string(),
+                    if frame.top > 0 { height } else { frame.rows }.to_string(),
                 );
             }
             target.format_variables.extend(variables);
             let (left, top) = popup_position(
                 parsed.x.as_deref(),
                 parsed.y.as_deref(),
-                geometry.columns,
-                window_rows,
+                frame.columns,
+                frame.rows,
                 width,
                 height,
                 |value| {
@@ -19336,7 +19329,7 @@ impl Shared {
                     )
                 },
             );
-            let top = top.saturating_add(window_top);
+            let top = top.saturating_add(frame.top);
             (
                 MenuState {
                     left,
@@ -43665,33 +43658,62 @@ fn popup_mouse_position_values(
     values
 }
 
-fn menu_window_rows(engine: &MuxEngine, target: &ExecutionContext, rows: u16) -> (u16, u16) {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct MenuFrame {
+    columns: u16,
+    rows: u16,
+    top: u16,
+    status_row: Option<u16>,
+    visible_rows: u16,
+}
+
+fn menu_window_frame(
+    engine: &MuxEngine,
+    target: &ExecutionContext,
+    client_columns: u16,
+    client_rows: u16,
+) -> MenuFrame {
     let status = engine.status_formats_for_session(target.session);
     let lines = if status.enabled {
-        u16::from(status.lines).min(rows)
+        u16::from(status.lines).min(client_rows)
     } else {
         0
     };
-    let top = if status.position == zz_protocol::StatusPosition::Top {
-        lines
-    } else {
-        0
+    let status_top = status.position == zz_protocol::StatusPosition::Top;
+    let available = client_rows.saturating_sub(lines);
+    let extent = |axis| {
+        target
+            .window
+            .and_then(|window| engine.window_extent(window, axis))
     };
-    (rows.saturating_sub(lines), top)
+    let columns = extent(zz_protocol::Axis::Horizontal).unwrap_or(client_columns);
+    let rows = extent(zz_protocol::Axis::Vertical).unwrap_or(available);
+    let visible_rows = if client_columns >= columns && available >= rows {
+        rows
+    } else {
+        available
+    };
+    MenuFrame {
+        columns,
+        rows,
+        top: if status_top { lines } else { 0 },
+        status_row: (!status_top && lines > 0).then_some(available),
+        visible_rows,
+    }
 }
 
 fn menu_mouse_position_values(
     engine: &MuxEngine,
     target: &ExecutionContext,
     mouse: &MouseEventTarget,
-    (client_rows, window_rows, window_top): (u16, u16, u16),
+    frame: MenuFrame,
     width: u16,
     height: u16,
 ) -> Vec<(&'static str, i64)> {
-    let row = if window_top > 0 {
-        mouse.row.saturating_sub(window_top)
-    } else if mouse.row >= window_rows && client_rows > window_rows {
-        window_rows.saturating_sub(1)
+    let row = if frame.top > 0 {
+        mouse.row.saturating_sub(frame.top)
+    } else if frame.status_row.is_some_and(|status| mouse.row >= status) {
+        frame.visible_rows.saturating_sub(1)
     } else {
         mouse.row
     };
@@ -43700,16 +43722,15 @@ fn menu_mouse_position_values(
         status_range_start: None,
         ..mouse.clone()
     };
-    let mut values =
-        popup_mouse_position_values(engine, target, &moved, window_rows, width, height);
+    let mut values = popup_mouse_position_values(engine, target, &moved, frame.rows, width, height);
     if let Some(start) = mouse.status_range_start {
         values.push((POPUP_WINDOW_STATUS_LINE_X_CONTEXT_FORMAT, i64::from(start)));
         values.push((
             POPUP_WINDOW_STATUS_LINE_Y_CONTEXT_FORMAT,
-            if window_top > 0 {
+            if frame.top > 0 {
                 i64::from(height)
             } else {
-                i64::from(window_rows)
+                i64::from(frame.rows)
             },
         ));
     }

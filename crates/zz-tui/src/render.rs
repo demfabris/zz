@@ -875,10 +875,7 @@ impl Renderer {
                         self.paint_terminal(entry.pane, viewport, body, force, damage.as_ref());
                         self.blank_is_default = false;
                         if let Some(mode) = mode {
-                            if let Some(gutter) = gutter {
-                                self.paint_line_numbers(mode, gutter, content, model);
-                            }
-                            self.paint_mode_position(mode, viewport, body, model);
+                            self.paint_copy_chrome(mode, gutter, viewport, content, model);
                         }
                         self.selection_style = None;
                         self.selection_trim = None;
@@ -1351,6 +1348,22 @@ impl Renderer {
                 &model.appearance,
             );
         }
+    }
+
+    fn paint_copy_chrome(
+        &mut self,
+        mode: &zz_protocol::ModePresentation,
+        gutter: Option<crate::mode_view::LineNumberGutter>,
+        viewport: &TerminalViewport,
+        rect: Rect,
+        model: &Model,
+    ) {
+        let Some(gutter) = gutter else {
+            self.paint_mode_position(mode, viewport, rect, model);
+            return;
+        };
+        self.paint_line_numbers(mode, gutter, rect, model);
+        self.paint_mode_position(mode, viewport, gutter.body(rect), model);
         if let Some((column, row)) = gutter.cursor
             && row < rect.height
             && column >= gutter.content_width(rect.width)
@@ -4080,6 +4093,42 @@ mod tests {
             ),
             "\x1b[0m\x1b[39m\x1b[48;2;216;222;233m"
         );
+    }
+
+    #[test]
+    fn the_overflow_dollar_is_drawn_after_the_position_indicator() {
+        let mut viewport = TerminalViewport::blank(8, 2, SessionStatus::Running);
+        viewport.mode = TerminalMode::Copy {
+            position: 0,
+            total: 0,
+            hide_position: false,
+        };
+        viewport.overlays = Arc::from([OverlaySpan::new(0, 7, 8, OverlayKind::CopyCursor)]);
+        let mode = zz_protocol::ModePresentation {
+            pane: PaneId(1),
+            view: false,
+            position: "#[align=right]POS".to_owned(),
+            position_style: String::new(),
+            selection_style: String::new(),
+            vi_keys: false,
+            match_style: String::new(),
+            current_match_style: String::new(),
+            line_numbers: 1,
+            line_number_style: String::new(),
+            current_line_number_style: String::new(),
+        };
+        let gutter = crate::mode_view::line_number_gutter(&mode, &viewport);
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: 8,
+            height: 2,
+        };
+        let model = block_model(8, 2);
+        let mut renderer = Renderer::new();
+        renderer.paint_copy_chrome(&mode, gutter, &viewport, rect, &model);
+        let output = String::from_utf8(renderer.output).unwrap();
+        assert!(output.rfind('$').unwrap() > output.rfind("POS").unwrap());
     }
 
     #[test]

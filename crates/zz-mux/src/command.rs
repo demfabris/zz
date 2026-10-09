@@ -9149,20 +9149,31 @@ impl MuxEngine {
                 }));
             };
             let action = match action {
-                CopyModeAction::LineNumbersOn { .. } | CopyModeAction::LineNumbersToggle { .. } => {
+                CopyModeAction::LineNumbersOn { .. }
+                | CopyModeAction::LineNumbersToggle { .. }
+                | CopyModeAction::GotoLine { .. } => {
                     let target = ExecutionContext::for_pane(&self.state, pane)
                         .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-                    let option_off = self.expand_pane_format(
+                    let option = self.expand_pane_format(
                         "#{copy-mode-line-numbers}",
                         &target,
                         context.session,
                         context.target_format_client(),
                         hooks,
-                    ) == "off";
-                    if matches!(action, CopyModeAction::LineNumbersOn { .. }) {
-                        CopyModeAction::LineNumbersOn { option_off }
-                    } else {
-                        CopyModeAction::LineNumbersToggle { option_off }
+                    );
+                    let option_off = option == "off";
+                    match action {
+                        CopyModeAction::LineNumbersOn { .. } => {
+                            CopyModeAction::LineNumbersOn { option_off }
+                        }
+                        CopyModeAction::GotoLine { line, .. } => CopyModeAction::GotoLine {
+                            line,
+                            option_absolute: matches!(
+                                option.as_str(),
+                                "absolute" | "relative" | "hybrid"
+                            ),
+                        },
+                        _ => CopyModeAction::LineNumbersToggle { option_off },
                     }
                 }
                 action => action,
@@ -18120,7 +18131,7 @@ pub fn copy_mode_action_is_read_only_safe(action: &CopyModeAction) -> bool {
             | CopyModeAction::RecentreTopBottom
             | CopyModeAction::NextMatchingBracket
             | CopyModeAction::PreviousMatchingBracket
-            | CopyModeAction::GotoLine(_)
+            | CopyModeAction::GotoLine { .. }
             | CopyModeAction::PageDownScrollExit
             | CopyModeAction::HalfPageDownScrollExit
             | CopyModeAction::ScrollDownAndCancel
@@ -18545,10 +18556,12 @@ fn copy_selection_mode(argument: Option<&str>) -> Option<CopySelectionMode> {
 
 fn copy_goto_line_action(arguments: &[RawText]) -> Option<CopyModeAction> {
     let [line] = arguments else { return None };
-    let target = pinned_strtonum(line, -1, i64::from(i32::MAX)).map_or(u32::MAX, |parsed| {
-        u32::try_from(parsed).unwrap_or(i32::MAX.unsigned_abs())
-    });
-    Some(CopyModeAction::GotoLine(target))
+    let line = pinned_strtonum(line, -1, i64::from(i32::MAX))
+        .and_then(|parsed| i32::try_from(parsed).ok());
+    Some(CopyModeAction::GotoLine {
+        line,
+        option_absolute: false,
+    })
 }
 
 /// The pin's `strtonum` grammar: `strtoll` base ten over the whole string,
@@ -28410,7 +28423,10 @@ mod tests {
         assert!(matches!(
             execution.effects.as_slice(),
             [MuxEffect::TerminalView {
-                action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(42)),
+                action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                    line: Some(42),
+                    ..
+                }),
                 ..
             }]
         ));
@@ -28444,19 +28460,22 @@ mod tests {
         };
 
         for (argument, line) in [
-            ("0", 0_u32),
+            ("0", 0_i32),
             ("5", 5),
             ("+6", 6),
             (" 13", 13),
             ("2147483647", 2_147_483_647),
-            ("-1", 2_147_483_647),
+            ("-1", -1),
         ] {
             let execution = goto(&mut engine, &mut context, argument);
             assert!(
                 matches!(
                     execution.effects.as_slice(),
                     [MuxEffect::TerminalView {
-                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                            line: Some(actual),
+                            ..
+                        }),
                         ..
                     }] if *actual == line
                 ),
@@ -28481,9 +28500,12 @@ mod tests {
                 matches!(
                     execution.effects.as_slice(),
                     [MuxEffect::TerminalView {
-                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine(actual)),
+                        action: TerminalViewAction::CopyMode(CopyModeAction::GotoLine {
+                            line: None,
+                            ..
+                        }),
                         ..
-                    }] if i32::try_from(*actual).is_err()
+                    }]
                 ),
                 "goto-line {argument:?} must still reach the mode with no target"
             );

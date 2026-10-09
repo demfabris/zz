@@ -155,11 +155,38 @@ check_equal refresh-now-clears-unseen 0 "$(value pane_unseen_changes)"
 check_equal refresh-now-leaves-the-timer-off 0 "$(value refresh_active)"
 check_equal refresh-now-stays-in-the-mode 1 "$(value pane_in_mode)"
 
-if [ "$check_count" -ne 20 ]; then
+main_client send-keys -t "$pane" -X begin-selection
+main_client send-keys -t "$pane" -X cursor-up
+main_client send-keys -t "$pane" -X refresh-now
+check_equal refresh-now-clears-the-selection 0 "$(value selection_present)"
+main_client send-keys -t "$pane" -X cancel
+
+seq 1 60 >"$(value pane_tty)"
+await_output '^60$' || { echo "copy-mode-line-numbers-$side: seq"; exit 0; }
+main_client copy-mode -t "$pane"
+printf 'three' >"$(value pane_tty)"
+await_output 'three' || { echo "copy-mode-line-numbers-$side: bottom"; exit 0; }
+main_client send-keys -t "$pane" -X refresh-now
+await_value copy_cursor_line three
+check_equal follow-moves-to-the-line-end 5 "$(value copy_cursor_x)"
+main_client send-keys -t "$pane" -X cancel
+
+main_client set-option -w -t "$pane" copy-mode-line-numbers absolute
+main_client copy-mode -t "$pane"
+history="$(value history_size)"
+main_client send-keys -t "$pane" -X goto-line 1
+check_equal absolute-goto-line-1-is-the-top "$history" "$(value scroll_position)"
+main_client send-keys -t "$pane" -X goto-line 5
+check_equal absolute-goto-line-5 "$((history - 4))" "$(value scroll_position)"
+main_client send-keys -t "$pane" -X goto-line -- -1
+check_equal absolute-goto-line-minus-one-is-the-top "$history" "$(value scroll_position)"
+main_client send-keys -t "$pane" -X cancel
+
+if [ "$check_count" -ne 25 ]; then
     record_failure "total-checks $check_count"
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g COPY_MODE_LINE_NUMBERS clean:20
+    main_client set-environment -g COPY_MODE_LINE_NUMBERS clean:25
 else
     sed "s/^/copy-mode-line-numbers-$side: /" "$work/failures"
 fi

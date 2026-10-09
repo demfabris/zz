@@ -368,7 +368,10 @@ pub enum CopyModeAction {
         direction: SearchDirection,
     },
     CopyEndOfLine(Box<CopyModeCopy>),
-    GotoLine(u32),
+    GotoLine {
+        line: Option<i32>,
+        option_absolute: bool,
+    },
     PageDownScrollExit,
     SelectionMode(CopySelectionMode),
     /// Stop the selection following the cursor without clearing it.
@@ -525,7 +528,7 @@ impl CopyModeAction {
             | Self::ScrollDown
             | Self::CursorCentreVertical
             | Self::CursorCentreHorizontal
-            | Self::GotoLine(_)
+            | Self::GotoLine { .. }
             | Self::Jump(_)
             | Self::RepeatJump { .. } => CopyModeClear::EmacsOnly,
             Self::TogglePosition
@@ -666,7 +669,7 @@ impl CopyModeAction {
             | Self::LineNumbersToggle { .. }
             | Self::RefreshRevision
             | Self::MouseCursor(_)
-            | Self::GotoLine(_) => CopyModeCountPolicy::Once,
+            | Self::GotoLine { .. } => CopyModeCountPolicy::Once,
         }
     }
 }

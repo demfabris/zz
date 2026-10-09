@@ -1320,16 +1320,12 @@ fn handle_mouse(
     if matches!(event.kind, MouseEventKind::Down(_)) {
         focus_pane(model, client, entry.pane)?;
     }
-    let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !mouse_tracking;
-    if let Some(action) = pane_mouse_action(
-        &model.size,
-        event,
+    if let Some(action) = native_pane_mouse_action(
+        model,
+        entry.pane,
         content,
-        global_column,
-        global_row,
-        global_x,
-        global_y,
-        force_selection,
+        event,
+        (global_column, global_row, global_x, global_y),
     ) {
         client
             .send_input(InputMessage::TerminalView {
@@ -1557,6 +1553,22 @@ fn bound_mouse_view_action(
         .iter()
         .find(|entry| entry.pane == pane)?
         .content();
+    native_pane_mouse_action(
+        model,
+        pane,
+        content,
+        event,
+        (global_column, global_row, global_x, global_y),
+    )
+}
+
+fn native_pane_mouse_action(
+    model: &Model,
+    pane: zz_protocol::PaneId,
+    content: Rect,
+    event: MouseEvent,
+    (global_column, global_row, global_x, global_y): (u16, u16, u32, u32),
+) -> Option<TerminalViewAction> {
     let viewport = model.viewports.get(&pane)?;
     let force_selection = event.modifiers.contains(KeyModifiers::SHIFT) || !viewport.mouse_tracking;
     let (content, global_column) = match crate::mode_view::presentation(model, pane, viewport)
@@ -2273,6 +2285,71 @@ const fn modifiers(value: KeyModifiers) -> Modifiers {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_shift_click_past_the_line_number_gutter_lands_on_the_first_column() {
+        use crate::terminal_event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        use zz_protocol::{ModePresentation, PaneId};
+        use zz_terminal::{SessionStatus, TerminalMode, TerminalViewAction, TerminalViewport};
+
+        let core = zz_client::ClientCore::new();
+        let endpoint =
+            zz_daemon::Endpoint::parse("unix:///tmp/zz-input-test.sock").expect("test endpoint");
+        let mut model = crate::state::Model::new(
+            &core,
+            crate::tty::TerminalSize {
+                columns: 80,
+                rows: 24,
+                cell_width_px: 8,
+                cell_height_px: 16,
+            },
+            "host".to_owned(),
+            "host".to_owned(),
+            endpoint.clone(),
+            endpoint,
+            Vec::new(),
+        );
+        let mut viewport = TerminalViewport::blank(80, 24, SessionStatus::Running);
+        viewport.mode = TerminalMode::Copy {
+            position: 0,
+            total: 0,
+            hide_position: false,
+        };
+        model.viewports.insert(PaneId(1), viewport);
+        std::sync::Arc::make_mut(&mut model.status)
+            .modes
+            .push(ModePresentation {
+                pane: PaneId(1),
+                view: false,
+                position: String::new(),
+                position_style: String::new(),
+                selection_style: String::new(),
+                vi_keys: false,
+                match_style: String::new(),
+                current_match_style: String::new(),
+                line_numbers: 1,
+                line_number_style: String::new(),
+                current_line_number_style: String::new(),
+            });
+        let content = crate::layout::Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 24,
+        };
+        let event = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 4,
+            row: 0,
+            modifiers: KeyModifiers::SHIFT,
+        };
+        let Some(TerminalViewAction::Mouse(input)) =
+            super::native_pane_mouse_action(&model, PaneId(1), content, event, (4, 0, 32, 0))
+        else {
+            panic!("a click in a copy-mode pane is a view action");
+        };
+        assert_eq!(input.cell.column, 0);
+    }
+
     #[test]
     fn xterm_shift_sequences_reach_the_shared_key_contract() {
         for (bytes, expected) in [

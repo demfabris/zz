@@ -10325,8 +10325,12 @@ fn apply_copy_mode_action(
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
         }
-        CopyModeAction::GotoLine(line) => {
-            goto_copy_line(&mut mode, line);
+        CopyModeAction::GotoLine {
+            line,
+            option_absolute,
+        } => {
+            let absolute = option_absolute && mode.line_numbers != 0;
+            goto_copy_line(&mut mode, line, absolute);
             if mode.selecting {
                 update_copy_selection(&mut mode, Some(word_separators));
             }
@@ -10400,7 +10404,7 @@ fn apply_copy_mode_action(
                 *copy_mode = Some(mode);
                 return Ok(ViewActionResult::None);
             }
-            refresh_copy_revision(terminal, &mut mode)?;
+            refresh_copy_revision(terminal, selection, &mut mode, mode_keys_vi)?;
             *unseen_output = 0;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -10420,7 +10424,7 @@ fn apply_copy_mode_action(
                 *copy_mode = Some(mode);
                 return Ok(ViewActionResult::None);
             }
-            refresh_copy_revision(terminal, &mut mode)?;
+            refresh_copy_revision(terminal, selection, &mut mode, mode_keys_vi)?;
             *unseen_output = 0;
             *copy_mode = Some(mode);
             Ok(ViewActionResult::Snapshot)
@@ -10824,12 +10828,16 @@ fn select_copy_mode_lines(mode: &mut CopyModeState, count: u32, mode_keys_vi: bo
 /// The pin's `window_copy_goto_line` with line numbers off: the argument is a
 /// scrollback offset counted from the bottom, clamped to the retained history,
 /// and the cursor keeps the screen row it was on.
-fn goto_copy_line(mode: &mut CopyModeState, line: u32) {
-    if i32::try_from(line).is_err() {
+fn goto_copy_line(mode: &mut CopyModeState, line: Option<i32>, absolute: bool) {
+    let Some(line) = line else {
         return;
-    }
+    };
     let maximum = mode.revision.maximum_offset();
-    let offset = maximum.saturating_sub(line.min(maximum));
+    let offset = if absolute {
+        u32::try_from(line.max(1) - 1).unwrap_or(0).min(maximum)
+    } else {
+        maximum.saturating_sub(u32::try_from(line).unwrap_or(maximum).min(maximum))
+    };
     let delta = i64::from(offset) - i64::from(mode.viewport_offset);
     mode.viewport_offset = offset;
     let last = i64::from(mode.revision.total_rows().saturating_sub(1));
@@ -15896,8 +15904,10 @@ fn settle_unwatched<'alloc: 'callbacks, 'callbacks>(
 }
 
 fn refresh_copy_revision(
-    terminal: &Terminal<'_, '_>,
+    terminal: &mut Terminal<'_, '_>,
+    selection: &mut Option<SelectionState>,
     mode: &mut CopyModeState,
+    mode_keys_vi: bool,
 ) -> Result<(), WorkerError> {
     let rows = u32::from(mode.revision.viewport_rows.saturating_sub(1));
     let follow = mode.viewport_offset == mode.revision.maximum_offset()
@@ -15912,15 +15922,19 @@ fn refresh_copy_revision(
                 .viewport_offset
                 .saturating_add(u32::from(mode.revision.viewport_rows.saturating_sub(1))),
         });
-        mode.cursor.x = mode
-            .cursor
-            .x
-            .min(revision_copy_line_end(&mode.revision, mode.cursor.y));
+        mode.cursor.x = copy_cursor_limit(&mode.revision, mode.cursor.y, mode_keys_vi, false);
     } else {
         mode.viewport_offset = offset_from_top.min(mode.revision.maximum_offset());
         mode.cursor = mode.revision.clamp_point(mode.cursor);
     }
     mode.recentre = None;
+    *selection = None;
+    terminal.set_selection(None)?;
+    mode.selection = None;
+    mode.selection_mode = CopySelectionMode::Char;
+    mode.selecting = false;
+    let limit = copy_cursor_limit(&mode.revision, mode.cursor.y, mode_keys_vi, mode.rectangle);
+    mode.cursor.x = mode.cursor.x.min(limit);
     Ok(())
 }
 
@@ -27217,13 +27231,16 @@ PS1='zz-path-fixture> '
                     terminal: &mut Terminal<'_, '_>,
                     selection: &mut Option<SelectionState>,
                     unseen_output: &mut u32,
-                    line: u32| {
+                    line: Option<i32>| {
             apply_copy_mode_action(
                 terminal,
                 selection,
                 copy_mode,
                 unseen_output,
-                CopyModeAction::GotoLine(line),
+                CopyModeAction::GotoLine {
+                    line,
+                    option_absolute: false,
+                },
                 &WordSeparators::default(),
                 false,
             )
@@ -27238,7 +27255,7 @@ PS1='zz-path-fixture> '
             &mut terminal,
             &mut selection,
             &mut unseen_output,
-            u32::MAX,
+            None,
         );
         {
             let mode = copy_mode.as_ref().expect("mode");
@@ -27253,7 +27270,7 @@ PS1='zz-path-fixture> '
                 &mut terminal,
                 &mut selection,
                 &mut unseen_output,
-                line,
+                i32::try_from(line).ok(),
             );
             let mode = copy_mode.as_ref().expect("mode");
             assert_eq!(
@@ -27265,6 +27282,127 @@ PS1='zz-path-fixture> '
                 mode.cursor.y - mode.viewport_offset,
                 screen_row,
                 "goto-line {line} moved the cursor screen row"
+            );
+        }
+    }
+
+    #[test]
+    fn goto_line_counts_from_the_top_under_absolute_line_numbers() {
+        let mut terminal = new_terminal(8, 3, 64).expect("terminal");
+        for line in 0..20_u32 {
+            terminal.vt_write(format!("L{line}\r\n").as_bytes());
+        }
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        let maximum = copy_mode.as_ref().expect("mode").revision.maximum_offset();
+        let mut unseen_output = 0;
+        let mut run = |copy_mode: &mut CopyModeSlot, action: CopyModeAction| {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                copy_mode,
+                &mut unseen_output,
+                action,
+                &WordSeparators::default(),
+                false,
+            )
+            .expect("copy action");
+            copy_mode.as_ref().expect("mode").viewport_offset
+        };
+        let goto = |line: i32| CopyModeAction::GotoLine {
+            line: Some(line),
+            option_absolute: true,
+        };
+        assert_eq!(run(&mut copy_mode, goto(1)), 0);
+        assert_eq!(run(&mut copy_mode, goto(5)), 4);
+        assert_eq!(run(&mut copy_mode, goto(-1)), 0);
+        assert_eq!(run(&mut copy_mode, goto(i32::MAX)), maximum);
+        run(&mut copy_mode, CopyModeAction::LineNumbersOff);
+        assert_eq!(run(&mut copy_mode, goto(5)), maximum - 5);
+    }
+
+    #[test]
+    fn refresh_now_clears_the_selection_and_follows_to_the_line_end() {
+        let mut terminal = new_terminal(8, 3, 16).expect("terminal");
+        terminal.vt_write(b"a\r\nb\r\n");
+        let mut selection = None;
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        let mut unseen_output = 0;
+        for action in [CopyModeAction::StartSelection, CopyModeAction::Up] {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                action,
+                &WordSeparators::default(),
+                false,
+            )
+            .expect("copy action");
+        }
+        assert!(copy_mode.as_ref().expect("mode").selection.is_some());
+        apply_copy_mode_action(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            &mut unseen_output,
+            CopyModeAction::RefreshNow,
+            &WordSeparators::default(),
+            false,
+        )
+        .expect("refresh-now");
+        let mode = copy_mode.as_ref().expect("mode");
+        assert!(mode.selection.is_none() && !mode.selecting);
+
+        let mut terminal = new_terminal(8, 3, 16).expect("terminal");
+        terminal.vt_write(b"a\r\nb\r\n");
+        let mut copy_mode = None;
+        enter_copy_mode(
+            &mut terminal,
+            &mut selection,
+            &mut copy_mode,
+            false,
+            false,
+            None,
+            true,
+        )
+        .expect("copy mode");
+        terminal.vt_write(b"three");
+        for (vi, column) in [(false, 5), (true, 4)] {
+            apply_copy_mode_action(
+                &mut terminal,
+                &mut selection,
+                &mut copy_mode,
+                &mut unseen_output,
+                CopyModeAction::RefreshNow,
+                &WordSeparators::default(),
+                vi,
+            )
+            .expect("refresh-now");
+            let mode = copy_mode.as_ref().expect("mode");
+            assert_eq!(
+                (mode.cursor.x, mode.cursor.y - mode.viewport_offset),
+                (column, 2)
             );
         }
     }

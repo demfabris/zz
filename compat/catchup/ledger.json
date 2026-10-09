@@ -254,7 +254,7 @@
       "id": "pin.tui-fixtures",
       "track": "pin",
       "title": "Re-baseline the TUI fixtures at the 3.8 pin",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -271,7 +271,7 @@
         "--self-check passes for each fixture touched.",
         "The closed TUI campaign's ledger keeps its own pin (compat/tui/tracker.py) and stays green."
       ],
-      "branch": null,
+      "branch": "catchup/pin.tui-fixtures",
       "sha": null,
       "notes": [
         "2026-10-09: pin.move ran check.sh only; the TUI fixtures went red at 3.8. Gates every later lane that runs a TUI fixture."

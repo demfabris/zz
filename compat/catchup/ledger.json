@@ -68,7 +68,7 @@
       "id": "fix.capture-links",
       "track": "fix",
       "title": "capture-pane -H and the derivable -F line flags",
-      "status": "review",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-terminal/src/session.rs",
@@ -84,11 +84,12 @@
         "capture.rich-transports keeps only -P, -R and the saved alternate grid."
       ],
       "branch": "catchup/fix.capture-links",
-      "sha": null,
+      "sha": "2012f21c9",
       "notes": [
         "2026-10-09: lane done at 6b4a587a8 (-H and -F match; link identity is by URI since libghostty exposes no OSC 8 id, recorded); integration pass merging main (3.8) sent",
         "2026-10-09: merged main at 7e0a35f4b; capture checks green at 3.8; tui-client-commands.sh red only from the pin move (see pin.tui-fixtures)",
-        "2026-10-09: fix pass 7946cf657: 5 fixed, 2 recorded as capture.terminal-engine-limits; second review running"
+        "2026-10-09: fix pass 7946cf657: 5 fixed, 2 recorded as capture.terminal-engine-limits; second review running",
+        "2026-10-09: 3 fix passes after 2 reviews; IL/DL output-mark move and two OSC 8/133 cases recorded in capture.terminal-engine-limits; merged; clippy + just compat check green on main"
       ]
     },
     {
@@ -336,7 +337,8 @@
       "branch": "catchup/pin.layout-v2",
       "sha": null,
       "notes": [
-        "2026-10-09: lane done at f2455a131: all 4 clauses met; wire: ControlFlags.new_layouts appended under 108; snapshot dumps now v2 text; a plain select-pane now sends a TreeOp::WindowLayout (dump strings carry a/l), small extra delta traffic"
+        "2026-10-09: lane done at f2455a131: all 4 clauses met; wire: ControlFlags.new_layouts appended under 108; snapshot dumps now v2 text; a plain select-pane now sends a TreeOp::WindowLayout (dump strings carry a/l), small extra delta traffic",
+        "2026-10-09: fix pass 5cd37e43c: 5 fixed; orchestrator ruling: refresh-client -B subscriptions print v2 regardless of new-layouts, as 3.8 measures (monitor.c formats have no client)"
       ]
     },
     {

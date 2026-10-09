@@ -398,7 +398,7 @@
       "id": "pin.formats-options",
       "track": "pin",
       "title": "3.8 formats, modifiers, options and show -F",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "pin.move"
       ],
@@ -418,9 +418,10 @@
         "show-options, show-window-options and show-hooks accept -F; display-message -j works; capture-pane -I is adopted or registered native (libghostty keeps no per-row time)."
       ],
       "branch": "catchup/pin.formats-options",
-      "sha": null,
+      "sha": "beb67803b",
       "notes": [
-        "2026-10-09: lane done at 3f09fc58a: 21/32 registry items closed (failed-key, 3.8 defaults, show -F, split-window -B, 11 formats, 2 native); the rest moved to pin.formats-options-2"
+        "2026-10-09: lane done at 3f09fc58a: 21/32 registry items closed (failed-key, 3.8 defaults, show -F, split-window -B, 11 formats, 2 native); the rest moved to pin.formats-options-2",
+        "2026-10-09: 2 reviews + final fix; 21/32 registry items closed; rest in pin.formats-options-2; merged"
       ]
     },
     {

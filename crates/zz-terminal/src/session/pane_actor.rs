@@ -1510,7 +1510,9 @@ impl PaneActor {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                if let Some(capture) = CaptureWork::start(&self.terminal, mode, *request) {
+                if let Some(capture) =
+                    CaptureWork::start(&self.terminal, mode, &self.engine_filter, *request)
+                {
                     self.captures.push_back(capture);
                 }
                 self.compression.rearm();
@@ -2207,7 +2209,9 @@ impl DeadPane {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                if let Some(capture) = CaptureWork::start(&self.surface.terminal, mode, *request) {
+                if let Some(capture) =
+                    CaptureWork::start(&self.surface.terminal, mode, &self.engine_filter, *request)
+                {
                     self.surface.captures.push_back(capture);
                 }
                 complete_dead_notice_command(&self.slot);

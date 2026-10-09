@@ -329,6 +329,7 @@ const DEAD_NOTICE_WAIT: Duration = Duration::from_secs(5);
 const MAX_ENGINE_SEQUENCE_BYTES: usize = 256;
 const MAX_ENGINE_RENAME_BYTES: usize = 1024;
 const MAX_ENGINE_OSC_BYTES: usize = 64;
+const MAX_OUTPUT_MARKS: usize = 1024;
 const SHELL_INTEGRATION_TITLE_MARK: &[u8] = b"2626";
 
 /// `enum progress_bar_state`: what the `ConEmu` OSC 9;4 sequence's first argument
@@ -453,9 +454,45 @@ struct EngineFilter {
     program_status: ProgramStatus,
     program_status_changed: bool,
     replies: Option<Rc<RefCell<PtyEffects>>>,
+    output_marks: Vec<(Screen, TrackedGridRef)>,
 }
 
 impl EngineFilter {
+    fn mark_output_start(&mut self, terminal: &Terminal<'_, '_>) {
+        let (Ok(screen), Ok(row)) = (terminal.active_screen(), terminal.cursor_y()) else {
+            return;
+        };
+        let Ok(mark) = terminal.track_grid_ref(Point::Active(PointCoordinate {
+            x: 0,
+            y: u32::from(row),
+        })) else {
+            return;
+        };
+        if self.output_marks.len() >= MAX_OUTPUT_MARKS {
+            self.output_marks.retain(|(_, mark)| mark.has_value());
+            if self.output_marks.len() >= MAX_OUTPUT_MARKS {
+                self.output_marks.remove(0);
+            }
+        }
+        self.output_marks.push((screen, mark));
+    }
+
+    fn output_rows(&self, terminal: &Terminal<'_, '_>) -> Vec<u64> {
+        let Ok(active) = terminal.active_screen() else {
+            return Vec::new();
+        };
+        let mut rows = self
+            .output_marks
+            .iter()
+            .filter(|(screen, _)| *screen == active)
+            .filter_map(|(_, mark)| mark.point(PointSpace::Screen).ok().flatten())
+            .map(|point| u64::from(point.y))
+            .collect::<Vec<_>>();
+        rows.sort_unstable();
+        rows.dedup();
+        rows
+    }
+
     fn facts(&self, terminal: &Terminal<'_, '_>) -> Result<TerminalFacts, WorkerError> {
         let alternate_on = terminal.active_screen()? == Screen::Alternate;
         Ok(TerminalFacts {
@@ -698,15 +735,19 @@ impl EngineFilter {
             terminal.vt_write(bytes);
             return &[];
         };
+        let output_start = !self.osc_overflowed && self.osc.starts_with(b"133;C");
         if terminator == 0x1b {
             terminal.vt_write(&bytes[..end]);
             self.finish_osc(bar, last_command_status, terminator);
             self.state = EngineState::Escape;
-            return &bytes[end + 1..];
+        } else {
+            terminal.vt_write(&bytes[..=end]);
+            self.finish_osc(bar, last_command_status, terminator);
+            self.state = EngineState::Ground;
         }
-        terminal.vt_write(&bytes[..=end]);
-        self.finish_osc(bar, last_command_status, terminator);
-        self.state = EngineState::Ground;
+        if output_start {
+            self.mark_output_start(terminal);
+        }
         &bytes[end + 1..]
     }
 
@@ -798,6 +839,7 @@ impl EngineFilter {
 
     fn full_reset(&mut self) {
         self.metadata_hint = true;
+        self.output_marks.clear();
         self.program_status_changed |= self.program_status.reset();
     }
 
@@ -1357,6 +1399,8 @@ pub struct CaptureOptions {
     pub escape_sequences: bool,
     pub escape_nonprintable: bool,
     pub number_lines: bool,
+    pub line_flags: bool,
+    pub hyperlinks: bool,
 }
 
 impl Default for CaptureOptions {
@@ -1372,6 +1416,8 @@ impl Default for CaptureOptions {
             escape_sequences: false,
             escape_nonprintable: false,
             number_lines: false,
+            line_flags: false,
+            hyperlinks: false,
         }
     }
 }
@@ -8484,6 +8530,10 @@ fn capture_history(
 #[path = "session/capture_work_e22_tests.rs"]
 mod capture_work_e22_tests;
 
+#[cfg(test)]
+#[path = "session/capture_links_tests.rs"]
+mod capture_links_tests;
+
 const CAPTURE_ROWS_PER_STEP: u64 = 512;
 
 trait CaptureGrid: GridRead {
@@ -8578,6 +8628,7 @@ enum CaptureSource {
 struct CaptureWork {
     source: CaptureSource,
     options: CaptureOptions,
+    output_rows: Vec<u64>,
     next: u64,
     end: u64,
     visible_start: u64,
@@ -8591,9 +8642,15 @@ impl CaptureWork {
     fn start(
         terminal: &Terminal<'_, '_>,
         mode: Option<&CopyModeState>,
+        filter: &EngineFilter,
         request: CaptureRequest,
     ) -> Option<Self> {
         let CaptureRequest { options, reply } = request;
+        let output_rows = if options.line_flags {
+            filter.output_rows(terminal)
+        } else {
+            Vec::new()
+        };
         let dimensions = if options.mode
             && let Some(mode) = mode
         {
@@ -8620,8 +8677,8 @@ impl CaptureWork {
                 .min(total.saturating_sub(1));
             let start = resolve_capture_boundary(options.start, visible_start, visible_end, total);
             let end = resolve_capture_boundary(options.end, visible_start, visible_end, total);
-            if start > end || end - start < CAPTURE_ROWS_PER_STEP {
-                return capture_terminal(terminal, mode, options).map(Err);
+            if start > end || end - start < CAPTURE_ROWS_PER_STEP || options.hyperlinks {
+                return capture_terminal_marked(terminal, mode, options, &output_rows).map(Err);
             }
             let source = if options.mode
                 && let Some(mode) = mode
@@ -8644,6 +8701,7 @@ impl CaptureWork {
             Ok(Ok((source, next, end, visible_start))) => Some(Self {
                 source,
                 options,
+                output_rows,
                 next,
                 end,
                 visible_start,
@@ -8692,6 +8750,7 @@ impl CaptureWork {
         let continuing = end < self.end && self.options.join_wrapped && self.wrapped(end)?;
         let keep_tail = continuing
             && !options.number_lines
+            && !options.line_flags
             && !options.escape_sequences
             && !options.preserve_trailing;
         let mut output = match &self.source {
@@ -8702,6 +8761,7 @@ impl CaptureWork {
                     ..options
                 },
                 &mut self.previous,
+                &self.output_rows,
             )?,
             CaptureSource::Mode(revision) => {
                 capture_revision(revision, self.visible_start as u32, options)?
@@ -8753,7 +8813,17 @@ fn capture_terminal(
     mode: Option<&CopyModeState>,
     options: CaptureOptions,
 ) -> Result<String, TerminalCaptureError> {
+    capture_terminal_marked(terminal, mode, options, &[])
+}
+
+fn capture_terminal_marked(
+    terminal: &Terminal<'_, '_>,
+    mode: Option<&CopyModeState>,
+    options: CaptureOptions,
+    output_rows: &[u64],
+) -> Result<String, TerminalCaptureError> {
     if options.mode
+        && !options.hyperlinks
         && let Some(mode) = mode
     {
         if options.alternate && mode.revision.screen != Screen::Alternate {
@@ -8765,6 +8835,7 @@ fn capture_terminal(
         terminal,
         options,
         &mut libghostty_vt::style::Style::default(),
+        output_rows,
     )
 }
 
@@ -8772,6 +8843,7 @@ fn capture_grid(
     terminal: &impl CaptureGrid,
     options: CaptureOptions,
     previous: &mut libghostty_vt::style::Style,
+    output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
     let active_screen = terminal.capture_screen().map_err(capture_failure)?;
     if options.alternate && active_screen != Screen::Alternate {
@@ -8797,15 +8869,25 @@ fn capture_grid(
     let requested_rows = usize::try_from(end.saturating_sub(start).saturating_add(1)).unwrap_or(1);
 
     let columns = terminal.capture_columns().map_err(capture_failure)?;
+    if options.hyperlinks {
+        return capture_hyperlinks(
+            terminal,
+            options,
+            (start, end),
+            visible_start,
+            columns,
+            output_rows,
+        );
+    }
     if options.escape_sequences {
         return capture_styled_terminal(
             terminal,
             options,
-            start,
-            end,
+            (start, end),
             visible_start,
             columns,
             previous,
+            output_rows,
         );
     }
     let head = terminal
@@ -8829,8 +8911,9 @@ fn capture_grid(
             .with_selection(&selection);
         terminal.capture_format(formatter_options)
     };
-    let output = format_range(options.join_wrapped && !options.number_lines)?;
-    let rows = if options.number_lines && options.join_wrapped {
+    let per_row = options.number_lines || options.line_flags;
+    let output = format_range(options.join_wrapped && !per_row)?;
+    let rows = if per_row && options.join_wrapped {
         Some(
             (start..=end)
                 .map(|row| {
@@ -8857,23 +8940,195 @@ fn capture_grid(
     };
     let trailing_rows = requested_rows.saturating_sub(written_rows);
     let output = pad_capture_rows(&output, trailing_rows, columns, options);
+    let flags = if options.line_flags {
+        Some(
+            (start..=end)
+                .map(|row| grid_line_flags(terminal, row, output_rows))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+    } else {
+        None
+    };
     Ok(decorate_capture(
         output,
         rows.as_deref(),
         options,
         start,
         visible_start,
+        flags.as_deref(),
     ))
+}
+
+const LINE_FLAG_HYPERLINK: u8 = 1 << 0;
+const LINE_FLAG_OUTPUT: u8 = 1 << 1;
+const LINE_FLAG_PROMPT: u8 = 1 << 2;
+const LINE_FLAG_WRAPPED: u8 = 1 << 3;
+const MAX_HYPERLINK_URI: usize = 1024;
+
+fn push_line_flags(output: &mut String, flags: u8) {
+    for (bit, letter) in [
+        (LINE_FLAG_HYPERLINK, 'H'),
+        (LINE_FLAG_OUTPUT, 'O'),
+        (LINE_FLAG_PROMPT, 'P'),
+        (LINE_FLAG_WRAPPED, 'W'),
+    ] {
+        if flags & bit != 0 {
+            output.push(letter);
+        }
+    }
+    if flags == 0 {
+        output.push('-');
+    }
+    output.push(' ');
+}
+
+fn grid_line_flags(
+    terminal: &impl GridRead,
+    row: u64,
+    output_rows: &[u64],
+) -> Result<u8, TerminalCaptureError> {
+    let line = terminal
+        .grid_ref(Point::Screen(PointCoordinate {
+            x: 0,
+            y: u32::try_from(row).unwrap_or(u32::MAX),
+        }))
+        .and_then(|grid| grid.row())
+        .map_err(capture_failure)?;
+    let mut flags = 0;
+    if line.has_hyperlink().map_err(capture_failure)? {
+        flags |= LINE_FLAG_HYPERLINK;
+    }
+    if output_rows.binary_search(&row).is_ok() {
+        flags |= LINE_FLAG_OUTPUT;
+    }
+    if line.semantic_prompt().map_err(capture_failure)? == RowSemanticPrompt::Prompt {
+        flags |= LINE_FLAG_PROMPT;
+    }
+    if line.is_wrapped().map_err(capture_failure)? {
+        flags |= LINE_FLAG_WRAPPED;
+    }
+    Ok(flags)
+}
+
+fn capture_hyperlinks(
+    terminal: &impl GridRead,
+    options: CaptureOptions,
+    (start, end): (u64, u64),
+    history_rows: u64,
+    columns: u16,
+    output_rows: &[u64],
+) -> Result<String, TerminalCaptureError> {
+    let mut output = String::new();
+    let mut found = 0_usize;
+    let mut carried: Option<Vec<u8>> = None;
+    let mut buffer = vec![0_u8; 256];
+    for row in start..=end {
+        let y = u32::try_from(row).unwrap_or(u32::MAX);
+        let line = terminal
+            .grid_ref(Point::Screen(PointCoordinate { x: 0, y }))
+            .and_then(|grid| grid.row())
+            .map_err(capture_failure)?;
+        let wrapped = line.is_wrapped().map_err(capture_failure)?;
+        let mut current = carried.take();
+        if !line.has_hyperlink().map_err(capture_failure)? {
+            continue;
+        }
+        let mut uris = Vec::new();
+        for x in 0..columns {
+            let grid = terminal
+                .grid_ref(Point::Screen(PointCoordinate { x, y }))
+                .map_err(capture_failure)?;
+            let cell = grid.cell().map_err(capture_failure)?;
+            if matches!(
+                cell.wide().map_err(capture_failure)?,
+                CellWide::SpacerTail | CellWide::SpacerHead
+            ) {
+                continue;
+            }
+            if !cell.has_hyperlink().map_err(capture_failure)? {
+                current = None;
+                continue;
+            }
+            let length = match grid.hyperlink_uri(&mut buffer) {
+                Ok(length) => length,
+                Err(libghostty_vt::Error::OutOfSpace { required }) => {
+                    buffer.resize(required, 0);
+                    grid.hyperlink_uri(&mut buffer).map_err(capture_failure)?
+                }
+                Err(error) => return Err(capture_failure(error)),
+            };
+            let uri = &buffer[..length];
+            if current.as_deref() == Some(uri) {
+                continue;
+            }
+            let visible = visible_uri(uri);
+            if uri.is_empty() || visible.len() > MAX_HYPERLINK_URI {
+                current = None;
+                continue;
+            }
+            current = Some(uri.to_vec());
+            if found == usize::from(columns) {
+                break;
+            }
+            found += 1;
+            uris.push(visible);
+        }
+        if wrapped {
+            carried = current;
+        }
+        if uris.is_empty() {
+            continue;
+        }
+        if options.number_lines {
+            push_capture_line_number(&mut output, row, history_rows);
+        }
+        if options.line_flags {
+            push_line_flags(&mut output, grid_line_flags(terminal, row, output_rows)?);
+        }
+        output.push_str(&uris.join(" "));
+        if !(options.join_wrapped && wrapped) {
+            output.push('\n');
+        }
+        if output.len() > MAX_CAPTURE_BYTES {
+            return Err(TerminalCaptureError::TooLarge);
+        }
+    }
+    if output.ends_with('\n') {
+        output.pop();
+    }
+    Ok(output)
+}
+
+fn visible_uri(uri: &[u8]) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::with_capacity(uri.len());
+    for chunk in uri.utf8_chunks() {
+        for character in chunk.valid().chars() {
+            match character {
+                '\\' => output.push_str("\\\\"),
+                '\t' | '\n' => output.push(character),
+                character if character.is_ascii_control() => {
+                    let _ = write!(output, "\\{:03o}", u32::from(character));
+                }
+                character => output.push(character),
+            }
+        }
+        for byte in chunk.invalid() {
+            let _ = write!(output, "\\{byte:03o}");
+        }
+    }
+    output
 }
 
 fn capture_styled_terminal(
     terminal: &impl GridRead,
     options: CaptureOptions,
-    start: u64,
-    end: u64,
+    (start, end): (u64, u64),
     history_rows: u64,
     columns: u16,
     previous: &mut libghostty_vt::style::Style,
+    output_rows: &[u64],
 ) -> Result<String, TerminalCaptureError> {
     let mut output = String::new();
     let mut graphemes = vec!['\0'; 8];
@@ -8954,6 +9209,9 @@ fn capture_styled_terminal(
         if options.number_lines {
             push_capture_line_number(&mut output, row, history_rows);
         }
+        if options.line_flags {
+            push_line_flags(&mut output, grid_line_flags(terminal, row, output_rows)?);
+        }
         if !options.join_wrapped && !options.preserve_trailing {
             output.push_str(line.trim_end_matches(' '));
         } else {
@@ -8980,6 +9238,7 @@ fn capture_styled_terminal(
         },
         start,
         history_rows,
+        None,
     ))
 }
 
@@ -9134,9 +9393,16 @@ fn decorate_capture(
     options: CaptureOptions,
     first_row: u64,
     history_rows: u64,
+    flags: Option<&[u8]>,
 ) -> String {
-    let text = if options.number_lines {
-        number_capture(&text, rows, first_row, history_rows)
+    let text = if options.number_lines || flags.is_some() {
+        number_capture(
+            &text,
+            rows,
+            (first_row, history_rows),
+            options.number_lines,
+            flags,
+        )
     } else {
         text
     };
@@ -9155,17 +9421,28 @@ fn push_capture_line_number(output: &mut String, row: u64, history_rows: u64) {
     output.push(' ');
 }
 
-fn number_capture(text: &str, rows: Option<&[bool]>, first_row: u64, history_rows: u64) -> String {
+fn number_capture(
+    text: &str,
+    rows: Option<&[bool]>,
+    (first_row, history_rows): (u64, u64),
+    numbers: bool,
+    flags: Option<&[u8]>,
+) -> String {
     let mut output = String::with_capacity(text.len());
     for (offset, line) in text.split('\n').enumerate() {
         if offset > 0 && rows.is_none_or(|rows| rows.get(offset - 1) != Some(&true)) {
             output.push('\n');
         }
-        push_capture_line_number(
-            &mut output,
-            first_row.saturating_add(offset as u64),
-            history_rows,
-        );
+        if numbers {
+            push_capture_line_number(
+                &mut output,
+                first_row.saturating_add(offset as u64),
+                history_rows,
+            );
+        }
+        if let Some(flags) = flags {
+            push_line_flags(&mut output, flags.get(offset).copied().unwrap_or(0));
+        }
         output.push_str(line);
     }
     output
@@ -9268,7 +9545,20 @@ fn capture_viewport(
             return Err(TerminalCaptureError::TooLarge);
         }
     }
-    Ok(decorate_capture(output, None, options, start, 0))
+    if options.hyperlinks {
+        return Ok(String::new());
+    }
+    let flags = options
+        .line_flags
+        .then(|| vec![0; usize::try_from(end - start + 1).unwrap_or(0)]);
+    Ok(decorate_capture(
+        output,
+        None,
+        options,
+        start,
+        0,
+        flags.as_deref(),
+    ))
 }
 
 fn capture_viewport_row(
@@ -9368,19 +9658,29 @@ fn capture_revision(
     }
     let head = u32::try_from(start).unwrap_or(u32::MAX);
     let tail = u32::try_from(end).unwrap_or(u32::MAX);
+    let per_row = options.number_lines || options.line_flags;
     let output = revision.capture_rows(
         head,
         tail,
-        options.join_wrapped && !options.number_lines,
+        options.join_wrapped && !per_row,
         options.preserve_trailing,
         options.escape_sequences,
     );
     if output.len() > MAX_CAPTURE_BYTES {
         return Err(TerminalCaptureError::TooLarge);
     }
-    let rows = (options.number_lines && options.join_wrapped).then(|| {
+    let rows = (per_row && options.join_wrapped).then(|| {
         (head..=tail)
             .map(|row| revision.row(row).wrapped())
+            .collect::<Vec<_>>()
+    });
+    let flags = options.line_flags.then(|| {
+        (head..=tail)
+            .map(|row| {
+                let meta = revision.row(row);
+                (u8::from(meta.prompt()) * LINE_FLAG_PROMPT)
+                    | (u8::from(meta.wrapped()) * LINE_FLAG_WRAPPED)
+            })
             .collect::<Vec<_>>()
     });
     Ok(decorate_capture(
@@ -9389,6 +9689,7 @@ fn capture_revision(
         options,
         start,
         visible_start,
+        flags.as_deref(),
     ))
 }
 
@@ -20654,10 +20955,13 @@ mod tests {
     fn numbered_capture_uses_physical_rows_for_styled_wraps() {
         let rows = "\x1b[31mAAAA\x1b[0m\n\x1b[31mAAAA\x1b[0m\n\x1b[31mAA\x1b[0m\nNEXT";
         assert_eq!(
-            number_capture(rows, Some(&[true, true, false, false]), 0, 0),
+            number_capture(rows, Some(&[true, true, false, false]), (0, 0), true, None),
             "0 \x1b[31mAAAA\x1b[0m1 \x1b[31mAAAA\x1b[0m2 \x1b[31mAA\x1b[0m\n3 NEXT"
         );
-        assert_eq!(number_capture("old\nnew", None, 2, 3), "-1 old\n0 new");
+        assert_eq!(
+            number_capture("old\nnew", None, (2, 3), true, None),
+            "-1 old\n0 new"
+        );
     }
 
     #[test]

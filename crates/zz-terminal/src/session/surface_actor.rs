@@ -489,7 +489,9 @@ impl<'a, 'b> SurfaceActor<'a, 'b> {
                     (Some(mode), None) => Some(mode),
                     _ => None,
                 };
-                if let Some(capture) = CaptureWork::start(&self.terminal, mode, *request) {
+                if let Some(capture) =
+                    CaptureWork::start(&self.terminal, mode, &self.engine_filter, *request)
+                {
                     self.captures.push_back(capture);
                 }
                 self.compression.rearm();

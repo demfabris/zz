@@ -4,7 +4,7 @@ title: tmux compatibility gap report
 description: "Live TODO and status report for tmux compatibility gaps, decisions, evidence, and acceptance gates."
 resource: compat/tmux-gaps.json
 tags: [tmux, compatibility, gaps, tracker]
-timestamp: 2026-10-04T00:00:00-03:00
+timestamp: 2026-10-09T00:00:00-03:00
 ---
 
 # Overview
@@ -17,17 +17,17 @@ below.
 
 Pinned tmux commit: `d77c9dc6aa021e4bc61f0da128c591af695e6466`.
 
-Tracked gap groups: **44**. Classified items: **354**.
+Tracked gap groups: **45**. Classified items: **353**.
 
-- Status: open: 2, accepted: 42.
-- Decision: adopt: 2, native: 33, never: 9.
-- Priority: now: 1, next: 1, none: 42.
+- Status: open: 2, accepted: 43.
+- Decision: adopt: 2, native: 34, never: 9.
+- Priority: now: 1, next: 1, none: 43.
 - Closed history entries: 212.
-- Surface: command: 3, flag: 23, extension-flag: 10, native-command: 26, option: 31, format: 42, key: 28, binding: 37, native-key: 92, semantic: 53, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 21, extension-flag: 10, native-command: 26, option: 31, format: 42, key: 28, binding: 37, native-key: 92, semantic: 54, presentation: 8, protocol: 1.
 
 ## Measured surface
 
-The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 23 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 10 zz-only flags on tmux command names, 26 native command names, 31 options absent from `BEHAVES`, 42 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 28 omitted default keys, 37 divergent shared default bindings, 92 zz-only default keys.
+The pinned oracle contains 92 commands, 78 aliases, 572 command-flag shapes (318 valueless, 246 required-value, 8 optional-value), positional minimum and maximum bounds, 180 options, 198 global formats, 153 scoped literal context pairs across 31 source producers, 10 derived context families, 36 format modifiers, 68 hooks, and 303 default bindings across 5 tables. zz has catalog entries for 89 of those commands. The registry classifies 21 catalogued-unsupported upstream flag pairs, 0 implemented flag-arity mismatches, 0 positional-minimum mismatches, 0 positional-maximum mismatches, 14 callback-bearing commands across 6 effective `args_parse` rules, 0 implemented commands without verified callback behavior, 10 zz-only flags on tmux command names, 26 native command names, 31 options absent from `BEHAVES`, 42 known limited formats, 0 scoped context-format gaps, 0 accepted-native context-format names, 0 currently documented hook-producer gaps, 28 omitted default keys, 37 divergent shared default bindings, 92 zz-only default keys.
 
 ## Enforcement boundary
 
@@ -64,7 +64,8 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `aliases.remote-client-preflight` | Route a remote host statically to its ssh lifecycle | native | accepted | none | client | remote, scripts | none |
-| `capture.rich-transports` | Add rich capture transports | native | accepted | none | terminal | scripts | none |
+| `capture.grid-storage-line-flags` | Print tmux's grid storage letters in capture-pane -F | native | accepted | none | terminal | scripts | none |
+| `capture.rich-transports` | Add the raw grid and pending-input capture transports | native | accepted | none | terminal | scripts | none |
 | `clients.interactive-refresh` | Complete interactive client commands | native | accepted | none | client | remote | none |
 | `clients.read-only-and-focus` | Retain native client focus semantics | native | accepted | none | daemon | daily, remote | none |
 | `commands.cold-parse-diagnostics` | Report a cold CLI parse error as the parse error | native | accepted | none | client | scripts | none |
@@ -126,28 +127,48 @@ Settled 2026-09-02 as a native decision rather than a gap, because the clause it
 - Acceptance:
   - `A `--host` CLI vector is classified against the static remote route and its ssh lifecycle without an existing-only discovery pass, while the local CLI keeps preparing against an already-running compatible daemon.`
 
-### `capture.rich-transports`: Add rich capture transports
+### `capture.grid-storage-line-flags`: Print tmux's grid storage letters in capture-pane -F
 
-Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The remaining -F, -H, -P and -R transports stay loudly refused with measured workload-specific decisions. Reopen only when a named scripted workload needs cell attributes, hyperlinks, or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform. semantic:capture-pane-trailing-blank-rows closed 2026-09-14: the text residues were not the transports. cmd_capture_pane_history prints one line per grid row of the range whatever the row holds, and grid_string_cells walks each row to gl->cellsize under GRID_STRING_EMPTY_CELLS and to gl->cellused otherwise, then drops trailing spaces under GRID_STRING_TRIM_SPACES; cmd_capture_pane_exec then drops one trailing newline and prints one, so an empty last row survives. The worker now adds back the rows after the last one written and the cells after the ones used, and -M falls back to the pane the way the pin's else branch does. Measured 2026-09-14 on Linux against the pin d77c9dc6 on an 80x24 pane holding three written rows: capture-pane -p, -p -e, -p -N, -p -M and -p -a -q and every explicit range from -E 0 to -E 30 are byte-identical on both sides, where -p was 3 lines against 24 and -p -N was 37 bytes against 104 before. The one grid fact this reproduces is grid_expand_line's growth to a quarter, a half or the whole screen width, read off the cells the row currently uses: a row the pin once wrote wider and later erased keeps the wider allocation there and not here. The cases are capture-default-range, capture-past-last-row, capture-preserve-trailing and its three neighbours, capture-mode-screen, capture-mode-default, capture-escape, capture-alternate and capture-alternate-quiet in compat/tui-client-commands.sh. Narrowed on 2026-09-15 by the cycle 10 capture lane: `-C` and `-L` are transforms of the text snapshot and nothing else, so they left this gap. `-C` doubles a backslash in cell data and, with `-e`, writes every escape introducer as a literal `\033` (grid.c also emits escaped SO/SI for retained DEC charset cells, a fact Ghostty does not retain). `-L` numbers each line from the history size, negative in history, and with `-J` keeps the number of every joined row inside the joined line. Both are asserted against the pin in compat/tui-client-commands.sh and compat/scenarios/capture-pane.txt. Fix pass 2026-09-15: numbered joins now use physical wrap flags, so ANSI style bytes cannot consume another row. Live styled captures emit the pin's colour and attribute transitions. Cycle 11 residuals, measured 2026-09-17: the local Ghostty patch retains explicit indexed colour class in spare style bits, and the low-indexed-colour case asserts the pin bytes. Decided 2026-09-18 (fabrico): capture returns the spaces a tab left on screen; the pin's literal tabs (GRID_FLAG_TAB, grid.c:1202) are not imitated, the tab span tracking was removed, and the tab cases are filed under decided:TUI-017. Unpatch 2026-09-18 (fabrico): zz carries no patch on the vendored terminal engine, so the indexed-colour plumbing and the ICH hunk are gone with their asserted cases: SGR 38;5;1 captures as named red (pin `\\033[38;5;1m`, zz `\\033[31m`, both ending `\\033[39m`) and the 6-wide insert at column 70 leaves 74 spaces, C, 3 spaces, AB on the pin against 78 spaces, AB on zz; both cases are filed under decided:TUI-017. The eight 100x30 erased-background probe differences were a detached new-session starting its pty at 80x24 whatever -x and -y asked; panes now spawn at their laid-out size and the eight cases assert. Styled frozen-mode capture is unproven. Both plain and escaped DEC charset captures carry the authorized measured provenance decision; literal Unicode line drawing remains asserted.
+D is GRID_LINE_DEAD, which grid_reflow_dead leaves on the source lines a reflow has moved out, and X is GRID_LINE_EXTENDED, which grid_extended_cell sets the first time a row stores a cell outside the compact 8-bit form (UTF-8 wider than one byte, a wide cell, RGB or underline colour, a link, a tab, an attribute above 0xff) and which stays until the row is cleared (cmd-capture-pane.c:356-371, grid.c:154-170, grid.c:1298). Both describe how tmux stores a row, not what the row holds, and libghostty's page rows have no such states, so zz does not invent them. Measured 2026-10-09 against the pin d77c9dc6 on a 20x8 pane: every row holding a link or a non-ASCII cell carries X there, the only letter difference in capture-pane -F on that screen.
 
 - Decision: `native`
 - Status: `accepted`
 - Priority and ease: `none` / `none`
 - Owner: `terminal`
 - User impact: scripts
-- Items: `flag:capture-pane:-F`, `flag:capture-pane:-H`, `flag:capture-pane:-P`, `flag:capture-pane:-R`, `semantic:capture-pane-saved-alternate`
+- Items: `semantic:capture-pane-line-flags-dead-extended`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-terminal/src/session.rs`
+  - `resource:crates/zz-terminal/src/session/capture_links_tests.rs`
+  - `scenario:compat/scenarios/smoke/capture-links.txt`
+- Acceptance:
+  - ``capture-pane -F` prints the H, O, P and W letters in the pin's D H O P W X order and leaves the D and X positions empty: a row the pin flags HX prints H here, and a row the pin flags only X prints `-`.`
+
+### `capture.rich-transports`: Add the raw grid and pending-input capture transports
+
+Pinned tmux backs `-R`, `-P`, `-C`, `-F`, `-H`, and `-L` with its own grid and input-parser internals: `-R` prints per-line `grid_line` flags plus every cell's colour, attribute, and hyperlink id, and `-P` drains the incomplete escape sequence still sitting in `input_pending`. zz's capture surface is the terminal worker's retained UTF-8 text snapshot, which the daemon serves for `-a`, `-e`, `-J`, `-M`, `-N`, `-p`, `-q`, `-b`, `-S`, and `-E` with the pin's routing, alongside the zz-native `show-last-output` and `capture-browser` verbs. The remaining -P and -R transports stay loudly refused with measured workload-specific decisions. Reopen only when a named scripted workload needs every cell's attributes or a saved alternate grid, which takes a terminal-owned rich snapshot rather than another text transform. semantic:capture-pane-trailing-blank-rows closed 2026-09-14: the text residues were not the transports. cmd_capture_pane_history prints one line per grid row of the range whatever the row holds, and grid_string_cells walks each row to gl->cellsize under GRID_STRING_EMPTY_CELLS and to gl->cellused otherwise, then drops trailing spaces under GRID_STRING_TRIM_SPACES; cmd_capture_pane_exec then drops one trailing newline and prints one, so an empty last row survives. The worker now adds back the rows after the last one written and the cells after the ones used, and -M falls back to the pane the way the pin's else branch does. Measured 2026-09-14 on Linux against the pin d77c9dc6 on an 80x24 pane holding three written rows: capture-pane -p, -p -e, -p -N, -p -M and -p -a -q and every explicit range from -E 0 to -E 30 are byte-identical on both sides, where -p was 3 lines against 24 and -p -N was 37 bytes against 104 before. The one grid fact this reproduces is grid_expand_line's growth to a quarter, a half or the whole screen width, read off the cells the row currently uses: a row the pin once wrote wider and later erased keeps the wider allocation there and not here. The cases are capture-default-range, capture-past-last-row, capture-preserve-trailing and its three neighbours, capture-mode-screen, capture-mode-default, capture-escape, capture-alternate and capture-alternate-quiet in compat/tui-client-commands.sh. Narrowed on 2026-09-15 by the cycle 10 capture lane: `-C` and `-L` are transforms of the text snapshot and nothing else, so they left this gap. `-C` doubles a backslash in cell data and, with `-e`, writes every escape introducer as a literal `\033` (grid.c also emits escaped SO/SI for retained DEC charset cells, a fact Ghostty does not retain). `-L` numbers each line from the history size, negative in history, and with `-J` keeps the number of every joined row inside the joined line. Both are asserted against the pin in compat/tui-client-commands.sh and compat/scenarios/capture-pane.txt. Fix pass 2026-09-15: numbered joins now use physical wrap flags, so ANSI style bytes cannot consume another row. Live styled captures emit the pin's colour and attribute transitions. Cycle 11 residuals, measured 2026-09-17: the local Ghostty patch retains explicit indexed colour class in spare style bits, and the low-indexed-colour case asserts the pin bytes. Decided 2026-09-18 (fabrico): capture returns the spaces a tab left on screen; the pin's literal tabs (GRID_FLAG_TAB, grid.c:1202) are not imitated, the tab span tracking was removed, and the tab cases are filed under decided:TUI-017. Unpatch 2026-09-18 (fabrico): zz carries no patch on the vendored terminal engine, so the indexed-colour plumbing and the ICH hunk are gone with their asserted cases: SGR 38;5;1 captures as named red (pin `\\033[38;5;1m`, zz `\\033[31m`, both ending `\\033[39m`) and the 6-wide insert at column 70 leaves 74 spaces, C, 3 spaces, AB on the pin against 78 spaces, AB on zz; both cases are filed under decided:TUI-017. The eight 100x30 erased-background probe differences were a detached new-session starting its pty at 80x24 whatever -x and -y asked; panes now spawn at their laid-out size and the eight cases assert. Styled frozen-mode capture is unproven. Both plain and escaped DEC charset captures carry the authorized measured provenance decision; literal Unicode line drawing remains asserted. Narrowed on 2026-10-09 by fix.capture-links: libghostty now publishes per-row wrap, hyperlink and semantic-prompt flags and per-cell hyperlink URIs, so `-H` and `-F` left this gap. `-H` follows cmd_capture_pane_hyperlinks: one line per row holding a link not yet printed, its URIs vis-encoded and joined by spaces, rows without one skipped, at most pane-width links in the whole capture, and every other text flag but -L, -F and -J ignored. The pin tells links apart by the inner id hyperlinks_put gives each OSC 8 open (anonymous opens never share one, `id=` opens with the same URI do); libghostty publishes only the URI, so zz treats a run of cells carrying one URI, continued across a wrapped row, as one link. Measured on the pin d77c9dc6: two anonymous links with the same URI written back to back print twice there and once here, and an `id=` link split by a gap prints once there and per piece here. `-F` prints H (row.has_hyperlink), O (the cursor row at OSC 133;C, kept as a tracked grid reference by the engine filter because libghostty records no per-row output mark), P (row semantic prompt Prompt) and W (row wrap) in the pin's order; D and X are filed under capture.grid-storage-line-flags. The cases are crates/zz-terminal/src/session/capture_links_tests.rs and compat/scenarios/smoke/capture-links.txt.
+
+- Decision: `native`
+- Status: `accepted`
+- Priority and ease: `none` / `none`
+- Owner: `terminal`
+- User impact: scripts
+- Items: `flag:capture-pane:-P`, `flag:capture-pane:-R`, `semantic:capture-pane-saved-alternate`
 - Depends on: none
 - Evidence:
   - `resource:crates/zz-daemon/src/daemon.rs`
   - `resource:crates/zz-protocol/src/catalog.rs`
   - `resource:crates/zz-terminal/src/session.rs`
+  - `resource:crates/zz-terminal/src/session/capture_links_tests.rs`
   - `resource:knowledge/tmux/divergences.md`
   - `scenario:compat/scenarios/capture-pane.txt`
+  - `scenario:compat/scenarios/smoke/capture-links.txt`
   - `file:compat/tui-client-commands.sh`
   - `file:compat/tui/evidence/TUI-017/attempt-10/notes.md`
 - Acceptance:
-  - ``capture-pane` keeps the pin's routing, boundaries and retained text/style semantics. `-C` and `-L` have byte assertions; low indexed colours and the wide-insert clear are decided divergences under the 2026-09-18 no-patch ruling, and tabs capture as the spaces on screen by fabrico's 2026-09-18 decision, and TUI-017 retains its charset decision. `-F`, `-H`, `-P` and `-R` keep measured workload-specific refusal decisions.`
-  - `The divergence matrix keeps the accepted text-snapshot shape visible: the saved alternate grid the pin keeps for -a and the four rich transports.`
+  - ``capture-pane` keeps the pin's routing, boundaries and retained text/style semantics. `-C` and `-L` have byte assertions; low indexed colours and the wide-insert clear are decided divergences under the 2026-09-18 no-patch ruling, and tabs capture as the spaces on screen by fabrico's 2026-09-18 decision, and TUI-017 retains its charset decision. `-F` and `-H` are implemented and asserted against the pin; `-P` and `-R` keep measured workload-specific refusal decisions.`
+  - `The divergence matrix keeps the accepted text-snapshot shape visible: the saved alternate grid the pin keeps for -a and the two raw transports.`
 
 ### `clients.interactive-refresh`: Complete interactive client commands
 

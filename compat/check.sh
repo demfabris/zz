@@ -8,6 +8,7 @@ tmux_bin="$("$COMPAT_DIR/fetch-tmux.sh")"
 python3 "$COMPAT_DIR/tmux-oracle.py" --check --tmux "$tmux_bin"
 python3 "$COMPAT_DIR/tmux-tracker.py" check
 python3 "$COMPAT_DIR/board_test.py"
+python3 -B "$COMPAT_DIR/layout_v1_test.py"
 python3 -B "$COMPAT_DIR/tui/tracker_test.py"
 python3 -B "$COMPAT_DIR/tui/verify_claims_test.py"
 python3 "$COMPAT_DIR/tui/verify-claims.py"

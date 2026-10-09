@@ -348,17 +348,21 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
         let command = upstream
             .get(name)
             .unwrap_or_else(|| panic!("stale flag item names a non-upstream command: {item}"));
-        let spec = specs
-            .get(name)
-            .unwrap_or_else(|| panic!("flag item duplicates an unimplemented command gap: {item}"));
         assert!(
             command.flags.contains_key(flag),
             "stale flag item is absent from the oracle: {item}"
         );
-        assert!(
-            spec.option(flag).is_none_or(|option| option.unsupported),
-            "implemented flag has a stale item: {item}"
-        );
+        match specs.get(name) {
+            Some(spec) => assert!(
+                spec.option(flag).is_none_or(|option| option.unsupported),
+                "implemented flag has a stale item: {item}"
+            ),
+            None => assert_eq!(
+                items.get(&format!("command:{name}")),
+                items.get(item),
+                "a flag item on an unimplemented command must sit in that command's gap: {item}"
+            ),
+        }
     }
     for item in items
         .keys()

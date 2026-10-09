@@ -12,12 +12,23 @@ def checksum(layout):
     return value
 
 
+def tiled(node):
+    if node["t"] == "p":
+        return None if "z" in node else node
+    children = [child for child in map(tiled, node["c"]) if child is not None]
+    if not children:
+        return None
+    if len(children) == 1:
+        return children[0]
+    return {**node, "c": children}
+
+
 def cell(node):
     head = f"{node['w']}x{node['h']},{node['x']},{node['y']}"
     kind = node["t"]
     if kind == "p":
         return f"{head},{node['I'].removeprefix('%')}"
-    children = [cell(child) for child in node["c"] if "z" not in child]
+    children = [cell(child) for child in node["c"]]
     if kind == "h":
         return f"{head}{{{','.join(children)}}}"
     if kind == "v":
@@ -31,7 +42,12 @@ def v1(layout):
     tree = json.loads(layout)
     if tree.get("V") != 2:
         raise ValueError(f"unknown layout version in {layout!r}")
-    body = cell(tree["L"])
+    root = tiled(tree["L"])
+    if root is None:
+        return ""
+    if root["t"] == "p":
+        root = {**root, "x": 0, "y": 0}
+    body = cell(root)
     return f"{checksum(body):04x},{body}"
 
 

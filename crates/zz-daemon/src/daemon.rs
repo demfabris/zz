@@ -4711,8 +4711,8 @@ struct PendingHookEvent {
 const CURRENT_FILE_CONTEXT_FORMAT: &str = "current_file";
 const HOOK_CONTEXT_FORMAT: &str = "hook";
 const HOOK_CLIENT_CONTEXT_FORMAT: &str = "hook_client";
-/// The commands whose rows the pin builds with a null format client.
-const CLIENTLESS_ROW_COMMANDS: [&str; 3] = ["list-windows", "list-sessions", "list-panes"];
+const INVOKING_CLIENT_COMMANDS: [&str; 4] =
+    ["list-windows", "list-sessions", "list-panes", "new-session"];
 const HOOK_PANE_CONTEXT_FORMAT: &str = "hook_pane";
 const HOOK_SESSION_CONTEXT_FORMAT: &str = "hook_session";
 const HOOK_SESSION_NAME_CONTEXT_FORMAT: &str = "hook_session_name";
@@ -9441,18 +9441,21 @@ impl Shared {
                 && kind != ClientKind::Control
                 && nested_attach_refusal(&inner, client).is_some())
             .then(|| format_hook_facts_for_client(&inner, client, context));
-            // cmd-list-windows.c, cmd-list-sessions.c and cmd-list-panes.c all
-            // call `format_defaults(ft, NULL, ...)`, so a row answers null for
-            // every client-scoped name even while a client is attached.
-            if CLIENTLESS_ROW_COMMANDS.contains(&command_name)
-                && let Some(facts) = built_facts.as_mut()
-            {
-                facts.client = None;
-            }
-            if CLIENTLESS_ROW_COMMANDS.contains(&command_name)
+            if INVOKING_CLIENT_COMMANDS.contains(&command_name)
                 && let Some(seed) = command_seed.as_mut()
             {
-                seed.client = None;
+                match context.format_client() {
+                    FormatClient::Attached(_) => {}
+                    FormatClient::Unattached => {
+                        seed.client = format_provenance_client(context, client)
+                            .filter(|client| inner.client(*client).is_some())
+                            .map(|client| match client_attached_session(&inner, client) {
+                                Some(session) => client_format_facts(&inner, client, session),
+                                None => unattached_client_format_facts(&inner, client),
+                            });
+                    }
+                    FormatClient::NoClient => seed.client = None,
+                }
             }
             if command_name == "display-message" && !facts_unread {
                 let (target, target_client) = inner
@@ -41458,6 +41461,48 @@ fn client_format_facts(
     session: SessionId,
 ) -> ClientFormatFacts {
     client_format_facts_from_source(&ClientFormatSource::from_inner(inner), client, session)
+}
+
+fn unattached_client_format_facts(inner: &ServerState, client: ClientId) -> ClientFormatFacts {
+    let source = ClientFormatSource::from_inner(inner);
+    let registered = source.clients.get(&client);
+    let (written, discarded) = registered
+        .and_then(|c| c.subscriber.as_ref())
+        .map_or((0, 0), |subscriber| subscriber.stats());
+    ClientFormatFacts {
+        activity: client_format_time(registered.and_then(|c| c.activity_time)),
+        control_mode: usize::from(registered.and_then(|c| c.kind) == Some(ClientKind::Control))
+            .to_string(),
+        created: client_format_time(registered.and_then(|c| c.created_time)),
+        discarded: discarded.to_string(),
+        flags: format_client_flags_from_source(&source, client),
+        key_table: "root".to_owned(),
+        name: client_format_name_from_source(&source, client),
+        pid: registered
+            .and_then(|c| c.pid)
+            .filter(|pid| *pid != 0)
+            .map(|pid| pid.to_string())
+            .unwrap_or_default(),
+        prefix: "0".to_owned(),
+        readonly: usize::from(source.client_flags.contains(client)).to_string(),
+        termfeatures: client_negotiated_features_from_source(&source, client),
+        termname: client_environment_value_from_source(&source, client, "TERM")
+            .filter(|term| !term.is_empty())
+            .unwrap_or("unknown")
+            .to_owned(),
+        tty: registered
+            .and_then(|c| c.tty.as_ref())
+            .cloned()
+            .unwrap_or_default(),
+        uid: source.engine.format_uid().to_owned(),
+        user: source.engine.format_user().to_owned(),
+        utf8: usize::from(client_uses_utf8_from_source(&source, client)).to_string(),
+        width: "80".to_owned(),
+        written: written.to_string(),
+        environment: registered.and_then(|c| c.environment.as_ref()).cloned(),
+        viewport: Some(ClientViewportFacts::default()),
+        ..ClientFormatFacts::default()
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -106267,6 +106312,150 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn list_rows_carry_the_invoking_client() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, window, pane) = switch_test_session(&shared, "rows-attached");
+        switch_test_session(&shared, "rows-other");
+        let (attached, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("rows-client".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        let (bystander, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("rows-bystander".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(attached, session).expect("attach client");
+        shared.attach(bystander, session).expect("attach bystander");
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_entry(attached).has_terminal = true;
+            inner.client_entry(bystander).has_terminal = true;
+            inner.client_entry(bystander).activity.replace(100);
+        }
+        let format = "#{session_name}=[#{session_active}]:[#{client_name}]";
+        let lists = |client: ClientId, kind: ClientKind| -> Vec<String> {
+            [
+                CommandInvocation::new("list-sessions", ["-F", format]),
+                CommandInvocation::new("list-windows", ["-a", "-F", format]),
+                CommandInvocation::new("list-panes", ["-a", "-F", format]),
+            ]
+            .iter()
+            .map(|command| {
+                let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+                shared
+                    .execute(client, kind, &mut context, command)
+                    .expect("list rows")
+                    .output
+                    .to_string()
+            })
+            .collect()
+        };
+
+        assert_eq!(
+            lists(attached, ClientKind::Interactive),
+            vec!["rows-attached=[1]:[rows-client]\nrows-other=[0]:[rows-client]"; 3]
+        );
+
+        let (command_client, _) =
+            shared.register_subscribed(ClientKind::Command, None, None, OutboundMailbox::new());
+        shared
+            .inner
+            .lock()
+            .client_entry(command_client)
+            .pid
+            .replace(4242);
+        assert_eq!(
+            lists(command_client, ClientKind::Command),
+            vec!["rows-attached=[0]:[client-4242]\nrows-other=[0]:[client-4242]"; 3]
+        );
+
+        let unattached_facts = "#{client_pid}|#{client_flags}|#{client_key_table}|#{client_width}|#{client_height}|#{client_session}|#{client_prefix}|#{client_readonly}|#{client_control_mode}|#{window_bigger}|#{window_offset_x}";
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let filtered = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-windows",
+                    ["-a", "-f", "#{client_pid}", "-F", unattached_facts],
+                ),
+            )
+            .expect("unattached list rows");
+        assert_eq!(
+            filtered.output,
+            "4242|focused|root|80|||0|0|0|0|\n".repeat(2).trim_end()
+        );
+
+        let mut context = ExecutionContext::default();
+        let created = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-d",
+                        "-P",
+                        "-s",
+                        "rows-new",
+                        "-F",
+                        "#{client_name}|#{session_active}",
+                    ],
+                ),
+            )
+            .expect("new-session -P from an unattached client");
+        assert_eq!(created.output, "client-4242|0");
+
+        shared
+            .inner
+            .lock()
+            .client_entry(command_client)
+            .features
+            .replace(client_features_fact(&["client-features-v1:RGB".to_owned()]));
+        let mut context = ExecutionContext::new(Some(session), Some(window), Some(pane));
+        let features = shared
+            .execute(
+                command_client,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "list-windows",
+                    ["-t", "=rows-other", "-F", "#{client_termfeatures}"],
+                ),
+            )
+            .expect("unattached client features");
+        assert_eq!(features.output, "RGB");
+
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, OutboundMailbox::new());
+        let mut context = ExecutionContext::default();
+        let attached_print = shared
+            .execute(
+                control,
+                ClientKind::Control,
+                &mut context,
+                &CommandInvocation::new(
+                    "new-session",
+                    [
+                        "-P",
+                        "-s",
+                        "rows-demo",
+                        "-F",
+                        "#{client_session}|#{session_active}|#{client_flags}",
+                    ],
+                ),
+            )
+            .expect("new-session -P from a fresh control client");
+        assert_eq!(attached_print.output, "rows-demo|1|focused,control-mode");
+    }
+
+    #[test]
     fn requested_colour_features_join_the_roster_alone() {
         let shared = Arc::new(Shared::new(1));
         let (session, _, _) = switch_test_session(&shared, "requested-features");
@@ -106475,9 +106664,6 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(&fields[23..27], ["1", "132", "1234", "333"]);
         assert_eq!(fields[27], "1");
 
-        // cmd-list-panes.c passes a null client to format_defaults, so a row
-        // answers null for every client-scoped name even from an attached
-        // client; the pin answers the same empty pair here.
         let ordinary = shared
             .execute(
                 client,
@@ -106489,7 +106675,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ),
             )
             .expect("ordinary target client facts");
-        assert_eq!(ordinary.output, "|");
+        assert_eq!(ordinary.output, "/dev/pts/42|4242");
         let targeted = shared
             .execute(
                 client,

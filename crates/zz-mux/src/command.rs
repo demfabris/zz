@@ -6502,7 +6502,8 @@ impl MuxEngine {
             ordering.then_with(|| left.name.cmp(&right.name))
         });
         let mut output = Vec::new();
-        let universe = self.format_universe(FormatClient::NoClient);
+        let format_client = context.format_client();
+        let universe = self.format_universe(format_client);
         let mut dumps = LayoutDumps::default();
         for (line, session) in sessions.into_iter().enumerate() {
             let format_context = FormatContext {
@@ -6510,7 +6511,7 @@ impl MuxEngine {
                 window: None,
                 pane: None,
                 active_session: context.session,
-                format_client: FormatClient::NoClient,
+                format_client,
                 format_type: FormatType::Session,
             };
             let prepared =
@@ -6992,7 +6993,8 @@ impl MuxEngine {
         });
         let line = windows.len();
         let mut output = Vec::new();
-        let universe = self.format_universe(FormatClient::NoClient);
+        let format_client = context.format_client();
+        let universe = self.format_universe(format_client);
         let mut dumps = LayoutDumps::default();
         for (session, window) in windows {
             let format_context = FormatContext {
@@ -7000,7 +7002,7 @@ impl MuxEngine {
                 window: Some(window),
                 pane: None,
                 active_session: context.session,
-                format_client: FormatClient::NoClient,
+                format_client,
                 format_type: FormatType::Window,
             };
             let prepared =
@@ -8621,7 +8623,8 @@ impl MuxEngine {
             DEFAULT_LIST_PANES_FORMAT
         });
         let mut output = Vec::new();
-        let universe = self.format_universe(FormatClient::NoClient);
+        let format_client = context.format_client();
+        let universe = self.format_universe(format_client);
         let mut dumps = LayoutDumps::default();
         for window_id in window_ids {
             let window = self
@@ -8675,7 +8678,7 @@ impl MuxEngine {
                     window: Some(window_id),
                     pane: Some(pane.id),
                     active_session: context.session,
-                    format_client: FormatClient::NoClient,
+                    format_client,
                     format_type: FormatType::Pane,
                 };
                 let prepared = PreparedFormat::with_universe(
@@ -24096,7 +24099,7 @@ mod tests {
                             "-O",
                             "name",
                             "-f",
-                            "#{==:#{session_active},}",
+                            "#{==:#{session_active},0}",
                             "-F",
                             "#{session_name}=[#{session_active}]",
                         ],
@@ -24104,7 +24107,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "A=[]\nB=[]\nw=[]"
+            "A=[0]\nw=[0]"
         );
         assert_eq!(
             engine
@@ -24572,7 +24575,7 @@ mod tests {
                             "-O",
                             "name",
                             "-f",
-                            "#{==:#{session_active},}",
+                            "#{==:#{session_active},1}",
                             "-F",
                             "#{window_name}=[#{session_active}]",
                         ],
@@ -24580,7 +24583,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "a=[]\nbase=[]\nz=[]"
+            "a=[1]\nbase=[1]\nz=[1]"
         );
 
         let first = context.pane.unwrap();
@@ -24651,7 +24654,7 @@ mod tests {
                             "-O",
                             "title",
                             "-f",
-                            "#{==:#{session_active},}",
+                            "#{==:#{session_active},1}",
                             "-F",
                             "#{pane_title}=[#{session_active}]",
                         ],
@@ -24659,7 +24662,7 @@ mod tests {
                 )
                 .unwrap()
                 .output,
-            "a=[]\nz=[]"
+            "a=[1]\nz=[1]"
         );
         assert!(matches!(
             engine.execute(
@@ -25814,6 +25817,82 @@ mod tests {
                 .unwrap()
                 .output,
             "\n"
+        );
+    }
+
+    #[test]
+    fn list_rows_read_session_active_from_the_invoking_client() {
+        let mut engine = MuxEngine::default();
+        let (first, first_window, first_pane) = engine.state.create_session("first").unwrap();
+        let (_second, _, _) = engine.state.create_session("second").unwrap();
+        let rows = |engine: &mut MuxEngine, context: &mut ExecutionContext| -> Vec<String> {
+            [
+                command(
+                    "list-sessions",
+                    &["-F", "#{session_name}=[#{session_active}]#{S:n,a}"],
+                ),
+                command("list-sessions", &["-f", "#{session_active}", "-F", "#S"]),
+                command(
+                    "list-sessions",
+                    &["-f", "#{==:#{session_active},}", "-F", "#S"],
+                ),
+                command(
+                    "list-windows",
+                    &["-a", "-F", "#{session_name}=[#{session_active}]"],
+                ),
+                command(
+                    "list-panes",
+                    &["-a", "-F", "#{session_name}=[#{session_active}]"],
+                ),
+            ]
+            .iter()
+            .map(|invocation| {
+                engine
+                    .execute(context, invocation)
+                    .unwrap()
+                    .output
+                    .to_string()
+            })
+            .collect()
+        };
+
+        let mut attached = ExecutionContext::new(Some(first), Some(first_window), Some(first_pane));
+        attached.set_attached_client_context(Some((first, first_window, first_pane)));
+        assert_eq!(
+            rows(&mut engine, &mut attached),
+            [
+                "first=[1]an\nsecond=[0]an",
+                "first",
+                "",
+                "first=[1]\nsecond=[0]",
+                "first=[1]\nsecond=[0]",
+            ]
+        );
+
+        let mut unattached = attached.clone();
+        unattached.set_client_attached(false);
+        assert_eq!(
+            rows(&mut engine, &mut unattached),
+            [
+                "first=[0]nn\nsecond=[0]nn",
+                "",
+                "",
+                "first=[0]\nsecond=[0]",
+                "first=[0]\nsecond=[0]",
+            ]
+        );
+
+        let mut no_client = attached.clone();
+        no_client.set_no_client();
+        assert_eq!(
+            rows(&mut engine, &mut no_client),
+            [
+                "first=[]nn\nsecond=[]nn",
+                "",
+                "first\nsecond",
+                "first=[]\nsecond=[]",
+                "first=[]\nsecond=[]",
+            ]
         );
     }
 

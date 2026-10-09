@@ -41,7 +41,7 @@ impl ConfigCommandBytes {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigEnvironmentAssignment {
     pub name: String,
-    pub value: String,
+    pub value: RawText,
     pub hidden: bool,
 }
 
@@ -88,7 +88,7 @@ impl ParsedConfigBytes {
                 .into_iter()
                 .map(|assignment| ConfigEnvironmentAssignment {
                     name: String::from_utf8_lossy(&assignment.name).into_owned(),
-                    value: String::from_utf8_lossy(&assignment.value).into_owned(),
+                    value: RawText::from_bytes(assignment.value),
                     hidden: assignment.hidden,
                 })
                 .collect(),
@@ -752,7 +752,7 @@ impl<C: ConfigContext> ConfigBuilder<'_, C> {
         }
         self.parsed.environment.push(ConfigEnvironmentAssignment {
             name,
-            value,
+            value: value.into(),
             hidden,
         });
     }

@@ -39053,6 +39053,8 @@ mod tests {
         assert_eq!(parsed.commands[1].args[2].as_bytes(), b"\xc3\xa9\xfe");
         let plain = engine.parse_config("<test>", "set-buffer -b three \"\\101\"\n");
         assert_eq!(plain.commands[0].args[2], "A");
+        let assignment = engine.parse_config("<test>", "OCTAL=a\\375b\n");
+        assert_eq!(assignment.environment[0].value.as_bytes(), b"a\xfdb");
     }
 
     #[test]

@@ -96,6 +96,14 @@ record variable-status "$status:$message"
 record variable-buffer "$(client show-buffer -b option_bytes_variable | hex)"
 record variable-environment "$(client show-environment -g OPTION_BYTES | hex)"
 
+printf 'OPTION_BYTES=a\\374b\n' >"$assign_conf"
+client source-file "$assign_conf"
+status=0
+message="$(client source-file "$use_conf" 2>&1)" || status=$?
+record octal-variable-status "$status:$message"
+record octal-variable-buffer "$(client show-buffer -b option_bytes_variable | hex)"
+record octal-variable-environment "$(utf8_client show-environment -g OPTION_BYTES | hex)"
+
 client set-option -gu @option_bytes_argv
 client set-option -gu @option_bytes_stream
 client delete-buffer -b option_bytes_block

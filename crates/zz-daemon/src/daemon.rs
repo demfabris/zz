@@ -34676,7 +34676,7 @@ impl ConfigParse {
                 .into_iter()
                 .map(|assignment| ConfigEnvironmentEntry {
                     name: assignment.name,
-                    value: assignment.value.into(),
+                    value: assignment.value,
                     hidden: assignment.hidden,
                 })
                 .collect(),
@@ -59086,6 +59086,8 @@ mod tests {
         source(b"if-shell -F 1 { set-buffer -b block a\xfeb }\n");
         source(b"BYTES_VARIABLE=a\xfdb\n");
         source(b"set-buffer -b variable \"$BYTES_VARIABLE\"\n");
+        source(b"OCTAL_VARIABLE=a\\375b\n");
+        source(b"set-buffer -b octal \"$OCTAL_VARIABLE\"\n");
         source(b"set-buffer -b escaped \"\\303\\251\\376\"\n");
         let mut buffer = |name: &str| {
             shared
@@ -59102,6 +59104,7 @@ mod tests {
         };
         assert_eq!(buffer("block"), b"a\xfeb");
         assert_eq!(buffer("variable"), b"a\xfdb");
+        assert_eq!(buffer("octal"), b"a\xfdb");
         assert_eq!(buffer("escaped"), b"\xc3\xa9\xfe");
     }
 

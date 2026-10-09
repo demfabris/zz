@@ -1756,7 +1756,7 @@ where the build departs from the scope above:
 - Item 3: the size alone is not enough. The TUI reports pixel sizes with each pane, and a
   pixel-only difference resizes the pty (`SIGWINCH`) and publishes again. The shared client code
   sends `client-cell-v1:WxH` next to `client-size-v1` (the 8x16 fallback moved from zz-tui into
-  `zz_daemon::cell_pixel_extent`). `presize_client_terminals` seeds `terminal_geometries` for the
+  `zz_daemon_client::cell_pixel_extent`). `presize_client_terminals` seeds `terminal_geometries` for the
   attaching raw-terminal client's visible panes with the geometry the window takes at the
   client's size less its status block (`interactive_client_window_extent`), so the existing
   write-back and resize policy (window-size, aggressive-resize, ignore-size) runs as if the client

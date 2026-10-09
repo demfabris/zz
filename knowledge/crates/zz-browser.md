@@ -89,7 +89,7 @@ runtime types (only under `cef-runtime`):
 | `src/lifecycle.rs` | `RuntimePhase` and `SessionPhase` strict transition tables. |
 | `src/page_zoom.rs` | Chrome percentage ladder and logarithmic CEF zoom-level conversion. |
 | `src/profile.rs` | `BrowserProfilePaths` + `resolve_profile_paths`; encoded named paths, per-platform data dir, user-only permissions. |
-| `src/cookies.rs` | Cookie-Editor JSON/Netscape parsing, normalization, limits, and secret-free result types. |
+| `zz-protocol/src/browser_cookie.rs` | Cookie-Editor JSON/Netscape parsing, normalization, limits, and secret-free result types (re-exported here; it lives in `zz-protocol` so `zz-chrome-import` builds without CEF). |
 | `src/url_input.rs` | `resolve_address` (address field: navigate or search), `normalize_url`, and `diagnostic_url` (credential/query redaction). |
 | `src/element_picker.rs` | Token-guarded in-page element-picker protocol state (`ElementPickState`). |
 | `assets/element-picker.js` | Injected renderer-side script backing the element picker (~45 KB). |

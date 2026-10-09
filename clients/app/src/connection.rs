@@ -189,7 +189,7 @@ impl AgentCursor {
 #[derive(Clone)]
 pub struct AuthenticationPrompt {
     pub id: u64,
-    pub kind: zz_daemon::AskpassPromptKind,
+    pub kind: zz_daemon_client::AskpassPromptKind,
     pub text: String,
     pub echo: bool,
 }
@@ -200,13 +200,13 @@ pub struct Connection {
     #[cfg(target_os = "ios")]
     native: Option<crate::transport::Connection>,
     #[cfg(target_os = "ios")]
-    client: Option<Arc<zz_daemon::InteractiveClient>>,
+    client: Option<Arc<zz_daemon_client::InteractiveClient>>,
     #[cfg(target_os = "ios")]
     reader: Option<zpui::Task<()>>,
     #[cfg(target_os = "ios")]
     auth_prompt: Option<(
         AuthenticationPrompt,
-        std::sync::mpsc::Sender<zz_daemon::AskpassReply>,
+        std::sync::mpsc::Sender<zz_daemon_client::AskpassReply>,
     )>,
     #[cfg(target_os = "ios")]
     resume: bool,
@@ -469,7 +469,7 @@ impl Connection {
 
     #[cfg(target_os = "ios")]
     #[must_use]
-    pub fn browser_client(&self) -> Option<Arc<zz_daemon::InteractiveClient>> {
+    pub fn browser_client(&self) -> Option<Arc<zz_daemon_client::InteractiveClient>> {
         self.connected.then(|| self.client.clone()).flatten()
     }
 
@@ -1027,8 +1027,8 @@ impl Connection {
         let (_, reply) = self.auth_prompt.take().unwrap();
         let cancelled = answer.is_none();
         let answer = answer.map_or(
-            zz_daemon::AskpassReply::Cancel,
-            zz_daemon::AskpassReply::answer,
+            zz_daemon_client::AskpassReply::Cancel,
+            zz_daemon_client::AskpassReply::answer,
         );
         if reply.send(answer).is_err() {
             self.disconnect_native("Authentication expired. Reconnect to try again.".into(), cx);

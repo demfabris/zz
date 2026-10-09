@@ -144,7 +144,8 @@ mod daemon {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
     use zz_client::{ClientCore, Outbound};
-    use zz_daemon::{CommandClient, Daemon};
+    use zz_daemon::Daemon;
+    use zz_daemon_client::CommandClient;
     use zz_protocol::{
         ClientHello, ClientInstanceId, ClientKind, CommandInvocation, CommandRequest,
         CommandResponse, InputMessage, PROTOCOL_VERSION, ProtocolMessage, decode_protocol_frame,

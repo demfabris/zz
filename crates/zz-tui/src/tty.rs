@@ -13,7 +13,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 #[cfg(unix)]
 use rustix::termios::{OptionalActions, Termios};
 
-use zz_daemon::{terminal_default_features, terminal_feature_mask};
+use zz_daemon_client::{terminal_default_features, terminal_feature_mask};
 use zz_protocol::{MuxOptionKey, ServerHello};
 
 use crate::kitty::{FILE_PROBE_IMAGE_ID, PROBE_IMAGE_ID, cleanup_frame_slot_files};
@@ -30,15 +30,15 @@ impl TerminalSize {
     #[cfg(unix)]
     pub fn detect() -> io::Result<Self> {
         let size = rustix::termios::tcgetwinsize(io::stdout())?;
-        let cell_width_px = zz_daemon::cell_pixel_extent(
+        let cell_width_px = zz_daemon_client::cell_pixel_extent(
             size.ws_xpixel,
             size.ws_col,
-            zz_daemon::DEFAULT_CELL_WIDTH_PX,
+            zz_daemon_client::DEFAULT_CELL_WIDTH_PX,
         );
-        let cell_height_px = zz_daemon::cell_pixel_extent(
+        let cell_height_px = zz_daemon_client::cell_pixel_extent(
             size.ws_ypixel,
             size.ws_row,
-            zz_daemon::DEFAULT_CELL_HEIGHT_PX,
+            zz_daemon_client::DEFAULT_CELL_HEIGHT_PX,
         );
         Ok(Self {
             columns: size.ws_col,
@@ -106,7 +106,7 @@ fn raise_terminal_colours(colours: u32) {
 /// never revisits it, so this reads it once too.
 pub(crate) fn terminal_takes_utf8() -> bool {
     static TAKES_UTF8: OnceLock<bool> = OnceLock::new();
-    *TAKES_UTF8.get_or_init(zz_daemon::client_takes_utf8_terminal)
+    *TAKES_UTF8.get_or_init(zz_daemon_client::client_takes_utf8_terminal)
 }
 
 /// `tty_keys_device_attributes2` reads the first parameter of a secondary DA
@@ -130,7 +130,7 @@ fn secondary_device_attributes_name(kind: u8) -> &'static str {
 /// terminal outright, and `tty_default_features` decides what that name
 /// carries.
 pub(crate) fn note_extended_device_attributes(name: &str) {
-    zz_daemon::report_terminal_type(name);
+    zz_daemon_client::report_terminal_type(name);
     learn_terminal_features(terminal_default_features(extended_device_attributes_name(
         name,
     )));
@@ -159,15 +159,15 @@ fn learn_terminal_features(features: &str) {
     if features.is_empty() {
         return;
     }
-    zz_daemon::learn_client_terminal_features(features);
-    raise_terminal_colours(zz_daemon::client_terminal_colour_count());
+    zz_daemon_client::learn_client_terminal_features(features);
+    raise_terminal_colours(zz_daemon_client::client_terminal_colour_count());
     arm_extended_keys();
 }
 
 pub(crate) fn adopt_negotiated_features(features: &[String]) {
-    zz_daemon::adopt_negotiated_terminal_features(features);
+    zz_daemon_client::adopt_negotiated_terminal_features(features);
     if terminal_colours().is_some() {
-        raise_terminal_colours(zz_daemon::client_terminal_colour_count());
+        raise_terminal_colours(zz_daemon_client::client_terminal_colour_count());
     }
     arm_extended_keys();
 }
@@ -199,7 +199,7 @@ fn terminal_carries_extended_keys() -> bool {
 }
 
 pub(crate) fn terminal_carries(feature: &str) -> bool {
-    terminal_feature_mask([feature]) & zz_daemon::client_terminal_feature_mask() != 0
+    terminal_feature_mask([feature]) & zz_daemon_client::client_terminal_feature_mask() != 0
 }
 
 static CURSOR_STYLE_SENT: AtomicBool = AtomicBool::new(false);
@@ -322,7 +322,10 @@ impl TerminalGuard {
         rustix::termios::tcsetattr(io::stdin(), OptionalActions::Now, &raw)?;
         self.active = true;
         EXTENDED_KEYS_OPTION.store(extended_keys, Ordering::Relaxed);
-        TERMINAL_COLOURS.store(zz_daemon::client_terminal_colour_count(), Ordering::Relaxed);
+        TERMINAL_COLOURS.store(
+            zz_daemon_client::client_terminal_colour_count(),
+            Ordering::Relaxed,
+        );
         let mut output = Vec::new();
         output.write_all(b"\x1b[?1049h\x1b[?25l")?;
         if focus_events {
@@ -527,9 +530,9 @@ mod tests {
 
     #[test]
     fn pixel_geometry_uses_ioctl_values_or_documented_fallbacks() {
-        assert_eq!(zz_daemon::cell_pixel_extent(1600, 200, 8), 8);
-        assert_eq!(zz_daemon::cell_pixel_extent(0, 200, 8), 8);
-        assert_eq!(zz_daemon::cell_pixel_extent(40, 80, 8), 1);
+        assert_eq!(zz_daemon_client::cell_pixel_extent(1600, 200, 8), 8);
+        assert_eq!(zz_daemon_client::cell_pixel_extent(0, 200, 8), 8);
+        assert_eq!(zz_daemon_client::cell_pixel_extent(40, 80, 8), 1);
     }
 
     #[test]

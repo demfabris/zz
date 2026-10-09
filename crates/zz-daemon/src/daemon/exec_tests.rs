@@ -1,6 +1,6 @@
 use super::tests::{connect_command_retry, daemon_test_endpoint};
 use super::*;
-use crate::{CommandClient, ExecChain, ExecChainEnd};
+use zz_daemon_client::{CommandClient, ExecChain, ExecChainEnd};
 
 struct RunningDaemon {
     socket: PathBuf,
@@ -327,7 +327,7 @@ fn a_preparation_error_rejects_the_whole_chain_before_it_runs() {
 fn an_attaching_chain_comes_back_as_a_resume_without_running() {
     let daemon = RunningDaemon::start("exec-resume");
     let mut client = daemon.client();
-    let classify: crate::ExecClassifier<'_> = &exec_resume_kind;
+    let classify: zz_daemon_client::ExecClassifier<'_> = &exec_resume_kind;
     let mut chain = ExecChain::new(vec![
         CommandInvocation::new("new-session", ["-s", "later"]),
         CommandInvocation::new("display-message", ["-p", "x"]),

@@ -4736,8 +4736,8 @@ mod tests {
 
     fn block_model(columns: u16, rows: u16) -> Model {
         let core = zz_client::ClientCore::new();
-        let endpoint =
-            zz_daemon::Endpoint::parse("unix:///tmp/zz-render-test.sock").expect("test endpoint");
+        let endpoint = zz_daemon_client::Endpoint::parse("unix:///tmp/zz-render-test.sock")
+            .expect("test endpoint");
         Model::new(
             &core,
             crate::tty::TerminalSize {

@@ -1,21 +1,11 @@
-#[cfg(all(
-    feature = "hotreload",
-    debug_assertions,
-    not(target_family = "wasm"),
-    not(target_os = "ios")
-))]
+#[cfg(all(feature = "hotreload", debug_assertions, not(target_family = "wasm")))]
 macro_rules! render {
     ($body:block) => {
         dioxus_devtools::subsecond::call(|| zpui::IntoElement::into_any_element($body))
     };
 }
 
-#[cfg(not(all(
-    feature = "hotreload",
-    debug_assertions,
-    not(target_family = "wasm"),
-    not(target_os = "ios")
-)))]
+#[cfg(not(all(feature = "hotreload", debug_assertions, not(target_family = "wasm"))))]
 macro_rules! render {
     ($body:block) => {
         $body
@@ -24,12 +14,7 @@ macro_rules! render {
 
 pub(crate) use render;
 
-#[cfg(all(
-    feature = "hotreload",
-    debug_assertions,
-    not(target_family = "wasm"),
-    not(target_os = "ios")
-))]
+#[cfg(all(feature = "hotreload", debug_assertions, not(target_family = "wasm")))]
 pub(crate) fn init(cx: &mut zpui::App) {
     if !zz_protocol::app_identity::DEVELOPMENT {
         return;

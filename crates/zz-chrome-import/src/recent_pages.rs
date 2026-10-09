@@ -191,7 +191,8 @@ impl RecentPages {
 
         let mut changed_urls = HashSet::new();
         for mut candidate in imported {
-            let Ok(profile) = zz_browser::normalize_browser_profile_name(&candidate.profile) else {
+            let Ok(profile) = zz_protocol::normalize_browser_profile_name(&candidate.profile)
+            else {
                 continue;
             };
             if !recordable_url(&candidate.url) {
@@ -380,7 +381,7 @@ impl RecentPages {
                 };
                 if favicons.len() >= MAX_FAVICONS
                     || !recordable_url(url)
-                    || encoded.len() > zz_browser::MAX_FAVICON_BYTES.div_ceil(3) * 4
+                    || encoded.len() > zz_protocol::MAX_FAVICON_BYTES.div_ceil(3) * 4
                 {
                     continue;
                 }
@@ -432,7 +433,7 @@ impl RecentPages {
             let Some(url) = parts.next() else {
                 continue;
             };
-            let profile = zz_browser::DEFAULT_BROWSER_PROFILE.to_owned();
+            let profile = zz_protocol::DEFAULT_BROWSER_PROFILE.to_owned();
             let key = (profile.clone(), url.to_owned());
             if entries.len() >= MAX_ENTRIES || !recordable_url(url) || !seen_entries.insert(key) {
                 continue;
@@ -702,7 +703,7 @@ fn recordable_url(url: &str) -> bool {
 }
 
 fn valid_profile(profile: &str) -> Option<String> {
-    zz_browser::normalize_browser_profile_name(profile).ok()
+    zz_protocol::normalize_browser_profile_name(profile).ok()
 }
 
 fn normalized_input(input: &str) -> String {
@@ -862,7 +863,7 @@ fn address_text(url: &str) -> String {
 }
 
 fn valid_favicon(png: &[u8]) -> bool {
-    png.len() <= zz_browser::MAX_FAVICON_BYTES && png.starts_with(b"\x89PNG\r\n\x1a\n")
+    png.len() <= zz_protocol::MAX_FAVICON_BYTES && png.starts_with(b"\x89PNG\r\n\x1a\n")
 }
 
 fn unix_now() -> u64 {
@@ -875,7 +876,7 @@ fn unix_now() -> u64 {
 mod tests {
     use super::*;
 
-    const DEFAULT: &str = zz_browser::DEFAULT_BROWSER_PROFILE;
+    const DEFAULT: &str = zz_protocol::DEFAULT_BROWSER_PROFILE;
 
     fn page(
         profile: &str,
@@ -1008,7 +1009,7 @@ mod tests {
         );
         assert!(pages.favicon(DEFAULT, "https://example.com/0").is_none());
         let mut oversized = png.to_vec();
-        oversized.resize(zz_browser::MAX_FAVICON_BYTES + 1, 0);
+        oversized.resize(zz_protocol::MAX_FAVICON_BYTES + 1, 0);
         assert!(!pages.record_favicon(DEFAULT, "https://example.com/1", oversized.into()));
         let (entries, _) = RecentPages::parse(&pages.serialize());
         assert_eq!(

@@ -165,6 +165,7 @@ impl LayoutNode {
 }
 
 pub const DEFAULT_BROWSER_PROFILE: &str = "default";
+pub const MAX_FAVICON_BYTES: usize = 8 * 1024;
 pub const MAX_BROWSER_PROFILE_NAME_BYTES: usize = 64;
 
 #[derive(Clone, Debug, Error, PartialEq, Eq)]

@@ -129,7 +129,6 @@ are not errors because the daemon may supersede an unread terminal frame under b
 - [Wire protocol](/protocol/wire-protocol.md) and [key tables](/tmux/key-tables.md) supply the
   renderer-neutral contract.
 - [GPUI client](/crates/zz.md) uses the hybrid core plus retained-painter path.
-- [C ABI](/crates/zz-client-ffi.md) wraps the core for non-Rust consumers.
 - [Client core decision record](/designs/client-core-and-contract.md) records the extraction and its
   remaining ABI scope.
 - [Native status bar](/designs/native-status-bar.md) records the desktop presentation boundary.

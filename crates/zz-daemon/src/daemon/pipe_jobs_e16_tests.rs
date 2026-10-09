@@ -33,7 +33,7 @@ fn twenty_active_pipes_deliver_on_the_loop_without_reader_threads() {
             directory.path().join(format!("{index}.bin")),
         ));
     }
-    let before = crate::process_info::sample(std::process::id())
+    let before = zz_daemon_client::process_info::sample(std::process::id())
         .unwrap()
         .threads;
     for (pane, _, output) in &panes {
@@ -49,7 +49,7 @@ fn twenty_active_pipes_deliver_on_the_loop_without_reader_threads() {
                         &pane.to_string(),
                         &format!(
                             "cat > {}",
-                            crate::endpoint::shell_quote(&output.to_string_lossy())
+                            zz_daemon_client::shell_quote(&output.to_string_lossy())
                         ),
                     ],
                 ),
@@ -69,7 +69,7 @@ fn twenty_active_pipes_deliver_on_the_loop_without_reader_threads() {
         );
     }
     assert!(
-        crate::process_info::sample(std::process::id())
+        zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads
             <= before
@@ -88,7 +88,7 @@ fn twenty_active_pipes_deliver_on_the_loop_without_reader_threads() {
         thread::sleep(Duration::from_millis(2));
     }
     assert!(
-        crate::process_info::sample(std::process::id())
+        zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads
             <= before

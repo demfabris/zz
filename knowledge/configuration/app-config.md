@@ -22,7 +22,7 @@ chrome-color entries into typed
 collects repeatable `chrome-keybind`/`chrome-unbind` entries for the client-local keymap, and collects the supported
 daemon-owned appearance and mux entries as ordered raw `(key, value)` pairs. Client-reserved
 `host-<name> = <uri>` entries ([fleet attach](/designs/fleet-attach.md)) are matched before any
-of that: validated via `zz_daemon::Endpoint::parse`, published through a dedicated `FleetHosts`
+of that: validated via `zz_daemon_client::Endpoint::parse`, published through a dedicated `FleetHosts`
 global (not `AppConfig`, which stays `Copy`), and never forwarded to any daemon.
 Three surfaces write these lines and nothing else: `zz fleet add <name> <ssh-destination>` from the
 CLI, the sidebar's final **Add host** row, and the inline form in **Settings › Hosts**. The

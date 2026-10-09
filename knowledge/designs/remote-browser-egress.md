@@ -18,7 +18,7 @@ timestamp: 2026-07-30T23:00:00Z
 > **Reintroduced 2026-08-07 on ssh, simplified to socks5-direct the same day.** The shape
 > today: CEF's composite profile carries a `socks5://127.0.0.1:<port>` proxy preference
 > pointing directly at the `ssh -D` listener carried by the existing `-N -L` forward child
-> (`ssh_forward_command` in `crates/zz-daemon/src/endpoint.rs`). Chromium hands hostnames to
+> (`ssh_forward_command` in `crates/zz-daemon-client/src/endpoint.rs`). Chromium hands hostnames to
 > the proxy, sshd resolves and dials them on the host — there is no zz proxy code at all, on
 > either end. The port is pre-reserved (`ssh -D 0` never reports its choice); a lost bind race
 > is retried once on a fresh port; `Drop` hands both the `-L` and `-D` specs back to the

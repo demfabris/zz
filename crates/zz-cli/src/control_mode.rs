@@ -16,7 +16,7 @@ use std::sync::mpsc;
 #[cfg(any(not(unix), test))]
 use std::thread;
 
-use zz_daemon::InteractiveClient;
+use zz_daemon_client::InteractiveClient;
 use zz_protocol::{
     CommandInvocation, CommandResponse, ControlSourceFileEvent, EventPayload, ExecOutcome,
     MuxSnapshot, ProtocolMessage, SessionId, WindowId,

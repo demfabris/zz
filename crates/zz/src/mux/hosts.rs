@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use zz_daemon::Endpoint;
+use zz_daemon_client::Endpoint;
 
 use crate::{config::HostEntry, profile::LocalHostPolicy};
 

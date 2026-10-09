@@ -282,7 +282,7 @@ fn a_detach_parks_the_views_of_a_client_that_stays() {
 #[test]
 fn a_detach_releases_the_views_of_a_client_that_exits_on_detach() {
     assert_eq!(
-        views_after_detach(936, &[crate::CLIENT_EXITS_ON_DETACH_CAPABILITY]),
+        views_after_detach(936, &[zz_daemon_client::CLIENT_EXITS_ON_DETACH_CAPABILITY]),
         [0, 0]
     );
 }

@@ -87,7 +87,8 @@
       "sha": null,
       "notes": [
         "2026-10-09: lane done at 6b4a587a8 (-H and -F match; link identity is by URI since libghostty exposes no OSC 8 id, recorded); integration pass merging main (3.8) sent",
-        "2026-10-09: merged main at 7e0a35f4b; capture checks green at 3.8; tui-client-commands.sh red only from the pin move (see pin.tui-fixtures)"
+        "2026-10-09: merged main at 7e0a35f4b; capture checks green at 3.8; tui-client-commands.sh red only from the pin move (see pin.tui-fixtures)",
+        "2026-10-09: fix pass 7946cf657: 5 fixed, 2 recorded as capture.terminal-engine-limits; second review running"
       ]
     },
     {
@@ -393,7 +394,7 @@
       "id": "pin.formats-options",
       "track": "pin",
       "title": "3.8 formats, modifiers, options and show -F",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "pin.move"
       ],
@@ -412,7 +413,7 @@
         "clear-on-attach, copy-mode-current-line-style, remain-on-exit failed-key exist; fill-character, pane-active-border-style and status-format defaults match 3.8.",
         "show-options, show-window-options and show-hooks accept -F; display-message -j works; capture-pane -I is adopted or registered native (libghostty keeps no per-row time)."
       ],
-      "branch": null,
+      "branch": "catchup/pin.formats-options",
       "sha": null,
       "notes": []
     },

@@ -7157,9 +7157,7 @@ impl Shared {
                     output
                 }
             };
-            if canonical_command(&command.name) == "show-buffer" {
-                *output = RawText::from(utf8_sanitize(output.as_bytes()));
-            } else if !output.is_empty() {
+            if !output.is_empty() {
                 *output = sanitize_client_output(output);
             }
         }
@@ -8238,6 +8236,7 @@ impl Shared {
                     }
                     DaemonCommandDispatch::Buffer => self.buffer_command_for_client(
                         Some(client),
+                        kind,
                         context,
                         canonical,
                         &command.args,
@@ -19541,12 +19540,19 @@ impl Shared {
         name: &str,
         args: &[RawText],
     ) -> Result<Execution, DaemonError> {
-        self.buffer_command_for_client(None, context, canonical_command(name), args)
+        self.buffer_command_for_client(
+            None,
+            ClientKind::Command,
+            context,
+            canonical_command(name),
+            args,
+        )
     }
 
     fn buffer_command_for_client(
         self: &Arc<Self>,
         invoking_client: Option<ClientId>,
+        kind: ClientKind,
         context: &ExecutionContext,
         name: &str,
         args: &[RawText],
@@ -19620,14 +19626,26 @@ impl Shared {
             "show-buffer" | "showb" => {
                 let parsed = parse_buffer_command_args(name, args, &['b'], &[])?;
                 require_no_positionals(name, &parsed)?;
-                let data = {
+                let (data, utf8) = {
                     let inner = self.inner.lock();
                     let buffer =
                         resolve_buffer(&inner, parsed.value('b'), BufferMissing::NoBuffer)?;
-                    Arc::clone(&buffer.data)
+                    let utf8 = invoking_client
+                        .is_some_and(|client| inner.client(client).is_some_and(|c| c.utf8));
+                    (Arc::clone(&buffer.data), utf8)
+                };
+                let output = if kind == ClientKind::Control {
+                    let printed = data.split(|byte| *byte == 0).next().unwrap_or_default();
+                    if utf8 {
+                        RawText::from_bytes(printed)
+                    } else {
+                        RawText::from(utf8_sanitize(printed))
+                    }
+                } else {
+                    RawText::from_bytes(data.as_ref())
                 };
                 Ok(Execution {
-                    output: RawText::from_bytes(data.as_ref()),
+                    output,
                     effects: Vec::new(),
                 })
             }
@@ -41578,10 +41596,12 @@ fn prepare_command_request(
 /// `control_write` for a control client and `file_print_buffer` for
 /// everyone else. `save-buffer` always writes `file_write`, a real path and
 /// `-` alike. `show-buffer` reaches `cmdq_print_data` only when the client
-/// has a session of its own or is a control client, so it is sanitized for
-/// a control client but falls through to the same raw `file_write` for a
-/// session-less command client, which is the only shape zz's `Command`
-/// kind has.
+/// has a session of its own or is a control client, and it shapes its own
+/// output for the client that runs it, so an inserted or sourced
+/// `show-buffer` is printed the same way as a direct one: a control client
+/// gets the buffer up to its first NUL, sanitized as one message unless it
+/// raised `CLIENT_UTF8`, and a session-less command client, the only shape
+/// zz's `Command` kind has, gets the raw `file_write` bytes.
 fn sanitizes_output_for(
     inner: &ServerState,
     client: ClientId,
@@ -41592,8 +41612,7 @@ fn sanitizes_output_for(
         return false;
     }
     match canonical_command(command) {
-        "capture-pane" | "save-buffer" => return false,
-        "show-buffer" if kind == ClientKind::Command => return false,
+        "capture-pane" | "save-buffer" | "show-buffer" => return false,
         _ => {}
     }
     !inner.client(client).is_some_and(|c| c.utf8)
@@ -57541,7 +57560,7 @@ mod tests {
         }
 
         assert!(!shared.sanitizes_output_for(plain, ClientKind::Command, "show-buffer"));
-        assert!(shared.sanitizes_output_for(plain, ClientKind::Control, "show-buffer"));
+        assert!(!shared.sanitizes_output_for(plain, ClientKind::Control, "show-buffer"));
 
         assert!(!shared.sanitizes_output_for(plain, ClientKind::Interactive, "display-message"));
     }
@@ -57596,6 +57615,69 @@ mod tests {
         );
         assert_eq!(shown(plain, ClientKind::Control).0, b"a_b_c_d");
         assert_eq!(shown(utf8, ClientKind::Control).0, stored);
+
+        let mailbox = OutboundMailbox::new();
+        let (control, _) =
+            shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+        take_reliable_messages(&mailbox);
+        shared.execute_command_request(
+            control,
+            ClientKind::Control,
+            &mut context,
+            2,
+            &CommandInvocation::new("if-shell", ["-F", "1", "show-buffer -b binary"]),
+        );
+        let guards = control_command_guards(take_reliable_messages(&mailbox));
+        assert!(
+            guards
+                .iter()
+                .any(|(output, error, _)| output == "a_b_c_d" && !error),
+            "{guards:?}"
+        );
+    }
+
+    #[test]
+    fn show_buffer_stops_a_control_client_at_the_first_nul_the_way_the_pin_does() {
+        let shared = Arc::new(Shared::new(1));
+        let plain = ClientId(1);
+        let utf8 = ClientId(2);
+        shared.inner.lock().client_entry(utf8).utf8 = true;
+        let mut context = ExecutionContext::default();
+        let stored = b"a\0b\xfec".to_vec();
+        shared
+            .execute(
+                plain,
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new(
+                    "set-buffer",
+                    [
+                        RawText::from("-b"),
+                        RawText::from("nul"),
+                        RawText::from_bytes(stored.clone()),
+                    ],
+                ),
+            )
+            .expect("buffer with a NUL");
+        let show = CommandInvocation::new("show-buffer", ["-b", "nul"]);
+        let mut shown = |client, kind| match shared.execute_command_request(
+            client,
+            kind,
+            &mut context,
+            1,
+            &show,
+        ) {
+            CommandResponse::Success {
+                output,
+                exit_code: 0,
+                ..
+            } => output.as_bytes().to_vec(),
+            other => panic!("show-buffer failed: {other:?}"),
+        };
+
+        assert_eq!(shown(plain, ClientKind::Command), stored);
+        assert_eq!(shown(plain, ClientKind::Control), b"a");
+        assert_eq!(shown(utf8, ClientKind::Control), b"a");
     }
 
     #[test]
@@ -87418,7 +87500,13 @@ set-option -g @alias-mixed-next yes
         mailbox.close();
 
         let error = shared
-            .buffer_command_for_client(Some(client), &context, "save-buffer", &args)
+            .buffer_command_for_client(
+                Some(client),
+                ClientKind::Command,
+                &context,
+                "save-buffer",
+                &args,
+            )
             .expect_err("a closed writer cannot take the write");
         assert!(matches!(
             error,

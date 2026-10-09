@@ -82,8 +82,10 @@ The `Config` sink takes them: its payload goes through the same byte parser a so
 (`parse_config_buffer_bytes`, which reads 0xff as end of line the way the pin's signed `getc`
 does), and each argument reaches its command as `RawText`. `show-buffer` writes the buffer's bytes
 unchanged to a command client, which is the pin's `file_write` on `-`; a control client gets them
-through the `cmdq_print_data` rule, one `utf8_sanitize` over the whole buffer unless the client
-raised `CLIENT_UTF8`.
+through the `cmdq_print_data` rule: the buffer up to its first NUL, with one `utf8_sanitize` over
+it unless the client raised `CLIENT_UTF8`. `show-buffer` shapes this output itself for the client
+that runs it, so a `show-buffer` inserted by `if-shell` or replayed from a sourced file prints the
+same way as a direct one.
 
 **Backpressure** takes two forms, one per read shape.
 

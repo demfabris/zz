@@ -56,6 +56,8 @@ cleanup() {
     for name in DP_CHOSEN DP_AFTER DP_DEFAULT DP_BACKGROUND DP_TIMEOUT DP_SECOND; do
         main_client set-environment -gu "$name" >/dev/null 2>&1
     done
+    main_client set-hook -gu pane-mode-exited >/dev/null 2>&1
+    main_client set -gu @dph >/dev/null 2>&1
     exit "$cleanup_status"
 }
 trap cleanup EXIT
@@ -224,6 +226,29 @@ drive "keys 71"
 await_mode silent-closed-by-q "$pane0" :0
 check_equal silent-ran-nothing pending "$(value DP_TIMEOUT)"
 
+# window_panes_key and the timer end the mode through window_pane_reset_mode,
+# so the 3.8 pane-mode hooks see a chosen pane, q and the timer close it.
+main_client set -g @dph ''
+main_client set-hook -g pane-mode-exited \
+    "set -gaF @dph '#{hook_pane}/#{hook_previous_mode}/#{hook_current_mode}/#{hook_mode_entered},'"
+main_client select-pane -t "$pane0"
+main_client display-panes -d 0 "set-environment -g DP_CHOSEN 'hooked-%%%'"
+await_mode hooks-chosen-mode "$pane0" panes-mode:1
+drive "keys 31"
+await_mode hooks-chosen-closed "$pane0" :0
+main_client display-panes -t "$pane0" -d 0
+await_mode hooks-q-mode "$pane0" panes-mode:1
+drive "keys 71"
+await_mode hooks-q-closed "$pane0" :0
+main_client display-panes -t "$pane0" -d 300
+await_mode hooks-timer-mode "$pane0" panes-mode:1
+sleep 0.8
+check_equal hooks-template-ran "hooked-$pane1" "$(value DP_CHOSEN)"
+check_equal hooks-exits "$pane0/panes-mode//0,$pane0/panes-mode//0,$pane0/panes-mode//0," \
+    "$(main_client show -gv @dph 2>/dev/null)"
+main_client set-hook -gu pane-mode-exited
+main_client set -gu @dph
+
 # A key that is not a pane index ends the mode, and -k kills the pane with it.
 main_client select-pane -t "$pane1"
 main_client display-panes -k -d 0
@@ -240,11 +265,11 @@ main_client display-panes -t "=$session-detached:" -d 0
 check_equal detached-mode panes-mode:0 "$(mode_of "=$session-detached:")"
 main_client kill-session -t "=$session-detached"
 
-if [ "$check_count" -ne 29 ]; then
+if [ "$check_count" -ne 36 ]; then
     record_failure total-checks
 fi
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g DISPLAY_PANES_TEMPLATE clean:29
+    main_client set-environment -g DISPLAY_PANES_TEMPLATE clean:36
 else
     sed "s/^/display-panes-template-$side: /" "$work/failures"
 fi

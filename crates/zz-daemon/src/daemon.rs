@@ -23525,7 +23525,7 @@ impl Shared {
         mode: &PanesMode,
         chosen: Option<PaneId>,
     ) {
-        {
+        let events = {
             let mut inner = self.inner.lock();
             if chosen.is_some()
                 && let Some(window) = inner.engine.state.window_for_pane(host)
@@ -23535,7 +23535,9 @@ impl Shared {
                 let _ = inner.engine.state.toggle_zoom(zoomed);
             }
             pop_pane_mode(&mut inner, host);
-        }
+            take_pane_mode_hook_events(&mut inner)
+        };
+        self.run_event_hooks(events);
         self.reap_pane_mode_kill_panes(client, ClientKind::Interactive, context);
         if let Some(target) = chosen {
             self.submit_template(
@@ -23556,17 +23558,18 @@ impl Shared {
     }
 
     fn expire_panes_mode(self: &Arc<Self>, pane: PaneId, token: u64) {
-        let expired = {
+        let events = {
             let mut inner = self.inner.lock();
             let due = matches!(
                 inner.pane_modes.get(&pane).and_then(|modes| modes.last()),
                 Some(PaneModeRequest::Panes(mode)) if mode.token == token
             );
-            due && pop_pane_mode(&mut inner, pane)
+            if !(due && pop_pane_mode(&mut inner, pane)) {
+                return;
+            }
+            take_pane_mode_hook_events(&mut inner)
         };
-        if !expired {
-            return;
-        }
+        self.run_event_hooks(events);
         let mut context = ExecutionContext::default();
         self.reap_pane_mode_kill_panes(ClientId(u64::MAX), ClientKind::Command, &mut context);
         self.publish_snapshot();
@@ -47535,17 +47538,15 @@ fn take_pane_mode_hook_events(inner: &mut ServerState) -> Vec<PendingHookEvent> 
 }
 
 fn push_pane_mode(inner: &mut ServerState, pane: PaneId, mode: PaneModeRequest) -> bool {
-    if !matches!(mode, PaneModeRequest::Panes(_))
+    let replaced = !matches!(mode, PaneModeRequest::Panes(_))
         && matches!(
             inner.pane_modes.get(&pane).and_then(|modes| modes.last()),
             Some(PaneModeRequest::Panes(_))
         )
-    {
-        pop_pane_mode(inner, pane);
-    }
+        && pop_pane_mode(inner, pane);
     let previous = top_pane_mode_name(inner, pane);
     let current = pane_mode_name(&mode);
-    let pushed = push_pane_mode_entry(inner, pane, mode);
+    let pushed = push_pane_mode_entry(inner, pane, mode) || replaced;
     if pushed {
         inner.pane_mode_transitions.push(PaneModeTransition {
             pane,
@@ -102113,6 +102114,97 @@ bind - split-window -v -c "#{pane_current_path}"
                 .pane_order()
                 .contains(&second)
         );
+    }
+
+    #[test]
+    fn display_panes_fires_the_pane_mode_hooks_on_every_exit() {
+        let (shared, client, _, mut context) = popup_test_workspace("panes-hooks");
+        let base = context.clone();
+        let run = |name: &str, args: &[&str]| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut base.clone(),
+                    &CommandInvocation::new(name, args.iter().copied()),
+                )
+                .unwrap_or_else(|error| panic!("{name} {args:?}: {error:?}"))
+        };
+        run("split-window", &["-d"]);
+        let pane = context.pane.expect("pane");
+        let target = pane.to_string();
+        run("set-option", &["-g", "@dpc", ""]);
+        for hook in ["pane-mode-entered", "pane-mode-exited", "pane-mode-changed"] {
+            run(
+                "set-hook",
+                &[
+                    "-g",
+                    hook,
+                    "set -gaF @dpc '#{hook}:#{hook_pane}:#{hook_current_mode}<#{hook_previous_mode}:#{hook_mode_entered} '",
+                ],
+            );
+        }
+        let token = || match shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+        {
+            Some(PaneModeRequest::Panes(mode)) => mode.token,
+            _ => panic!("panes mode"),
+        };
+
+        let show = |name: &str| {
+            run("show-options", &["-gv", name])
+                .output
+                .to_string()
+                .trim_end()
+                .to_owned()
+        };
+        let entered = |current: &str, previous: &str| {
+            ["pane-mode-entered", "pane-mode-changed"]
+                .map(|hook| format!("{hook}:{pane}:{current}<{previous}:1"))
+                .join(" ")
+        };
+        let exited = |current: &str, previous: &str| {
+            ["pane-mode-exited", "pane-mode-changed"]
+                .map(|hook| format!("{hook}:{pane}:{current}<{previous}:0"))
+                .join(" ")
+        };
+
+        run("display-panes", &["-d", "0", "-t", &target]);
+        assert!(shared.pane_mode_input(client, &mut context, pane, PaneModeInput::Key("q")));
+        assert!(show("@dpc").ends_with(&exited("", "panes-mode")));
+        run(
+            "display-panes",
+            &["-d", "0", "-t", &target, "set -g @picked %%%"],
+        );
+        assert!(shared.pane_mode_input(client, &mut context, pane, PaneModeInput::Key("1")));
+        assert!(show("@picked").starts_with('%'));
+        assert!(show("@dpc").ends_with(&exited("", "panes-mode")));
+        run("display-panes", &["-d", "0", "-t", &target]);
+        shared.expire_panes_mode(pane, token());
+        assert!(show("@dpc").ends_with(&exited("", "panes-mode")));
+        run("clock-mode", &["-t", &target]);
+        run("display-panes", &["-d", "0", "-t", &target]);
+        run("clock-mode", &["-t", &target]);
+
+        let expected = [
+            entered("panes-mode", ""),
+            exited("", "panes-mode"),
+            entered("panes-mode", ""),
+            exited("", "panes-mode"),
+            entered("panes-mode", ""),
+            exited("", "panes-mode"),
+            entered("clock-mode", ""),
+            entered("panes-mode", "clock-mode"),
+            exited("clock-mode", "panes-mode"),
+            entered("clock-mode", "clock-mode"),
+        ]
+        .join(" ");
+        assert_eq!(show("@dpc"), expected);
+        assert!(shared.inner.lock().pane_mode_transitions.is_empty());
     }
 
     #[test]

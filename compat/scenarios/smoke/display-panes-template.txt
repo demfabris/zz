@@ -3,7 +3,8 @@ corpus: none
 # once, zooms the pane unless -Z, runs its optional template with the chosen
 # pane's %id substituted for %%% (select-pane -t "%%%" by default), ignores a
 # second display-panes on the same pane, swallows a digit under -N, ends on its
-# own timer, kills the pane under -k, and needs no client. -b is gone.
+# own timer, kills the pane under -k, fires pane-mode-exited on a chosen pane,
+# q and the timer, and needs no client. -b is gone.
 stage: fixtures/display-panes-template.sh ~/display-panes-template.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
 out: set-environment -gu DISPLAY_PANES_TEMPLATE

@@ -10,3 +10,36 @@ out: show-options -v -t w display-panes-format
 fmt: #{display-panes-format}
 set-option -u -t w display-panes-format
 fmt: #{display-panes-format}
+# display-panes enters panes-mode through window_pane_set_mode, so the 3.8
+# pane-mode hooks fire with its name: on entry, when clock-mode replaces it
+# (panes-mode does not stack) and re-enters the clock below, when respawn-pane
+# resets every mode, and on its own timer. Mode keys need an attached client
+# in 3.8, so the key exits live in smoke/display-panes-template.
+set -g @dpc ''
+set-hook -g pane-mode-entered "set -gF @dpe '#{hook}/#{hook_event}/#{hook_pane}/#{hook_current_mode}/#{hook_previous_mode}/#{hook_mode_entered}'"
+set-hook -g pane-mode-exited "set -gF @dpx '#{hook}/#{hook_event}/#{hook_pane}/#{hook_current_mode}/#{hook_previous_mode}/#{hook_mode_entered}'"
+set-hook -g pane-mode-changed "set -gaF @dpc '#{hook}/#{hook_previous_mode}/#{hook_current_mode}/#{hook_mode_entered},'"
+display-panes -d 0 -t w:0.0
+out: show -gv @dpe
+fmt: #{pane_in_mode}/#{pane_mode}
+clock-mode -t w:0.0
+out: show -gv @dpx
+out: show -gv @dpe
+display-panes -d 0 -t w:0.0
+out: show -gv @dpe
+clock-mode -t w:0.0
+out: show -gv @dpx
+out: show -gv @dpe
+fmt: #{pane_in_mode}/#{pane_mode}
+display-panes -d 0 -t w:0.0
+respawn-pane -k -t w:0.0
+out: show -gv @dpx
+fmt: #{pane_in_mode}
+display-panes -d 100 -t w:0.0
+run-shell 'sleep 0.5'
+out: show -gv @dpx
+fmt: #{pane_in_mode}
+out: show -gv @dpc
+set-hook -gu pane-mode-entered
+set-hook -gu pane-mode-exited
+set-hook -gu pane-mode-changed

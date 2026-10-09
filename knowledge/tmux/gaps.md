@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
-Tracked gap groups: **50**. Classified items: **365**.
+Tracked gap groups: **51**. Classified items: **370**.
 
-- Status: open: 5, accepted: 45.
-- Decision: adopt: 5, native: 36, never: 9.
-- Priority: now: 1, next: 4, none: 45.
+- Status: open: 6, accepted: 45.
+- Decision: adopt: 6, native: 36, never: 9.
+- Priority: now: 1, next: 4, later: 1, none: 45.
 - Closed history entries: 221.
-- Surface: command: 3, flag: 29, extension-flag: 10, native-command: 26, option: 19, format: 47, hook: 2, key: 29, binding: 37, native-key: 92, semantic: 62, presentation: 8, protocol: 1.
+- Surface: command: 3, flag: 29, extension-flag: 10, native-command: 26, option: 19, format: 47, hook: 2, key: 29, binding: 37, native-key: 92, semantic: 67, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -61,6 +61,12 @@ structure as proof.
 | `keys.move-table` | Bind the floating-pane move table as tmux 3.8 does | adopt | open | medium | gui | daily, gui | none |
 | `pin.formats-options` | Adopt the 3.8 formats, modifiers and options | adopt | open | medium | mux | daily, scripts | none |
 | `pane.floating-model` | Build floating panes in the mux model as tmux 3.8 does | adopt | open | hard | mux | daily, scripts, gui | none |
+
+## Later
+
+| ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `options.byte-path-residue` | Keep non-UTF-8 bytes on the text paths fix.option-bytes left lossy | adopt | open | hard | mux | scripts | none |
 
 ## None
 
@@ -815,6 +821,30 @@ Re-pointed 2026-10-09 by the catch-up lane fix.small-semantics, from the 2026-10
   - `resource:knowledge/tmux/key-tables.md`
 - Acceptance:
   - `Native pointer handling keeps scrollbar and slider gestures without a scrollbar location, the two remaining mouse-context flags stay loudly unsupported, and a target spelling that only a bound mouse event can resolve resolves to that event's pane.`
+
+### `options.byte-path-residue`: Keep non-UTF-8 bytes on the text paths fix.option-bytes left lossy
+
+Measured 2026-10-09 on tmux 3.8 (7f2a35ad) by fix.followups-2 after fix.option-bytes made the user option store, command blocks and sourced variables byte-clean. Four paths still pass bytes through a lossy text view: the format expander takes its template as text, so a format argument that is not UTF-8 reaches expand_format_bytes already replaced (display-message, and show-options -F, whose option_value is also a text variable); the stored binding and hook command lists print through tmux_command_print from text arguments; and the control client's $NAME expansion asks the daemon for values over an EnvironmentRequest whose answer is text. rename-window is the reverse case: 3.8 refuses a name that is not valid UTF-8 and zz accepts it lossily. Each fix crosses the expander or the wire, so it was registered rather than folded into the follow-up batch.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `hard`
+- Owner: `mux`
+- User impact: scripts
+- Items: `semantic:command-print-argument-bytes`, `semantic:control-environment-request-bytes`, `semantic:format-template-argument-bytes`, `semantic:show-options-format-value-bytes`, `semantic:window-name-invalid-utf8`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `scenario:compat/scenarios/option-bytes.txt`
+  - `file:compat/scenarios/fixtures/option-bytes.sh`
+- Acceptance:
+  - `With LC_ALL=C, TMUX unset and @x holding 61 fe 62, a -u command client's `display-message -p a<fe>b` and `show-options -g -F '#{option_value}' @x` print 61 fe 62 0a as tmux 3.8 does (zz prints 61 ef bf bd 62 0a; both sides print 61 5f 62 0a without -u).`
+  - ``list-keys` after `bind-key -T t x display-message a<fe>b`, and `show-hooks` for a hook whose command holds that byte, print the argument as `a\376b` as 3.8 does (zz prints `a_b`).`
+  - `A control client line `set-buffer -b b "$X"` with a global X of 61 fe 62 stores 61 fe 62 as 3.8 does (zz stores 61 ef bf bd 62 because the EnvironmentRequest answer is text).`
+  - ``rename-window a<fe>b` answers `invalid window name: a_b` and keeps the old name as 3.8 does (zz renames the window to 61 ef bf bd 62).`
+  - `Each row is a hex row in compat/scenarios/fixtures/option-bytes.sh that reads clean on both binaries; #{O:} option loops and window-neighbour option copies are measured there too before this closes.`
 
 ### `options.client-terminal-negotiation`: Keep extended-keys-format, assume-paste-time and xterm-keys native; capability-string overrides open
 

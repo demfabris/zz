@@ -719,12 +719,17 @@ impl CommandClient {
         let mut pending_error = None;
         let mut streamed_stderr = String::new();
         let mut client_exit = false;
+        let mut unanswered = None;
         loop {
             let current = match message.take() {
                 Some(current) => current,
                 None => match reader.recv() {
                     Ok(current) => current,
-                    Err(error) => return Ok(ExecChainEnd::Failed(pending_error.unwrap_or(error))),
+                    Err(error) => {
+                        return Ok(ExecChainEnd::Failed(
+                            pending_error.or(unanswered).unwrap_or(error),
+                        ));
+                    }
                 },
             };
             match current {
@@ -803,7 +808,7 @@ impl CommandClient {
                         answer_command_file(&request, self.stdin_enabled, &mut self.stdin_spent);
                     if let Err(error) = writer.send(&ProtocolMessage::ClientFileResponse(response))
                     {
-                        return Ok(ExecChainEnd::Failed(error));
+                        unanswered.get_or_insert(error);
                     }
                 }
                 _ => {}

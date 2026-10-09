@@ -1,0 +1,69 @@
+# set-hook -E fires an @ hook only when set-hook registered that event name
+# (a user option of the same name set with set-option does not count, and
+# set-hook has no -o or -q to register one without assigning it), the
+# registration outlives the hook, after-select-pane runs only when select-pane
+# moves the active pane, and pane-created carries pane_command and
+# pane_current_path, with a respawned shell pane naming the shell it was
+# spawned with rather than the current default-shell.
+set -g @plain "set -gF @plainran yes"
+set -g @plainran no
+set-hook -E -t w:0 @plain
+out: show -gv @plainran
+set-hook -g @reg "set -gF @regran yes"
+set-hook -E -t w:0 @reg
+out: show -gv @regran
+set-hook -gu @reg
+set -g @reg "set -gF @regran again"
+set-hook -E -t w:0 @reg
+out: show -gv @regran
+set -g @oq "set -gF @oqran yes"
+set -g @oqran no
+set-hook -goq @oq ignored
+set-hook -E -t w:0 @oq
+out: show -gv @oqran
+set -gu @plain
+set -gu @plainran
+set -gu @oq
+set -gu @oqran
+set -gu @reg
+set -gu @regran
+split-window -d -t w:0
+set -g @asp ''
+set-hook -g after-select-pane "set -gaF @asp '#{hook_argument_0}#{hook_flag_t}+'"
+select-pane -t w:0.0
+out: show -gv @asp
+select-pane -t w:0.1
+out: show -gv @asp
+select-pane -t w:0.1
+select-pane -m -t w:0.0
+select-pane -m -t w:0.0
+select-pane -T named -t w:0.0
+select-pane -d -t w:0.0
+select-pane -e -t w:0.0
+select-pane -l -t w:0
+out: show -gv @asp
+select-pane -t w:0.1
+out: show -gv @asp
+select-pane -t w:0.0
+set-hook -gu after-select-pane
+set -gu @asp
+kill-pane -t w:0.1
+set-hook -g pane-created "set -gF @pcc '#{hook_pane_command}^#{hook_pane_current_path}'"
+split-window -d -c /tmp -t w:0 'sleep 100'
+out: show -gv @pcc
+new-window -d -c / -t w:7 sleep 99
+out: show -gv @pcc
+set-hook -gu pane-created
+set -gu @pcc
+kill-window -t w:7
+kill-pane -t w:0.1
+set -g default-shell /bin/sh
+split-window -d -t w:0
+set-hook -g pane-created "set -gF @pcs '#{hook_pane_command}'"
+set -g default-shell /bin/bash
+respawn-pane -k -t w:0.1
+out: show -gv @pcs
+set-hook -gu pane-created
+set -gu @pcs
+set -gu default-shell
+kill-pane -t w:0.1

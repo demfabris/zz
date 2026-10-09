@@ -681,7 +681,6 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "split-window",
         "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
     ),
-    ("wait-for", "[-ELSUlv] [-F format] [-w waiter] name"),
 ];
 
 pub static DAEMON_COMMAND_NAMES: &[&str] = &[
@@ -1322,15 +1321,15 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "wait-for",
         aliases: &["wait"],
         description: "Block or wake a client on a named channel",
-        usage: "[-L|-S|-U] [-l] [-w waiter] channel",
+        usage: "[-ELSUlv] [-F format] [-w waiter] name",
         options: &[
             CommandOptionSpec::flag("-L", "lock the channel"),
             CommandOptionSpec::flag("-S", "signal the channel"),
             CommandOptionSpec::flag("-U", "unlock the channel"),
-            CommandOptionSpec::unsupported_flag("-E"),
-            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::flag("-E", "wait for a hook or @ event"),
+            CommandOptionSpec::value("-F", FreeForm, "wake only when the format is true"),
             CommandOptionSpec::flag("-l", "list the channel's waiters"),
-            CommandOptionSpec::unsupported_flag("-v"),
+            CommandOptionSpec::flag("-v", "print each event payload"),
             CommandOptionSpec::value("-w", FreeForm, "wake one waiter by client name"),
         ],
         positionals: &[FreeForm],
@@ -3245,8 +3244,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 309), ("optional", 8), ("required", 234)])
         );
-        assert_eq!((supported, unsupported), (525, 26));
-        assert_eq!(usage_overrides.len(), 25);
+        assert_eq!((supported, unsupported), (528, 23));
+        assert_eq!(usage_overrides.len(), 24);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

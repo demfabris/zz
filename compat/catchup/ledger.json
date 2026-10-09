@@ -13,7 +13,7 @@
       "id": "fix.tui-colour",
       "track": "fix",
       "title": "Raw TUI honours terminal-overrides, terminal-features and user-keys",
-      "status": "review",
+      "status": "active",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/client.rs",
@@ -35,7 +35,8 @@
       "branch": "catchup/fix.tui-colour",
       "sha": null,
       "notes": [
-        "2026-10-09: lane done at 5451831a4: all 4 clauses met; wire: EventPayload::TerminalNegotiation + KeyCode::User under 108; also fixed set -s extended-keys/focus-events not reaching the TUI hello"
+        "2026-10-09: lane done at 5451831a4: all 4 clauses met; wire: EventPayload::TerminalNegotiation + KeyCode::User under 108; also fixed set -s extended-keys/focus-events not reaching the TUI hello",
+        "2026-10-09: fix-pass agent stalled 2h waiting on a dead background job; stopped and relaunched at 08:35 to continue from the uncommitted worktree changes and merge main"
       ]
     },
     {
@@ -420,7 +421,8 @@
       "accept": [
         "-b removed; -k, -Z and -s source-window accepted; -t is a target pane (1a02c995).",
         "display-panes-active-colour, -colour, -format and -time are window options; display-panes-border-style exists.",
-        "Raw TUI matches the pin's mode screen; desktop keeps its native overlay."
+        "Raw TUI matches the pin's mode screen; desktop keeps its native overlay.",
+        "compat/attached-client.sh passes at 3.8: today it stops tmux-side in probe_display_panes_target_no_select ('can't find pane: missing', display-panes -t is a pane now), so the probes after it (probe_requested_client_flags and others) never run. This fixture restamps CI's summary at milestones."
       ],
       "branch": null,
       "sha": null,

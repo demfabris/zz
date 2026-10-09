@@ -182,7 +182,10 @@ so one of them may run beside the compiling lanes. On macOS there is no `systemd
 Stuck looks like: the same full command 4 or more times in a lane's last 60 calls, the same failure
 signature 4 or more times, no transcript write for 20 minutes, two memory kills, or hours of calls
 with no commit. A high raw failure rate alone means nothing. A stuck lane gets one redirect, then is
-stopped with its work committed as WIP.
+stopped with its work committed as WIP. To check a lane cheaply: newest mtime under its
+worktree's `crates` and `compat` (`find ... -newermt '-30 minutes'`) and processes whose cwd is in
+it. A lane that waits on a background job can stall silently for hours (fix.tui-colour,
+2026-10-09): stop it and relaunch with "continue from the uncommitted changes".
 
 ## Codex
 

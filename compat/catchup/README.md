@@ -232,5 +232,11 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: menus stay per-client overlays (`menus.client-owned`, native) rather than
   3.8's window-owned menus; 3.8's window-relative placement is adopted. Same reasoning as
   fabrico's copy-mode-per-client ruling (TUI-014): zz's clients keep independent views.
+- 2026-10-09 orchestrator: the float track merges to main as one unit. float.core alone would make
+  popups invisible (clients draw floats in float.clients) and remove popup dragging (float.keys), so
+  float.clients branches from catchup/float.core, float.keys from float.clients, and main gets all
+  three together after their reviews. display-popup follows upstream master's modal-pane model per
+  fabrico's ruling, so the smoke scenarios that compare 3.8's per-client popup are registered as
+  known differences, not chased.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

@@ -502,7 +502,7 @@
       "id": "pin.hooks-events-2",
       "track": "pin",
       "title": "Rest of the 3.8 hook surface",
-      "status": "review",
+      "status": "active",
       "deps": [
         "pin.hooks-events"
       ],
@@ -529,7 +529,8 @@
       "notes": [
         "2026-10-09: leftovers of pin.hooks-events.",
         "2026-10-09: From pin.display-panes: inner.pane_mode_transitions.clear() at command end sits outside the hooks-enabled branch, so a transition recorded outside a command and not fired at once is dropped (clock-mode -k and switch-mode exits may leak); 3.8 send-keys to a pane in a mode does nothing without an attached client (window_pane_key), zz passes it to the mode.",
-        "2026-10-09: Lane done at 44257f9e6: all 7 clauses (prompt events, wait-for -E/-v/-F sink, 10 payload keys + 2 to linked-groups, after-select-pane skip, set-hook -E registry, gap closed, attached-client --client-events PASS); mode transition leak fixed; send-keys to a mode unattached already matched. Follow-ups: zz events still carry d77 payload keys 3.8 dropped (visible in wait-for -E -v); -v prints at wake not per event; pane prompts are per client (close on detach); formats-values session_active list filters fail on main. Review 1 running."
+        "2026-10-09: Lane done at 44257f9e6: all 7 clauses (prompt events, wait-for -E/-v/-F sink, 10 payload keys + 2 to linked-groups, after-select-pane skip, set-hook -E registry, gap closed, attached-client --client-events PASS); mode transition leak fixed; send-keys to a mode unattached already matched. Follow-ups: zz events still carry d77 payload keys 3.8 dropped (visible in wait-for -E -v); -v prints at wake not per event; pane prompts are per client (close on detach); formats-values session_active list filters fail on main. Review 1 running.",
+        "2026-10-09: Codex review 1 (pin.hooks-events-2-1.md): 4 P1 (format monitors bypass the sink, -v buffered not streamed, interactive clients cannot wait, pane_command uses the current default-shell) + P2 (prompt events carry session keys; also drop d77 keys 3.8 removed); fix pass sent."
       ]
     },
     {
@@ -826,6 +827,57 @@
       "sha": null,
       "notes": [
         "fabrico 2026-10-09: note down for later."
+      ]
+    },
+    {
+      "id": "fix.formats-values-3-8",
+      "track": "fix",
+      "title": "formats-values scenario is red on main at the 3.8 pin",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src/formats.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "compat/scenarios/formats-values.txt"
+      ],
+      "gaps": [],
+      "accept": [
+        "compat/run.sh --strict-geometry formats-values is clean against tmux 3.8 (45 steps), or each remaining row is 3.8 drift that is matched or registered with its 3.8 source line.",
+        "The cause is named: a regression from a catch-up merge (which commit) or 3.8 drift (which tmux change)."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09: found by pin.hooks-events-2 and confirmed by the orchestrator on main 51adcd7a5: OUT differs (zz prints rows tmux leaves out in the #{session_active} list filters); clean in compat/results/summary.md, which was stamped at the d77c9dc6 pin."
+      ]
+    },
+    {
+      "id": "fix.followups",
+      "track": "fix",
+      "title": "Small follow-ups the catch-up lanes reported",
+      "status": "todo",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src",
+        "crates/zz-daemon/src",
+        "crates/zz-terminal/src",
+        "crates/zz-cli/src",
+        "knowledge/tmux/divergences.md"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "2026-10-09 (fix.capture-e-links): capture-pane -M -e (copy-mode styled capture) emits no OSC 8; the capture.terminal-engine-limits reason should mention the -e effects (no id=, back-to-back same-URI links open once).",
+        "2026-10-09 (fix.chooser-preview): refresh_chooser_previews resends the full chooser state to every tree-chooser client on every snapshot publish even when unchanged.",
+        "2026-10-09 (fix.mode-styles): mode prompts (chooser filter/search, customize, switch) ignore prompt-cursor-style/colour (3.8 mode_tree_draw_prompt) and take hard-coded message-style/message-command-style defaults in chooser_presentation::prompt_style.",
+        "2026-10-09 (fix.option-bytes): lossy paths left: show-options -F #{option_value}, --json, #{O:} loops, window-neighbour option copies, tmux_command_print (list-keys, show-hooks), resolve_environment on control lines; divergences.md 'Non-UTF-8 command arguments' row is stale.",
+        "2026-10-09 (pin.control-3-8): zz accepts an unquoted #{ mid-word (display -p foo::#{window_name} in a sourced file, refresh-client -B on a control line); both pins answer syntax error. A control client that read a blank line still sizes windows; tmux ignores it for sizing.",
+        "2026-10-09 (pin.hooks-events-2): zz pane prompts belong to the client (close on detach, a status prompt replaces them); in 3.8 the prompt stays on the pane.",
+        "2026-10-09 (pin.display-panes): with -s naming another window the desktop overlay draws indicators on panes not on screen (desktop renderer)."
       ]
     }
   ]

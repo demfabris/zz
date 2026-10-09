@@ -71,8 +71,9 @@ window.paint_glass_shapes(&shapes, &material);
 `GlassMaterial` holds every knob: blur (frost), bezel and refraction (the lens), dispersion,
 tint, saturation, brightness, contrast, specular and glint width, light angle, fresnel, edge shadow
 and width, grain, touch glow, merge radius, and opacity. The presets `regular`, `clear`,
-`frosted`, `bubble`, and `smoked` are starting points, and materials interpolate, so springs and
-animations can carry one into another; `vanished()` is the identity glass appears from.
+`frosted`, `bubble`, `smoked`, and `tinted(color)` are starting points, and materials
+interpolate, so springs and animations can carry one into another; `vanished()` is the identity
+glass appears from.
 `LiquidRect` moves a shape on springs and stretches it along its velocity.
 
 Metal and wgpu draw it from the same WGSL (`crates/gpui/src/glass.wgsl`; Metal translates it with

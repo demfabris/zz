@@ -707,6 +707,11 @@ impl Window {
         self.z_order.insert(index, pane);
     }
 
+    fn hidden_by_zoom(&self, pane: PaneId) -> bool {
+        self.zoomed_pane
+            .is_some_and(|zoomed| zoomed != pane && !self.is_over_zoom(pane))
+    }
+
     pub(crate) fn move_float_z(&mut self, pane: PaneId, position: FloatZ) {
         let hidden = |window: &Self, candidate: PaneId| window.is_floating(candidate);
         let current = self.z_order.iter().position(|candidate| *candidate == pane);
@@ -725,9 +730,19 @@ impl Window {
                 self.z_order.insert(index, pane);
             }
             FloatZ::Forward | FloatZ::ForwardLoop => {
-                if current > 0 {
+                let previous = self.z_order[..current]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|candidate| !self.hidden_by_zoom(*candidate));
+                if let Some(previous) = previous {
                     self.z_order.remove(current);
-                    self.z_order.insert(current - 1, pane);
+                    let index = self
+                        .z_order
+                        .iter()
+                        .position(|candidate| *candidate == previous)
+                        .unwrap_or(0);
+                    self.z_order.insert(index, pane);
                 } else if position == FloatZ::ForwardLoop {
                     self.z_order.remove(current);
                     let index = self
@@ -739,8 +754,11 @@ impl Window {
                 }
             }
             FloatZ::Backward | FloatZ::BackwardLoop => {
-                let next = self.z_order.get(current + 1).copied();
-                if let Some(next) = next.filter(|next| self.is_floating(*next)) {
+                let next = self.z_order[current + 1..]
+                    .iter()
+                    .copied()
+                    .find(|candidate| !self.hidden_by_zoom(*candidate));
+                if let Some(next) = next.filter(|next| self.shows_floating(*next)) {
                     self.z_order.remove(current);
                     let index = self
                         .z_order
@@ -2017,9 +2035,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window_id)
             .expect("window exists");
-        if window.active_pane == pane && window.zoomed_pane.is_some() && !preserve_zoom {
-            window.zoomed_pane = None;
-            self.bump_generation();
+        if window.active_pane == pane {
             return Ok(false);
         }
         let pane_changed = activate_window_pane(window, pane, preserve_zoom);

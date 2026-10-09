@@ -58,3 +58,30 @@ kill-pane -t modal.1
 kill-pane -t modal.1
 out: list-panes -t modal -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
 out: display-message -p -t modal #{window_zoomed_flag}:#{window_flags}:#{window_modal_pane}:#{pane_id}
+
+# Selecting the active over-zoom float keeps the zoom, and move-pane -P
+# forward and backward step past floats the zoom hides.
+new-session -d -s zf
+new-pane -t zf.0
+resize-pane -Z -t zf.0
+new-pane -A -t zf.0
+select-pane -t zf.2
+out: display-message -p -t zf #{window_zoomed_flag}:#{pane_index}
+new-pane -A -t zf.0
+move-pane -P back -t zf.2
+out: list-panes -t zf -F #{pane_index}:#{pane_z}:#{pane_active}
+move-pane -P forward -t zf.2
+out: list-panes -t zf -F #{pane_index}:#{pane_z}:#{pane_active}
+move-pane -P backward -t zf.2
+out: list-panes -t zf -F #{pane_index}:#{pane_z}:#{pane_active}
+out: display-message -p -t zf #{window_zoomed_flag}
+
+# join-pane unzooms a zoomed float back to the front of the z order.
+new-session -d -s jz
+split-window -h -t jz.0
+new-pane -t jz.0
+new-pane -t jz.0
+resize-pane -Z -t jz.2
+join-pane -d -s jz.0 -t jz.1
+out: list-panes -t jz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}
+out: display-message -p -t jz #{window_zoomed_flag}

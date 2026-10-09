@@ -110,9 +110,11 @@ fn vs_glass(@builtin(vertex_index) vertex_id: u32) -> @builtin(position) vec4<f3
 }
 
 // Signed distance to a rounded rectangle (negative inside) and its outward
-// gradient. Corners above smoothing 2 are superellipses, measured as a
-// p-norm, except on pills and circles.
-fn rounded_rect(point: vec2<f32>, shape: GlassShape, smoothing: f32) -> vec3<f32> {
+// normal. Corners above smoothing 2 are superellipses, measured as a p-norm,
+// except on pills and circles. The normal comes from the same rectangle with
+// corners rounded at least as wide as the bezel, so it turns smoothly through
+// a tight corner instead of creasing along its diagonal.
+fn rounded_rect(point: vec2<f32>, shape: GlassShape, smoothing: f32, bezel: f32) -> vec3<f32> {
     let half_size = shape.rect.zw * 0.5;
     let center_to_point = point - (shape.rect.xy + half_size);
     var radius: f32;
@@ -123,28 +125,38 @@ fn rounded_rect(point: vec2<f32>, shape: GlassShape, smoothing: f32) -> vec3<f32
     }
     let half_minor = min(half_size.x, half_size.y);
     radius = min(radius, half_minor);
+    let exponent = select(smoothing, 2.0, radius >= half_minor - 0.01);
     let side = select(vec2<f32>(1.0), vec2<f32>(-1.0), center_to_point < vec2<f32>(0.0));
-    let q = abs(center_to_point) - half_size + radius;
+    let corner = abs(center_to_point) - half_size;
+
+    let q = corner + radius;
     let outset = max(q, vec2<f32>(0.0));
     var distance: f32;
-    var gradient: vec2<f32>;
     if (outset.x > 0.0 && outset.y > 0.0) {
-        let exponent = select(smoothing, 2.0, radius >= half_minor - 0.01);
         if (exponent <= 2.001) {
             distance = length(outset);
-            gradient = outset / distance;
         } else {
             distance = pow(pow(outset.x, exponent) + pow(outset.y, exponent), 1.0 / exponent);
-            gradient = normalize(pow(outset, vec2<f32>(exponent - 1.0)));
         }
-    } else if (q.x > q.y) {
-        distance = q.x;
-        gradient = vec2<f32>(1.0, 0.0);
     } else {
-        distance = q.y;
-        gradient = vec2<f32>(0.0, 1.0);
+        distance = max(q.x, q.y);
     }
-    return vec3<f32>(distance - radius, gradient * side);
+
+    let soft = corner + min(max(radius, bezel), half_minor);
+    let soft_outset = max(soft, vec2<f32>(0.0));
+    var normal: vec2<f32>;
+    if (soft_outset.x > 0.0 && soft_outset.y > 0.0) {
+        if (exponent <= 2.001) {
+            normal = soft_outset;
+        } else {
+            normal = pow(soft_outset, vec2<f32>(exponent - 1.0));
+        }
+    } else if (soft.x > soft.y) {
+        normal = vec2<f32>(1.0, 0.0);
+    } else {
+        normal = vec2<f32>(0.0, 1.0);
+    }
+    return vec3<f32>(distance - radius, normalize(normal) * side);
 }
 
 // Smooth union of every shape, so shapes closer than the merge radius melt
@@ -154,9 +166,10 @@ fn glass_field(point: vec2<f32>) -> vec3<f32> {
     let count = u32(glass.shape.x);
     let smoothing = glass.shape.y;
     let merge = glass.shape.z;
-    var field = rounded_rect(point, glass.shapes[0], smoothing);
+    let bezel = glass.optics.x;
+    var field = rounded_rect(point, glass.shapes[0], smoothing, bezel);
     for (var i = 1u; i < count; i += 1u) {
-        let next = rounded_rect(point, glass.shapes[i], smoothing);
+        let next = rounded_rect(point, glass.shapes[i], smoothing, bezel);
         let k = max(merge * min(0.5 * length(next.yz - field.yz), 1.0), 1e-4);
         let h = clamp(0.5 + 0.5 * (next.x - field.x) / k, 0.0, 1.0);
         let distance = mix(next.x, field.x, h) - k * h * (1.0 - h);

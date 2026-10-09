@@ -4731,7 +4731,6 @@ mod tests {
 
         click_a11y_button(cx, AnyWindowHandle::from(window), px(95.));
         assert_eq!(*clicked.borrow(), ["clipped"]);
-
     }
 
     struct GroupHoverTestView {

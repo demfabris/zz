@@ -85,8 +85,6 @@ pub use profile::{AppProfile, LocalHostPolicy, SettingsSection};
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
-const GPUI_SOURCE: &str = env!("ZZ_GPUI_SOURCE");
-
 /// Start the native executable on Linux and macOS.
 #[cfg(not(any(target_os = "windows", target_os = "ios")))]
 #[must_use]
@@ -251,10 +249,6 @@ fn run_app(
     socket_path: PathBuf,
     profile: AppProfile,
 ) {
-    log::info!(
-        target: "zz::diagnostics::appearance",
-        "gpui_source={GPUI_SOURCE}"
-    );
     let platform = gpui_platform::current_platform(false);
     let fonts = zz_ui::settings::appearance::AvailableFonts(platform.text_system());
     let application = gpui::Application::with_platform(platform);

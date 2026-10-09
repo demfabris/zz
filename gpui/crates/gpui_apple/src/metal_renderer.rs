@@ -2432,7 +2432,10 @@ fn main(@location(0) position: vec2<f32>) -> @location(0) vec4<f32> {
         background.background = hsla(0.0, 0.0, 0.1, 1.0).into();
         scene.insert_primitive(background);
         if glow {
-            let element = Bounds::new(point(px(12.0), px(12.0)), size(px(width - 24.0), px(height - 24.0)));
+            let element = Bounds::new(
+                point(px(12.0), px(12.0)),
+                size(px(width - 24.0), px(height - 24.0)),
+            );
             let hole = (element + point(px(32.0), px(48.0))).dilate(px(16.0));
             scene.insert_primitive(Shadow {
                 order: Default::default(),
@@ -2471,7 +2474,10 @@ fn main(@location(0) position: vec2<f32>) -> @location(0) vec4<f32> {
         };
         let plain = time(false)?;
         let glow = time(true)?;
-        println!("pane glow {width}x{height}: background {plain:.3} ms, with glow {glow:.3} ms, glow {:.3} ms/frame", glow - plain);
+        println!(
+            "pane glow {width}x{height}: background {plain:.3} ms, with glow {glow:.3} ms, glow {:.3} ms/frame",
+            glow - plain
+        );
         Ok(())
     }
 
@@ -2522,4 +2528,3 @@ fn main(@location(0) position: vec2<f32>) -> @location(0) vec4<f32> {
         Ok(())
     }
 }
-

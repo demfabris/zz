@@ -1,11 +1,12 @@
 # AGENTS.md
 
-zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on gpui (Zed's UI framework, split out into our own `demfabris/gpui`), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL and GPUI iOS clients, and a raw-terminal attach client.
+zz is a tmux-superset terminal multiplexer that ships as a native GPU desktop app: a Rust workspace built on gpui (Zed's UI framework, split out into our own crates under `gpui/`), a persistent daemon that owns sessions and PTYs, Chromium browser panes (CEF off-screen rendering), agent panes (ACP), and remote hosts over plain ssh. Targets macOS and Linux (Wayland), with experimental Windows/WSL and GPUI iOS clients, and a raw-terminal attach client.
 
 Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (see `mise.toml`).
 
 ## Project map
 
+- `gpui/` — our GPUI: the 22 crates split out of Zed, as their own excluded Cargo workspace
 - `crates/zz` — desktop client: GPUI shell, terminal/browser/agent panes, settings, daemon client
 - `crates/zz-daemon` — the daemon: session state, PTY workers, client connections
 - `crates/zz-mux` — tmux-compatible model: sessions, windows, panes, key tables
@@ -74,12 +75,12 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 Multiple agent sessions often share this checkout in parallel. Never `git stash`, hard-reset, or discard uncommitted changes you did not author — you may be destroying another session's in-flight work.
 </important>
 
-<important if="you are changing gpui or moving its pin">
+<important if="you are changing gpui">
 
-- `gpui`, `gpui_platform`, and `gpui_wgpu` come from `demfabris/gpui`, our own repo with the 22 GPUI crates split out of Zed. It is not a patch branch: there is nothing to rebase, and upstream Zed fixes come in by hand. GPUI changes land there first, then the `rev` moves in root `Cargo.toml` `[workspace.dependencies]`.
-- Strange gpui build errors right after a dependency change usually mean `Cargo.lock` and the pinned rev are out of sync.
-- `clients/web` consumes gpui's WASM renderer in an excluded workspace. Keep its rev and lockfile in step with the root, and check `just web build` after a bump.
-- `knowledge/references/gpui-revision.md` has the full recipe; the `fork-rebase` skill covers the native Ghostty fork.
+- `gpui`, `gpui_platform`, and `gpui_wgpu` live in `gpui/`, our own copy of the 22 GPUI crates split out of Zed. It is not a patch branch: there is nothing to rebase, and upstream Zed fixes come in by hand. Change gpui in the same commit as the zz code that needs it.
+- `gpui/` is its own Cargo workspace, excluded from the root one and consumed by path, so the root clippy and test runs skip it. Run `cargo check --workspace` and the touched crates' tests from inside `gpui/`. `cargo fmt --all` from the root does format it.
+- `clients/web` consumes gpui's WASM renderer in an excluded workspace; check `just web build` after a gpui change.
+- `knowledge/references/gpui-revision.md` has the full recipe; the `fork-rebase` skill covers pulling upstream Zed fixes and the native Ghostty fork.
 </important>
 
 <important if="a test fails under cargo test --workspace">

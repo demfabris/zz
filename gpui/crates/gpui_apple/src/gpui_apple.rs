@@ -1,4 +1,5 @@
 #![cfg(target_os = "macos")]
+#![allow(deprecated)]
 //! Shared Apple platform support for GPUI.
 //!
 //! This crate contains the Metal renderer and GPU resource management shared

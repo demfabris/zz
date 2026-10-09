@@ -20,6 +20,7 @@ members = [
 ]
 exclude = [
     "clients/web",
+    "gpui",
     "third_party/rust/libghostty-vt",
     "third_party/rust/libghostty-vt-sys",
 ]
@@ -52,9 +53,9 @@ filedescriptor = "0.8.3"
 env_logger = "0.11.11"
 foldhash = "0.2.0"
 futures-lite = "2.6.1"
-gpui = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde" }
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_wgpu = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde" }
+gpui = { path = "gpui/crates/gpui" }
+gpui_platform = { path = "gpui/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_wgpu = { path = "gpui/crates/gpui_wgpu" }
 getrandom = "0.4.3"
 ignore = "0.4.33"
 image = { version = "=0.25.10", default-features = false }

@@ -1,45 +1,36 @@
 ---
 name: fork-rebase
-description: Maintain zz's own GPUI repo (demfabris/gpui, the 22 gpui crates split out of Zed, carrying RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, and more) and the native Ghostty fork pinned in third_party/rust/libghostty-vt-sys/build.rs. Use when changing gpui, moving its pin, pulling an upstream Zed fix, when the user says "bump gpui", "update zed", or "rebase forks", and before debugging weird gpui build errors after a dependency change.
+description: Maintain zz's own GPUI (gpui/, the 22 gpui crates split out of Zed, carrying RenderImage::into_frames, WgpuDeviceContext, the external-texture element, the window corner mask, superellipse corner smoothing, refresh_rate exposure, and more) and the native Ghostty fork pinned in third_party/rust/libghostty-vt-sys/build.rs. Use when changing gpui, pulling an upstream Zed fix, when the user says "bump gpui", "update zed", or "rebase forks", and before debugging weird gpui build errors after a dependency change.
 ---
 
-# GPUI: `demfabris/gpui`
+# GPUI: `gpui/`
 
-Since 2026-10-05 zz builds against [`demfabris/gpui`](https://github.com/demfabris/gpui), our
-own repo holding the 22 GPUI crates split out of Zed. It is not a patch branch: nothing gets
-rebased, and upstream Zed fixes come in by hand. Its first commit is upstream
-`zed-industries/zed` `933d8d9381` limited to those crates; the next 89 are the old
-`demfabris/zed` `zz-patches` commits (tip `5a00ac89a4`), replayed under new IDs. The old fork
-stays up as an archive; knowledge pages cite its commit IDs, and the same commits exist in
-`demfabris/gpui` with the same subjects. Crate paths match Zed's (`crates/gpui`,
-`crates/gpui_wgpu`, `tooling/perf`, ...), so upstream patches apply as-is.
+zz's GPUI lives in `gpui/`, the 22 GPUI crates split out of Zed on 2026-10-05. They were the
+[`demfabris/gpui`](https://github.com/demfabris/gpui) repo until 2026-10-09, when they moved in
+with their history (`git log -- gpui`). It is not a patch branch: nothing gets rebased, and
+upstream Zed fixes come in by hand. The first commit is upstream `zed-industries/zed`
+`933d8d9381` limited to those crates; the next 89 are the old `demfabris/zed` `zz-patches`
+commits (tip `5a00ac89a4`), replayed under new IDs. The old fork stays up as an archive;
+knowledge pages cite its commit IDs, and the same commits exist under `gpui/` with the same
+subjects. Crate paths under `gpui/` match Zed's (`crates/gpui`, `crates/gpui_wgpu`,
+`tooling/perf`, ...).
 
-Local checkout: `~/dev/gpui` on the macbook. Clone it anywhere else; it is about 7 MB.
+`gpui/` is its own Cargo workspace, excluded from the root one. The root `Cargo.toml` and
+`clients/web/Cargo.toml` depend on it by path, so there is no revision to move and no lockfile
+to re-resolve.
 
 ## Landing a GPUI change
 
-1. Commit and push in the `demfabris/gpui` checkout. Run `cargo check --workspace
-   --all-targets` there first, plus the GPU tests for whatever the change touches.
-2. Move the `rev` in root `Cargo.toml` `[workspace.dependencies]` (`gpui`, `gpui_platform`,
-   `gpui_wgpu`) and in `clients/web/Cargo.toml` (every `demfabris/gpui` line). All must match:
-   a second `rev` is a second source identity and builds a second copy of every GPUI crate.
-3. Re-resolve both lockfiles and check each diff touches only the 22 GPUI `source =` lines:
-
-   ```bash
-   cargo metadata --format-version 1 >/dev/null
-   cargo metadata --manifest-path clients/web/Cargo.toml --format-version 1 >/dev/null
-   rg -c 'demfabris/gpui' Cargo.lock clients/web/Cargo.lock
-   ```
-
-4. Run the workspace gates and `just web build`, then an isolated app run for anything visual.
-
-The gpui revision in diagnostics needs no manual bump: `crates/zz/build.rs` stamps
-`ZZ_GPUI_SOURCE` from `Cargo.lock` at build time.
+1. Edit `gpui/` in the same commit as the zz code that needs it.
+2. From inside `gpui/`, run `cargo check --workspace --all-targets` plus the GPU tests for
+   whatever the change touches. The root clippy and test runs skip gpui; `cargo fmt --all`
+   from the root formats it.
+3. Run the workspace gates and `just web build`, then an isolated app run for anything visual.
 
 ## Pulling a fix from upstream Zed
 
 ```bash
-git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3 --directory=gpui
 ```
 
 Limit the pathspec to the crates the fix touches. Never bulk-merge upstream: take what we need,
@@ -47,7 +38,7 @@ read it, and run the GPU tests for the renderers it touches.
 
 ## What zz changed in GPUI
 
-`git log` in `demfabris/gpui` is the authority. The core five:
+`git log -- gpui` is the authority. The core five:
 
   1. `RenderImage::into_frames()` — retired browser frames return their pixel
      buffers to the OSR paint pool.

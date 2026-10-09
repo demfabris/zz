@@ -1,47 +1,40 @@
 ---
 type: Reference
-title: GPUI revision pin
-description: Where the demfabris/gpui revision zz builds against is pinned, how to move it, and what zz's GPUI changes do. gpui-component is not a dependency.
-resource: Cargo.toml
-tags: [gpui, pin, reference, git-dependency]
-timestamp: 2026-10-07T00:00:00Z
+title: GPUI source
+description: Where zz's GPUI crates live (gpui/), how to change them or pull an upstream Zed fix, and what zz's GPUI changes do. gpui-component is not a dependency.
+resource: gpui/Cargo.toml
+tags: [gpui, reference, vendored]
+timestamp: 2026-10-09T00:00:00Z
 ---
 
 # Overview
 
-zz's GPUI layer comes from [`demfabris/gpui`](https://github.com/demfabris/gpui), our own
-repository holding the 22 GPUI crates split out of Zed on 2026-10-05. Its first commit is
-upstream `zed-industries/zed` at `933d8d9381`, limited to those crates; the next 89 are the
-commits that lived on the old `demfabris/zed` `zz-patches` branch (tip `5a00ac89a4`), replayed
-under new commit IDs. Before the split every build cloned all of Zed (about 400 MB) and every
-upstream bump meant rebasing the patch branch. Upstream fixes now come in by hand, when we want
-them.
+zz's GPUI layer lives in `gpui/`: the 22 GPUI crates split out of Zed on 2026-10-05. They
+spent four days as their own repository, [`demfabris/gpui`](https://github.com/demfabris/gpui),
+and moved into this repo on 2026-10-09 with their history (`git subtree add` of
+`99114ccc`), so `git log -- gpui` reaches back to the split. The first commit there is upstream
+`zed-industries/zed` at `933d8d9381`, limited to those crates; the next 89 are the commits that
+lived on the old `demfabris/zed` `zz-patches` branch (tip `5a00ac89a4`), replayed under new
+commit IDs. Upstream fixes come in by hand, when we want them.
 
 Commit IDs cited below come from the old `demfabris/zed` fork, which stays up as an archive. The
-same commits exist in `demfabris/gpui` with the same subjects.
+same commits exist under `gpui/` with the same subjects.
 
 On Linux, `gpui_platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-**Do not read a revision out of this document.** The pin lives in two manifests and two
-lockfiles, which must agree:
+`gpui/` is its own Cargo workspace (its root `Cargo.toml` holds the shared dependency versions
+and Zed's lints), excluded from the zz workspace. Both zz workspaces depend on it by path:
 
 | Place | Role |
 | --- | --- |
-| `Cargo.toml`, `[workspace.dependencies]` | The `rev = "…"` on `gpui`, `gpui_platform`, and `gpui_wgpu` (the iOS crate's direct renderer dependency). This is the authority. Editing it is how the pin moves. |
-| `clients/web/Cargo.toml` | The browser client's own workspace. Keep it on the desktop revision. |
-| `Cargo.lock` and `clients/web/Cargo.lock` | The resolved `source = "git+https://github.com/demfabris/gpui?rev=…"`. Regenerated, never hand-edited. |
+| `Cargo.toml`, `[workspace.dependencies]` | `gpui`, `gpui_platform`, and `gpui_wgpu` (the iOS crate's direct renderer dependency) as `path = "gpui/crates/…"`. |
+| `clients/web/Cargo.toml` | The browser client's own workspace, `path = "../../gpui/crates/…"`. |
 
-A second `rev` anywhere is a second source identity and builds a second copy of every GPUI crate.
-
-The appearance diagnostics log line no longer holds a third copy to keep in sync:
-`crates/zz/build.rs` reads the resolved source out of `Cargo.lock` and stamps it into
-`ZZ_GPUI_SOURCE`, which `crates/zz/src/lib.rs` prints as `GPUI_SOURCE`. To read the pin rather than
-trust this document:
-
-```bash
-rg 'demfabris/gpui' Cargo.toml Cargo.lock clients/web/{Cargo.toml,Cargo.lock}
-```
+Because the crates are not workspace members, `cargo clippy --workspace` and
+`cargo test --workspace` skip them and `[profile.dev.package."*"]` still optimizes them in dev
+builds. `cargo fmt --all` does format them, since it follows path dependencies. Run gpui's own
+checks from inside `gpui/`.
 
 **`gpui-component` is not a dependency.** It was forked into `crates/zz-ui` (`zz-ui`) and both
 `gpui-component` and `gpui-component-assets` are gone from the workspace and its lockfiles; nothing
@@ -54,8 +47,8 @@ Fork commit `37d0b352ed` carries the pane renderer changes. Metal, WGPU, and Dir
 use position-seeded stochastic alpha rounding in 1/128 steps to reduce banding. WGPU applies
 this before any required premultiplication. Dithering changes only alpha.
 The GPU test `faint_inset_shadows_dither_dark_composites` checks variation, noise size,
-brightness, and opaque composition. Both workspaces resolve these changes
-through their shared Git revision pin.
+brightness, and opaque composition. Both workspaces build these changes
+from `gpui/`.
 
 Blurred shadows also follow the element's superellipse cross-section in Metal, WGPU, and
 DirectX. The earlier carried smoothing fix covered only unblurred shadows, leaving the 2px
@@ -233,7 +226,7 @@ uses to show macOS browser frames on a native layer under the window (see
 display link after three vsyncs without frame demand, restarting it through `schedule_frame`
 and a new `frame_waker`, the same contract `gpui_web` uses for `requestAnimationFrame`.
 
-`git log` in `demfabris/gpui` is the authority (it carries
+`git log -- gpui` is the authority (it carries
 more commits than this list numbers, because a few patches landed as follow-up fixes to an entry
 above).
 
@@ -241,25 +234,20 @@ above).
 
 ```toml
 # Cargo.toml [workspace.dependencies]
-gpui = { git = "https://github.com/demfabris/gpui", rev = "<rev>" }
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "<rev>", default-features = false, features = ["font-kit", "wayland", "x11"] }
-gpui_wgpu = { git = "https://github.com/demfabris/gpui", rev = "<rev>" }
+gpui = { path = "gpui/crates/gpui" }
+gpui_platform = { path = "gpui/crates/gpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+gpui_wgpu = { path = "gpui/crates/gpui_wgpu" }
 ```
 
-Landing a GPUI change: commit and push it in a `demfabris/gpui` checkout, set the new `rev` in
-both manifests, then re-resolve both lockfiles. Each lock diff should touch only the 22 GPUI
-`source =` lines. Then run the workspace gates and `just web build`.
+Landing a GPUI change: edit `gpui/` in the same commit as the zz code that needs it. Run
+`cargo check --workspace` and `cargo test -p <crate>` inside `gpui/` for the crates you touched,
+then the zz workspace gates and `just web build`.
+
+Pulling a fix from upstream Zed: crate paths under `gpui/` match Zed's, so a patch limited to the
+touched crates applies with a directory prefix.
 
 ```bash
-cargo metadata --format-version 1 >/dev/null
-cargo metadata --manifest-path clients/web/Cargo.toml --format-version 1 >/dev/null
-```
-
-Pulling a fix from upstream Zed: crate paths in `demfabris/gpui` match Zed's, so a patch limited
-to the touched crates applies as-is.
-
-```bash
-git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3
+git -C <zed-checkout> format-patch -1 <sha> --stdout -- crates/gpui crates/gpui_wgpu | git am -3 --directory=gpui
 ```
 
 The two rebase sections below are history from the patch-branch era. Their layout sizes and
@@ -320,4 +308,4 @@ for Linux (musl target, zig as the C compiler) and `gpui_windows` for
 - [Terminal rendering parity concept](/terminal/rendering-parity.md) . the work done against this revision
 - [`app` crate](/crates/zz.md) . the GPUI client consuming these dependencies
 - [UI design conventions](/configuration/ui-conventions.md) . the zz-ui fork that replaced `gpui-component`
-- [Prerequisites](/playbooks/prerequisites.md) . toolchain needed to build against this GPUI pin
+- [Prerequisites](/playbooks/prerequisites.md) . toolchain needed to build this GPUI source

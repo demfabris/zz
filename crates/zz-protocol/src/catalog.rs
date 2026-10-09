@@ -680,14 +680,9 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "set-hook",
         "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]",
     ),
-    ("show-hooks", "[-Bgpw] [-F format] [-t target-pane] [hook]"),
     (
         "show-options",
         "[-AgHpqsvw] [-F format] [-t target-pane] [option]",
-    ),
-    (
-        "show-window-options",
-        "[-gv] [-F format] [-t target-window] [option]",
     ),
     ("server-access", "[-adglrw] [-t target-pane] [user|group]"),
     (
@@ -1807,7 +1802,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-window",
         aliases: &["splitw"],
         description: "Split a pane",
-        usage: "[-bdEfhIkPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
+        usage: "[-bdEfhIkPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("--kind", PaneKind, "pane kind").native(),
             CommandOptionSpec::value("--profile", FreeForm, "browser profile").native(),
@@ -1837,7 +1832,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-T", FreeForm, "pane title"),
             CommandOptionSpec::flag("-W", "wait for the pane's command to finish"),
             CommandOptionSpec::flag("-Z", "zoom the active pane after splitting"),
-            CommandOptionSpec::unsupported_value("-B"),
+            CommandOptionSpec::value("-B", FreeForm, "new pane border lines"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
@@ -2550,14 +2545,14 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-hooks",
         aliases: &[],
         description: "Show hooks",
-        usage: "[-Bgpw] [-t target-pane] [hook]",
+        usage: "[-Bgpw] [-F format] [-t target-pane] [hook]",
         options: &[
             CommandOptionSpec::flag("-B", "show format monitors"),
+            CommandOptionSpec::value("-F", FreeForm, "line format"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::flag("-p", "pane scope"),
             CommandOptionSpec::flag("-w", "window scope"),
-            CommandOptionSpec::unsupported_value("-F"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2604,10 +2599,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-options",
         aliases: &["show"],
         description: "Show server, session, window, or pane options",
-        usage: "[--json] [-AgHpqsvw] [-t target-pane] [option]",
+        usage: "[--json] [-AgHpqsvw] [-F format] [-t target-pane] [option]",
         options: &[
             CommandOptionSpec::flag("--json", "one JSON object per line").native(),
             CommandOptionSpec::flag("-A", "include inherited values"),
+            CommandOptionSpec::value("-F", FreeForm, "line format"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::flag("-H", "include hooks"),
             CommandOptionSpec::flag("-p", "pane scope"),
@@ -2616,7 +2612,6 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-t", FreeForm, "target"),
             CommandOptionSpec::flag("-v", "show value only"),
             CommandOptionSpec::flag("-w", "window scope"),
-            CommandOptionSpec::unsupported_value("-F"),
         ],
         positionals: &[SetOption],
         variadic: None,
@@ -2625,12 +2620,12 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-window-options",
         aliases: &["showw"],
         description: "Show window options",
-        usage: "[-gv] [-t target-window] [option]",
+        usage: "[-gv] [-F format] [-t target-window] [option]",
         options: &[
+            CommandOptionSpec::value("-F", FreeForm, "line format"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::flag("-v", "show value only"),
-            CommandOptionSpec::unsupported_value("-F"),
         ],
         positionals: &[SetOption],
         variadic: None,
@@ -3262,8 +3257,8 @@ mod tests {
             flag_shapes,
             BTreeMap::from([("none", 309), ("optional", 8), ("required", 234)])
         );
-        assert_eq!((supported, unsupported), (515, 37));
-        assert_eq!(usage_overrides.len(), 29);
+        assert_eq!((supported, unsupported), (519, 33));
+        assert_eq!(usage_overrides.len(), 27);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

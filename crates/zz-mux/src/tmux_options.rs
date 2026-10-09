@@ -43,6 +43,8 @@ pub(crate) const MESSAGE_COMMAND_STYLE_DEFAULT: &str = "bg=themeblack,fg=themeye
 pub(crate) const MESSAGE_FORMAT_DEFAULT: &str =
     "#[#{?#{command_prompt},#{E:message-command-style},#{E:message-style}}]#{message}";
 pub(crate) const MESSAGE_STYLE_DEFAULT: &str = "bg=themeyellow,fg=themeblack,#{?#{m/r:(^|#,)IS(PANE|MODE)($|#,),#{prompt_flags}},,fill=themeyellow}";
+pub(crate) const FILL_CHARACTER_DEFAULT: &str =
+    "#{?is_inside,#[bg=themedarkgrey] ,#[fg=themelightgrey]#[acs]~}";
 pub(crate) const PANE_SCROLLBARS_STYLE_DEFAULT: &str =
     "bg=themedarkgrey,fg=themelightgrey,width=1,pad=0";
 const COMMAND_ALIAS_DEFAULTS: &[&str] = &[
@@ -142,7 +144,7 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#[norange default]",
     ),
     concat!(
-        "#[align=left]#{R: ,#{n:#{session_name}}}P: ",
+        "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}P: ",
         "#[norange default]",
         "#[list=on align=#{status-justify}]",
         "#[list=left-marker]<#[list=right-marker]>#[list=on]",
@@ -153,7 +155,8 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#[push-default]",
         "#{T:window-pane-status-format}",
         "#[pop-default]",
-        "#[norange list=on default]  ",
+        "#[norange list=on default]",
+        "#{?loop_last_flag,,#{E:window-status-separator}}",
         ",",
         "#[range=pane|#{pane_id} list=focus ",
         "#{?#{!=:#{E:pane-status-current-style},default},",
@@ -164,11 +167,12 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#[push-default]",
         "#{T:window-pane-current-status-format}",
         "#[pop-default]",
-        "#[norange list=on default] ",
+        "#[norange list=on default]",
+        "#{?loop_last_flag,,#{E:window-status-separator}}",
         "}",
     ),
     concat!(
-        "#[align=left]#{R: ,#{n:#{session_name}}}S: ",
+        "#[align=left]#{R: ,#{e|-:#{w;T;=/#{status-left-length}:status-left},3}}S: ",
         "#[norange default]",
         "#[list=on align=#{status-justify}]",
         "#[list=left-marker]<#[list=right-marker]>#[list=on]",
@@ -177,7 +181,7 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "#{E:session-status-style}",
         "]",
         "#[push-default]",
-        "#S#{session_alert}",
+        "#S#{q/h:session_alert}",
         "#[pop-default]",
         "#[norange list=on default]  ",
         ",",
@@ -188,7 +192,7 @@ pub(crate) const STATUS_FORMAT_DEFAULTS: &[&str] = &[
         "}",
         "]",
         "#[push-default]",
-        "#S*#{session_alert}",
+        "#S*#{q/h:session_alert}",
         "#[pop-default]",
         "#[norange list=on default] ",
         "}",
@@ -363,9 +367,10 @@ pub(crate) fn tmux_stored_scalar(name: &str) -> Option<TmuxStoredScalar> {
         "mode-style" => ("noattr,bg=themeyellow,fg=themeblack", Style),
         "pane-active-border-style" => (
             concat!(
-                "fg=#{?pane_marked,thememagenta,",
+                "fg=#{?pane_modal_flag,themeblue,",
+                "#{?pane_marked,thememagenta,",
                 "#{?synchronize-panes,themered,",
-                "#{?pane_in_mode,themeyellow,themegreen}}}",
+                "#{?pane_in_mode,themeyellow,themegreen}}}}",
             ),
             Style,
         ),
@@ -1117,11 +1122,11 @@ fn tmux_option_default(name: &str) -> Option<TmuxOptionDefault> {
         "copy-command"
         | "cursor-colour"
         | "default-command"
-        | "fill-character"
         | "history-file"
         | "prompt-command-cursor-colour"
         | "prompt-cursor-colour" => TmuxOptionDefault::String(""),
         "default-size" => TmuxOptionDefault::String("80x24"),
+        "fill-character" => TmuxOptionDefault::String(FILL_CHARACTER_DEFAULT),
         "default-shell" => TmuxOptionDefault::String("/bin/sh"),
         "display-panes-time" | "message-limit" => TmuxOptionDefault::Scalar("1000"),
         "history-limit" => TmuxOptionDefault::Scalar("2000"),
@@ -1555,7 +1560,10 @@ mod tests {
             ("prompt-cursor-style", TmuxOptionDefault::Scalar("default")),
             ("clock-mode-colour", TmuxOptionDefault::String("themeblue")),
             ("clock-mode-style", TmuxOptionDefault::Scalar("24")),
-            ("fill-character", TmuxOptionDefault::String("")),
+            (
+                "fill-character",
+                TmuxOptionDefault::String(FILL_CHARACTER_DEFAULT),
+            ),
             (
                 "pane-border-indicators",
                 TmuxOptionDefault::Scalar("colour"),

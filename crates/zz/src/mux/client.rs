@@ -746,6 +746,7 @@ struct HostConnection {
     reconnect_attempt_in_flight: Option<u32>,
     reconnect_attach: Option<ReconnectAttachState>,
     in_flight_commands: RwLock<VecDeque<(u64, String)>>,
+    failed_commands: VecDeque<u64>,
     ssh_auth_declined: bool,
     background_core: ClientCore,
 }
@@ -773,6 +774,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
+            failed_commands: VecDeque::new(),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         }
@@ -844,6 +846,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
+            failed_commands: VecDeque::new(),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         })
@@ -861,6 +864,13 @@ impl HostConnection {
         let mut in_flight = self.in_flight_commands.write();
         let index = in_flight.iter().position(|(id, _)| *id == request_id)?;
         in_flight.remove(index).map(|(_, name)| name)
+    }
+
+    fn record_failed_command(&mut self, request_id: u64) {
+        while self.failed_commands.len() >= MAX_TRACKED_COMMANDS {
+            self.failed_commands.pop_front();
+        }
+        self.failed_commands.push_back(request_id);
     }
 
     fn reroute(&self, host: HostId) {
@@ -2763,7 +2773,18 @@ impl MuxClient {
         self.execute_on_host(self.attached_host, command);
     }
 
-    pub fn execute_on_host(&self, host: HostId, command: CommandInvocation) {
+    pub fn execute_tracked(&self, command: CommandInvocation) -> Option<u64> {
+        self.execute_on_host(self.attached_host, command)
+    }
+
+    #[must_use]
+    pub fn command_failed(&self, request_id: u64) -> bool {
+        self.attached_connection()
+            .failed_commands
+            .contains(&request_id)
+    }
+
+    pub fn execute_on_host(&self, host: HostId, command: CommandInvocation) -> Option<u64> {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         log::trace!(
             target: "zz::diagnostics::mux",
@@ -2771,33 +2792,41 @@ impl MuxClient {
         );
         let Some(connection) = self.connections.get(&host) else {
             log::warn!("cannot send mux command to unknown fleet host {host:?}");
-            return;
+            return None;
         };
         let name = command.name.clone();
-        if let Some(client) = &connection.client {
-            match client.execute(command) {
-                Ok(request_id) => connection.track_command(request_id, name),
-                Err(error) => log::warn!("failed to send mux command: {error}"),
-            }
+        let sent = if let Some(client) = &connection.client {
+            client.execute(command)
         } else {
             #[cfg(test)]
             if let Some(client) = &connection.fake_client {
-                match client.execute(command) {
-                    Ok(request_id) => connection.track_command(request_id, name),
-                    Err(error) => log::warn!("failed to send mux command: {error}"),
+                let sent = client.execute(command);
+                if let Ok(request_id) = sent {
+                    connection.track_command(request_id, name);
                 }
-                return;
+                return sent.ok();
             }
             log::trace!(
                 target: "zz::diagnostics::mux",
                 "execute skipped: no client for host={host:?}",
             );
-        }
+            return None;
+        };
         log::trace!(
             target: "zz::diagnostics::mux",
             "execute end elapsed_us={}",
             diagnostics::elapsed_us(started)
         );
+        match sent {
+            Ok(request_id) => {
+                connection.track_command(request_id, name);
+                Some(request_id)
+            }
+            Err(error) => {
+                log::warn!("failed to send mux command: {error}");
+                None
+            }
+        }
     }
 
     pub fn new_session(&self, host: HostId) {
@@ -3666,7 +3695,7 @@ impl MuxClient {
     }
 
     fn report_command_failure(
-        &self,
+        &mut self,
         host: HostId,
         request_id: u64,
         error: &ServerError,
@@ -3675,10 +3704,10 @@ impl MuxClient {
         if request_id == 0 {
             return false;
         }
-        let tracked = self
-            .connections
-            .get(&host)
-            .and_then(|connection| connection.take_command(request_id));
+        let tracked = self.connections.get_mut(&host).and_then(|connection| {
+            connection.record_failed_command(request_id);
+            connection.take_command(request_id)
+        });
         match tracked {
             Some(name)
                 if matches!(

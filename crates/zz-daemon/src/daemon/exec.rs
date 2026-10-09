@@ -229,8 +229,10 @@ pub fn exec_resume_kind(
             })
     });
     let attach_prefix = !matches!(first_typed, "attach" | "attach-session")
-        && prepared_command_any(first, |_, canonical_name| {
-            canonical_name == "attach-session"
+        && prepared.iter().any(|command| {
+            prepared_command_any(command, |_, canonical_name| {
+                canonical_name == "attach-session"
+            })
         });
     if new_session || attach_prefix {
         return Some(ExecResumeKind::NewSession);

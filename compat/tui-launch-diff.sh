@@ -478,9 +478,9 @@ run_attached_cases() {
   compare_screens attach-live same
   compare_facts attach-live same
 
-  launch_both set-environment -g UPGRADE_PREFIX before '\;' \
-    attach-session -t '=live' '\;' \
-    set-environment -g UPGRADE_TAIL after '\;' \
+  launch_both set-environment -g UPGRADE_PREFIX before ';' \
+    attach-session -t '=live' ';' \
+    set-environment -g UPGRADE_TAIL after ';' \
     set-option -g status-left UPGRADE
   wait_for "zz attached through the command chain" side_attached zz
   wait_for "tmux attached through the command chain" side_attached tmux
@@ -750,4 +750,5 @@ if [ "$FAILURES" -ne 0 ]; then
     "$FAILURES" "$CHECKS" "$RECORDS"
   exit 1
 fi
-printf 'all %s comparisons agree where they assert, %s recorded not asserted\n' "$CHECKS" "$RECORDS"
+printf 'all %s comparisons agree where they assert, %s recorded not asserted, owners decided:TUI-003=%s unattributed=0\n' \
+  "$CHECKS" "$RECORDS" "$RECORDS"

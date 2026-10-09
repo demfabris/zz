@@ -164,10 +164,12 @@ files as bytes and keep the pin's two input shapes apart, so a runtime `source-f
 `parse_config_buffer_bytes`, where the pin's signed-char reading makes `0xff` one EOF that ends the
 current line while the rest of the file keeps parsing, and a startup `-f` file goes through
 `parse_config_file_bytes`, which keeps the byte inside the token so the command name stays unknown.
-Nothing is replaced with lossy text: a surviving command name or argument that still holds non-UTF-8
-bytes keeps the typed read error. `config.non-utf8-file-bytes` closed on 2026-09-01; that argument
-limit and the `source-file -` caller stdin transport, whose completion number already agrees, stay
-accepted under `protocol.binary-streams`. Control sourced-hook cwd, deferred event-hook cwd and
+Arguments and environment values keep their bytes: a command argument reaches the command as
+`RawText`, so `set-buffer` and `set-environment` store exactly what the file held, and a command name
+that is not UTF-8 is unknown, as on the pin. Only an environment assignment whose name is not UTF-8
+keeps the typed read error. `source-file -` parses its caller stream with the same buffer parser,
+so a stream that is not UTF-8 applies too. `config.non-utf8-file-bytes` closed on 2026-09-01 and
+`protocol.binary-streams` on 2026-10-09. Control sourced-hook cwd, deferred event-hook cwd and
 routing, and hard-disconnect queue cancellation also remain under their named gaps.
 No-match, glob, and located depth diagnostics stay inside the source command's guard. Config
 summaries and lexer-owned diagnostics remain generic Warning events

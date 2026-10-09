@@ -31,6 +31,12 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
             "",
             &[],
         ),
+        "clear-on-attach" => (
+            TmuxOptionKind::Flag,
+            "Whether to use the alternate screen and clear it when a client is attached. When disabled, tmux does not enter the alternate screen on attach so terminal content before tmux remains in scrollback.",
+            "",
+            &[],
+        ),
         "command-alias" => (
             TmuxOptionKind::String,
             "Array of command aliases. Each entry is an alias and a command separated by '='.",
@@ -765,6 +771,18 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
             "",
             &[],
         ),
+        "copy-mode-current-line-style" => (
+            TmuxOptionKind::Style,
+            "Style of the line containing the cursor in copy mode.",
+            "",
+            &[],
+        ),
+        "display-panes-border-style" => (
+            TmuxOptionKind::Style,
+            "Style of the pane borders in 'display-panes'.",
+            "",
+            &[],
+        ),
         "copy-mode-position-style" => (
             TmuxOptionKind::Style,
             "Style of position indicator in copy mode.",
@@ -797,7 +815,7 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
         ),
         "fill-character" => (
             TmuxOptionKind::String,
-            "Character used to fill unused parts of window.",
+            "Format used to fill unused parts of window.",
             "",
             &[],
         ),
@@ -946,9 +964,9 @@ pub(crate) fn tmux_option_metadata(name: &str) -> TmuxOptionMetadata {
         ),
         "remain-on-exit" => (
             TmuxOptionKind::Choice,
-            "Whether panes should remain ('on'), remain until a key is pressed ('key') or be automatically killed ('off' or 'failed') when the program inside exits.",
+            "Whether panes should remain ('on'), remain until a key is pressed after any exit ('key') or after a failure ('failed-key'), or be automatically killed ('off' or 'failed') when the program inside exits.",
             "",
-            &["off", "on", "failed", "key"],
+            &["off", "on", "failed", "key", "failed-key"],
         ),
         "remain-on-exit-format" => (
             TmuxOptionKind::String,

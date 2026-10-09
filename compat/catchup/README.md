@@ -56,6 +56,8 @@ orchestrator never runs the full suite per item.
    sessions share it; never stash or reset their work).
    - `git merge-tree --write-tree main catchup/<id>` first: it predicts conflicts in one command.
    - `git merge --no-ff catchup/<id>`.
+   - A lane branched before a pin move merges `main` and re-verifies at the new pin first
+     (refresh its `compat/.cache` from the main checkout), then goes to review.
    - Merge checks, narrow: `compat/catchup/cargo.sh clippy -p <touched crates> --all-targets
      --all-features -- -D warnings`, the item's own filtered tests, and `just compat check` if the
      registry, oracle or manifest tests changed.
@@ -65,12 +67,18 @@ orchestrator never runs the full suite per item.
      ready. No worktree outlives its work.
 5. **Milestones**: at M1, M2 and M3 run the [full suite](#full-suite-milestones-only) once on `main`.
 
+Orchestrator shell habits: never `pkill -f <pattern>` (it matches the shell running it; list pids
+with `pgrep -f`, check `readlink /proc/<pid>/cwd`, then `kill` those pids), and chain a merge and
+its checks with `&&` only, so a failed merge never starts checks on the unmerged tree. A trailing
+`&` backgrounds the whole `&&` list, merge included: put the detached checks in their own command.
+
 Add a dated line to [Decisions](#decisions) for every call the orchestrator makes on fabrico's
 behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new lesson.
 
 ## Priority order
 
-1. `pin.move`: unblocks the whole pin track and `float.core`.
+1. `pin.move`: unblocks the whole pin track and `float.core`. Then `pin.tui-fixtures`, because the
+   TUI fixtures are red at 3.8 until it lands and every lane that runs one sees the noise.
 2. `fix.tui-colour`: a real bug users hit over ssh.
 3. `float.design`: no compile, runs as a third agent beside two compiling lanes.
 4. The other `fix.*` items, in ledger order.
@@ -79,13 +87,14 @@ behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new le
 
 ## Lane rules
 
-Each rule cost an earlier campaign real time. The source is in brackets
+Each rule cost a campaign real time. The source is in brackets
 (`compat/orchestration/CAMPAIGN-LOG.md` = LOG, `compat/tui/HANDOFF.md` = THO,
 `knowledge/playbooks/tui-parity-campaign.md` = PB).
 
 1. **Cargo only through `compat/catchup/cargo.sh`.** It caps memory, sets `--jobs` from RAM, and
    holds one of two cargo slots inside `flock -o`, so a killed lane's daemons cannot keep a slot
-   locked. [Five lanes OOMed alienware for hours; a leaked slot fd stalled every lane for 7 h.]
+   locked. Scripts that call `cargo` themselves (`just compat check`, `compat/run.sh`) go through
+   it too when run as `PATH=$PWD/compat/catchup/bin:$PATH <script>`; always run them that way. [Five lanes OOMed alienware for hours; a leaked slot fd stalled every lane for 7 h.]
 2. **Iterate behind a filter**: `compat/catchup/cargo.sh test -p <crate> --lib <name>`. Run the full
    test package of each crate you touched once, before your final commit. Never
    `cargo test --workspace`. [A whole `zz-daemon` run per edit made every loop cost minutes.]
@@ -101,14 +110,15 @@ Each rule cost an earlier campaign real time. The source is in brackets
    [Twice a corpus row contradicted a lane and only the gate found it, PB.]
 6. **Registry**: edit only the gap entries your item names, plus new ones it needs. After any edit
    to `compat/tmux-gaps.json`, `compat/tmux-oracle.json` or `compat_manifest_tests.rs`, run
-   `just compat check` (zz-mux lib tests plus three daemon tests).
+   `PATH=$PWD/compat/catchup/bin:$PATH just compat check` (zz-mux lib tests plus three daemon
+   tests, plus the layout converter tests).
 7. **Wire**: `PROTOCOL_VERSION` 107 shipped in v0.16.0. If you change a serde type under
    `crates/zz-protocol/src` (not `catalog.rs` or `lib.rs`) and main still says 107, move it to 108,
    move both assertions (`message.rs`, `tests/hunt_claims.rs`) and open 108 in
    `knowledge/protocol/wire-protocol.md`. If main already says 108 and no tag shipped it, append
-   under 108. `python3 compat/wire-version.py` tells you. `feat/native-agent-drivers` and
-   `feat/osc-7501` also claim 108; that is fine while it is unreleased. [A release froze the
-   version lanes were appending to, three times.]
+   under 108 (main is on unreleased 108 since native-agent-drivers and osc-7501 merged on
+   2026-10-09). `python3 compat/wire-version.py` tells you. [A release froze the version lanes
+   were appending to, three times.]
 8. **Bash calls die at 600 s.** Run long builds and fixtures detached
    (`setsid nohup <cmd> > <log> 2>&1 &`, append an `EXIT $?` marker) and poll the log. Never end
    your turn waiting on a background task. [A reviewer that did was dropped, LOG.]
@@ -123,7 +133,10 @@ Each rule cost an earlier campaign real time. The source is in brackets
 13. **Probes live in the repo** (tests or `compat/scenarios`), never only in `/tmp`, which is RAM
     and is lost on reboot. [A gate spent an hour rebuilding lost probes, LOG.]
 14. **Leave nothing running**: kill the daemons and fixtures you started; no binary copies in `/tmp`.
-15. **Commits**: plain English, what changed and why; end with `Co-Authored-By: <a funny name>`
+15. **Stay in your worktree.** Start every Bash command with `cd <your worktree> &&` or use
+    absolute paths; a `cd` inside a backgrounded subshell does not carry over. [fix.tui-colour ran a
+    test batch in the shared main checkout this way, 2026-10-09.]
+16. **Commits**: plain English, what changed and why; end with `Co-Authored-By: <a funny name>`
     (race-condition-slayer, deadbeef-hexlord); never Claude, Codex or an email. No comments in code.
 
 ## Full suite: milestones only
@@ -169,11 +182,14 @@ so one of them may run beside the compiling lanes. On macOS there is no `systemd
 Stuck looks like: the same full command 4 or more times in a lane's last 60 calls, the same failure
 signature 4 or more times, no transcript write for 20 minutes, two memory kills, or hours of calls
 with no commit. A high raw failure rate alone means nothing. A stuck lane gets one redirect, then is
-stopped with its work committed as WIP.
+stopped with its work committed as WIP. To check a lane cheaply: newest mtime under its
+worktree's `crates` and `compat` (`find ... -newermt '-30 minutes'`) and processes whose cwd is in
+it. A lane that waits on a background job can stall silently for hours (fix.tui-colour,
+2026-10-09): stop it and relaunch with "continue from the uncommitted changes".
 
 ## Codex
 
-Codex only reviews. `review.sh` runs `codex review --base main` at high effort with `review.md`
+Codex only reviews. `review.sh` runs `codex exec` read-only at high effort over `git diff main...HEAD`, with `review.md`
 plus the ledger item as the prompt, from the lane's worktree. If Codex is out
 (`^ERROR: You've hit your usage limit`, "model is at capacity"), run the same prompt through an Opus
 subagent instead and note it in the ledger. Killing the orchestrator leaves a running `codex` child;
@@ -187,5 +203,22 @@ check `pgrep -af codex` on resume.
   orchestrator manages parallelism and worktrees; instructions must survive a machine switch.
 - 2026-10-09 orchestrator: pin the `3.8` tag (7f2a35ad), not master. Master deleted popups and the
   `popup-*` options, which would break configs today; it is the next pin move, not this one.
+- 2026-10-09 orchestrator: wave 1 launched on alienware: `pin.move` (slot a), `fix.tui-colour`
+  (slot b), `float.design` (slot c, no compile).
+- 2026-10-09 orchestrator, on the design's two open questions, after Codex's review: match 3.8 on
+  both. Windows may hold only floating panes (a zz-only "keep one tile" rule needed more custom
+  transfer rules than it saved), and the v2 layout writer keeps 3.8's structural position for
+  floating leaves so `#{window_layout}` matches tmux.
+- 2026-10-09 orchestrator: pin.move merged (338aad43a); the pin is tmux 3.8. Any checkout's
+  `compat/.cache` must be refetched (`compat/fetch-tmux.sh`) before `just compat check` passes there;
+  `wt.sh add` copies the main checkout's cache, so refresh that one first.
+- 2026-10-09 orchestrator: fix.capture-links gets a third, final fix pass after two reviews (output
+  marks on resize, repeated alternate-on, IL/DL) and merges without a third review; IL/DL may be
+  recorded as an engine limit if it does not fit. Zz approximates tmux's per-row output flag with
+  tracked pins, so its edge cases are bounded by budget, not chased to the end.
+- 2026-10-09 orchestrator: float.core runs as repeated 240-minute sessions in six ordered steps
+  (model, commands, zoom/focus, daemon and display-popup, wire, formats/registry), each step its
+  own commit; a relaunch continues from the branch and the last session's report. It is reviewed
+  once all six steps are in.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

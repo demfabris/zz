@@ -26,14 +26,12 @@ fn choose_buffer_filters_each_row_by_its_own_created_time() {
             data: Arc::from(b"old".as_slice()),
             created: UNIX_EPOCH + Duration::from_secs(1000),
             automatic: false,
-            utf8: true,
         },
         PasteBuffer {
             name: "newer".to_owned(),
             data: Arc::from(b"new".as_slice()),
             created: UNIX_EPOCH + Duration::from_secs(2000),
             automatic: false,
-            utf8: true,
         },
     ];
     let facts = FormatHookFacts::default();

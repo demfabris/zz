@@ -4,25 +4,28 @@ title: Running the tmux compatibility harness
 description: How to run the pinned tmux differential corpus, read topology, geometry, format, and query-stdout results, and record known divergences.
 resource: compat/run.sh
 tags: [tmux, compatibility, differential-testing, geometry, playbook]
-timestamp: 2026-08-26T00:00:00-03:00
+timestamp: 2026-10-09T00:00:00-03:00
 last_updated: 2026-08-31
 last_updated_by: Codex
 ---
 
 # Overview
 
-The harness feeds each scenario command to zz and tmux at commit
-`d77c9dc6aa021e4bc61f0da128c591af695e6466`. After each command, it queries both servers
+The harness feeds each scenario command to zz and tmux at the `3.8` tag, commit
+`7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`. After each command, it queries both servers
 with matching explicit `list-sessions`, `list-windows`, and `list-panes` formats. The
 runner compares command exit classes and topology as strict results. It also compares `fmt:` format
 queries and generic `out:` command stdout as separate byte-exact strict channels. Geometry
-differences fail under `--strict-geometry`, which is how CI runs the harness.
+differences fail under `--strict-geometry`, which is how CI runs the harness. The geometry snapshot
+compares window layouts in the checksummed v1 form: `compat/layout-v1.py` rewrites the JSON v2
+layouts tmux 3.8 prints, so the channel compares layout trees whichever form a side prints, while
+`fmt:` and `out:` queries still see the raw strings.
 
 `compat/run.sh` builds `target/debug/zz` with your normal environment before the scenario
 runner creates its scratch `HOME` and `XDG_CONFIG_HOME`. The tmux fetcher clones and builds
-the pin under `compat/.cache/`. The canonical oracle check accepts `tmux next-3.8` only when the
+the pin under `compat/.cache/`. The canonical oracle check accepts `tmux 3.8` only when the
 binary lives at the root of a clean source checkout at the exact pin and its companion build stamp
-matches the commit, version, fetch recipe, and binary checksum. `ZZ_COMPAT_TMUX` can select another
+matches the tag, commit, version, fetch recipe, and binary checksum. `ZZ_COMPAT_TMUX` can select another
 cache built by the same fetcher, but a version-matching prebuilt or an unstamped clean checkout
 cannot satisfy the oracle.
 
@@ -485,7 +488,7 @@ Use the registry vocabulary consistently:
 ## Coverage freshness
 
 `compat/results/summary.md` is the persisted acceptance artifact. It records 220 scenarios and 2,648
-steps against pinned tmux `d77c9dc6`. Every ordinary row is clean and exactly three registered
+steps against the previous pin, tmux `d77c9dc6`; it predates the move to the 3.8 tag. Every ordinary row is clean and exactly three registered
 `known/` rows carry GEO differences, one of them an approved OUT difference as well. Its SHA-256 is
 `5bef958b6945d2d07d39ab0409e47589e486e43695a458392fbae2957bfb4c1c`. The file also ends with an
 attached-client `Status: PASS` footer that nothing regenerates: `compat/attached-client.sh` does not
@@ -831,7 +834,7 @@ Interactive delivery with a global drain. It compares normalized Control transcr
 detached streams and status, and drives the attached Interactive view through real outer PTYs.
 
 The oracle must be the checkout-root `tmux` executable from a clean checkout at exact commit
-`d77c9dc6aa021e4bc61f0da128c591af695e6466`, report `tmux next-3.8`, and match the build stamp's
+`7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`, report `tmux 3.8`, and match the build stamp's
 commit, version, fetch-script checksum, and binary checksum. The probe requires GNU `timeout`, wraps
 commands in real 15-second deadlines, uses 500 ms bounded polls, and stops readiness loops after 10
 seconds. A missing case or any skip fails the run.

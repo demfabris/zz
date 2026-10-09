@@ -166,8 +166,8 @@ impl Replacement {
             None => (Vec::new(), body, arguments),
         };
         let flags = ModifierFlags::from_modifiers(&modifiers);
-        *clock_dependent |= flags.time.enabled || flags.expand_time;
-        *unconditional_clock |= flags.time.enabled;
+        *clock_dependent |= flags.time.enabled || flags.expand_time || flags.cycle.is_some();
+        *unconditional_clock |= flags.time.enabled || flags.cycle.is_some();
         *split_safe &= !modifiers
             .iter()
             .any(|modifier| modifier.kind == ModifierKind::NameExists)
@@ -677,6 +677,7 @@ pub(super) struct Flags {
     loop_environment: Option<String>,
     content_search: Option<String>,
     interrogate: Option<String>,
+    cycle: Option<u64>,
     comparison: Option<Comparison<'static>>,
     match_flags: Option<String>,
     substitutions: Vec<usize>,
@@ -759,6 +760,7 @@ impl Flags {
             loop_environment: flags.loop_environment.map(str::to_owned),
             content_search: flags.content_search.map(str::to_owned),
             interrogate: flags.interrogate.map(str::to_owned),
+            cycle: flags.cycle,
             comparison,
             match_flags,
             substitutions: flags
@@ -820,6 +822,7 @@ impl Flags {
             loop_environment: self.loop_environment.as_deref(),
             content_search: self.content_search.as_deref(),
             interrogate: self.interrogate.as_deref(),
+            cycle: self.cycle,
             comparison: self
                 .match_flags
                 .as_deref()

@@ -2317,6 +2317,9 @@ pub enum InputMessage {
         rows: u16,
         layout_generation: u64,
     },
+    ClipboardReply {
+        data: Vec<u8>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3633,6 +3636,8 @@ pub enum EventPayload {
         wait_exit: bool,
         pause_after_ms: Option<u64>,
         no_output: bool,
+        #[serde(default)]
+        new_layouts: bool,
     },
     SubscriptionChanged {
         name: String,
@@ -3712,6 +3717,7 @@ pub enum EventPayload {
         canonical_name: Option<String>,
         guard: bool,
     },
+    ClipboardQuery,
     TerminalNegotiation {
         features: Vec<String>,
         user_keys: Vec<String>,
@@ -4837,6 +4843,7 @@ mod tests {
                 wait_exit: false,
                 pause_after_ms: None,
                 no_output: false,
+                new_layouts: false,
             }),
             44
         );

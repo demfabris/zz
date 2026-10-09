@@ -616,7 +616,7 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
     ),
     (
         "capture-pane",
-        "[-aCeFHJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+        "[-aCeFHIJLMNpPqRT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
     ),
     (
         "choose-buffer",
@@ -631,6 +631,14 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-GhkNrswZ] [-F format] [-f filter] [-K key-format] [-O sort-order] [-t target-pane] [template]",
     ),
     ("copy-mode", "[-dekHMqSu] [-s src-pane] [-t target-pane]"),
+    (
+        "display-message",
+        "[-aCIjlNpv] [-c target-client] [-d delay] [-F format] [-t target-pane] [message]",
+    ),
+    (
+        "display-panes",
+        "[-kNZ] [-d duration] [-s source-window] [-t target-pane] [template]",
+    ),
     (
         "join-pane",
         "[-bdfhv] [-l size] [-s src-pane] [-t dst-pane]",
@@ -668,12 +676,20 @@ static PINNED_TMUX_USAGE_OVERRIDES: &[(&str, &str)] = &[
         "[-MTZ] [-D lines] [-L columns] [-R columns] [-U lines] [-x width] [-y height] [-t target-pane]",
     ),
     ("select-pane", "[-DdeLlMmRUZ] [-T title] [-t target-pane]"),
-    ("show-options", "[-AgHpqsvw] [-t target-pane] [option]"),
+    (
+        "set-hook",
+        "[-agpERTuw] [-B name:what:format] [-t target-pane] [hook] [command]",
+    ),
+    (
+        "show-options",
+        "[-AgHpqsvw] [-F format] [-t target-pane] [option]",
+    ),
     ("server-access", "[-adglrw] [-t target-pane] [user|group]"),
     (
         "split-window",
-        "[-bdefhIklPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
+        "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-t target-pane] [shell-command [argument ...]]",
     ),
+    ("wait-for", "[-ELSUlv] [-F format] [-w waiter] name"),
 ];
 
 pub static DAEMON_COMMAND_NAMES: &[&str] = &[
@@ -788,13 +804,19 @@ static UNIMPLEMENTED_TMUX_COMMAND_SPECS: &[CommandSpec] = &[
         name: "new-pane",
         aliases: &["newp"],
         description: "Unsupported tmux command",
-        usage: "[-bdefhIklPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
+        usage: "[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]",
         options: &[
+            CommandOptionSpec::unsupported_flag("-A"),
             CommandOptionSpec::unsupported_value("-B"),
+            CommandOptionSpec::unsupported_flag("-C"),
+            CommandOptionSpec::unsupported_flag("-D"),
             CommandOptionSpec::unsupported_flag("-E"),
             CommandOptionSpec::unsupported_value("-F"),
             CommandOptionSpec::unsupported_flag("-I"),
+            CommandOptionSpec::unsupported_flag("-K"),
             CommandOptionSpec::unsupported_flag("-L"),
+            CommandOptionSpec::unsupported_flag("-M"),
+            CommandOptionSpec::unsupported_flag("-O"),
             CommandOptionSpec::unsupported_flag("-P"),
             CommandOptionSpec::unsupported_value("-R"),
             CommandOptionSpec::unsupported_value("-S"),
@@ -1000,11 +1022,13 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
         name: "capture-pane",
         aliases: &["capturep"],
         description: "Capture the contents of a pane",
-        usage: "[-aCeJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
+        usage: "[-aCeFHJLMNpqT] [-b buffer-name] [-E end-line] [-S start-line] [-t target-pane]",
         options: &[
             CommandOptionSpec::flag("-a", "capture the alternate screen"),
             CommandOptionSpec::flag("-C", "escape backslashes and escape sequences"),
             CommandOptionSpec::flag("-e", "include escape sequences"),
+            CommandOptionSpec::flag("-F", "prefix each line with its line flags"),
+            CommandOptionSpec::flag("-H", "print the hyperlinks on each line"),
             CommandOptionSpec::flag("-J", "join wrapped lines"),
             CommandOptionSpec::flag("-L", "number each line"),
             CommandOptionSpec::flag("-M", "trailing spaces"),
@@ -1016,8 +1040,7 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-E", FreeForm, "end line"),
             CommandOptionSpec::value("-S", FreeForm, "start line"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
-            CommandOptionSpec::unsupported_flag("-F"),
-            CommandOptionSpec::unsupported_flag("-H"),
+            CommandOptionSpec::unsupported_flag("-I"),
             CommandOptionSpec::unsupported_flag("-P"),
             CommandOptionSpec::unsupported_flag("-R"),
         ],
@@ -1312,6 +1335,11 @@ pub static DAEMON_COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-L", "lock the channel"),
             CommandOptionSpec::flag("-S", "signal the channel"),
             CommandOptionSpec::flag("-U", "unlock the channel"),
+            CommandOptionSpec::unsupported_flag("-E"),
+            CommandOptionSpec::unsupported_value("-F"),
+            CommandOptionSpec::unsupported_flag("-l"),
+            CommandOptionSpec::unsupported_flag("-v"),
+            CommandOptionSpec::unsupported_value("-w"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -1594,13 +1622,13 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         description: "Refresh the current client",
         usage: "[-cDlLRSU] [-A pane:state] [-B name:what:format] [-C XxY] [-F flags] [-f flags] [-r pane:report] [-t target-client] [adjustment]",
         options: &[
-            CommandOptionSpec::flag("-c", "return to the previous client size"),
-            CommandOptionSpec::flag("-D", "disable client size updates"),
-            CommandOptionSpec::flag("-l", "request clipboard data"),
-            CommandOptionSpec::flag("-L", "request clipboard data and enable OSC 52"),
-            CommandOptionSpec::flag("-R", "redraw the client"),
+            CommandOptionSpec::flag("-c", "follow the cursor again"),
+            CommandOptionSpec::flag("-D", "move the visible part down"),
+            CommandOptionSpec::flag("-l", "store the terminal clipboard in a new buffer"),
+            CommandOptionSpec::flag("-L", "move the visible part left"),
+            CommandOptionSpec::flag("-R", "move the visible part right"),
             CommandOptionSpec::flag("-S", "refresh client status"),
-            CommandOptionSpec::flag("-U", "update client size"),
+            CommandOptionSpec::flag("-U", "move the visible part up"),
             CommandOptionSpec::value("-A", FreeForm, "pane state"),
             CommandOptionSpec::value("-B", FreeForm, "format subscription"),
             CommandOptionSpec::value("-C", FreeForm, "client size"),
@@ -1774,7 +1802,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "split-window",
         aliases: &["splitw"],
         description: "Split a pane",
-        usage: "[-bdEfhIkPvWZ] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
+        usage: "[-bdEfhIkPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-R inactive-border-style] [-s style] [-S active-border-style] [-T title] [-t target-pane] [--kind terminal|browser|picker|agent] [--profile NAME] [--provider codex|claude-code] [shell-command [argument ...]]",
         options: &[
             CommandOptionSpec::value("--kind", PaneKind, "pane kind").native(),
             CommandOptionSpec::value("--profile", FreeForm, "browser profile").native(),
@@ -1804,6 +1832,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::value("-T", FreeForm, "pane title"),
             CommandOptionSpec::flag("-W", "wait for the pane's command to finish"),
             CommandOptionSpec::flag("-Z", "zoom the active pane after splitting"),
+            CommandOptionSpec::value("-B", FreeForm, "new pane border lines"),
         ],
         positionals: &[],
         variadic: Some(FreeForm),
@@ -2348,6 +2377,7 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
                 "-I",
                 "write the caller's standard input into the target empty pane",
             ),
+            CommandOptionSpec::unsupported_flag("-j"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2375,6 +2405,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-b", "do not block other commands, always on in zz"),
             CommandOptionSpec::flag("-N", "disable pane selection"),
             CommandOptionSpec::value("-t", FreeForm, "target client"),
+            CommandOptionSpec::unsupported_flag("-k"),
+            CommandOptionSpec::unsupported_value("-s"),
+            CommandOptionSpec::unsupported_flag("-Z"),
         ],
         positionals: &[FreeForm],
         variadic: None,
@@ -2502,6 +2535,8 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
             CommandOptionSpec::flag("-R", "run immediately"),
             CommandOptionSpec::flag("-u", "unset"),
             CommandOptionSpec::flag("-w", "window scope"),
+            CommandOptionSpec::unsupported_flag("-E"),
+            CommandOptionSpec::unsupported_flag("-T"),
         ],
         positionals: &[FreeForm, FreeForm],
         variadic: None,
@@ -2510,9 +2545,10 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-hooks",
         aliases: &[],
         description: "Show hooks",
-        usage: "[-Bgpw] [-t target-pane] [hook]",
+        usage: "[-Bgpw] [-F format] [-t target-pane] [hook]",
         options: &[
             CommandOptionSpec::flag("-B", "show format monitors"),
+            CommandOptionSpec::value("-F", FreeForm, "line format"),
             CommandOptionSpec::value("-t", Pane, "target pane"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::flag("-p", "pane scope"),
@@ -2563,10 +2599,11 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-options",
         aliases: &["show"],
         description: "Show server, session, window, or pane options",
-        usage: "[--json] [-AgHpqsvw] [-t target-pane] [option]",
+        usage: "[--json] [-AgHpqsvw] [-F format] [-t target-pane] [option]",
         options: &[
             CommandOptionSpec::flag("--json", "one JSON object per line").native(),
             CommandOptionSpec::flag("-A", "include inherited values"),
+            CommandOptionSpec::value("-F", FreeForm, "line format"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::flag("-H", "include hooks"),
             CommandOptionSpec::flag("-p", "pane scope"),
@@ -2583,8 +2620,9 @@ pub static COMMAND_SPECS: &[CommandSpec] = &[
         name: "show-window-options",
         aliases: &["showw"],
         description: "Show window options",
-        usage: "[-gv] [-t target-window] [option]",
+        usage: "[-gv] [-F format] [-t target-window] [option]",
         options: &[
+            CommandOptionSpec::value("-F", FreeForm, "line format"),
             CommandOptionSpec::flag("-g", "global scope"),
             CommandOptionSpec::value("-t", Window, "target window"),
             CommandOptionSpec::flag("-v", "show value only"),
@@ -3133,10 +3171,13 @@ mod tests {
             .commands
     }
 
+    const FLAGS_THE_PIN_REMOVED: &[(&str, &str)] = &[("display-panes", "-b")];
+
     fn catalog_flag_shapes(spec: &CommandSpec) -> BTreeMap<String, String> {
         spec.options
             .iter()
             .filter(|option| !option.name.starts_with("--"))
+            .filter(|option| !FLAGS_THE_PIN_REMOVED.contains(&(spec.name, option.name)))
             .map(|option| {
                 let arity = if option.optional_value {
                     "optional"
@@ -3211,13 +3252,13 @@ mod tests {
         }
         assert_eq!(implemented, 89);
         assert_eq!(aliases, 75);
-        assert_eq!(flag_shapes.values().sum::<usize>(), 536);
+        assert_eq!(flag_shapes.values().sum::<usize>(), 551);
         assert_eq!(
             flag_shapes,
-            BTreeMap::from([("none", 301), ("optional", 8), ("required", 227)])
+            BTreeMap::from([("none", 309), ("optional", 8), ("required", 234)])
         );
-        assert_eq!((supported, unsupported), (513, 23));
-        assert_eq!(usage_overrides.len(), 23);
+        assert_eq!((supported, unsupported), (519, 33));
+        assert_eq!(usage_overrides.len(), 27);
         assert_eq!(
             usage_overrides,
             PINNED_TMUX_USAGE_OVERRIDES

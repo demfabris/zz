@@ -1203,7 +1203,7 @@ case_widths() {
 # prints and returns before it ever opens one. Two things are normalised and
 # nothing else is: the program name, because zz is not called tmux, and the
 # version line, because zz answers `tmux 3.8-zz` where the pin answers
-# `tmux next-3.8` - which is also what keeps a release bump from turning this
+# `tmux 3.8` - which is also what keeps a release bump from turning this
 # row red.
 normalise_diagnostic() {
   sed -e 's/^tmux: /PROG: /' -e 's/^zz: /PROG: /' \

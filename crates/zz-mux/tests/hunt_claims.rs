@@ -802,7 +802,7 @@ fn new_session_dash_t_is_rejected_instead_of_leaking_into_the_pane_command() {
         .execute(&mut context, &command("new-session", &["-t", "name"]))
         .unwrap_err();
     assert!(
-        matches!(error, ServerError::UnsupportedCommand(message) if message == "new-session -t")
+        matches!(error, ServerError::UnsupportedCommand(message) if message.starts_with("new-session -t (") && message.contains("use attach -t <session>"))
     );
     assert!(session_names(&engine).is_empty());
 }

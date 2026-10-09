@@ -209,6 +209,7 @@ enum Handoff {
 
 const RELEASE_WAIT: Duration = Duration::from_secs(1);
 const GRAPHICS_REPLY_WAIT: Duration = Duration::from_secs(1);
+const CLIPBOARD_REPLY_WAIT: Duration = Duration::from_secs(5);
 
 pub(super) struct EventLoop {
     client: Option<Arc<InteractiveClient>>,
@@ -390,6 +391,11 @@ impl EventLoop {
         self.negotiation = Some(negotiation.clone());
     }
 
+    pub fn await_clipboard_reply(&mut self) {
+        self.parser
+            .await_clipboard_reply(Instant::now() + CLIPBOARD_REPLY_WAIT);
+    }
+
     pub fn await_graphics_reply(&mut self) {
         self.parser
             .await_graphics_reply(Instant::now() + GRAPHICS_REPLY_WAIT);
@@ -460,8 +466,8 @@ impl EventLoop {
         self.terminal_events.extend(decoded);
         self.escape_deadline = self
             .parser
-            .has_pending_escape()
-            .then(|| Instant::now() + Duration::from_millis(self.escape_ms));
+            .pending_escape_delay(self.escape_ms)
+            .map(|delay| Instant::now() + delay);
     }
 
     fn read_terminal(&mut self, escape_time: &AtomicU64) -> io::Result<()> {

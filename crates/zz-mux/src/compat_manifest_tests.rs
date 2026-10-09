@@ -17,7 +17,8 @@ use crate::{
     command::{
         accepted_native_literal_format_context_scopes, format_key_command,
         missing_derived_format_context_families, missing_literal_format_context_scopes,
-        mux_derived_format_context_families, mux_literal_format_context_scopes,
+        mux_derived_format_context_families, mux_hook_payload_format_contexts,
+        mux_literal_format_context_scopes,
     },
     formats::{
         constant_format_variable_names, delegated_format_variable_names,
@@ -49,7 +50,7 @@ struct Oracle {
     schema: usize,
     commands: Vec<OracleCommand>,
     args_parse: BTreeMap<String, String>,
-    options: Vec<String>,
+    options: Vec<OracleOption>,
     formats: Vec<String>,
     format_contexts: OracleFormatContexts,
     format_modifiers: Vec<String>,
@@ -58,10 +59,53 @@ struct Oracle {
 }
 
 #[derive(Deserialize)]
+struct OracleOption {
+    name: String,
+    scope: String,
+    array: bool,
+    default: OracleOptionDefault,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+#[serde(untagged)]
+enum OracleOptionDefault {
+    Scalar(String),
+    Array(Vec<String>),
+}
+
+#[derive(Deserialize)]
 struct OracleFormatContexts {
     literal_scopes: Vec<OracleLiteralFormatScope>,
     derived_families: Vec<OracleDerivedFormatFamily>,
+    event_payload: OracleEventPayload,
     propagation: Vec<OracleFormatPropagation>,
+}
+
+#[derive(Deserialize)]
+struct OracleEventPayload {
+    consumers: Vec<OracleEventPayloadConsumer>,
+    keys: Vec<OracleEventPayloadKey>,
+    patterns: Vec<OracleEventPayloadPattern>,
+}
+
+#[derive(Deserialize)]
+struct OracleEventPayloadConsumer {
+    path: String,
+    function: String,
+    prefix: String,
+}
+
+#[derive(Deserialize)]
+struct OracleEventPayloadKey {
+    key: String,
+    named: bool,
+    producers: Vec<OracleFormatProducer>,
+}
+
+#[derive(Deserialize)]
+struct OracleEventPayloadPattern {
+    pattern: String,
+    producers: Vec<OracleFormatProducer>,
 }
 
 #[derive(Deserialize)]
@@ -112,11 +156,11 @@ struct OracleKey {
 }
 
 const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
-    ("copy-mode", 68),
-    ("copy-mode-vi", 79),
+    ("copy-mode", 67),
+    ("copy-mode-vi", 78),
     ("move", 19),
     ("prefix", 57),
-    ("root", 15),
+    ("root", 12),
 ];
 
 fn root() -> PathBuf {
@@ -304,17 +348,21 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
         let command = upstream
             .get(name)
             .unwrap_or_else(|| panic!("stale flag item names a non-upstream command: {item}"));
-        let spec = specs
-            .get(name)
-            .unwrap_or_else(|| panic!("flag item duplicates an unimplemented command gap: {item}"));
         assert!(
             command.flags.contains_key(flag),
             "stale flag item is absent from the oracle: {item}"
         );
-        assert!(
-            spec.option(flag).is_none_or(|option| option.unsupported),
-            "implemented flag has a stale item: {item}"
-        );
+        match specs.get(name) {
+            Some(spec) => assert!(
+                spec.option(flag).is_none_or(|option| option.unsupported),
+                "implemented flag has a stale item: {item}"
+            ),
+            None => assert_eq!(
+                items.get(&format!("command:{name}")),
+                items.get(item),
+                "a flag item on an unimplemented command must sit in that command's gap: {item}"
+            ),
+        }
     }
     for item in items
         .keys()
@@ -512,7 +560,7 @@ fn command_and_flag_gaps_match_the_pinned_oracle() {
 #[test]
 fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
     let (oracle, items) = inventory();
-    assert_eq!(oracle.schema, 5);
+    assert_eq!(oracle.schema, 6);
 
     let mut upstream_literals = BTreeSet::new();
     let mut upstream_scopes = BTreeSet::new();
@@ -540,9 +588,9 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(upstream_scopes.len(), 31);
-    assert_eq!(upstream_literals.len(), 153);
-    assert_eq!(upstream_names.len(), 108);
+    assert_eq!(upstream_scopes.len(), 37);
+    assert_eq!(upstream_literals.len(), 204);
+    assert_eq!(upstream_names.len(), 122);
 
     let mut mux_literals = BTreeSet::new();
     for (path, function, names) in mux_literal_format_context_scopes() {
@@ -553,7 +601,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(mux_literals.len(), 84);
+    assert_eq!(mux_literals.len(), 100);
     assert!(mux_literals.is_subset(&upstream_literals));
 
     let mut accepted_native_literals = BTreeSet::new();
@@ -569,7 +617,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(accepted_native_literals.len(), 37);
+    assert_eq!(accepted_native_literals.len(), 39);
     assert!(accepted_native_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&accepted_native_literals));
 
@@ -582,7 +630,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(missing_literals.len(), 0);
+    assert_eq!(missing_literals.len(), 21);
     assert!(missing_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&missing_literals));
     assert!(accepted_native_literals.is_disjoint(&missing_literals));
@@ -594,7 +642,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         .difference(&classified_literals)
         .cloned()
         .collect::<BTreeSet<_>>();
-    assert_eq!(delegated_literals.len(), 32);
+    assert_eq!(delegated_literals.len(), 44);
     assert_eq!(
         classified_literals
             .union(&delegated_literals)
@@ -639,7 +687,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(upstream_families.len(), 10);
+    assert_eq!(upstream_families.len(), 5);
 
     let mut mux_families = BTreeSet::new();
     for (family, names, patterns) in mux_derived_format_context_families() {
@@ -663,7 +711,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             "duplicate mux derived format family: {family}"
         );
     }
-    assert_eq!(mux_families.len(), 9);
+    assert_eq!(mux_families.len(), 4);
 
     let mut missing_families = BTreeSet::new();
     for (family, names, patterns) in missing_derived_format_context_families() {
@@ -728,25 +776,11 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         .iter()
         .map(String::as_str)
         .collect::<BTreeSet<_>>();
-    assert_eq!(upstream_modifiers.len(), 36);
+    assert_eq!(upstream_modifiers.len(), 37);
     assert_eq!(upstream_modifiers.len(), oracle.format_modifiers.len());
     let implemented_modifiers = format_modifier_names().collect::<BTreeSet<_>>();
-    assert_eq!(implemented_modifiers.len(), 36);
-    let missing_modifiers = upstream_modifiers
-        .difference(&implemented_modifiers)
-        .copied()
-        .collect::<BTreeSet<_>>();
-    assert_eq!(missing_modifiers, BTreeSet::new());
-    assert!(implemented_modifiers.is_subset(&upstream_modifiers));
-
-    let missing_modifier_items = BTreeMap::<&str, (&str, &str)>::new();
-    assert_eq!(
-        missing_modifier_items
-            .keys()
-            .copied()
-            .collect::<BTreeSet<_>>(),
-        missing_modifiers
-    );
+    assert_eq!(implemented_modifiers.len(), 37);
+    assert_eq!(implemented_modifiers, upstream_modifiers);
 
     assert!(
         items.keys().all(|item| !item.starts_with("context-format:")
@@ -777,14 +811,110 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         Some(("native", "accepted")),
         "wrong manifest decision or status for {owner}"
     );
-    for (item, owner) in missing_modifier_items.values() {
+    let missing_literal_items = BTreeMap::from([
+        (
+            ("cmd-show-options.c", "cmd_show_hooks_print_monitor"),
+            "semantic:show-options-format-contexts",
+        ),
+        (
+            ("cmd-show-options.c", "cmd_show_options_print"),
+            "semantic:show-options-format-contexts",
+        ),
+        (
+            ("window-client.c", "window_client_draw_info"),
+            "semantic:mode-format-contexts-3-8",
+        ),
+        (
+            ("window-copy.c", "window_copy_formats"),
+            "semantic:mode-format-contexts-3-8",
+        ),
+        (
+            ("window-customize.c", "window_customize_build"),
+            "semantic:mode-format-contexts-3-8",
+        ),
+        (
+            ("window-customize.c", "window_customize_build_environment"),
+            "semantic:mode-format-contexts-3-8",
+        ),
+        (
+            ("window-customize.c", "window_customize_build_keys"),
+            "semantic:mode-format-contexts-3-8",
+        ),
+        (
+            ("window-customize.c", "window_customize_build_option"),
+            "semantic:mode-format-contexts-3-8",
+        ),
+    ]);
+    assert_eq!(
+        missing_literal_items
+            .keys()
+            .map(|(path, function)| ((*path).to_owned(), (*function).to_owned()))
+            .collect::<BTreeSet<_>>(),
+        missing_literals
+            .iter()
+            .map(|(path, function, _)| (path.clone(), function.clone()))
+            .collect::<BTreeSet<_>>(),
+        "every missing literal context scope names its registry item"
+    );
+
+    let payload = &oracle.format_contexts.event_payload;
+    let hook_consumers = payload
+        .consumers
+        .iter()
+        .filter(|consumer| consumer.prefix == "hook_")
+        .map(|consumer| (consumer.path.as_str(), consumer.function.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(hook_consumers, [("hooks.c", "hooks_insert_event")]);
+    assert_eq!(payload.consumers.len(), 2);
+    let mut upstream_hook_names = BTreeSet::new();
+    for key in &payload.keys {
+        assert!(!key.producers.is_empty(), "{}", key.key);
+        upstream_hook_names.insert(format!("hook_{}", key.key));
+        if key.named {
+            upstream_hook_names.insert(format!("hook_{}_name", key.key));
+        }
+    }
+    let upstream_hook_patterns = payload
+        .patterns
+        .iter()
+        .map(|pattern| {
+            assert!(!pattern.producers.is_empty(), "{}", pattern.pattern);
+            format!("hook_{}", pattern.pattern)
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(payload.keys.len(), 43);
+    assert_eq!(upstream_hook_names.len(), 49);
+    let (zz_hook_names, zz_hook_patterns) = mux_hook_payload_format_contexts();
+    let zz_hook_names = zz_hook_names
+        .iter()
+        .map(|name| (*name).to_owned())
+        .collect::<BTreeSet<_>>();
+    let zz_hook_patterns = zz_hook_patterns
+        .iter()
+        .map(|pattern| (*pattern).to_owned())
+        .collect::<BTreeSet<_>>();
+    assert!(zz_hook_names.is_subset(&upstream_hook_names));
+    assert_eq!(zz_hook_patterns, upstream_hook_patterns);
+    let missing_hook_names = upstream_hook_names
+        .difference(&zz_hook_names)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(missing_hook_names.len(), 39);
+    let missing_hook_item = "semantic:hook-event-payload-formats";
+    let mut owned_items = missing_literal_items
+        .values()
+        .map(|item| (*item, "pin.formats-options"))
+        .collect::<Vec<_>>();
+    owned_items.push(("semantic:format-modifier-animation", "pin.formats-options"));
+    owned_items.push((missing_hook_item, "pin.hooks-events"));
+    for (item, owner) in owned_items {
         assert_eq!(
-            items.get(*item).map(String::as_str),
-            Some(*owner),
+            items.get(item).map(String::as_str),
+            Some(owner),
             "wrong manifest owner for {item}"
         );
         assert_eq!(
-            groups.get(*owner).copied(),
+            groups.get(owner).copied(),
             Some(("adopt", "open")),
             "wrong manifest decision or status for {owner}"
         );
@@ -971,7 +1101,7 @@ fn command_flag_fixture_matches_the_pin() {
         rows += 1;
     }
 
-    assert_eq!((rows, aliases, required), (89, 75, 84));
+    assert_eq!((rows, aliases, required), (89, 75, 85));
     assert_eq!(
         fs::read_to_string(root().join("compat/scenarios/smoke/fixtures/command-flag-errors.tsv"))
             .expect("command flag fixture corpus"),
@@ -1089,19 +1219,19 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
     let oracle_options = oracle
         .options
         .iter()
-        .map(String::as_str)
+        .map(|option| option.name.as_str())
         .collect::<BTreeSet<_>>();
     let catalog = crate::tmux_options::tmux_options()
         .filter(|option| !crate::tmux_options::tmux_option_is_hook(option.name))
         .map(|option| option.name)
         .collect::<BTreeSet<_>>();
-    assert_eq!(oracle.options.len(), 180, "pinned option count changed");
+    assert_eq!(oracle.options.len(), 183, "pinned option count changed");
     assert_eq!(
         oracle_options.len(),
-        180,
+        183,
         "pinned options contain duplicates"
     );
-    assert_eq!(catalog.len(), 180, "live option catalog count changed");
+    assert_eq!(catalog.len(), 183, "live option catalog count changed");
     assert_eq!(
         catalog, oracle_options,
         "live option catalog differs from the pin"
@@ -1139,7 +1269,7 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         .keys()
         .filter_map(|item| item.strip_prefix("option:"))
         .collect::<BTreeSet<_>>();
-    assert_eq!(tracked.len(), 29, "active option gap count changed");
+    assert_eq!(tracked.len(), 32, "active option gap count changed");
     assert!(
         consumers.is_disjoint(&tracked),
         "consumed and tracked option names overlap"
@@ -1180,7 +1310,11 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         options,
-        oracle.options.iter().map(String::as_str).collect(),
+        oracle
+            .options
+            .iter()
+            .map(|option| option.name.as_str())
+            .collect(),
         "zz option names differ from the pinned oracle"
     );
     for option in options.difference(&behaves) {
@@ -1207,12 +1341,12 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let constant_formats = constant_format_variable_names().collect::<BTreeSet<_>>();
     let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
     let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
-    assert_eq!(formats.len(), 198, "pinned global format count changed");
-    assert_eq!(constant_formats.len(), 42, "tracked format count changed");
-    assert_eq!(direct_formats.len(), 99, "direct format count changed");
+    assert_eq!(formats.len(), 214, "pinned global format count changed");
+    assert_eq!(constant_formats.len(), 47, "tracked format count changed");
+    assert_eq!(direct_formats.len(), 101, "direct format count changed");
     assert_eq!(
         delegated_formats.len(),
-        57,
+        66,
         "delegated format count changed"
     );
     assert!(
@@ -1233,7 +1367,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         nonconstant_formats.len(),
-        156,
+        167,
         "nonconstant format registration count changed"
     );
     let tracked_formats = items
@@ -1260,14 +1394,32 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
+    let upstream_hooks = oracle
+        .hooks
+        .iter()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    assert!(
+        upstream_hooks.is_subset(&hooks),
+        "pinned hooks missing from zz: {:?}",
+        upstream_hooks.difference(&hooks).collect::<Vec<_>>()
+    );
+    let native_hooks = hooks
+        .difference(&upstream_hooks)
+        .map(|hook| format!("native-hook:{hook}"))
+        .collect::<BTreeSet<_>>();
+    let tracked_native_hooks = items
+        .keys()
+        .filter(|item| item.starts_with("native-hook:"))
+        .cloned()
+        .collect::<BTreeSet<_>>();
     assert_eq!(
-        hooks,
-        oracle.hooks.iter().map(String::as_str).collect(),
-        "zz hook names differ from the pinned oracle"
+        tracked_native_hooks, native_hooks,
+        "zz-only hook names and tracked native hook items differ"
     );
     for item in items.keys().filter(|item| item.starts_with("hook:")) {
         let hook = item.strip_prefix("hook:").unwrap();
-        assert!(hooks.contains(hook), "stale hook item: {item}");
+        assert!(upstream_hooks.contains(hook), "stale hook item: {item}");
     }
 
     let upstream_keys = oracle
@@ -1377,7 +1529,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         oracle.key_bindings.len(),
-        303,
+        308,
         "pinned binding count changed"
     );
     assert_eq!(zz_keys.len(), 367, "zz default binding count changed");
@@ -1388,7 +1540,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         missing_keys.len(),
-        28,
+        33,
         "missing default binding count changed"
     );
     assert_eq!(
@@ -1398,12 +1550,12 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         divergent_bindings.len(),
-        37,
+        42,
         "divergent shared binding count changed"
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        238,
+        233,
         "structurally matching shared binding count changed"
     );
     assert_eq!(
@@ -1413,6 +1565,78 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
             .copied()
             .collect(),
         "structurally matching shared binding tables changed"
+    );
+}
+
+fn zz_option_scope(option: &crate::tmux_options::TmuxOption) -> &'static str {
+    match option.scope {
+        crate::tmux_options::TmuxOptionScope::Server => "server",
+        crate::tmux_options::TmuxOptionScope::Session => "session",
+        crate::tmux_options::TmuxOptionScope::Window => "window",
+        crate::tmux_options::TmuxOptionScope::WindowPane => "window-pane",
+    }
+}
+
+fn zz_option_default(option: &crate::tmux_options::TmuxOption) -> OracleOptionDefault {
+    if option.is_array {
+        OracleOptionDefault::Array(
+            crate::tmux_options::tmux_stored_array(option.name)
+                .map(|array| {
+                    array
+                        .defaults
+                        .iter()
+                        .map(|value| (*value).to_owned())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        )
+    } else if let Some(default) = option.default {
+        OracleOptionDefault::Scalar(default.value().to_owned())
+    } else if let Some(status) = crate::status::StatusOption::from_name(option.name) {
+        OracleOptionDefault::Scalar(crate::status::StatusFormats::default().value(status))
+    } else if let Some(window) = crate::status::WindowStatusOption::from_name(option.name) {
+        OracleOptionDefault::Scalar(
+            crate::status::WindowStatusFormats::default()
+                .value(window)
+                .to_owned(),
+        )
+    } else {
+        OracleOptionDefault::Scalar(String::new())
+    }
+}
+
+#[test]
+fn option_scopes_and_defaults_match_the_pinned_oracle() {
+    let (oracle, items) = inventory();
+    let mut scope_mismatches = BTreeSet::new();
+    let mut default_mismatches = BTreeSet::new();
+    for upstream in &oracle.options {
+        let option = crate::tmux_options::exact_tmux_option(&upstream.name)
+            .unwrap_or_else(|| panic!("pinned option is not in the zz catalog: {}", upstream.name));
+        assert_eq!(option.is_array, upstream.array, "{}", upstream.name);
+        if zz_option_scope(&option) != upstream.scope {
+            scope_mismatches.insert(format!("option-scope:{}", upstream.name));
+        }
+        if zz_option_default(&option) != upstream.default {
+            default_mismatches.insert(format!("option-default:{}", upstream.name));
+        }
+    }
+    let tracked = |prefix: &str| {
+        items
+            .keys()
+            .filter(|item| item.starts_with(prefix))
+            .cloned()
+            .collect::<BTreeSet<_>>()
+    };
+    assert_eq!(
+        tracked("option-scope:"),
+        scope_mismatches,
+        "option scope mismatches and tracked items differ"
+    );
+    assert_eq!(
+        tracked("option-default:"),
+        default_mismatches,
+        "option default mismatches and tracked items differ"
     );
 }
 

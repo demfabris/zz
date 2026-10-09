@@ -1,6 +1,11 @@
 //! Bounded decoding for the terminal input protocols enabled by `tty`.
 
-use std::{ops::BitOr, time::Instant};
+use std::{
+    ops::BitOr,
+    time::{Duration, Instant},
+};
+
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 
 const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 /// A device control string with no terminator in sight is not one, the way a
@@ -9,10 +14,14 @@ const MAX_BUFFER_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DEVICE_CONTROL_BYTES: usize = 256;
 const PASTE_START: &[u8] = b"\x1b[200~";
 const PASTE_END: &[u8] = b"\x1b[201~";
+const CLIPBOARD_REPLY: &[u8] = b"\x1b]52;";
+const MAX_CLIPBOARD_REPLY_BYTES: usize = MAX_BUFFER_BYTES;
+const CLIPBOARD_REPLY_DELAY: Duration = Duration::from_millis(500);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Event {
     CellSize { width_px: u32, height_px: u32 },
+    Clipboard(Vec<u8>),
     DarkTheme,
     DeviceAttributes,
     ExtendedDeviceAttributes(String),
@@ -134,12 +143,34 @@ pub(crate) struct EventParser {
     in_paste: bool,
     graphics_reply: Option<Instant>,
     user_keys: Vec<(Box<[u8]>, u16)>,
+    clipboard: Option<ClipboardReply>,
+    clipboard_query: Option<Instant>,
 }
 
 enum UserKeyMatch {
     Complete { consumed: usize, number: u16 },
     Partial,
     Absent,
+}
+
+#[derive(Default)]
+struct ClipboardReply {
+    body: Vec<u8>,
+    overflowed: bool,
+}
+
+impl ClipboardReply {
+    fn take(&mut self, bytes: &[u8]) {
+        if self.overflowed {
+            return;
+        }
+        if self.body.len().saturating_add(bytes.len()) > MAX_CLIPBOARD_REPLY_BYTES {
+            self.overflowed = true;
+            self.body = Vec::new();
+            return;
+        }
+        self.body.extend_from_slice(bytes);
+    }
 }
 
 impl EventParser {
@@ -190,11 +221,30 @@ impl EventParser {
     }
 
     pub fn has_pending_escape(&self) -> bool {
-        self.bytes.first() == Some(&0x1b)
+        self.clipboard.is_some() || self.bytes.first() == Some(&0x1b)
+    }
+
+    pub fn await_clipboard_reply(&mut self, deadline: Instant) {
+        self.clipboard_query = Some(deadline);
+    }
+
+    pub fn pending_escape_delay(&self, escape_ms: u64) -> Option<Duration> {
+        let delay = Duration::from_millis(escape_ms);
+        let query = self
+            .clipboard_query
+            .is_some_and(|deadline| deadline > Instant::now());
+        if self.clipboard.is_some() || (query && is_clipboard_reply_prefix(&self.bytes)) {
+            Some(delay.max(CLIPBOARD_REPLY_DELAY))
+        } else {
+            self.has_pending_escape().then_some(delay)
+        }
     }
 
     pub fn is_idle(&self) -> bool {
-        self.bytes.is_empty() && !self.in_paste && self.graphics_reply.is_none()
+        self.bytes.is_empty()
+            && !self.in_paste
+            && self.graphics_reply.is_none()
+            && self.clipboard.is_none()
     }
 
     pub fn await_graphics_reply(&mut self, deadline: Instant) {
@@ -214,6 +264,17 @@ impl EventParser {
     }
 
     pub fn flush_escape(&mut self, output: &mut Vec<Event>) {
+        if self.clipboard.take().is_some() {
+            self.parse(output);
+        }
+        if is_clipboard_reply_prefix(&self.bytes) {
+            if let Some(parsed) = parse_escape(&self.bytes, self.graphics_reply.is_some()) {
+                self.bytes.drain(..parsed.consumed);
+                output.extend(parsed.event);
+            }
+            self.parse(output);
+            return;
+        }
         if self.has_pending_escape() {
             if self.bytes.starts_with(b"\x1b[?") || self.bytes.starts_with(b"\x1b_") {
                 return;
@@ -256,6 +317,33 @@ impl EventParser {
                     String::from_utf8_lossy(&std::mem::take(&mut self.paste)).into_owned(),
                 ));
                 continue;
+            }
+
+            if let Some(reply) = self.clipboard.as_mut() {
+                let Some((end, terminator)) = clipboard_reply_end(&self.bytes) else {
+                    let drain = self.bytes.len() - usize::from(self.bytes.last() == Some(&0x1b));
+                    reply.take(&self.bytes[..drain]);
+                    self.bytes.drain(..drain);
+                    return;
+                };
+                reply.take(&self.bytes[..end]);
+                self.bytes.drain(..end + terminator);
+                self.clipboard_query = None;
+                if let Some(reply) = self.clipboard.take()
+                    && !reply.overflowed
+                    && let Some(event) = parse_clipboard_reply(&reply.body)
+                {
+                    output.push(event);
+                }
+                continue;
+            }
+            if self.bytes.starts_with(CLIPBOARD_REPLY) {
+                self.bytes.drain(..CLIPBOARD_REPLY.len());
+                self.clipboard = Some(ClipboardReply::default());
+                continue;
+            }
+            if is_clipboard_reply_prefix(&self.bytes) {
+                return;
             }
 
             if self.bytes.starts_with(PASTE_START) {
@@ -389,6 +477,29 @@ fn parse_escape(bytes: &[u8], graphics_reply: bool) -> Option<Parsed> {
         consumed: parsed.consumed + 1,
         event,
     })
+}
+
+fn is_clipboard_reply_prefix(bytes: &[u8]) -> bool {
+    bytes.len() > 1 && bytes.len() < CLIPBOARD_REPLY.len() && CLIPBOARD_REPLY.starts_with(bytes)
+}
+
+fn clipboard_reply_end(body: &[u8]) -> Option<(usize, usize)> {
+    body.iter()
+        .enumerate()
+        .find_map(|(index, byte)| match byte {
+            0x07 => Some((index, 1)),
+            b'\\' if index > 0 && body[index - 1] == 0x1b => Some((index - 1, 2)),
+            _ => None,
+        })
+}
+
+fn parse_clipboard_reply(payload: &[u8]) -> Option<Event> {
+    let separator = payload.iter().position(|byte| *byte == b';')?;
+    let data = &payload[separator + 1..];
+    if data.is_empty() {
+        return None;
+    }
+    STANDARD.decode(data).ok().map(Event::Clipboard)
 }
 
 /// `tty_keys_extended_device_attributes`: the XTVERSION reply is a device
@@ -875,6 +986,96 @@ mod tests {
                 })
             })
             .collect()
+    }
+
+    #[test]
+    fn decodes_osc_52_clipboard_replies_the_way_tty_keys_clipboard_does() {
+        assert_eq!(
+            parse(b"\x1b]52;c;aGVsbG8=\x07x"),
+            [vec![Event::Clipboard(b"hello".to_vec())], typed("x")].concat()
+        );
+        assert_eq!(
+            parse(b"\x1b]52;;AP8K\x1b\\"),
+            [Event::Clipboard(vec![0x00, 0xff, b'\n'])]
+        );
+        assert_eq!(parse(b"\x1b]52;c;\x07y"), typed("y"));
+        assert_eq!(parse(b"\x1b]52;c\x07y"), typed("y"));
+        assert_eq!(parse(b"\x1b]52;c;not base64!\x07y"), typed("y"));
+
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.await_clipboard_reply(Instant::now() + Duration::from_secs(5));
+        for chunk in [&b"\x1b]5"[..], b"2;c;aGk", b"=\x1b", b"\\"] {
+            assert!(events.is_empty());
+            parser.push(chunk, &mut events);
+            if events.is_empty() {
+                assert_eq!(parser.pending_escape_delay(10), Some(CLIPBOARD_REPLY_DELAY));
+            }
+        }
+        assert_eq!(events, [Event::Clipboard(b"hi".to_vec())]);
+        assert!(parser.is_idle());
+        assert_eq!(parser.pending_escape_delay(10), None);
+    }
+
+    #[test]
+    fn a_clipboard_reply_split_after_its_escape_bracket_is_held_and_alt_bracket_still_arrives() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.await_clipboard_reply(Instant::now() + Duration::from_secs(5));
+        parser.push(b"\x1b]", &mut events);
+        assert!(events.is_empty());
+        assert_eq!(parser.pending_escape_delay(10), Some(CLIPBOARD_REPLY_DELAY));
+        parser.push(b"52;c;aGVsbG8=\x07", &mut events);
+        assert_eq!(events, [Event::Clipboard(b"hello".to_vec())]);
+        assert_eq!(parser.pending_escape_delay(10), None);
+
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b]", &mut events);
+        assert!(events.is_empty());
+        assert_eq!(
+            parser.pending_escape_delay(10),
+            Some(Duration::from_millis(10))
+        );
+        parser.flush_escape(&mut events);
+        assert_eq!(
+            events,
+            [Event::Key(KeyEvent::new(
+                KeyCode::Char(']'),
+                KeyModifiers::ALT
+            ))]
+        );
+        assert!(parser.is_idle());
+    }
+
+    #[test]
+    fn an_unterminated_clipboard_reply_is_abandoned_and_later_keys_pass_through() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b]52;c;", &mut events);
+        let chunk = [b'A'; 4096];
+        for _ in 0..=MAX_BUFFER_BYTES / chunk.len() + 16 {
+            parser.push(&chunk, &mut events);
+        }
+        assert!(events.is_empty());
+        parser.flush_escape(&mut events);
+        parser.push(b"x", &mut events);
+        assert_eq!(events, typed("x"));
+        assert!(parser.is_idle());
+    }
+
+    #[test]
+    fn an_oversized_clipboard_reply_is_dropped_up_to_its_terminator() {
+        let mut parser = EventParser::default();
+        let mut events = Vec::new();
+        parser.push(b"\x1b]52;c;", &mut events);
+        let chunk = [b'A'; 4096];
+        for _ in 0..=MAX_BUFFER_BYTES / chunk.len() + 16 {
+            parser.push(&chunk, &mut events);
+        }
+        parser.push(b"AAAA\x07y", &mut events);
+        assert_eq!(events, typed("y"));
+        assert!(parser.is_idle());
     }
 
     #[test]

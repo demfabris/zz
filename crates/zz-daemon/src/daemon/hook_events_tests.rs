@@ -70,6 +70,26 @@ fn read_only_commands_still_fire_their_after_hooks() {
 }
 
 #[test]
+fn swap_window_fires_the_after_swap_window_hook_the_pin_added() {
+    let (shared, mut context) = pane_fixture("after-swap-window");
+    run(&shared, &mut context, &["new-window", "-d"]).expect("second window");
+    run(
+        &shared,
+        &mut context,
+        &[
+            "set-hook",
+            "-g",
+            "after-swap-window",
+            "display-message 'fired #{hook}'",
+        ],
+    )
+    .expect("set-hook accepts the pinned name");
+    shared.inner.lock().message_log.clear();
+    run(&shared, &mut context, &["swap-window", "-t", ":1"]).expect("swap-window");
+    assert_eq!(messages(&shared), ["fired after-swap-window"]);
+}
+
+#[test]
 fn read_only_after_hook_still_publishes_keys_and_retires_control_taps() {
     let (shared, mut context) = pane_fixture("readonly-hook-effects");
     let session = context.session.expect("session");

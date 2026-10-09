@@ -4,8 +4,8 @@
 * [zz-browser crate](zz-browser.md) - Browser-neutral abstraction over CEF Alloy off-screen rendering. Owns CEF init, named private request contexts, page zoom, input, lifecycle, and frame mailboxes.
 * [zz-chrome-import crate](zz-chrome-import.md) - Store-agnostic Google Chrome data import - profile discovery, cookie snapshot/decryption, and read-only history extraction - isolating the app's only sqlite/crypto/keychain dependencies.
 * [zz-cli crate](zz-cli.md) - Headless CLI, daemon entrypoint, and terminal attach client shared with the desktop app.
-* [zz-client-ffi crate](zz-client-ffi.md) - Native client C ABI for transport, terminal viewports, Agent transcripts, settings, and chrome bindings.
 * [zz-client crate](zz-client.md) - Renderer-free client state, effects, chrome keymaps, and normalized pane geometry shared by native and terminal skins.
+* [zz-daemon-client crate](zz-daemon-client.md) - The client half of the zz daemon. Local and ssh endpoints, ssh askpass, the command and interactive clients, and the transport, config paths, and process facts the server shares.
 * [zz-daemon crate](zz-daemon.md) - The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 * [zz-mux crate . renderer-free mux state machine](zz-mux.md) - The pure, UI-agnostic multiplexer core that owns sessions/windows/panes/splits, resolves tmux-style targets, executes tmux-compatible commands, holds key tables, and parses .tmux.conf.
 * [zz-protocol crate](zz-protocol.md) - The stable, versioned wire vocabulary (IDs, framing, control messages, packed terminal lanes, and mux snapshots) shared by every zz client and the daemon.
@@ -14,7 +14,8 @@
 * [zz crate (the GPUI client)](zz.md) - The long-lived GPUI desktop client, linking zz-cli for CLI dispatch, daemon spawning, and terminal attach, and hosting terminal, Chromium browser, and native Agent panes.
 <!-- okf:listing:end -->
 
-Workspace members without a crate page here: `zz-kit` (widget kit, a maintained gpui-component fork),
+Workspace members without a crate page here: `zpui` and the `zpui-*` crates (our GPUI, see
+[zpui](/references/zpui.md)), `zpui-kit` (widget kit, a maintained gpui-component fork),
 `zz-ui` (zz's application UI), `zz-tui` (the library behind `zz attach`), `zz-app` (the thin-client app
 web and iOS share, in `clients/app`), and `zz-ios` (the iOS entry point, in `clients/ios`).
 `zz-web` serves the [browser client](/playbooks/browser-client.md), whose GPUI/WASM frontend lives

@@ -6,7 +6,7 @@
 //! viewport, the origin is the preferred one whenever the box fits there, and
 //! a viewport that grows again restores exactly what was asked for.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod overlay;
 

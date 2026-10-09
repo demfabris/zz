@@ -404,13 +404,53 @@ fn animated_status_and_border_formats_arm_the_cycle_deadline() {
         &["set", "-g", "pane-border-format", "#{A:x,y}"],
     );
     shared.publish_mux_snapshots();
-    assert!(
-        shared
-            .inner
-            .lock()
-            .border_cycle
-            .load(std::sync::atomic::Ordering::Relaxed)
+    sync(&shared, &mut timers, &waker);
+    assert!(timers.deadlines.get(TimerKey::StatusCycle).is_some());
+}
+
+#[test]
+fn a_still_border_on_one_client_keeps_another_clients_border_animating() {
+    let (shared, mut context, _client, _poll, waker, mut timers) = fixture();
+    model(
+        &shared,
+        &mut context,
+        &["set", "-g", "status-interval", "0"],
     );
+    let first_window = context.window.unwrap().to_string();
+    let mut second_context = ExecutionContext::default();
+    model(
+        &shared,
+        &mut second_context,
+        &["new-session", "-d", "-s", "second"],
+    );
+    {
+        let mut inner = shared.inner.lock();
+        let other = ClientId(2);
+        inner.client_entry(other).subscriber = Some(OutboundMailbox::new());
+        inner
+            .attached
+            .entry(second_context.session.unwrap())
+            .or_default()
+            .insert(other);
+    }
+    model(
+        &shared,
+        &mut context,
+        &["set", "-g", "pane-border-status", "top"],
+    );
+    model(
+        &shared,
+        &mut context,
+        &[
+            "set",
+            "-w",
+            "-t",
+            &first_window,
+            "pane-border-format",
+            "#{?session_active,#{A:x,y},fixed}",
+        ],
+    );
+    shared.publish_mux_snapshots();
     sync(&shared, &mut timers, &waker);
     assert!(timers.deadlines.get(TimerKey::StatusCycle).is_some());
 }

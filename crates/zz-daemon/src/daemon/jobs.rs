@@ -812,8 +812,8 @@ pub(super) fn spawn(
     _: Environment,
     streams: [Io; 3],
 ) -> io::Result<Spawned> {
-    use crate::unmasked::SpawnUnmasked as _;
     use std::{os::unix::process::CommandExt as _, process::Stdio};
+    use zz_daemon_client::unmasked::SpawnUnmasked as _;
     if let Some(name) = Path::new(command.get_program()).file_name() {
         let name = name.to_owned();
         command.arg0(name);
@@ -910,7 +910,10 @@ pub(super) fn launch_shell(
     );
     process.current_dir(&cwd).env("PWD", cwd.as_os_str());
     if let Some(startup_reentry) = startup_reentry {
-        process.env(crate::STARTUP_REENTRY_ENVIRONMENT_VARIABLE, startup_reentry);
+        process.env(
+            zz_daemon_client::STARTUP_REENTRY_ENVIRONMENT_VARIABLE,
+            startup_reentry,
+        );
     }
     let socket = || child_socket.try_clone().map(|socket| Io::Fd(socket.into()));
     let stdio = [

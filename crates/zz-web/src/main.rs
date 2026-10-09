@@ -17,7 +17,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     } else {
         "clients/web/dist"
     });
-    let mut socket = zz_daemon::default_socket_path();
+    let mut socket = zz_daemon_client::default_socket_path();
     let mut arguments = std::env::args_os().skip(1);
     while let Some(argument) = arguments.next() {
         match argument.to_str() {

@@ -24,7 +24,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use zz_daemon::{CommandClient, Daemon, DaemonError};
+use zz_daemon::Daemon;
+use zz_daemon_client::{CommandClient, DaemonError};
 use zz_protocol::{
     ClientHello, ClientKind, CommandInvocation, Event, EventPayload, InputMessage,
     PROTOCOL_VERSION, PaneId, ProtocolMessage, agent_update_batch_bytes, read_protocol_message,

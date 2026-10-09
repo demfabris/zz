@@ -8,78 +8,49 @@ description = "The zz daemon: session state, PTY workers, client connections"
 publish = false
 
 [features]
-default = ["daemon", "agent"]
+default = ["agent"]
 agent = [
-    "daemon",
     "dep:agent-client-protocol",
     "dep:async-channel",
     "dep:base64",
     "dep:futures-lite",
-    "dep:serde",
-    "dep:serde_json",
     "dep:smol",
-]
-daemon = [
-    "dep:async-channel",
-    "dep:signal-hook",
-    "dep:chrono",
-    "dep:crossbeam-channel",
-    "dep:ignore",
-    "dep:mio",
-    "dep:serde",
-    "dep:serde_json",
-    "dep:zz-mux",
-    "zz-terminal/session",
 ]
 
 [dependencies]
 agent-client-protocol = { workspace = true, optional = true }
-# The agent host runs its pane threads on every platform, so its executor and
-# channel are not part of the unix-only signal plumbing below.
 async-channel = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
-chrono = { workspace = true, optional = true, features = ["alloc", "std"] }
+chrono = { workspace = true, features = ["alloc", "std"] }
 futures-lite = { workspace = true, optional = true }
 getrandom.workspace = true
 glob = "0.3"
-ignore = { workspace = true, optional = true }
-serde = { workspace = true, optional = true }
-serde_json = { workspace = true, optional = true }
+ignore.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 smol = { workspace = true, optional = true }
-crossbeam-channel = { workspace = true, optional = true }
-interprocess.workspace = true
+crossbeam-channel.workspace = true
 libc.workspace = true
 log.workspace = true
 parking_lot.workspace = true
 regex.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
-zeroize.workspace = true
-zz-mux = { workspace = true, optional = true }
+zz-daemon-client.workspace = true
+zz-mux.workspace = true
 zz-protocol.workspace = true
-zz-terminal.workspace = true
-
-[target.'cfg(target_os = "ios")'.dependencies]
-russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync"] }
-getrandom = { workspace = true, features = ["sys_rng"] }
-core-foundation.workspace = true
-security-framework-sys = "2.17"
+zz-terminal = { workspace = true, features = ["session"] }
 
 [target.'cfg(unix)'.dependencies]
-mio = { version = "1.2.3", features = ["os-poll", "os-ext"], optional = true }
-signal-hook = { version = "0.4.4", optional = true, default-features = false }
+mio = { version = "1.2.3", features = ["os-poll", "os-ext"] }
+signal-hook = { version = "0.4.4", default-features = false }
 rustix = { workspace = true, features = ["fs", "net"] }
 
 [target.'cfg(windows)'.dependencies]
-sysinfo.workspace = true
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Pipes"] }
 
 [dev-dependencies]
 chrono = { workspace = true, features = ["clock"] }
-sysinfo.workspace = true
-russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
-tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync", "macros", "test-util"] }
 
 [lints]
 workspace = true

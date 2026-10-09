@@ -33,7 +33,7 @@ use zz_browser::{
 };
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use zz_browser::{BrowserGpuContext, OsrFrame, SessionId};
-use zz_daemon::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
 const DEFAULT_PORT: u16 = 9324;
 const DEFAULT_SPIKE_SECONDS: u64 = 10;

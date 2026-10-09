@@ -2,27 +2,10 @@
 members = [
     "clients/app",
     "clients/ios",
-    "crates/zz",
-    "crates/zz-browser",
-    "crates/zz-chrome-import",
-    "crates/zz-cli",
-    "crates/zz-client",
-    "crates/zz-config",
-    "crates/zz-hotreload",
-    "crates/zz-kit",
-    "crates/zz-client-ffi",
-    "crates/zz-daemon",
-    "crates/zz-mux",
-    "crates/zz-protocol",
-    "crates/zz-terminal",
-    "crates/zz-tui",
-    "crates/zz-ui",
-    "crates/zz-web",
-    "crates/zz-xtask",
+    "crates/*",
 ]
 exclude = [
     "clients/web",
-    "zpui",
     "third_party/rust/libghostty-vt",
     "third_party/rust/libghostty-vt-sys",
 ]
@@ -34,38 +17,96 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/demfabris/zz"
 rust-version = "1.97"
+publish = false
 
 [workspace.dependencies]
+accesskit = { version = "0.24.0", features = ["enumn"] }
+accesskit_macos = "0.26.0"
+accesskit_unix = "0.22"
+accesskit_windows = "0.34"
 aes = "=0.9.3"
 aes-gcm = { version = "=0.11.1", default-features = false, features = ["aes", "alloc"] }
 agent-client-protocol = "2.1.0"
+anyhow = "1.0.86"
+ashpd = { version = "0.13", default-features = false, features = [
+    "async-io",
+    "inhibit",
+    "notification",
+    "open_uri",
+    "file_chooser",
+    "settings",
+    "trash"
+] }
 async-channel = "2.5.0"
+async-compression = { version = "0.4", features = ["bzip2", "gzip", "futures-io"] }
+async-task = "4.7"
+backtrace = "0.3"
 base64 = "0.23.1"
+bitflags = "2.6.0"
 block2 = "0.6.2"
+bytes = "1.0"
 cargo_metadata = "0.23.1"
 cbc = "=0.2.1"
+cbindgen = { version = "0.28.0", default-features = false }
 cef = { version = "=154.0.0", features = ["accelerated_osr"] }
 chrono = { version = "0.4.45", default-features = false }
+cocoa = "=0.26.0"
+console_error_panic_hook = "0.1.7"
 core-foundation = "=0.10.1"
+core-foundation-sys = "0.8.6"
+core-graphics = "0.24"
+core-text = "21"
 core-video = "=0.5.2"
+criterion = { version = "0.5", features = ["html_reports"] }
 crossbeam-channel = "0.5.17"
 csscolorparser = "=0.8.4"
+ctor = "1.0.12"
+derive_more = { version = "2.1.1", features = [
+    "add",
+    "add_assign",
+    "deref",
+    "deref_mut",
+    "display",
+    "from",
+    "from_str",
+    "mul",
+    "mul_assign",
+    "not",
+] }
+dunce = "1.0"
 env_logger = "0.11.11"
+etagere = "0.2"
 filedescriptor = "0.8.3"
+flume = "0.12"
 foldhash = "0.2.0"
+foreign-types = "0.5"
 futures = "0.3.34"
+futures-concurrency = "7.7.1"
 futures-lite = "2.6.1"
 getrandom = "0.4.3"
+hdrhistogram = { version = "7", default-features = false }
+heapless = "0.9.2"
+heck = "0.5"
+http = "1.1"
+http-body = "1.0"
 ignore = "0.4.33"
 image = { version = "=0.25.10", default-features = false }
+indexmap = { version = "2.7.0", features = ["serde"] }
 interprocess = "2.4.4"
+inventory = "0.3.19"
+itertools = "0.14.0"
+js-sys = "0.3"
 libc = "0.2.189"
 libghostty-vt = { path = "third_party/rust/libghostty-vt", default-features = false }
 log = "0.4.34"
+mach2 = "0.5"
 memchr = "2.8.3"
 merman = { version = "=0.6.2", features = ["render"] }
+metal = "0.33"
 mimalloc = "0.1.52"
 naga = { version = "=30.0.1", features = ["glsl-in", "wgsl-in", "wgsl-out"] }
+notify-rust = "4"
+objc = "0.2"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSOpenPanel", "NSPanel", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSView", "NSWindow"] }
 objc2-core-foundation = "0.3.2"
@@ -73,41 +114,96 @@ objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-io-surface = "0.3.2"
 objc2-metal = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std"] }
+objc2-user-notifications = "0.3"
 oo7 = { version = "=0.6.0", default-features = false }
 parking_lot = "0.12.5"
+pathfinder_geometry = "0.5"
 pbkdf2 = "=0.13.0"
 plist = "1.10.1"
 pollster = "1.0.1"
 portable-pty = "0.9.0"
+postage = { version = "0.5", features = ["futures-traits"] }
 postcard = { version = "1.1.3", default-features = false, features = ["use-std"] }
+proc-macro2 = "1.0.93"
+profiling = "1"
+proptest = { git = "https://github.com/proptest-rs/proptest", rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b", features = ["attr-macro"] }
+quote = "1.0.9"
+rand = "0.9"
 raw-window-handle = "0.6.2"
+rayon = "1.8"
 regex = "1.13.1"
+resvg = { version = "0.46.0", default-features = false, features = [
+    "text",
+    "system-fonts",
+    "memmap-fonts",
+    "raster-images",
+] }
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
+rustc-hash = "2.1.0"
 rustix = { version = "1.1.4", features = ["event", "pipe", "process", "termios"] }
+schemars = { version = "1.0", features = ["indexmap2"] }
 security-framework = "=3.7.0"
+semver = { version = "1.0", features = ["serde"] }
 serde = { version = "1.0.229", features = ["derive", "rc"] }
 serde_json = "1.0.151"
+serde_urlencoded = "0.7"
 sha1 = "=0.11.0"
 sha2 = "=0.11.0"
+slotmap = "1.0.6"
 smallvec = { version = "=1.16.1", features = ["serde"] }
 smol = "=2.0.2"
+stacksafe = "1.0"
+strum = { version = "0.28", features = ["derive"] }
+swash = "0.2.6"
+syn = { version = "2.0.101", features = ["full", "extra-traits", "visit-mut"] }
 sysinfo = { version = "=0.39.6", default-features = false, features = ["system"] }
 tempfile = "3.27.0"
 thiserror = "2.0.20"
+tracing = "0.1.40"
+unicode-bidi = { version = "0.3.18", default-features = false, features = [
+    "hardcoded-data",
+] }
+unicode-segmentation = "1.10"
 unicode-width = "0.2.2"
 url = "=2.5.8"
+usvg = { version = "0.46.0", default-features = false }
+uuid = { version = "1.1.2", features = ["v4", "v5", "v7", "serde"] }
+wasm-bindgen = "0.2.120"
+wasm-bindgen-futures = "0.4"
 wayland-client = "0.31.15"
 web-time = "1.1.0"
 wgpu = "=30.0.1"
+which = "8"
 windows = "=0.62.2"
+windows-core = "0.62"
+windows-registry = "0.6.0"
 x11rb = "0.13.2"
 zeroize = "=1.9.0"
 
-zpui = { path = "zpui/crates/zpui" }
-zpui_platform = { path = "zpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
-zpui_wgpu = { path = "zpui/crates/zpui_wgpu" }
-zpui_ios = { path = "zpui/crates/zpui_ios" }
-sum_tree = { path = "zpui/crates/sum_tree" }
+zpui = { path = "crates/zpui", default-features = false }
+zpui-apple = { path = "crates/zpui-apple" }
+collections = { path = "crates/zpui-collections", package = "zpui-collections" }
+http_client = { path = "crates/zpui-http-client", package = "zpui-http-client" }
+zpui-ios = { path = "crates/zpui-ios" }
+zpui-kit = { path = "crates/zpui-kit" }
+zpui-linux = { path = "crates/zpui-linux", default-features = false }
+zlog = { path = "crates/zpui-log", package = "zpui-log" }
+zpui-macos = { path = "crates/zpui-macos", default-features = false }
+zpui-macros = { path = "crates/zpui-macros" }
+zpui-platform = { path = "crates/zpui-platform", default-features = false }
+refineable = { path = "crates/zpui-refineable", package = "zpui-refineable" }
+derive_refineable = { path = "crates/zpui-refineable-derive", package = "zpui-refineable-derive" }
+scheduler = { path = "crates/zpui-scheduler", package = "zpui-scheduler" }
+zpui-shared-string = { path = "crates/zpui-shared-string" }
+sum_tree = { path = "crates/zpui-sum-tree", package = "zpui-sum-tree" }
+ztracing = { path = "crates/zpui-tracing", package = "zpui-tracing" }
+ztracing_macro = { path = "crates/zpui-tracing-macros", package = "zpui-tracing-macros" }
+zpui-util = { path = "crates/zpui-util" }
+util_macros = { path = "crates/zpui-util-macros", package = "zpui-util-macros" }
+zpui-web = { path = "crates/zpui-web" }
+zpui-wgpu = { path = "crates/zpui-wgpu" }
+zpui-windows = { path = "crates/zpui-windows", default-features = false }
+
 zz = { path = "crates/zz" }
 zz-app = { path = "clients/app" }
 zz-browser = { path = "crates/zz-browser" }
@@ -116,13 +212,12 @@ zz-cli = { path = "crates/zz-cli" }
 zz-client = { path = "crates/zz-client" }
 zz-config = { path = "crates/zz-config" }
 zz-daemon = { path = "crates/zz-daemon", default-features = false }
-zz-kit = { path = "crates/zz-kit" }
+zz-daemon-client = { path = "crates/zz-daemon-client" }
 zz-mux = { path = "crates/zz-mux" }
 zz-protocol = { path = "crates/zz-protocol" }
 zz-terminal = { path = "crates/zz-terminal", default-features = false }
 zz-tui = { path = "crates/zz-tui" }
 zz-ui = { path = "crates/zz-ui" }
-
 [patch.crates-io]
 cef-dll-sys = { path = "third_party/rust/cef-dll-sys" }
 
@@ -159,14 +254,31 @@ unused_self = "allow"
 [profile.dev]
 debug = 1
 
-[profile.dev.package."*"]
-opt-level = 2
-
-[profile.dev.package.taffy]
-opt-level = 3
-
-[profile.dev.package.zpui]
-opt-level = 3
+[profile.dev.package]
+"*" = { opt-level = 2 }
+taffy = { opt-level = 3 }
+zpui = { opt-level = 3 }
+zpui-apple = { opt-level = 2 }
+zpui-collections = { opt-level = 2 }
+zpui-http-client = { opt-level = 2 }
+zpui-ios = { opt-level = 2 }
+zpui-linux = { opt-level = 2 }
+zpui-log = { opt-level = 2 }
+zpui-macos = { opt-level = 2 }
+zpui-macros = { opt-level = 2 }
+zpui-platform = { opt-level = 2 }
+zpui-refineable = { opt-level = 2 }
+zpui-refineable-derive = { opt-level = 2 }
+zpui-scheduler = { opt-level = 2 }
+zpui-shared-string = { opt-level = 2 }
+zpui-sum-tree = { opt-level = 2 }
+zpui-tracing = { opt-level = 2 }
+zpui-tracing-macros = { opt-level = 2 }
+zpui-util = { opt-level = 2 }
+zpui-util-macros = { opt-level = 2 }
+zpui-web = { opt-level = 2 }
+zpui-wgpu = { opt-level = 2 }
+zpui-windows = { opt-level = 2 }
 
 [profile.release]
 opt-level = 3

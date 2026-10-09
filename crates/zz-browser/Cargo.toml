@@ -29,7 +29,7 @@ zz-protocol.workspace = true
 zz-terminal.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
-zpui.workspace = true
+zpui = { workspace = true, features = ["default"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2.workspace = true

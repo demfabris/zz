@@ -454,7 +454,7 @@ fn control_output_loop_delivers_bytes_without_readers() {
         shard_sink::PaneSink::of(&terminal)
             .is_some_and(zz_terminal::TerminalFrameSink::takes_output)
     );
-    let threads = crate::process_info::sample(std::process::id())
+    let threads = zz_daemon_client::process_info::sample(std::process::id())
         .unwrap()
         .threads;
     assert!(terminal.send_raw_input(Arc::from(b"b2-bytes\n".as_slice())));
@@ -502,7 +502,7 @@ fn control_output_loop_delivers_bytes_without_readers() {
     }
     assert!(received.len() >= 4_200_000);
     assert!(
-        crate::process_info::sample(std::process::id())
+        zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads
             <= threads

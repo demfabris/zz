@@ -201,7 +201,7 @@ impl AppShell {
     fn add_host(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let value = self.hosts.destination.read(cx).value().to_string();
         let endpoint = destination_endpoint(&value).and_then(|endpoint| {
-            zz_daemon::Endpoint::parse(&endpoint)
+            zz_daemon_client::Endpoint::parse(&endpoint)
                 .map(|endpoint| endpoint.to_string())
                 .map_err(|error| error.to_string())
         });
@@ -396,7 +396,7 @@ impl AppShell {
                 h_flex().child(Button::new("hosts-copy-ssh-key").small().label("Copy").on_click(
                     |_, window, cx| {
                         use zz_ui::{WindowExt as _, notification::Notification};
-                        let notification = match zz_daemon::ios_ssh_public_key() {
+                        let notification = match zz_daemon_client::ios_ssh_public_key() {
                             Ok(key) => {
                                 cx.write_to_clipboard(zpui::ClipboardItem::new_string(key));
                                 Notification::success("SSH key copied.")

@@ -572,7 +572,7 @@
       "id": "pin.formats-options-2",
       "track": "pin",
       "title": "Rest of the 3.8 formats and options",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "pin.formats-options",
         "pin.layout-v2"
@@ -598,13 +598,14 @@
         "Split 2026-10-09: the customize-mode rows of the mode context formats, semantic:customize-mode-3-8 and the gap close moved to pin.customize-3-8."
       ],
       "branch": "catchup/pin.formats-options-2",
-      "sha": null,
+      "sha": "6bb2c3e0d",
       "notes": [
         "2026-10-09: leftovers of pin.formats-options; see its lane report in the ledger notes.",
         "2026-10-09: Session 1 done at 959a3fa27: display-message -j, history_* native (formats.history-counters), clear-on-attach, copy-mode-current-line-style, A modifier animation, hook_fire_*, clipboard_invalid, terminal-features-3-8 (tui-caps 408/408); wire appends under 108. Customize rebuild split to pin.customize-3-8. Review 1 running.",
         "2026-10-09: Codex review 1 (pin.formats-options-2-1.md): 6 P1 (animation flag per client, current-line style change not republished, empty hooks not counted, counters survive unset, user hooks uncounted, extended underlines dropped); fix pass sent.",
         "2026-10-09: Fix pass dd957c8b5 (main merged): animation flag per client, current-line style republished (3.8 does not repaint at once: fixture proves), empty hooks counted on the global entry, unset clears counts, user hooks counted, extended underlines; hook-fire-count 27, display-message 34, tui-copy-mode 154/154. Review 2 running.",
-        "2026-10-09: Codex review 2: 4 P1 (negotiated utf8 not applied to TUI output, global hook unset keeps count, monitor fires not counted on the option entry, appesc ignores Enesc/Dsesc overrides) + 2 P2; final fix pass sent."
+        "2026-10-09: Codex review 2: 4 P1 (negotiated utf8 not applied to TUI output, global hook unset keeps count, monitor fires not counted on the option entry, appesc ignores Enesc/Dsesc overrides) + 2 P2; final fix pass sent.",
+        "2026-10-09: Merged after the final fix pass (a19923457); merge checks green (clippy 7 crates, zz-protocol 291, zz-client 217, zz-cli 126+148, zz-tui 276, zz-daemon 1592, zz-mux 690, compat check). Customize rebuild continues as pin.customize-3-8."
       ]
     },
     {
@@ -959,7 +960,10 @@
         "Lossy byte paths left by fix.option-bytes: plain argv, show-options -F '#{option_value}', list-keys/show-hooks arguments (tmux_command_print), a control line's $NAME (resolve_environment); #{O:} and window-neighbour option copies unmeasured.",
         "zz refuses copy-mode on an unattached pane ('pane is not attached') and command-prompt -P from a command client ('requires an interactive client'); tmux 3.8 accepts both.",
         "capture-pane -M: tmux reads only the copy-mode screen, zz reads the frozen screen including history; -S/-E ranges into history may differ (unmeasured).",
-        "2026-10-09: Session 1 done at 14ba4f710: 3.8 hook payload table (fit_payload), capture -M ranges fixed; byte paths registered (options.byte-path-residue); copy-mode/command-prompt -P ruled out (client model). Sent back for two side effects before review: zz events -t session filter, pane-bell/activity/shell-prompt feeding the sink without a hook."
+        "2026-10-09: Session 1 done at 14ba4f710: 3.8 hook payload table (fit_payload), capture -M ranges fixed; byte paths registered (options.byte-path-residue); copy-mode/command-prompt -P ruled out (client model). Sent back for two side effects before review: zz events -t session filter, pane-bell/activity/shell-prompt feeding the sink without a hook.",
+        "2026-10-09 (lane): show-options-hooks has 1 OUT divergence on main: zz lists display-panes-active-colour, -border-style, -colour, -format and -time with the session options; tmux 3.8 moved them to window scope. Take it in the review fix pass.",
+        "2026-10-09: Done at dfe9852ba: zz events session filter via zz_event_session (outside the 3.8 payload), pane events feed wait-for -E without a hook (pane_event_if_observed). Review 1 running.",
+        "2026-10-09: Codex review 1: 2 P2 (display-panes-* option order, #{O:}/window-neighbour byte paths unmeasured); final fix pass sent."
       ]
     }
   ]

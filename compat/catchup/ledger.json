@@ -186,7 +186,7 @@
       "id": "fix.mode-styles",
       "track": "fix",
       "title": "Raw TUI reads tree-mode styles and prompt cursor style and colour",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-daemon/src/daemon/chooser_presentation.rs",
@@ -204,7 +204,9 @@
       ],
       "branch": "catchup/fix.mode-styles",
       "sha": null,
-      "notes": []
+      "notes": [
+        "2026-10-09: Lane done at da2a38286: tree-mode styles from options (tui-choosers 86/86), prompt cursor style/colour in the raw TUI (tui-overlays 49/49), registry groups shrunk; wire append under 108 (PromptCursor); found a prompt mode-switch republish bug and fixed it. Follow-ups: mode prompts (chooser filter, customize, switch) ignore prompt cursor style and message-style/message-command-style. Review 1 running."
+      ]
     },
     {
       "id": "fix.small-semantics",

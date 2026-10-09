@@ -193,6 +193,7 @@ fn classify(commands: &[CommandInvocation]) -> Option<Class> {
                 None => class(Panes, rank, true, format!("Split {side}")),
             }
         }
+        "select-pane" if prompted && has("-T") => class(Panes, 19, false, "Change the pane title"),
         "select-pane" if has("-m") => class(Panes, 17, false, "Mark pane"),
         "select-pane" if has("-M") => class(Panes, 18, false, "Clear marked pane"),
         "select-pane" if args.iter().any(|arg| arg.ends_with(".+")) => {
@@ -617,7 +618,8 @@ mod tests {
         assert_eq!(find(&rows, "$").label, "Rename session");
         assert_eq!(find(&rows, "'").label, "Go to window by index");
         assert_eq!(find(&rows, "C-b").label, "Send the prefix");
-        assert_eq!(rows.len(), 50);
+        assert_eq!(find(&rows, "T").label, "Change the pane title");
+        assert_eq!(rows.len(), 51);
     }
 
     #[test]

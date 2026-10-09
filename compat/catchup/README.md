@@ -60,7 +60,9 @@ orchestrator never runs the full suite per item.
      (refresh its `compat/.cache` from the main checkout), then goes to review.
    - Merge checks, narrow: `compat/catchup/cargo.sh clippy -p <touched crates> --all-targets
      --all-features -- -D warnings`, the item's own filtered tests, and `just compat check` if the
-     registry, oracle or manifest tests changed.
+     registry, oracle or manifest tests changed. A merge that changes `zz-protocol` (wire types,
+     `key.rs` default tables, the catalog) also runs `cargo.sh test -p zz-client`: its which-key and
+     reducer tests read those tables (pin.keys-copy's 3.8 `T` binding broke two, 2026-10-09).
    - `ledger.py set <id> merged --sha <merge sha>`, commit the ledger, push `main`.
    - Delete the branch locally and on origin. Start the next ready item in the same slot
      (`wt.sh item` switches the warm worktree to a new branch), or `wt.sh rm <slot>` if nothing is

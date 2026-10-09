@@ -1,6 +1,6 @@
 mod cookies;
 #[cfg(any(feature = "cef-runtime", test))]
-mod element_picker;
+use zz_client::element_picker;
 mod event;
 // Without the CEF runtime nothing reaches the GPU-import and egress-profile halves.
 #[cfg_attr(not(feature = "cef-runtime"), allow(dead_code))]

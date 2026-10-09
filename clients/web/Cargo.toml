@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 rust-version = "1.97"
-description = "Browser client for zz using the shared GPUI interface"
+description = "zz in the browser: the WASM entry point around zz-app"
 publish = false
 
 [lib]
@@ -17,30 +17,20 @@ crate-type = ["cdylib", "rlib"]
 syntax-highlighting = ["zz-ui/tree-sitter"]
 
 [dependencies]
-async-channel = "2.5.0"
-base64 = "0.23.1"
-chrono = "0.4.45"
-image = { version = "=0.25.10", default-features = false }
-gpui = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde" }
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde", default-features = false }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-zz-client = { path = "../../crates/zz-client" }
+zpui = { path = "../../zpui/crates/zpui" }
+zpui_platform = { path = "../../zpui/crates/zpui_platform", default-features = false }
+zz-app = { path = "../app" }
 zz-protocol = { path = "../../crates/zz-protocol" }
-zz-terminal = { path = "../../crates/zz-terminal", default-features = false }
 zz-ui = { path = "../../crates/zz-ui", features = ["agent"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dependencies]
-gpui_platform = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde", default-features = false, features = ["font-kit", "wayland", "x11"] }
+zpui_platform = { path = "../../zpui/crates/zpui_platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
 
 [target.'cfg(target_family = "wasm")'.dependencies]
-js-sys = "0.3"
 wasm-bindgen = "=0.2.128"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["BinaryType", "Blob", "Clipboard", "CloseEvent", "Document", "Element", "ErrorEvent", "Event", "File", "FileList", "HtmlElement", "HtmlInputElement", "Location", "MessageEvent", "Navigator", "Node", "Storage", "WebSocket", "Window"] }
 
 [target.'cfg(not(target_family = "wasm"))'.dev-dependencies]
-gpui = { git = "https://github.com/demfabris/gpui", rev = "99114ccc4287da23f00598f3b340db993b94ecde", features = ["test-support"] }
+zpui = { path = "../../zpui/crates/zpui", features = ["test-support"] }
 
 [lints.rust]
 unsafe_code = "deny"

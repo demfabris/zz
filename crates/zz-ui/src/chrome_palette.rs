@@ -1,5 +1,5 @@
 use crate::{ThemeColor, ThemeMode};
-use gpui::Hsla;
+use zpui::Hsla;
 pub use zz_client::chrome_palette::{
     CHROME_PRESETS, ChromeColor, ChromePreset, ChromePresetId, ThemeModeSetting, chrome_presets,
 };
@@ -63,7 +63,7 @@ mod tests {
     use std::collections::HashSet;
 
     fn luminance(color: Hsla) -> f32 {
-        let rgba: gpui::Rgba = color.into();
+        let rgba: zpui::Rgba = color.into();
         let linear = |channel: f32| {
             if channel <= 0.04045 {
                 channel / 12.92

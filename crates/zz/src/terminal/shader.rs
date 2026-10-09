@@ -3,8 +3,8 @@ use std::{
     sync::{Arc, LazyLock},
 };
 
-use gpui::{Bounds, CustomShader, Pixels};
 use naga::valid::{Capabilities, ValidationFlags, Validator};
+use zpui::{Bounds, CustomShader, Pixels};
 use zz_terminal::{Color, TerminalAppearance};
 
 const PRELUDE: &str = include_str!("shaders/prelude.glsl");
@@ -168,7 +168,7 @@ impl Uniforms {
     pub(crate) fn copy_rects(
         &mut self,
         rects: &[Bounds<Pixels>],
-        origin: gpui::Point<Pixels>,
+        origin: zpui::Point<Pixels>,
         scale: f32,
     ) -> &mut Self {
         let count = rects.len().min(MAX_COPY_RECTS);
@@ -222,7 +222,7 @@ pub(crate) fn merge_rows(rows: &[Bounds<Pixels>]) -> Vec<Bounds<Pixels>> {
 
 #[cfg(test)]
 mod tests {
-    use gpui::{point, px, size};
+    use zpui::{point, px, size};
 
     use super::*;
 

@@ -194,7 +194,7 @@ a `questions` list, answered by `AgentAnswerQuestion`. Subagent tool calls carry
 `_meta.zz.parent`, and the shared reducer exposes it as `tool_parent`. The wire details are in the
 v108 entry of the [wire protocol](/protocol/wire-protocol.md).
 
-Desktop and gpui-shared render these through shared zz-ui widgets: the question card
+Desktop and zz-app render these through shared zz-ui widgets: the question card
 (`agent/question.rs`), the task tray chip in the composer (`agent/tasks.rs`), and the step fold in
 `agent.rs`, which nests subagent steps under their agent row, collapsed to a step count. A step
 leaves its place in the timeline for its agent's row wherever it arrives, before the agent or after

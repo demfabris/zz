@@ -11,7 +11,7 @@ use std::{
     path::PathBuf,
 };
 
-use gpui::{
+use zpui::{
     AnyElement, App, ClipboardItem, Context, Entity, FocusHandle, Focusable, IntoElement, Render,
     SharedString, Subscription, Window, WindowControlArea, div, img, prelude::*, px,
 };
@@ -59,10 +59,10 @@ use zz_ui::settings::{
     settings_scroll_column,
 };
 
-gpui::actions!(zz, [OpenSettings]);
+zpui::actions!(zz, [OpenSettings]);
 
 pub(crate) struct PendingMuxImport(pub bool);
-impl gpui::Global for PendingMuxImport {}
+impl zpui::Global for PendingMuxImport {}
 
 /// What the Settings hint prints when the chrome keymap names no chord for
 /// `open-settings`. The binding itself is data; see `zz_client::ChromeKeymap`.
@@ -1468,7 +1468,7 @@ impl SettingsView {
                     .label(label)
                     .dropdown_caret(true)
                     .bg(settings_control_fill(cx))
-                    .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                    .dropdown_menu_with_anchor(zpui::Anchor::TopRight, move |menu, _, _| {
                         choices.iter().fold(menu, |menu, &(choice, label)| {
                             menu.item(PopupMenuItem::new(label).checked(choice == value).on_click(
                                 move |_, _, cx| {
@@ -1578,7 +1578,7 @@ impl SettingsView {
                     .size(px(zz_ui::settings::about::ABOUT_LOGO_SIZE)),
                 cx,
             ))
-            .when_some(Self::updates_stack(cx), gpui::ParentElement::child)
+            .when_some(Self::updates_stack(cx), zpui::ParentElement::child)
             .child(zz_ui::settings::about::about_build_stack(
                 platform(),
                 zz_ui::settings::about::about_copy_button("settings-about-copy-build-info")
@@ -2048,7 +2048,7 @@ fn boolean_control(
         .on_click(commit)
 }
 
-fn numeric_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
+fn numeric_control(input: &Entity<InputState>, cx: &App) -> zpui::Div {
     div().w(px(CONTROL_WIDTH)).flex_none().child(
         NumberInput::new(input)
             .small()
@@ -2056,7 +2056,7 @@ fn numeric_control(input: &Entity<InputState>, cx: &App) -> gpui::Div {
     )
 }
 
-fn select_control(select: &Entity<SelectState<Vec<SettingsSelectItem>>>, cx: &App) -> gpui::Div {
+fn select_control(select: &Entity<SelectState<Vec<SettingsSelectItem>>>, cx: &App) -> zpui::Div {
     div()
         .flex_none()
         .child(Select::new(select).small().bg(settings_control_fill(cx)))
@@ -2548,7 +2548,7 @@ fn chrome_picker_subscriptions(
         .collect()
 }
 
-fn write_chrome_color(color: ChromeColor, value: Option<gpui::Hsla>, cx: &mut App) {
+fn write_chrome_color(color: ChromeColor, value: Option<zpui::Hsla>, cx: &mut App) {
     let key = ConfigKey::Chrome(color);
     let result = match value {
         Some(value) => set_config_key(key, &zz_ui::to_hex(value)),
@@ -2571,7 +2571,7 @@ fn theme_preview(
     light: Option<ChromePresetId>,
     dark: Option<ChromePresetId>,
     cx: &App,
-) -> gpui::Div {
+) -> zpui::Div {
     zz_ui::settings::appearance::theme_preview(
         match mode {
             ThemeModeSetting::System => None,
@@ -2595,7 +2595,7 @@ fn provenance_badge(provenance: ConfigProvenance) -> Tag {
     })
 }
 
-fn key_annotations(key: ConfigKey, provenance: ConfigProvenance) -> gpui::Div {
+fn key_annotations(key: ConfigKey, provenance: ConfigProvenance) -> zpui::Div {
     div()
         .flex()
         .flex_none()
@@ -2766,8 +2766,8 @@ mod tests {
         ));
     }
 
-    #[gpui::test]
-    fn heavy_section_state_is_initialized_on_first_visit(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn heavy_section_state_is_initialized_on_first_visit(cx: &mut zpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
 
         cx.update(zz_ui::init);
@@ -2841,8 +2841,8 @@ mod tests {
         assert!(!initialized);
     }
 
-    #[gpui::test]
-    fn ui_font_select_follows_live_config_reloads(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn ui_font_select_follows_live_config_reloads(cx: &mut zpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
 
         cx.update(zz_ui::init);
@@ -2914,8 +2914,8 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn submit_add_host_rejects_a_duplicate_without_changing_config(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn submit_add_host_rejects_a_duplicate_without_changing_config(cx: &mut zpui::TestAppContext) {
         use std::{cell::RefCell, rc::Rc};
 
         cx.update(zz_ui::init);
@@ -2969,9 +2969,9 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn the_zoom_field_applies_complete_values_and_ignores_partial_ones(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         use std::{cell::RefCell, rc::Rc};
 
@@ -2992,7 +2992,7 @@ mod tests {
         let settings = captured.borrow().clone().expect("captured settings view");
         let input = settings.read_with(cx, |settings, _| settings.ui_zoom.clone());
 
-        let typed = |value: &str, cx: &mut gpui::VisualTestContext| {
+        let typed = |value: &str, cx: &mut zpui::VisualTestContext| {
             let value = value.to_owned();
             cx.update(|window, cx| {
                 input.update(cx, |input, cx| input.set_value(value, window, cx));

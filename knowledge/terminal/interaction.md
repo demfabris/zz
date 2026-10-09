@@ -113,7 +113,7 @@ triggers a `HistoryRequest` prefetch.
 The state machine is `LocalScrollState` in [`zz-client`](/crates/zz-client.md)
 (`crates/zz-client/src/local_scroll.rs`); the desktop `TerminalView`
 (`crates/zz/src/terminal/view.rs`) and the GPUI thin client's `TerminalPane`
-(`clients/gpui-shared/src/terminal.rs`, iOS and web) both drive it and send the effects it returns.
+(`clients/app/src/terminal.rs`, iOS and web) both drive it and send the effects it returns.
 The thin client keeps its rings in `ClientCore` (`retain_history`); both pace history requests with
 the shared `HistoryPacer`.
 

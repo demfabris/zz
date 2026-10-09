@@ -4,15 +4,15 @@ use std::{
     sync::{Arc, Weak},
 };
 
-use gpui::{
-    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
-    Pixels, Position, Style, Window,
-};
 use objc2::{MainThreadMarker, MainThreadOnly as _, rc::Retained, runtime::AnyObject};
 use objc2_app_kit::{NSAutoresizingMaskOptions, NSView, NSWindowOrderingMode};
 use objc2_core_foundation::{CGPoint, CGRect, CGSize};
 use objc2_quartz_core::{CALayer, CATransaction, kCAGravityResize};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+use zpui::{
+    App, Bounds, Element, ElementId, GlobalElementId, InspectorElementId, IntoElement, LayoutId,
+    Pixels, Position, Style, Window,
+};
 use zz_browser::{MacFramePresenter, MacIoSurface};
 
 struct Layer(Retained<CALayer>);

@@ -1,6 +1,6 @@
 //! Client-side claim of the configured multiplexer prefix.
 
-use gpui::Keystroke;
+use zpui::Keystroke;
 use zz_client::ChromeKey;
 use zz_protocol::{Binding, KeyBindingSnapshot, KeyTables, TmuxOption};
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers as TerminalModifiers};

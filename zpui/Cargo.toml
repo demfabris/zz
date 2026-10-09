@@ -1,0 +1,357 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/collections",
+    "crates/zpui",
+    "crates/zpui_apple",
+    "crates/zpui_ios",
+    "crates/zpui_linux",
+    "crates/zpui_macos",
+    "crates/zpui_macros",
+    "crates/zpui_platform",
+    "crates/zpui_shared_string",
+    "crates/zpui_util",
+    "crates/zpui_web",
+    "crates/zpui_wgpu",
+    "crates/zpui_windows",
+    "crates/http_client",
+    "crates/refineable",
+    "crates/refineable/derive_refineable",
+    "crates/scheduler",
+    "crates/sum_tree",
+    "crates/util_macros",
+    "crates/zlog",
+    "crates/ztracing",
+    "crates/ztracing_macro",
+    "tooling/perf",
+]
+
+[workspace.package]
+publish = false
+edition = "2024"
+
+[workspace.dependencies]
+collections = { path = "crates/collections", version = "0.1.0" }
+derive_refineable = { path = "crates/refineable/derive_refineable" }
+zpui = { path = "crates/zpui", default-features = false }
+zpui_apple = { path = "crates/zpui_apple" }
+zpui_linux = { path = "crates/zpui_linux", default-features = false }
+zpui_macos = { path = "crates/zpui_macos", default-features = false }
+zpui_macros = { path = "crates/zpui_macros" }
+zpui_platform = { path = "crates/zpui_platform", default-features = false }
+zpui_shared_string = { path = "crates/zpui_shared_string" }
+zpui_util = { path = "crates/zpui_util" }
+zpui_web = { path = "crates/zpui_web" }
+zpui_ios = { path = "crates/zpui_ios" }
+zpui_wgpu = { path = "crates/zpui_wgpu" }
+zpui_windows = { path = "crates/zpui_windows", default-features = false }
+http_client = { path = "crates/http_client" }
+perf = { path = "tooling/perf" }
+refineable = { path = "crates/refineable" }
+scheduler = { path = "crates/scheduler" }
+sum_tree = { path = "crates/sum_tree" }
+util_macros = { path = "crates/util_macros" }
+zlog = { path = "crates/zlog" }
+ztracing = { path = "crates/ztracing" }
+ztracing_macro = { path = "crates/ztracing_macro" }
+
+accesskit = { version = "0.24.0", features = ["enumn"] }
+accesskit_macos = "0.26.0"
+accesskit_unix = "0.22"
+accesskit_windows = "0.34"
+anyhow = "1.0.86"
+ashpd = { version = "0.13", default-features = false, features = [
+    "async-io",
+    "inhibit",
+    "notification",
+    "open_uri",
+    "file_chooser",
+    "settings",
+    "trash"
+] }
+async-channel = "2.5.0"
+async-compression = { version = "0.4", features = ["bzip2", "gzip", "futures-io"] }
+async-task = "4.7"
+backtrace = "0.3"
+bitflags = "2.6.0"
+block2 = "0.6"
+bytes = "1.0"
+cbindgen = { version = "0.28.0", default-features = false }
+chrono = { version = "0.4", features = ["serde"] }
+cocoa = "=0.26.0"
+console_error_panic_hook = "0.1.7"
+core-foundation = "0.10"
+core-foundation-sys = "0.8.6"
+core-graphics = "0.24"
+core-text = "21"
+core-video = { version = "0.5.2", features = ["metal"] }
+criterion = { version = "0.5", features = ["html_reports"] }
+ctor = "1.0.12"
+derive_more = { version = "2.1.1", features = [
+    "add",
+    "add_assign",
+    "deref",
+    "deref_mut",
+    "display",
+    "from",
+    "from_str",
+    "mul",
+    "mul_assign",
+    "not",
+] }
+dunce = "1.0"
+env_logger = "0.11"
+etagere = "0.2"
+flume = "0.12"
+foreign-types = "0.5"
+futures = "0.3.34"
+futures-concurrency = "7.7.1"
+hdrhistogram = { version = "7", default-features = false }
+heapless = "0.9.2"
+heck = "0.5"
+http = "1.1"
+http-body = "1.0"
+image = { version = "0.25.1", default-features = false, features = [
+    "bmp",
+    "dds",
+    "exr",
+    "ff",
+    "gif",
+    "hdr",
+    "ico",
+    "jpeg",
+    "png",
+    "pnm",
+    "qoi",
+    "rayon",
+    "tga",
+    "tiff",
+    "webp",
+] }
+indexmap = { version = "2.7.0", features = ["serde"] }
+inventory = "0.3.19"
+itertools = "0.14.0"
+js-sys = "0.3"
+libc = "0.2"
+log = { version = "0.4.16", features = ["kv_unstable_serde", "serde"] }
+mach2 = "0.5"
+metal = "0.33"
+notify-rust = "4"
+objc = "0.2"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3.2", default-features = false, features = [
+    "NSAlert",
+    "NSApplication",
+    "NSButton",
+    "NSControl",
+    "NSDraggingItem",
+    "NSGraphics",
+    "NSImage",
+    "NSOpenPanel",
+    "NSPanel",
+    "NSPasteboard",
+    "NSResponder",
+    "NSSavePanel",
+    "NSScreen",
+    "NSTrackingArea",
+    "NSView",
+    "NSWindow",
+    "NSWorkspace",
+    "block2",
+    "objc2-core-foundation",
+] }
+objc2-core-foundation = { version = "=0.3.2", default-features = false }
+objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["CGDirectDisplay"] }
+objc2-core-media = { version = "=0.3.2", default-features = false, features = ["CMSampleBuffer", "objc2-core-video"] }
+objc2-core-video = { version = "=0.3.2", default-features = false, features = ["CVBuffer", "CVImageBuffer"] }
+objc2-foundation = { version = "=0.3.2", default-features = false, features = [
+    "NSArray",
+    "NSAttributedString",
+    "NSBundle",
+    "NSCoder",
+    "NSData",
+    "NSDate",
+    "NSDictionary",
+    "NSEnumerator",
+    "NSError",
+    "NSGeometry",
+    "NSNotification",
+    "NSNull",
+    "NSObjCRuntime",
+    "NSObject",
+    "NSProcessInfo",
+    "NSRange",
+    "NSRunLoop",
+    "NSSet",
+    "NSString",
+    "NSURL",
+    "NSUndoManager",
+    "NSValue",
+    "objc2-core-foundation",
+    "std",
+] }
+objc2-screen-capture-kit = { version = "=0.3.2", default-features = false, features = [
+    "block2",
+    "dispatch2",
+    "objc2-core-graphics",
+    "objc2-core-media",
+    "SCShareableContent",
+    "SCStream",
+    "std"
+] }
+objc2-user-notifications = "0.3"
+parking_lot = "0.12.1"
+pathfinder_geometry = "0.5"
+postage = { version = "0.5", features = ["futures-traits"] }
+proc-macro2 = "1.0.93"
+profiling = "1"
+pollster = "0.4.0"
+proptest = { git = "https://github.com/proptest-rs/proptest", rev = "3dca198a8fef1b32e3a66f1e1897c955b4dc5b5b", features = ["attr-macro"] }
+quote = "1.0.9"
+rand = "0.9"
+raw-window-handle = "0.6"
+rayon = "1.8"
+regex = "1.5"
+resvg = { version = "0.46.0", default-features = false, features = [
+    "text",
+    "system-fonts",
+    "memmap-fonts",
+    "raster-images",
+] }
+rustc-hash = "2.1.0"
+scap = { git = "https://github.com/zed-industries/scap", rev = "4afea48c3b002197176fb19cd0f9b180dd36eaac", default-features = false, package = "zed-scap", version = "0.0.8-zed" }
+schemars = { version = "1.0", features = ["indexmap2"] }
+semver = { version = "1.0", features = ["serde"] }
+serde = { version = "1.0.221", features = ["derive", "rc"] }
+serde_json = { version = "1.0.144", features = ["preserve_order", "raw_value"] }
+serde_urlencoded = "0.7"
+slotmap = "1.0.6"
+smallvec = { version = "1.6", features = ["union", "const_new"] }
+smol = "2.0"
+stacksafe = "1.0"
+strum = { version = "0.28", features = ["derive"] }
+swash = "0.2.6"
+syn = { version = "2.0.101", features = ["full", "extra-traits", "visit-mut"] }
+tempfile = "3.20.0"
+thiserror = "2.0.12"
+tracing = "0.1.40"
+unicode-bidi = { version = "0.3.18", default-features = false, features = [
+    "hardcoded-data",
+] }
+unicode-segmentation = "1.10"
+url = "2.2"
+usvg = { version = "0.46.0", default-features = false }
+uuid = { version = "1.1.2", features = ["v4", "v5", "v7", "serde"] }
+wasm-bindgen = "0.2.120"
+wasm-bindgen-futures = "0.4"
+web-time = "1.1.0"
+wgpu = "30.0.0"
+which = "8"
+windows-core = "0.62"
+windows-registry = "0.6.0"
+
+[workspace.dependencies.windows]
+version = "0.62"
+features = [
+    "Data_Xml_Dom",
+    "Foundation_Numerics",
+    "Globalization_DateTimeFormatting",
+    "Storage_Search",
+    "Storage_Streams",
+    "System_Threading",
+    "UI_Notifications",
+    "UI_ViewManagement",
+    "Wdk_System_SystemServices",
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_DirectWrite",
+    "Win32_Graphics_DirectManipulation",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
+    "Win32_Graphics_Hlsl",
+    "Win32_Networking_WinSock",
+    "Win32_Security",
+    "Win32_Security_Credentials",
+    "Win32_Security_Cryptography",
+    "Win32_Storage_FileSystem",
+    "Win32_Storage_Packaging_Appx",
+    "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Console",
+    "Win32_System_Diagnostics_Debug",
+    "Win32_System_DataExchange",
+    "Win32_System_IO",
+    "Win32_System_JobObjects",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Performance",
+    "Win32_System_Pipes",
+    "Win32_System_Power",
+    "Win32_System_RestartManager",
+    "Win32_System_SystemInformation",
+    "Win32_System_SystemServices",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_System_WinRT",
+    "Win32_UI_Controls",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_Ime",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Input_Pointer",
+    "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
+    "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Media",
+]
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow" }
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+
+declare_interior_mutable_const = "deny"
+
+redundant_clone = "deny"
+disallowed_methods = "deny"
+
+# We currently do not restrict any style rules
+# as it slows down shipping code to Zed.
+#
+# Running ./script/clippy can take several minutes, and so it's
+# common to skip that step and let CI do it. Any unexpected failures
+# (which also take minutes to discover) thus require switching back
+# to an old branch, manual fixing, and re-pushing.
+#
+# In the future we could improve this by either making sure
+# Zed can surface clippy errors in diagnostics (in addition to the
+# rust-analyzer errors), or by having CI fix style nits automatically.
+style = { level = "allow", priority = -1 }
+
+# Individual rules that have violations in the codebase:
+type_complexity = "allow"
+let_underscore_future = "allow"
+
+# Motivation: We use `vec![a..b]` a lot when dealing with ranges in text, so
+# warning on this rule produces a lot of noise.
+single_range_in_vec_init = "allow"
+
+# in Rust it can be very tedious to reduce argument count without
+# running afoul of the borrow checker.
+too_many_arguments = "allow"
+
+# We often have large enum variants yet we rarely actually bother with splitting them up.
+large_enum_variant = "allow"
+
+# Boolean expressions can be hard to read, requiring only the minimal form gets in the way
+nonminimal_bool = "allow"

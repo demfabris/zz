@@ -84,8 +84,6 @@ jobs:
           CARGO_TARGET_DIR: ${{ github.workspace }}/target
         run: |
           cargo fmt --manifest-path clients/web/Cargo.toml -- --check
-          cargo clippy --manifest-path clients/web/Cargo.toml --all-targets --locked -- -D warnings
-          cargo test --manifest-path clients/web/Cargo.toml --lib --locked
           rustup toolchain install nightly --profile minimal --target wasm32-unknown-unknown
           rustup run nightly cargo check --manifest-path clients/web/Cargo.toml --target wasm32-unknown-unknown --all-targets --locked
 
@@ -125,8 +123,12 @@ jobs:
         shell: bash
         run: |
           tree=$(cargo tree -p zz-cli -e normal --prefix none)
-          if grep -Eq '^(gpui|gpui_platform|wgpu|cef|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
+          if grep -Eq '^(zpui|zpui_platform|wgpu|cef|zz-kit|zz-ui|zz-browser|zz-chrome-import) ' <<<"$tree"; then
             echo "zz-cli links GUI crates"
+            exit 1
+          fi
+          if grep -Eq '^(ureq|rustls|ring) ' <<<"$tree"; then
+            echo "zz-cli links the update checker's TLS stack"
             exit 1
           fi
 

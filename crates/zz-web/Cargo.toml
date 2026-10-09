@@ -14,15 +14,15 @@ interprocess = { workspace = true, features = ["tokio"] }
 percent-encoding = "2.3.2"
 tokio = { version = "1", features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
 tokio-util = { version = "0.7", features = ["io"] }
-zz-daemon = { path = "../zz-daemon", default-features = false }
-zz-protocol = { path = "../zz-protocol" }
+zz-daemon.workspace = true
+zz-protocol.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio-tungstenite = "0.29"
-zz-client = { path = "../zz-client" }
-zz-daemon = { path = "../zz-daemon" }
-zz-terminal = { path = "../zz-terminal", default-features = false }
+zz-client.workspace = true
+zz-daemon = { workspace = true, features = ["default"] }
+zz-terminal.workspace = true
 
 [lints]
 workspace = true

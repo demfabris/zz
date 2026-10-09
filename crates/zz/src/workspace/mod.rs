@@ -13,6 +13,6 @@ pub(crate) use view::ClosePane;
 #[cfg(not(target_os = "ios"))]
 pub(crate) use view::maybe_prompt_stale_daemon;
 
-pub fn init(cx: &mut gpui::App) {
+pub fn init(cx: &mut zpui::App) {
     sidebar::init(cx);
 }

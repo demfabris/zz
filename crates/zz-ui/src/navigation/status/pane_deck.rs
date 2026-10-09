@@ -1,6 +1,6 @@
 use std::{fmt::Write as _, sync::Arc};
 
-use gpui::{
+use zpui::{
     AnyElement, App, ElementId, IntoElement, MouseButton, RenderOnce, SharedString, Window, div,
     prelude::*, px,
 };
@@ -164,7 +164,7 @@ impl RenderOnce for PaneDeck {
                             .w(px(CARD_SIZE))
                             .h(px(CARD_SIZE + 2.0))
                             .occlude()
-                            .when(connected && pane.is_some(), gpui::Styled::cursor_pointer)
+                            .when(connected && pane.is_some(), zpui::Styled::cursor_pointer)
                             .on_hover({
                                 let hover = hover.clone();
                                 move |entered, _, cx| {
@@ -219,7 +219,7 @@ impl RenderOnce for PaneDeck {
     }
 }
 
-fn pane_card(active: bool, hovered: bool, cx: &App) -> gpui::Div {
+fn pane_card(active: bool, hovered: bool, cx: &App) -> zpui::Div {
     div()
         .absolute()
         .top(px(if hovered {
@@ -262,10 +262,10 @@ fn pane_card(active: bool, hovered: bool, cx: &App) -> gpui::Div {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{
+    use std::{cell::Cell, rc::Rc};
+    use zpui::{
         Context, Modifiers, MouseButton, Render, TestAppContext, VisualTestContext, Window,
     };
-    use std::{cell::Cell, rc::Rc};
 
     struct DeckTest {
         selected: Rc<Cell<Option<usize>>>,
@@ -319,7 +319,7 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn cards_select_panes_directly_without_opening_a_menu(cx: &mut TestAppContext) {
         cx.update(crate::init);
         let selected = Rc::new(Cell::new(None));
@@ -340,7 +340,7 @@ mod tests {
         draw(cx);
         let raised = cx.debug_bounds("pane-deck-card-1-true").unwrap();
         assert_eq!(raised.origin.y, resting.origin.y - px(1.0));
-        cx.simulate_mouse_move(gpui::point(px(200.0), px(80.0)), None, Modifiers::none());
+        cx.simulate_mouse_move(zpui::point(px(200.0), px(80.0)), None, Modifiers::none());
         draw(cx);
         assert_eq!(cx.debug_bounds("pane-deck-card-1-false").unwrap(), resting);
         cx.simulate_click(bounds.center(), Modifiers::none());

@@ -2,7 +2,7 @@
 
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{App, AppContext as _, Entity, Focusable as _, Window};
+use zpui::{App, AppContext as _, Entity, Focusable as _, Window};
 use zz_daemon::{AskpassPromptKind, AskpassReply};
 use zz_ui::{
     WindowExt as _,

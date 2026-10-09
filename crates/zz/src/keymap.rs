@@ -3,13 +3,13 @@
 //! `zz-client` owns the chords: default tables per platform, the `bind`
 //! spelling, and one resolution semantic shared with the daemon's pane input.
 //! This module installs that keymap for the desktop profile, folds `zz/config`
-//! overrides into it, and bridges its chords to gpui bindings — so every
+//! overrides into it, and bridges its chords to zpui bindings — so every
 //! converted surface switches on a named [`ChromeAction`] and never spells a
 //! chord itself.
 
 use std::{collections::BTreeMap, rc::Rc};
 
-use gpui::{App, Global, KeyBinding, Keystroke};
+use zpui::{App, Global, KeyBinding, Keystroke};
 use zz_client::{CHROME_TABLES, ChromeAction, ChromeKey, ChromeKeymap, InputRouter};
 use zz_terminal::KeyAction;
 
@@ -23,7 +23,7 @@ use zz_config::keymap::{parse_bind, parse_unbind, tmux_key_name};
 
 /// One chord a surface should bind, under the action it carries. A chord an
 /// earlier configuration bound and this one does not comes back as not `live`:
-/// gpui keymaps only grow, so the surface that owned the chord shadows it with
+/// zpui keymaps only grow, so the surface that owned the chord shadows it with
 /// `NoAction` in its own context instead of removing it.
 pub(crate) struct ChromeChord {
     action: ChromeAction,
@@ -43,11 +43,11 @@ impl ChromeChord {
         &self.key
     }
 
-    pub(crate) fn binding(&self, action: impl gpui::Action, context: Option<&str>) -> KeyBinding {
+    pub(crate) fn binding(&self, action: impl zpui::Action, context: Option<&str>) -> KeyBinding {
         if self.live {
             KeyBinding::new(&self.source, action, context)
         } else {
-            KeyBinding::new(&self.source, gpui::NoAction, context)
+            KeyBinding::new(&self.source, zpui::NoAction, context)
         }
     }
 }
@@ -92,9 +92,9 @@ pub(crate) fn install(overrides: &[ChromeOverride], element_selector_hotkey: &st
     });
 }
 
-/// Bind one chrome table into the gpui keymap and keep it in step with the
+/// Bind one chrome table into the zpui keymap and keep it in step with the
 /// configuration. `build` is the surface's switch from named actions to its own
-/// gpui actions.
+/// zpui actions.
 pub(crate) fn bind(
     cx: &mut App,
     table: &'static str,
@@ -118,7 +118,7 @@ fn apply(cx: &mut App, table: &'static str, build: fn(&[ChromeChord]) -> Vec<Key
 }
 
 /// The action a press resolves to in `table`, for surfaces that read raw key
-/// events instead of dispatching gpui actions.
+/// events instead of dispatching zpui actions.
 pub(crate) fn resolve(cx: &App, table: &str, keystroke: &Keystroke) -> Option<ChromeAction> {
     keymap(cx)?.resolve(table, &terminal_key_input(keystroke, KeyAction::Press))
 }
@@ -129,7 +129,7 @@ pub(crate) fn action_for(cx: &App, table: &str, key: &str) -> Option<ChromeActio
     keymap(cx)?.action_for(table, key)
 }
 
-/// The chord bound to `action`, in the platform's own gpui spelling, for hints
+/// The chord bound to `action`, in the platform's own zpui spelling, for hints
 /// that print a shortcut.
 pub(crate) fn chord_for(cx: &App, table: &str, action: ChromeAction) -> Option<String> {
     keymap(cx)?
@@ -271,7 +271,7 @@ mod tests {
             .into_iter()
             .map(|(key, action)| {
                 (
-                    gpui_source(&key).unwrap_or_else(|| panic!("`{key}` bridges to gpui")),
+                    gpui_source(&key).unwrap_or_else(|| panic!("`{key}` bridges to zpui")),
                     action.name(),
                 )
             })
@@ -448,8 +448,8 @@ mod tests {
         );
     }
 
-    #[gpui::test]
-    fn a_reload_republishes_the_keymap_and_shadows_what_it_dropped(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn a_reload_republishes_the_keymap_and_shadows_what_it_dropped(cx: &mut zpui::TestAppContext) {
         cx.update(|cx| {
             let default_hotkey = crate::config::DEFAULT_BROWSER_ELEMENT_SELECTOR_HOTKEY;
             install(&[], default_hotkey, cx);
@@ -516,7 +516,7 @@ mod tests {
 
     #[test]
     fn chords_bridge_to_the_gpui_spelling_they_replaced() {
-        for (chrome, gpui) in [
+        for (chrome, zpui) in [
             ("D-=", "cmd-="),
             ("D-M-Right", "cmd-alt-right"),
             ("D-S-[", "cmd-shift-["),
@@ -532,7 +532,7 @@ mod tests {
             ("C- ", "ctrl-space"),
         ] {
             let key = ChromeKey::parse(chrome).expect("valid chrome chord");
-            assert_eq!(gpui_source(&key).as_deref(), Some(gpui), "{chrome}");
+            assert_eq!(gpui_source(&key).as_deref(), Some(zpui), "{chrome}");
         }
     }
 
@@ -543,7 +543,7 @@ mod tests {
             let key = chrome_key_for_keystroke(&keystroke).expect("bindable hotkey");
             let source = gpui_source(&key).expect("bindable chord");
             assert_eq!(
-                Keystroke::parse(&source).expect("valid gpui source"),
+                Keystroke::parse(&source).expect("valid zpui source"),
                 keystroke,
                 "{hotkey}",
             );

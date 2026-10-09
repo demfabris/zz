@@ -1,6 +1,6 @@
 //! Platform plumbing for `window-background-blur`.
 
-use gpui::{App, Global, Pixels, Window, WindowBackgroundAppearance};
+use zpui::{App, Global, Pixels, Window, WindowBackgroundAppearance};
 
 struct CompositorBlurSupport(bool);
 
@@ -160,10 +160,10 @@ fn corner_offset(radius: u32, row: u32) -> u32 {
 mod macos {
     use std::fmt;
 
-    use gpui::Window;
     use objc2::{MainThreadMarker, rc::Retained};
     use objc2_app_kit::NSView;
     use raw_window_handle::RawWindowHandle;
+    use zpui::Window;
 
     const BLUR_RADIUS: i32 = 160;
 
@@ -252,7 +252,6 @@ mod macos {
 mod linux {
     use std::{fmt, sync::OnceLock};
 
-    use gpui::Window;
     use raw_window_handle::RawWindowHandle;
     use x11rb::{
         connection::Connection as _,
@@ -260,6 +259,7 @@ mod linux {
         rust_connection::RustConnection,
         wrapper::ConnectionExt as _,
     };
+    use zpui::Window;
 
     use crate::{window::background::rounded_region, window::corners::WindowCorners};
 
@@ -293,7 +293,7 @@ mod linux {
     pub(super) fn set_x11_blur(
         window: &Window,
         enabled: bool,
-        corner_radius: gpui::Pixels,
+        corner_radius: zpui::Pixels,
     ) -> Result<(), BlurError> {
         let handle = raw_window_handle::HasWindowHandle::window_handle(window)
             .map_err(BlurError::WindowHandle)?;
@@ -432,7 +432,7 @@ mod linux {
 
 #[cfg(test)]
 mod tests {
-    use gpui::Tiling;
+    use zpui::Tiling;
 
     use super::*;
     use crate::window::corners::WindowCorners;

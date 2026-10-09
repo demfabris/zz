@@ -6,7 +6,7 @@
 ))]
 macro_rules! render {
     ($body:block) => {
-        dioxus_devtools::subsecond::call(|| gpui::IntoElement::into_any_element($body))
+        dioxus_devtools::subsecond::call(|| zpui::IntoElement::into_any_element($body))
     };
 }
 
@@ -30,7 +30,7 @@ pub(crate) use render;
     not(target_family = "wasm"),
     not(target_os = "ios")
 ))]
-pub(crate) fn init(cx: &mut gpui::App) {
+pub(crate) fn init(cx: &mut zpui::App) {
     if !zz_protocol::app_identity::DEVELOPMENT {
         return;
     }
@@ -41,7 +41,7 @@ pub(crate) fn init(cx: &mut gpui::App) {
     cx.spawn(async move |cx| {
         while patches.recv().await.is_ok() {
             log::info!(target: "zz::hotreload", "patch applied; refreshing windows");
-            cx.update(gpui::App::refresh_windows);
+            cx.update(zpui::App::refresh_windows);
         }
     })
     .detach();

@@ -93,13 +93,13 @@ pub fn gpui_key_name(name: &str) -> Option<&'static str> {
     KEY_NAMES
         .iter()
         .find(|(tmux, _)| *tmux == name)
-        .map(|(_, gpui)| *gpui)
+        .map(|(_, zpui)| *zpui)
 }
 
 pub fn tmux_key_name(name: &str) -> Option<&'static str> {
     KEY_NAMES
         .iter()
-        .find(|(_, gpui)| *gpui == name)
+        .find(|(_, zpui)| *zpui == name)
         .map(|(tmux, _)| *tmux)
 }
 const KEY_NAMES: [(&str, &str); 26] = [

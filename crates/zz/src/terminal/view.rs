@@ -8,7 +8,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-use gpui::{
+use parking_lot::RwLock;
+use zpui::{
     Anchor, AnyElement, App, Bounds, ClipboardEntry, ClipboardItem, Context, Entity,
     EntityInputHandler, FocusHandle, Focusable, Font, Hsla, Image, ImageSource, IntoElement,
     KeyBinding, KeyDownEvent, KeyUpEvent, Keystroke, ModifiersChangedEvent, MouseButton,
@@ -16,7 +17,6 @@ use gpui::{
     Point, Render, ScrollDelta, ScrollWheelEvent, Subscription, Task, UTF16Selection, Window,
     anchored, deferred, div, img, point, prelude::*, px,
 };
-use parking_lot::RwLock;
 use zz_client::{
     ChromeAction, TERMINAL_TABLE,
     local_scroll::{
@@ -285,7 +285,7 @@ pub(crate) fn terminal_line_height(appearance: &TerminalAppearance) -> Pixels {
 
 #[cfg(test)]
 fn appearance_hsla(color: zz_terminal::AppearanceColor) -> Hsla {
-    gpui::Rgba {
+    zpui::Rgba {
         r: f32::from(color.r) / 255.0,
         g: f32::from(color.g) / 255.0,
         b: f32::from(color.b) / 255.0,
@@ -1844,7 +1844,7 @@ impl TerminalView {
         cx.stop_propagation();
     }
 
-    fn local_selection(&self, modifiers: gpui::Modifiers) -> bool {
+    fn local_selection(&self, modifiers: zpui::Modifiers) -> bool {
         modifiers.shift || !self.retained.read().viewport.mouse_tracking
     }
 
@@ -1936,7 +1936,7 @@ impl TerminalView {
         &self,
         position: Point<Pixels>,
         click_count: usize,
-        modifiers: gpui::Modifiers,
+        modifiers: zpui::Modifiers,
     ) -> Option<PointerCellEvent> {
         self.pointer_cell_with_clamping(position, click_count, modifiers, false)
     }
@@ -1945,7 +1945,7 @@ impl TerminalView {
         &self,
         position: Point<Pixels>,
         click_count: usize,
-        modifiers: gpui::Modifiers,
+        modifiers: zpui::Modifiers,
     ) -> Option<PointerCellEvent> {
         self.pointer_cell_with_clamping(position, click_count, modifiers, true)
     }
@@ -1954,7 +1954,7 @@ impl TerminalView {
         &self,
         position: Point<Pixels>,
         click_count: usize,
-        modifiers: gpui::Modifiers,
+        modifiers: zpui::Modifiers,
         clamp: bool,
     ) -> Option<PointerCellEvent> {
         let grid = self.hit_grid?;
@@ -1999,7 +1999,7 @@ impl TerminalView {
         &self,
         position: Point<Pixels>,
         click_count: usize,
-        input_modifiers: gpui::Modifiers,
+        input_modifiers: zpui::Modifiers,
         phase: TerminalMousePhase,
         button: Option<TerminalMouseButton>,
         scale: f32,
@@ -2019,7 +2019,7 @@ impl TerminalView {
         &self,
         position: Point<Pixels>,
         click_count: usize,
-        input_modifiers: gpui::Modifiers,
+        input_modifiers: zpui::Modifiers,
         phase: TerminalMousePhase,
         button: Option<TerminalMouseButton>,
         scale: f32,
@@ -2045,7 +2045,7 @@ impl TerminalView {
         &self,
         position: Point<Pixels>,
         click_count: usize,
-        input_modifiers: gpui::Modifiers,
+        input_modifiers: zpui::Modifiers,
         phase: TerminalMousePhase,
         button: Option<TerminalMouseButton>,
         scale: f32,
@@ -2851,7 +2851,7 @@ fn scrollbar_strip_hit(grid: HitGrid, scrollbar: ScrollbarState, position: Point
     zz_ui::terminal::scrollbar_strip_hit(grid.surface_bounds, scrollbar, position)
 }
 
-fn modifiers(value: gpui::Modifiers) -> Modifiers {
+fn modifiers(value: zpui::Modifiers) -> Modifiers {
     Modifiers::new(value.shift, value.control, value.alt, value.platform)
 }
 
@@ -2910,11 +2910,11 @@ pub(crate) fn key_code(key: &str) -> KeyCode {
 )]
 mod tests {
     use super::*;
-    use gpui::{FontStyle, FontWeight};
+    use zpui::{FontStyle, FontWeight};
     use zz_client::scrollback::HistoryRow;
     use zz_terminal::{AppearanceColor, CursorBlinkPolicy};
 
-    gpui::actions!(terminal_view_test, [FocusNext, FocusPrevious]);
+    zpui::actions!(terminal_view_test, [FocusNext, FocusPrevious]);
 
     #[test]
     fn maps_gpui_key_names() {
@@ -2946,7 +2946,7 @@ mod tests {
                 keystroke: Keystroke {
                     key: key.to_owned(),
                     key_char: None,
-                    modifiers: gpui::Modifiers {
+                    modifiers: zpui::Modifiers {
                         shift: true,
                         ..Default::default()
                     },
@@ -2995,7 +2995,7 @@ mod tests {
             keystroke: Keystroke {
                 key: "e".to_owned(),
                 key_char: Some("e".to_owned()),
-                modifiers: gpui::Modifiers::default(),
+                modifiers: zpui::Modifiers::default(),
             },
             is_held: false,
             prefer_character_input: false,
@@ -3022,7 +3022,7 @@ mod tests {
         let keystroke = Keystroke {
             key: "space".to_owned(),
             key_char: Some(" ".to_owned()),
-            modifiers: gpui::Modifiers::default(),
+            modifiers: zpui::Modifiers::default(),
         };
 
         assert_eq!(
@@ -3049,10 +3049,10 @@ mod tests {
             KeyBinding::new("shift-tab", FocusPrevious, Some("Root")),
         ];
         bindings.extend(raw_key_bindings());
-        let keymap = gpui::Keymap::new(bindings);
-        let root_context = gpui::KeyContext::parse("Root").expect("valid root key context");
+        let keymap = zpui::Keymap::new(bindings);
+        let root_context = zpui::KeyContext::parse("Root").expect("valid root key context");
         let terminal_context =
-            gpui::KeyContext::parse(TERMINAL_KEY_CONTEXT).expect("valid terminal key context");
+            zpui::KeyContext::parse(TERMINAL_KEY_CONTEXT).expect("valid terminal key context");
 
         for source in ["tab", "shift-tab"] {
             let keystroke = Keystroke::parse(source).expect("valid tab keystroke");
@@ -3115,10 +3115,10 @@ mod tests {
         bindings.extend(terminal_key_bindings(&crate::keymap::test_chords(
             TERMINAL_TABLE,
         )));
-        let keymap = gpui::Keymap::new(bindings);
+        let keymap = zpui::Keymap::new(bindings);
         let contexts = [
-            gpui::KeyContext::parse(zz_ui::ROOT_KEY_CONTEXT).expect("valid zz root context"),
-            gpui::KeyContext::parse(TERMINAL_KEY_CONTEXT).expect("valid terminal context"),
+            zpui::KeyContext::parse(zz_ui::ROOT_KEY_CONTEXT).expect("valid zz root context"),
+            zpui::KeyContext::parse(TERMINAL_KEY_CONTEXT).expect("valid terminal context"),
         ];
 
         for source in ["ctrl-=", "ctrl-+", "ctrl--"] {
@@ -3461,9 +3461,9 @@ mod tests {
     #[test]
     fn visible_scrollbar_strip_is_not_part_of_the_terminal_hit_grid() {
         let surface_bounds =
-            Bounds::new(point(px(10.0), px(20.0)), gpui::size(px(650.0), px(460.0)));
+            Bounds::new(point(px(10.0), px(20.0)), zpui::size(px(650.0), px(460.0)));
         let grid = HitGrid {
-            bounds: Bounds::new(surface_bounds.origin, gpui::size(px(640.0), px(456.0))),
+            bounds: Bounds::new(surface_bounds.origin, zpui::size(px(640.0), px(456.0))),
             surface_bounds,
             columns: 80,
             rows: 24,
@@ -3510,9 +3510,9 @@ mod tests {
         );
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn terminal_geometry_retries_the_same_grid_after_a_new_layout_view(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         cx.update(zz_ui::init);
         let mux_slot = Rc::new(RefCell::new(None));
@@ -3575,9 +3575,9 @@ mod tests {
         drop(terminal);
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn trackpad_scrollback_stays_local_and_syncs_the_daemon_before_a_press(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         cx.update(zz_ui::init);
         let mux_slot = Rc::new(RefCell::new(None));
@@ -3595,7 +3595,7 @@ mod tests {
         });
         let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
         let sent = mux.update(cx, |mux, _| mux.record_input_for_test());
-        let grid = Bounds::new(point(px(0.0), px(0.0)), gpui::size(px(640.0), px(480.0)));
+        let grid = Bounds::new(point(px(0.0), px(0.0)), zpui::size(px(640.0), px(480.0)));
         let geometry = |view: &mut TerminalView, content_offset, cx: &mut Context<TerminalView>| {
             view.update_geometry(
                 GridSize {
@@ -3712,9 +3712,9 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn pane_search_owns_focus_and_updates_unicode_edits_without_submitting(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         cx.update(zz_ui::init);
         let (terminal, cx) = cx.add_window_view(|window, cx| {
@@ -3756,9 +3756,9 @@ mod tests {
         });
     }
 
-    #[gpui::test]
+    #[zpui::test]
     fn hidden_and_blurred_terminals_stop_blinking_without_another_render(
-        cx: &mut gpui::TestAppContext,
+        cx: &mut zpui::TestAppContext,
     ) {
         cx.update(zz_ui::init);
         let (terminal, cx) = cx.add_window_view(|window, cx| {
@@ -3813,8 +3813,8 @@ mod tests {
         });
     }
 
-    #[gpui::test]
-    fn cursor_blinking_settles_visible_after_idle_until_input(cx: &mut gpui::TestAppContext) {
+    #[zpui::test]
+    fn cursor_blinking_settles_visible_after_idle_until_input(cx: &mut zpui::TestAppContext) {
         cx.update(zz_ui::init);
         let (terminal, cx) = cx.add_window_view(|window, cx| {
             let mux = cx.new(|cx| {

@@ -79,7 +79,7 @@ behalf, and a rule to [Lane rules](#lane-rules) in the same commit as any new le
 
 ## Lane rules
 
-Each rule cost an earlier campaign real time. The source is in brackets
+Each rule cost a campaign real time. The source is in brackets
 (`compat/orchestration/CAMPAIGN-LOG.md` = LOG, `compat/tui/HANDOFF.md` = THO,
 `knowledge/playbooks/tui-parity-campaign.md` = PB).
 
@@ -123,7 +123,10 @@ Each rule cost an earlier campaign real time. The source is in brackets
 13. **Probes live in the repo** (tests or `compat/scenarios`), never only in `/tmp`, which is RAM
     and is lost on reboot. [A gate spent an hour rebuilding lost probes, LOG.]
 14. **Leave nothing running**: kill the daemons and fixtures you started; no binary copies in `/tmp`.
-15. **Commits**: plain English, what changed and why; end with `Co-Authored-By: <a funny name>`
+15. **Stay in your worktree.** Start every Bash command with `cd <your worktree> &&` or use
+    absolute paths; a `cd` inside a backgrounded subshell does not carry over. [fix.tui-colour ran a
+    test batch in the shared main checkout this way, 2026-10-09.]
+16. **Commits**: plain English, what changed and why; end with `Co-Authored-By: <a funny name>`
     (race-condition-slayer, deadbeef-hexlord); never Claude, Codex or an email. No comments in code.
 
 ## Full suite: milestones only

@@ -571,7 +571,7 @@
       "id": "pin.formats-options-2",
       "track": "pin",
       "title": "Rest of the 3.8 formats and options",
-      "status": "review",
+      "status": "active",
       "deps": [
         "pin.formats-options",
         "pin.layout-v2"
@@ -600,7 +600,8 @@
       "sha": null,
       "notes": [
         "2026-10-09: leftovers of pin.formats-options; see its lane report in the ledger notes.",
-        "2026-10-09: Session 1 done at 959a3fa27: display-message -j, history_* native (formats.history-counters), clear-on-attach, copy-mode-current-line-style, A modifier animation, hook_fire_*, clipboard_invalid, terminal-features-3-8 (tui-caps 408/408); wire appends under 108. Customize rebuild split to pin.customize-3-8. Review 1 running."
+        "2026-10-09: Session 1 done at 959a3fa27: display-message -j, history_* native (formats.history-counters), clear-on-attach, copy-mode-current-line-style, A modifier animation, hook_fire_*, clipboard_invalid, terminal-features-3-8 (tui-caps 408/408); wire appends under 108. Customize rebuild split to pin.customize-3-8. Review 1 running.",
+        "2026-10-09: Codex review 1 (pin.formats-options-2-1.md): 6 P1 (animation flag per client, current-line style change not republished, empty hooks not counted, counters survive unset, user hooks uncounted, extended underlines dropped); fix pass sent."
       ]
     },
     {
@@ -885,7 +886,7 @@
         "2026-10-09 (pin.hooks-events-2): zz pane prompts belong to the client (close on detach, a status prompt replaces them); in 3.8 the prompt stays on the pane.",
         "2026-10-09 (pin.display-panes): with -s naming another window the desktop overlay draws indicators on panes not on screen (desktop renderer).",
         "2026-10-09 (pin.hooks-events-2): zz events still carry d77 payload keys 3.8 dropped (hook_session/hook_pane on window-renamed, hook_session on pane events), visible in wait-for -E -v; needs a 3.8 payload table per event (PendingHookEvent::window/::pane back many events; a daemon test and control notifications read those keys). Control and attached clients' wait-for -E -v lines arrive at wake, not per event.",
-        "2026-10-09 (pin.formats-options-2): hook_fire_count: 3.8 counts an event even when its hook has no commands (the global entry always exists), zz counts only hooks that run commands; match 3.8 at the event sources. clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48."
+        "2026-10-09 (pin.formats-options-2): clear-history -t <pane> with no client attached fails 'pane is not attached: %0' in zz, succeeds in tmux. After set -g history-limit 50 and respawn-pane -k, zz keeps 98 lines of history where tmux keeps 48."
       ]
     },
     {

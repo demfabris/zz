@@ -370,6 +370,21 @@ client_on_both() {
     side_command "$side" "${arguments[@]}" || die "$side refused $1"
   done
 }
+PIN_DISPLAY_PANES_MODE=0
+DISPLAY_PANES_MODE=same
+DISPLAY_PANES_OWNER=gap:pin.display-panes
+DISPLAY_PANES_REASON='PIN 3.8, gap:pin.display-panes: 3.8 made display-panes a pane mode (window-panes.c) with no -b and a target pane for -t, so the pin draws its labels as a mode of the target pane while zz still raises the d77c9dc6 client overlay'
+CENTRE_MENU_MODE=same
+CENTRE_MENU_OWNER=gap:pin.keys-copy
+CENTRE_MENU_REASON='PIN 3.8, gap:pin.keys-copy: 3.8 menus belong to the window (ad6832e6), so display-menu -x C -y C centres on the window and the pin draws the menu a row above the client-centred row zz still uses at an odd height'
+display_panes_on_both() {
+  if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
+    side_command zz display-panes -b -d 0 -t "$(client_name zz)" || die 'zz refused display-panes'
+    side_command tmux display-panes -d 0 || die 'tmux refused display-panes'
+  else
+    client_on_both display-panes -b -d 0 -t CLIENT
+  fi
+}
 send_both() {
   local side pane
   for side in zz tmux; do
@@ -593,14 +608,24 @@ compare_rows() {
   return 1
 }
 
+declare -A RECORD_OWNERS=([unattributed]=0)
+owner_tally() {
+  local key entries=()
+  for key in $(printf '%s\n' "${!RECORD_OWNERS[@]}" | LC_ALL=C sort); do
+    entries+=("$key=${RECORD_OWNERS[$key]}")
+  done
+  printf 'owners %s' "${entries[*]}"
+}
 verdict() {
   local name="$1"
   local mode="$2"
   local reason="${3:-}"
+  local owner="${4:-unattributed}"
   if [ "$mode" = same ]; then
     CHECKS=$((CHECKS + 1))
   else
     RECORDS=$((RECORDS + 1))
+    RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
   fi
   if compare_rows "$name" styled; then
     printf 'ok    %s\n' "$name"
@@ -762,21 +787,23 @@ menu_case() {
 # before this has already asserted both menus sit on the same cells.
 click_item_on_both() {
   local text="$1"
-  local row column line index
-  row=""
-  index=0
-  while IFS= read -r line; do
-    if [[ "$line" == *"$text"* ]]; then
-      row="$index"
-      line="${line%%"$text"*}"
-      column="${#line}"
-      break
-    fi
-    index=$((index + 1))
-  done < <(capture_plain tmux)
-  [ -n "$row" ] || die "no $text on the tmux screen to click"
-  type_on_both -l "$(printf '\033[<0;%s;%sM' "$((column + 1))" "$((row + 1))")"
-  type_on_both -l "$(printf '\033[<0;%s;%sm' "$((column + 1))" "$((row + 1))")"
+  local side row column line index
+  for side in zz tmux; do
+    row=""
+    index=0
+    while IFS= read -r line; do
+      if [[ "$line" == *"$text"* ]]; then
+        row="$index"
+        line="${line%%"$text"*}"
+        column="${#line}"
+        break
+      fi
+      index=$((index + 1))
+    done < <(capture_plain "$side")
+    [ -n "$row" ] || die "no $text on the $side screen to click"
+    type_on "$side" -l "$(printf '\033[<0;%s;%sM' "$((column + 1))" "$((row + 1))")"
+    type_on "$side" -l "$(printf '\033[<0;%s;%sm' "$((column + 1))" "$((row + 1))")"
+  done
 }
 
 # DISPLAY-POPUP, bound to prefix P: -w 34 -h 9, -T title and -E, over a job that
@@ -842,19 +869,21 @@ display_panes_case() {
   local zz_before tmux_before
   zz_before="$(capture_screen zz)"
   tmux_before="$(capture_screen tmux)"
-  client_on_both display-panes -b -d 0 -t CLIENT
+  display_panes_on_both
   wait_for 'the zz labels' screen_differs_from zz "$zz_before"
   wait_for 'the tmux labels' screen_differs_from tmux "$tmux_before"
   settle_both MARK-panes 'the pane labels'
-  verdict panes-shown same
+  verdict panes-shown "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
   resize_both_to 80 30
   settle_both MARK-panes 'the pane labels at 80x30'
-  verdict panes-resized same
+  verdict panes-resized "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  [ "$PIN_DISPLAY_PANES_MODE" -eq 0 ] ||
+    tmux_inner_command copy-mode -q -t "=$INNER_SESSION:0.0" || die 'tmux refused copy-mode -q'
   resize_both_to 80 24
   mark_both panesback
   zz_before="$(capture_screen zz)"
   tmux_before="$(capture_screen tmux)"
-  client_on_both display-panes -b -d 0 -t CLIENT
+  display_panes_on_both
   wait_for 'the zz labels again' screen_differs_from zz "$zz_before"
   wait_for 'the tmux labels again' screen_differs_from tmux "$tmux_before"
   settle_both MARK-panes 'the pane labels again'
@@ -867,13 +896,14 @@ display_panes_case() {
   mark_both panesz
   zz_before="$(capture_screen zz)"
   tmux_before="$(capture_screen tmux)"
-  client_on_both display-panes -b -d 0 -t CLIENT
+  display_panes_on_both
   wait_for 'the zz labels' screen_differs_from zz "$zz_before"
   wait_for 'the tmux labels' screen_differs_from tmux "$tmux_before"
   settle_both MARK-panesz 'the pane labels'
   type_on_both Z
   settle_both MARK-panesz 'the labels closed by a non-pane key'
-  verdict panes-closed-by-key same
+  verdict panes-closed-by-key "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
+  [ "$PIN_DISPLAY_PANES_MODE" -eq 0 ] || type_on_both Enter
   DIVIDER_RULE=0
 }
 
@@ -905,10 +935,10 @@ centred_surfaces() {
   press_on_both C
   both_screen_has CENTRE-MENU 'the centred menu'
   settle_both "MARK-$label" 'the centred menu'
-  verdict "centre-menu-$label" same
+  verdict "centre-menu-$label" "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
   type_on_both Down
   settle_both "MARK-$label" 'the centred menu after Down'
-  verdict "centre-menu-$label-down" same
+  verdict "centre-menu-$label-down" "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
   type_on_both Escape
   both_screen_lacks CENTRE-MENU 'the cancelled centred menu'
   settle_both "MARK-$label" 'the cancelled centred menu'
@@ -944,7 +974,7 @@ odd_size_case() {
   press_on_both D
   both_screen_has CENTRE-MENU 'the centred -M menu'
   settle_both MARK-click 'the centred -M menu'
-  verdict centre-menu-mouse-opened same
+  verdict centre-menu-mouse-opened "$CENTRE_MENU_MODE" "$CENTRE_MENU_REASON" "$CENTRE_MENU_OWNER"
   click_item_on_both 'Third item'
   both_option_is @overlay_menu third 'the clicked third item of the centred menu'
   both_screen_lacks CENTRE-MENU 'the centred menu closed by the click'
@@ -960,11 +990,11 @@ odd_size_case() {
   local zz_before tmux_before
   zz_before="$(capture_screen zz)"
   tmux_before="$(capture_screen tmux)"
-  client_on_both display-panes -b -d 0 -t CLIENT
+  display_panes_on_both
   wait_for 'the zz coloured labels' screen_differs_from zz "$zz_before"
   wait_for 'the tmux coloured labels' screen_differs_from tmux "$tmux_before"
   settle_both MARK-colours 'the coloured pane labels'
-  verdict panes-coloured-shown same
+  verdict panes-coloured-shown "$DISPLAY_PANES_MODE" "$DISPLAY_PANES_REASON" "$DISPLAY_PANES_OWNER"
   type_on_both 1
   wait_for 'zz selected pane 1 from the coloured labels' active_pane_index_is zz 1
   wait_for 'tmux selected pane 1 from the coloured labels' active_pane_index_is tmux 1
@@ -979,6 +1009,13 @@ write_attach tmux "$SCRATCH_DIR/attach-tmux.sh"
 zz_command -f /dev/null daemon >"$SCRATCH_DIR/zz-daemon.out" 2>"$SCRATCH_DIR/zz-daemon.err" &
 ZZ_PID=$!
 wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
+
+if ! tmux_inner_command -f /dev/null start-server \; list-commands display-panes 2>/dev/null |
+  grep -q -- '-b'; then
+  PIN_DISPLAY_PANES_MODE=1
+  DISPLAY_PANES_MODE=record
+  CENTRE_MENU_MODE=record
+fi
 
 run_cases() {
   printf 'overlay differential at %sx%s (pin %s)\n' \
@@ -995,10 +1032,10 @@ run_cases() {
   odd_size_case
 
   if [ "$FAILURES" -ne 0 ]; then
-    printf '%s of %s asserted comparisons differ, %s recorded\n' "$FAILURES" "$CHECKS" "$RECORDS"
+    printf '%s of %s asserted comparisons differ, %s recorded (%s)\n' "$FAILURES" "$CHECKS" "$RECORDS" "$(owner_tally)"
     exit 1
   fi
-  printf 'all %s asserted comparisons identical, %s recorded not asserted\n' "$CHECKS" "$RECORDS"
+  printf 'all %s asserted comparisons identical, %s recorded not asserted (%s)\n' "$CHECKS" "$RECORDS" "$(owner_tally)"
 }
 
 # --- self-check ------------------------------------------------------------
@@ -1152,23 +1189,27 @@ run_self_check() {
   type_on_both Escape
   both_screen_lacks OVERLAY-MENU 'the equivalent menu cancelled'
 
-  CASE_LABEL='self-check display-panes colour'
-  side_command zz set-option -g display-panes-active-colour colour124 || die 'zz refused set-option'
-  run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
-  run_on_both select-pane -t "=$INNER_SESSION:0.0"
-  DIVIDER_RULE=1
-  mark_both colour
-  local zz_before tmux_before
-  zz_before="$(capture_screen zz)"
-  tmux_before="$(capture_screen tmux)"
-  client_on_both display-panes -b -d 0 -t CLIENT
-  wait_for 'the zz one-sided labels' screen_differs_from zz "$zz_before"
-  wait_for 'the tmux one-sided labels' screen_differs_from tmux "$tmux_before"
-  settle_both MARK-colour 'the one-sided pane colour'
-  compare_rows self-check-panes-colour styled || true
-  self_check_case 'display-panes, a display-panes-active-colour only one side sets' rows
-  type_on_both Escape
-  DIVIDER_RULE=0
+  if [ "$PIN_DISPLAY_PANES_MODE" -eq 1 ]; then
+    printf 'note  self-check display-panes colour skipped: %s\n' "$DISPLAY_PANES_REASON"
+  else
+    CASE_LABEL='self-check display-panes colour'
+    side_command zz set-option -g display-panes-active-colour colour124 || die 'zz refused set-option'
+    run_on_both split-window -h -t "=$INNER_SESSION:0.0" "$INNER_SHELL"
+    run_on_both select-pane -t "=$INNER_SESSION:0.0"
+    DIVIDER_RULE=1
+    mark_both colour
+    local zz_before tmux_before
+    zz_before="$(capture_screen zz)"
+    tmux_before="$(capture_screen tmux)"
+    display_panes_on_both
+    wait_for 'the zz one-sided labels' screen_differs_from zz "$zz_before"
+    wait_for 'the tmux one-sided labels' screen_differs_from tmux "$tmux_before"
+    settle_both MARK-colour 'the one-sided pane colour'
+    compare_rows self-check-panes-colour styled || true
+    self_check_case 'display-panes, a display-panes-active-colour only one side sets' rows
+    type_on_both Escape
+    DIVIDER_RULE=0
+  fi
 
   if [ "$SELF_CHECK_FAILURES" -ne 0 ]; then
     printf '%s self-check expectations unmet\n' "$SELF_CHECK_FAILURES"

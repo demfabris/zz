@@ -6,7 +6,7 @@ BASE="$(dirname "$MAIN")"
 LEDGER="$MAIN/compat/catchup/ledger.py"
 
 usage() {
-  echo "usage: wt.sh add SLOT | item SLOT ID | rm SLOT | list | prune" >&2
+  echo "usage: wt.sh add SLOT | item SLOT ID | cache SLOT | rm SLOT | list | prune" >&2
   exit 2
 }
 
@@ -47,7 +47,19 @@ case "${1:-}" in
     else
       git -C "$WT" switch -c "$BR" main
     fi
+    if ! cmp -s "$MAIN/compat/.cache/tmux-build.stamp" "$WT/compat/.cache/tmux-build.stamp"; then
+      "$0" cache "$2" >/dev/null
+    fi
     echo "$WT on $BR at $(git -C "$WT" rev-parse --short HEAD)"
+    ;;
+  cache)
+    [ $# -eq 2 ] || usage
+    WT="$(path_of "$2")"
+    [ -d "$WT" ] || { echo "no worktree $WT" >&2; exit 1; }
+    mkdir -p "$WT/compat/.cache/tmux-src"
+    rsync -a --delete "$MAIN/compat/.cache/tmux-src/" "$WT/compat/.cache/tmux-src/"
+    cp -a "$MAIN/compat/.cache/tmux-build.stamp" "$WT/compat/.cache/tmux-build.stamp"
+    (cd "$WT" && python3 compat/tmux-oracle.py --check 2>&1 | tail -1)
     ;;
   rm)
     [ $# -eq 2 ] || usage

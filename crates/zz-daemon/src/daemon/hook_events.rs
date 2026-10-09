@@ -601,6 +601,7 @@ pub(super) fn session_event(
         name,
         context: session_context(view, session),
         exclude_client: None,
+        control_notified: false,
         variables: BTreeMap::from([
             (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
             (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
@@ -628,6 +629,7 @@ pub(super) fn window_event(
         name,
         context: window_context(view, window),
         exclude_client: None,
+        control_notified: false,
         variables: BTreeMap::from([
             (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
             (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),
@@ -654,6 +656,7 @@ pub(super) fn winlink_event(
         name,
         context: window_context(view, window),
         exclude_client: None,
+        control_notified: false,
         variables: BTreeMap::from([
             (HOOK_CONTEXT_FORMAT.to_owned(), name.to_owned()),
             (HOOK_SESSION_CONTEXT_FORMAT.to_owned(), session.to_string()),

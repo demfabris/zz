@@ -1,0 +1,13 @@
+corpus: none
+# tmux 3.8's layout_parse_apply_ctx reorders only floating panes in z_index, so
+# select-layout with a layout string keeps the tiled panes' z-order instead of
+# rebuilding it from the tree. The top-right pane is created before the
+# top-left one, so it sits in front and both claim the junction cell above the
+# bottom divider as its top_wp; under pane-border-lines number that cell draws
+# the front pane's index. Re-applying the window's own layout must leave an
+# attached client's screen unchanged, where a tree rebuild would hand the cell
+# to the top-left pane.
+stage: fixtures/select-layout-z-order.sh ~/select-layout-z-order.sh
+out: set-environment -gu SELECT_LAYOUT_Z_ORDER
+run-shell 'sh ~/select-layout-z-order.sh'
+out: show-environment -g SELECT_LAYOUT_Z_ORDER

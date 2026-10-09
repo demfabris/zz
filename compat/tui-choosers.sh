@@ -728,7 +728,7 @@ session_tree_case() {
   verdict session-tree-open same
   step '┌ many (sort: index)' j
   verdict session-tree-next same
-  step '└─> ' Right
+  step '└─→ ' Right
   verdict session-tree-expanded same
   step 'MARK-sessions' q
   verdict session-tree-closed same

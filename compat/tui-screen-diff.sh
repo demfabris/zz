@@ -591,15 +591,27 @@ compare_plain_screens() {
 # to inherit. `text` is the split: every glyph, every column and the cursor are
 # ASSERTED, and only the styles are recorded, for a case whose colours are a
 # divergence somebody else owns and whose geometry is this obligation's claim.
+declare -A RECORD_OWNERS=([unattributed]=0)
+
+owner_tally() {
+  local key entries=()
+  for key in $(printf '%s\n' "${!RECORD_OWNERS[@]}" | LC_ALL=C sort); do
+    entries+=("$key=${RECORD_OWNERS[$key]}")
+  done
+  printf 'owners %s' "${entries[*]}"
+}
+
 checkpoint() {
   local name="$1"
   local mode="$2"
   local reason="${3:-}"
+  local owner="${4:-unattributed}"
   send_both "printf 'MARK-%s\\n' $name"
   settle_both "MARK-$name" "$name"
   if [ "$mode" = text ]; then
     CHECKS=$((CHECKS + 1))
     RECORDS=$((RECORDS + 1))
+    RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
     [ -n "$reason" ] || die "recorded style at $name says nothing about why"
     if compare_plain_screens "$name"; then
       printf 'ok    %s %s every glyph, column and the cursor identical\n' "$SIZE_LABEL" "$name"
@@ -618,6 +630,7 @@ checkpoint() {
     CHECKS=$((CHECKS + 1))
   else
     RECORDS=$((RECORDS + 1))
+    RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
   fi
   if compare_screens "$name"; then
     printf 'ok    %s %s\n' "$SIZE_LABEL" "$name"
@@ -1204,9 +1217,9 @@ done
 run_sidebar_case
 
 if [ "$FAILURES" -ne 0 ]; then
-  printf '%s of %s asserted checkpoints differ, %s recorded\n' \
-    "$FAILURES" "$CHECKS" "$RECORDS"
+  printf '%s of %s asserted checkpoints differ, %s recorded (%s)\n' \
+    "$FAILURES" "$CHECKS" "$RECORDS" "$(owner_tally)"
   exit 1
 fi
-printf 'all %s asserted checkpoints identical, %s recorded not asserted\n' \
-  "$CHECKS" "$RECORDS"
+printf 'all %s asserted checkpoints identical, %s recorded not asserted (%s)\n' \
+  "$CHECKS" "$RECORDS" "$(owner_tally)"

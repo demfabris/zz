@@ -3390,7 +3390,7 @@ impl MuxEngine {
             });
         }
         context.pane_z = window.pane_z(pane.id).and_then(|z| usize::try_from(z).ok());
-        context.pane_floating = window.is_floating(pane.id);
+        context.pane_floating = window.shows_floating(pane.id);
         context.pane_over_zoom = pane.over_zoom;
         context.pane_modal = window.modal_pane() == Some(pane.id);
         if context.pane_active == Some(true) {

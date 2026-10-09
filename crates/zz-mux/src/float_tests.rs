@@ -267,3 +267,51 @@ fn modal_close_falls_back_like_window_lost_pane() {
     assert!(state.validate().is_ok());
     assert_eq!(state.windows[&window].active_pane, second);
 }
+
+#[test]
+fn an_over_zoom_float_stays_active_above_a_zoomed_tile() {
+    let mut state = MuxState::default();
+    let (_, window, first) = state.create_session_with_extent("s", (80, 24)).unwrap();
+    let second = state
+        .split_pane(first, Axis::Horizontal, PaneKind::Terminal)
+        .unwrap();
+    state.toggle_zoom(first).unwrap();
+    let pushed = state.push_zoom(window, false, true);
+    let over = state
+        .float_pane_with(
+            first,
+            PaneKind::Terminal,
+            &FloatSpawn {
+                geometry: geometry(40, 6, 4, 2),
+                over_zoom: true,
+                ..FloatSpawn::default()
+            },
+        )
+        .unwrap();
+    state.pop_zoom(window, pushed);
+    assert!(state.validate().is_ok());
+    let state_window = &state.windows[&window];
+    assert_eq!(state_window.zoomed_pane, Some(first));
+    assert_eq!(state_window.active_pane, over);
+    assert!(state_window.shows_floating(over));
+    assert!(!state_window.pane_is_visible(second));
+
+    state.kill_pane(over).unwrap();
+    assert!(state.validate().is_ok());
+    assert_eq!(state.windows[&window].zoomed_pane, Some(first));
+    state.toggle_zoom(first).unwrap();
+
+    let float = float(&mut state, first, geometry(20, 6, 4, 2));
+    state.toggle_zoom(float).unwrap();
+    let state_window = &state.windows[&window];
+    assert_eq!(state_window.zoomed_pane, Some(float));
+    assert!(!state_window.shows_floating(float));
+    assert_eq!(state_window.z_order().last(), Some(&float));
+    state.toggle_zoom(float).unwrap();
+    let state_window = &state.windows[&window];
+    assert_eq!(state_window.z_order().first(), Some(&float));
+    assert_eq!(
+        state_window.layout.pane_geometry(float),
+        Some(geometry(20, 6, 4, 2))
+    );
+}

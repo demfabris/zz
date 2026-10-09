@@ -77,9 +77,11 @@ impl FormatTree<'_> {
             FormatBacking::PaneZ => optional_display(
                 window.and_then(|window| self.pane.and_then(|pane| window.pane_z(pane))),
             ),
-            FormatBacking::PaneFloatingFlag => boolean(
-                window.is_some_and(|window| self.pane.is_some_and(|pane| window.is_floating(pane))),
-            ),
+            FormatBacking::PaneFloatingFlag => {
+                boolean(window.is_some_and(|window| {
+                    self.pane.is_some_and(|pane| window.shows_floating(pane))
+                }))
+            }
             FormatBacking::PaneModalFlag => boolean(
                 window
                     .is_some_and(|window| self.pane.is_some() && window.modal_pane() == self.pane),
@@ -406,7 +408,7 @@ impl FormatTree<'_> {
                     (
                         'F',
                         window.is_some_and(|window| {
-                            self.pane.is_some_and(|pane| window.is_floating(pane))
+                            self.pane.is_some_and(|pane| window.shows_floating(pane))
                         }),
                     ),
                     ('A', pane.is_some_and(|pane| pane.over_zoom)),

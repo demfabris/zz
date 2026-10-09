@@ -8264,13 +8264,23 @@ impl MuxEngine {
         let (inherit_cwd_from, cwd) =
             spawn_cwd_source(self, options, Some(target), &kind, format_client, hooks);
         let over_zoom = floating.as_ref().is_some_and(|spawn| spawn.over_zoom);
-        if apply_tmux_zoom
-            && !over_zoom
-            && self
-                .state
-                .window_for_pane(target)
-                .is_some_and(|window| self.state.windows[&window].zoomed_pane.is_some())
-        {
+        let target_window = self
+            .state
+            .window_for_pane(target)
+            .expect("resolved pane has a window");
+        let mut float_zoom = None;
+        if apply_tmux_zoom && floating.is_some() {
+            let window_state = &self.state.windows[&target_window];
+            let active_over_zoom = window_state.active_is_over_zoom();
+            let restore = (active_over_zoom && window_state.pane_is_visible(target))
+                || (window_state.zoomed_pane.is_some() && over_zoom);
+            let pushed = if over_zoom || active_over_zoom {
+                self.state.push_zoom(target_window, false, true)
+            } else {
+                self.state.push_zoom(target_window, true, options.has("-Z"))
+            };
+            float_zoom = Some((restore, pushed));
+        } else if apply_tmux_zoom && self.state.windows[&target_window].zoomed_pane.is_some() {
             self.state.toggle_zoom(target)?;
         }
         let is_floating = floating.is_some();
@@ -8278,6 +8288,9 @@ impl MuxEngine {
             Some(spawn) => self.state.float_pane_with(target, kind, &spawn)?,
             None => self.state.split_pane_with(target, axis, kind, placement)?,
         };
+        if let Some((true, pushed)) = float_zoom {
+            self.state.pop_zoom(target_window, pushed);
+        }
         if empty {
             self.state.mark_pane_empty(pane)?;
         }

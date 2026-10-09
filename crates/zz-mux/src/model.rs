@@ -298,6 +298,12 @@ pub struct WindowFloats {
     pub last_new_pane: (i32, i32),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PushedZoom {
+    No,
+    Was(Option<PaneId>),
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct FloatSpawn {
     pub geometry: CellGeometry,
@@ -466,8 +472,33 @@ impl Window {
             return self.layout_string(format, pane_base_index);
         };
         let (width, height) = self.layout.extent();
-        CellLayout::new(zoomed, width, height)
-            .dump_as(format, &|pane| self.leaf_state(pane, pane_base_index))
+        let mut visible = CellLayout::new(zoomed, width, height);
+        let mut next_id = 0;
+        let mut ids = || {
+            next_id += 1;
+            SplitId(next_id)
+        };
+        for pane in &self.pane_order {
+            if *pane == zoomed || !self.shows_floating(*pane) {
+                continue;
+            }
+            if let Some(geometry) = self.layout.pane_geometry(*pane) {
+                let _ = visible.float(zoomed, *pane, geometry, &mut ids);
+            }
+        }
+        visible.dump_as(format, &|pane| {
+            let mut state = self.leaf_state(pane, pane_base_index);
+            state.z = self.shows_floating(pane).then(|| {
+                let before = self
+                    .z_order
+                    .iter()
+                    .take_while(|candidate| **candidate != pane)
+                    .filter(|candidate| self.shows_floating(**candidate))
+                    .count();
+                u32::try_from(before).unwrap_or(u32::MAX)
+            });
+            state
+        })
     }
 
     fn saved_layout(&self, legacy: bool) -> SavedLayout {
@@ -498,10 +529,15 @@ impl Window {
             active: pane == self.active_pane,
             last: position(&self.last_panes),
             index: pane_base_index.saturating_add(position(&self.pane_order).unwrap_or_default()),
-            z: self
-                .layout
-                .is_floating(pane)
-                .then(|| self.floats_before(pane)),
+            z: self.layout.is_floating(pane).then(|| {
+                let zoomed_float = self.zoomed_pane == Some(self.active_pane)
+                    && self.layout.is_floating(self.active_pane);
+                match (zoomed_float, pane == self.active_pane) {
+                    (true, true) => 0,
+                    (true, false) => self.floats_before(pane).saturating_add(1),
+                    (false, _) => self.floats_before(pane),
+                }
+            }),
         }
     }
 
@@ -525,12 +561,110 @@ impl Window {
         if !self.z_order.contains(&pane) {
             return None;
         }
-        let before = self.floats_before(pane);
-        Some(if self.is_floating(pane) {
+        let before = self
+            .z_order
+            .iter()
+            .take_while(|candidate| **candidate != pane)
+            .filter(|candidate| self.shows_floating(**candidate))
+            .count();
+        let before = u32::try_from(before).unwrap_or(u32::MAX);
+        Some(if self.shows_floating(pane) {
             before
         } else {
             before.saturating_add(1)
         })
+    }
+
+    #[must_use]
+    pub fn shows_floating(&self, pane: PaneId) -> bool {
+        if !self.layout.is_floating(pane) {
+            return false;
+        }
+        match self.zoomed_pane {
+            None => true,
+            Some(zoomed) => zoomed != pane && self.is_over_zoom(pane),
+        }
+    }
+
+    #[must_use]
+    pub fn is_over_zoom(&self, pane: PaneId) -> bool {
+        self.panes.get(&pane).is_some_and(|pane| pane.over_zoom)
+    }
+
+    #[must_use]
+    pub fn pane_is_visible(&self, pane: PaneId) -> bool {
+        match self.zoomed_pane {
+            None => true,
+            Some(zoomed) => zoomed == pane || self.shows_floating(pane),
+        }
+    }
+
+    #[must_use]
+    pub fn active_is_over_zoom(&self) -> bool {
+        self.zoomed_pane.is_some() && self.shows_floating(self.active_pane)
+    }
+
+    fn active_floats_over_zoom(&self) -> bool {
+        self.is_over_zoom(self.active_pane) && self.layout.is_floating(self.active_pane)
+    }
+
+    pub(crate) fn zoom(&mut self, pane: PaneId) -> bool {
+        if self.zoomed_pane.is_some() || self.panes.len() <= 1 || !self.panes.contains_key(&pane) {
+            return false;
+        }
+        if self.active_pane != pane && !self.active_floats_over_zoom() {
+            activate_window_pane(self, pane, false);
+        }
+        self.zoomed_pane = Some(pane);
+        if self.layout.is_floating(pane) {
+            self.lower_to_tail(pane);
+        }
+        self.clear_pane_screen_extents();
+        true
+    }
+
+    pub(crate) fn unzoom(&mut self) -> bool {
+        let Some(zoomed) = self.zoomed_pane.take() else {
+            return false;
+        };
+        if self.layout.is_floating(zoomed) {
+            self.z_order.retain(|candidate| *candidate != zoomed);
+            let index = if zoomed == self.active_pane {
+                0
+            } else {
+                self.z_order
+                    .iter()
+                    .position(|candidate| !self.layout.is_floating(*candidate))
+                    .unwrap_or(self.z_order.len())
+            };
+            self.z_order.insert(index, zoomed);
+        }
+        self.clear_pane_screen_extents();
+        true
+    }
+
+    pub(crate) fn push_zoom(&mut self, always: bool, flag: bool) -> PushedZoom {
+        let pushed = if flag && (always || self.zoomed_pane.is_some()) {
+            PushedZoom::Was(self.zoomed_pane)
+        } else {
+            PushedZoom::No
+        };
+        self.unzoom();
+        pushed
+    }
+
+    pub(crate) fn pop_zoom(&mut self, pushed: PushedZoom) -> bool {
+        let PushedZoom::Was(was_zoomed) = pushed else {
+            return false;
+        };
+        let target = if self.active_floats_over_zoom() {
+            was_zoomed
+                .filter(|pane| self.panes.contains_key(pane))
+                .unwrap_or(self.active_pane)
+        } else {
+            self.active_pane
+        };
+        self.zoom(target)
     }
 
     #[must_use]
@@ -1650,6 +1784,37 @@ impl MuxState {
         Ok(())
     }
 
+    pub(crate) fn push_zoom(&mut self, window: WindowId, always: bool, flag: bool) -> PushedZoom {
+        let Some(window) = self.windows.get_mut(&mut self.journal, &window) else {
+            return PushedZoom::No;
+        };
+        let zoomed = window.zoomed_pane.is_some();
+        let pushed = window.push_zoom(always, flag);
+        if zoomed {
+            self.bump_generation();
+        }
+        pushed
+    }
+
+    pub(crate) fn pop_zoom(&mut self, window: WindowId, pushed: PushedZoom) -> bool {
+        let active_point = self.allocate_sort_point();
+        let Some(window) = self.windows.get_mut(&mut self.journal, &window) else {
+            return false;
+        };
+        let before = window.active_pane;
+        let zoomed = window.pop_zoom(pushed);
+        if window.active_pane != before {
+            let active = window.active_pane;
+            if let Some(pane) = window.panes.get_mut(&active) {
+                pane.active_point = active_point;
+            }
+        }
+        if zoomed {
+            self.bump_generation();
+        }
+        zoomed
+    }
+
     pub(crate) fn set_last_new_pane(&mut self, window: WindowId, cascade: (i32, i32)) {
         if let Some(window) = self.windows.get_mut(&mut self.journal, &window) {
             window.floats.last_new_pane = cascade;
@@ -1660,23 +1825,27 @@ impl MuxState {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let removed = self
-            .windows
-            .get_mut(&mut self.journal, &window_id)
-            .expect("window exists")
-            .layout
-            .remove(pane);
-        match removed {
-            Ok(()) => {}
-            Err(LayoutError::LastPane) => return self.kill_window(window_id),
-            Err(error) => return Err(pane_layout_error(error, pane)),
+        if self.windows[&window_id].panes.len() <= 1 {
+            return self.kill_window(window_id);
         }
         let window = self
             .windows
             .get_mut(&mut self.journal, &window_id)
             .expect("window exists");
+        let over_zoom = window.is_over_zoom(pane);
+        let previous_zoom = window.zoomed_pane;
+        let pushed = window.push_zoom(false, over_zoom);
+        match window.layout.remove(pane) {
+            Ok(()) => {}
+            Err(LayoutError::LastPane) => return self.kill_window(window_id),
+            Err(error) => {
+                window.zoomed_pane = previous_zoom;
+                return Err(pane_layout_error(error, pane));
+            }
+        }
         window.panes.remove(&pane);
         repair_window_after_pane_removal(window, pane);
+        window.pop_zoom(pushed);
         self.journal.note_removal();
         self.bump_generation();
         Ok(vec![pane])
@@ -1872,17 +2041,17 @@ impl MuxState {
             return Ok(());
         }
         window.clear_pane_screen_extents();
-        if window.zoomed_pane.is_some() {
-            window.zoomed_pane = None;
-        } else {
-            if activate_window_pane(window, pane, false) {
-                window
-                    .panes
-                    .get_mut(&pane)
-                    .expect("selected pane exists")
-                    .active_point = active_point;
-            }
-            window.zoomed_pane = Some(pane);
+        let before = window.active_pane;
+        if !window.unzoom() {
+            window.zoom(pane);
+        }
+        if window.active_pane != before {
+            let active = window.active_pane;
+            window
+                .panes
+                .get_mut(&active)
+                .expect("active pane exists")
+                .active_point = active_point;
         }
         self.bump_generation();
         Ok(())
@@ -4565,10 +4734,10 @@ impl MuxState {
             if history.len() != window.last_panes.len() || !history.is_subset(&pane_set) {
                 return Err(format!("window {window_id} pane history is invalid"));
             }
-            if window
-                .zoomed_pane
-                .is_some_and(|pane| pane != window.active_pane || !pane_set.contains(&pane))
-            {
+            if window.zoomed_pane.is_some_and(|pane| {
+                !pane_set.contains(&pane)
+                    || (pane != window.active_pane && !window.active_floats_over_zoom())
+            }) {
                 return Err(format!("window {window_id} zoomed pane is invalid"));
             }
             for pane in pane_set {
@@ -5018,6 +5187,7 @@ fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) 
     }
     let previous = window.active_pane;
     let was_zoomed = window.zoomed_pane.is_some();
+    let visible = window.pane_is_visible(pane);
     window
         .last_panes
         .retain(|candidate| *candidate != pane && *candidate != previous);
@@ -5026,7 +5196,12 @@ fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) 
         .last_panes
         .truncate(window.panes.len().saturating_sub(1));
     window.active_pane = pane;
-    window.zoomed_pane = (preserve_zoom && was_zoomed).then_some(pane);
+    if was_zoomed && !visible {
+        window.unzoom();
+        if preserve_zoom {
+            window.zoom(pane);
+        }
+    }
     window.clear_pane_screen_extents();
     true
 }

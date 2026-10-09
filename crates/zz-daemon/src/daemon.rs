@@ -23053,10 +23053,10 @@ impl Shared {
             if base.starts_with("MouseDrag") && !base.starts_with("MouseDragEnd") {
                 return self.update_mouse_drag(client, kind, context, drag, mouse);
             }
-            if base.starts_with("Wheel") {
-                if let Some(registered) = self.inner.lock().client_mut(client) {
-                    registered.mouse_drag = Some(drag);
-                }
+            if base.starts_with("Wheel")
+                && let Some(registered) = self.inner.lock().client_mut(client)
+            {
+                registered.mouse_drag = Some(drag);
             }
         }
         let outside_modal = (!key.contains("Status"))

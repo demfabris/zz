@@ -9423,7 +9423,7 @@ impl MuxEngine {
             ))
         } else if at_left && ly == bottom {
             let new_sy = y - cell.yoff;
-            (new_sy >= 1).then(|| ((sx + lx - x).max(1), new_sy, x + 1, cell.yoff))
+            (new_sy >= 1).then_some(((sx + lx - x).max(1), new_sy, x + 1, cell.yoff))
         } else if at_right && ly == bottom {
             Some((
                 (x - cell.xoff).max(1),
@@ -9433,13 +9433,13 @@ impl MuxEngine {
             ))
         } else if lx == right {
             let new_sx = x - cell.xoff;
-            (new_sx >= 1).then(|| (new_sx, sy, cell.xoff, cell.yoff))
+            (new_sx >= 1).then_some((new_sx, sy, cell.xoff, cell.yoff))
         } else if lx == left {
             let new_sx = sx + lx - x;
-            (new_sx >= 1).then(|| (new_sx, sy, x + 1, cell.yoff))
+            (new_sx >= 1).then_some((new_sx, sy, x + 1, cell.yoff))
         } else if ly == bottom {
             let new_sy = y - cell.yoff;
-            (new_sy >= 1).then(|| (sx, new_sy, cell.xoff, cell.yoff))
+            (new_sy >= 1).then_some((sx, new_sy, cell.xoff, cell.yoff))
         } else if ly == top {
             Some((sx, sy, cell.xoff + x - lx, y + 1))
         } else {

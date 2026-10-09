@@ -320,6 +320,8 @@ Recorded by float.clients (2026-10-09).
 
 Recorded by float.keys (2026-10-09).
 
+- `new-pane -M` and `move-pane -M` are supported flags now, which supersedes float.core's note
+  above that both answer as unsupported.
 - The per-client drag is `Client.mouse_drag` in the daemon, armed by `MuxEffect::ArmMouseDrag`
   from `new-pane -M`, `move-pane -M` and `resize-pane -M`. A later drag report of the same client
   runs `resize-pane -M -t <pane>` with the armed drag in the invoking mouse event and no hooks, which

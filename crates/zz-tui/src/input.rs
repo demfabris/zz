@@ -1273,8 +1273,9 @@ fn bound_mouse_key(
     let outside_modal =
         latch.location == "Empty" && model.window().is_some_and(|window| window.modal.is_some());
     let gesture_continues = matches!(event.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_));
+    let bound_gesture = gesture_continues && latch.bound;
     if !outside_modal
-        && !(gesture_continues && latch.bound)
+        && !bound_gesture
         && !model.mouse_bindings.contains(&key)
         && !copy_mouse_key_is_reachable(model, &latch, &key)
         && !pane_mode_mouse_key_is_reachable(model, &latch, &key)

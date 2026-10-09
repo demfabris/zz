@@ -189,5 +189,9 @@ check `pgrep -af codex` on resume.
   `popup-*` options, which would break configs today; it is the next pin move, not this one.
 - 2026-10-09 orchestrator: wave 1 launched on alienware: `pin.move` (slot a), `fix.tui-colour`
   (slot b), `float.design` (slot c, no compile).
+- 2026-10-09 orchestrator, on the design's two open questions, after Codex's review: match 3.8 on
+  both. Windows may hold only floating panes (a zz-only "keep one tile" rule needed more custom
+  transfer rules than it saved), and the v2 layout writer keeps 3.8's structural position for
+  floating leaves so `#{window_layout}` matches tmux.
 - 2026-10-09 orchestrator: lane worktrees are per slot (`zz-cu-a`, `zz-cu-b`, `zz-cu-c`) and switch
   branches between items, so a warm target is reused instead of re-reflinked per item.

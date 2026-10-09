@@ -1,7 +1,7 @@
 ---
 type: Reference
 title: zpui
-description: zpui, our GPUI fork in crates/zpui and crates/zpui-*: where its crates live, how to change them or pull an upstream Zed fix, and what zz changed. gpui-component is not a dependency.
+description: zpui, our GPUI fork (crates/zpui and crates/zpui-*) - where its crates live, how to change them or pull an upstream Zed fix, and what zz changed. gpui-component is not a dependency.
 resource: crates/zpui/Cargo.toml
 tags: [zpui, gpui, reference, vendored]
 timestamp: 2026-10-09T00:00:00Z
@@ -34,11 +34,12 @@ same commits exist here with the same subjects.
 On Linux, `zpui-platform` is built with `font-kit`, Wayland, and X11 enabled; the same crate
 selects the native macOS and Windows backends automatically.
 
-The zpui crates are members of the root workspace. CI's clippy and test runs pass
-`--exclude zpui --exclude 'zpui-[!k]*'` (every Zed-derived crate, not `zpui-kit`), because `--all-features` on
-them turns on Zed's optional extras together (Linux screen capture, tracy, Zed's perf harness);
-clippy still lints their libraries as dependencies, and their own tests run only when asked
-(`cargo test -p zpui`). Two things differ from the zz crates:
+The zpui crates are members of the root workspace, so the root clippy run covers them with all
+features. On 2026-10-09 Zed's extras zz never used were removed: screen capture (the `scap` and
+ScreenCaptureKit backends; the `ScreenCaptureSource` API stays and reports unsupported), the
+tracy profiler behind `ZTRACING`, and Zed's `#[perf]` test harness (`tooling/perf`). CI's
+`cargo ci-test` alias runs every test except those of zpui-apple, zpui-linux, zpui-macos, zpui-platform, zpui-web, zpui-wgpu and zpui-windows, which need a GPU or a display
+server. Two things differ from the zz crates:
 
 | What | Where | Why |
 | --- | --- | --- |

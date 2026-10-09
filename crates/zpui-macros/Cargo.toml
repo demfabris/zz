@@ -28,7 +28,7 @@ inspector = []
 [lib]
 path = "src/zpui_macros.rs"
 proc-macro = true
-doctest = true
+doctest = false
 test = false
 
 [dependencies]

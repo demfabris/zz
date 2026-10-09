@@ -31,7 +31,6 @@ bench-support = ["zpui/bench-support", "zpui-macos/bench-support", "zpui-wgpu/be
 font-kit = ["zpui-macos/font-kit"]
 inspector = ["zpui/inspector"]
 test-support = ["zpui/test-support", "zpui-macos/test-support", "zpui-windows/test-support", "zpui-wgpu/test-support"]
-screen-capture = ["zpui/screen-capture", "zpui-macos/screen-capture", "zpui-windows/screen-capture", "zpui-linux/screen-capture"]
 runtime_shaders = ["zpui-macos/runtime_shaders"]
 wayland = ["zpui-linux/wayland"]
 x11 = ["zpui-linux/x11"]

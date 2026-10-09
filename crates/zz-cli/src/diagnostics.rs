@@ -1,5 +1,3 @@
-/// iOS spawns nothing and has no `/usr/bin/sample`, so no `Command` survives.
-#[cfg(not(target_os = "ios"))]
 use std::process::Command;
 #[cfg(target_os = "macos")]
 use std::sync::{Mutex, PoisonError};
@@ -15,9 +13,9 @@ use std::{
 };
 
 use env_logger::{Builder, Env, Target, WriteStyle};
-use zz_daemon::process_info::{self, ProcessSample};
+use zz_daemon_client::process_info::{self, ProcessSample};
 #[cfg(target_os = "macos")]
-use zz_daemon::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 use zz_protocol::RawText;
 
 pub const INTERNAL_LOG_ARGUMENT: &str = "--zz-verbose-log";
@@ -179,7 +177,6 @@ impl Write for RingLogWriter {
 
 /// Path CEF should write its log to; its subprocesses inherit the setting.
 /// Renames the previous session's log aside, because CEF truncates on startup.
-#[cfg(not(target_os = "ios"))]
 pub fn cef_log_file() -> PathBuf {
     let path = platform_log_dir().join("cef.log");
     if path.exists() {
@@ -205,13 +202,11 @@ pub fn elapsed_us(started: Option<Instant>) -> u128 {
     started.map_or(0, |started| started.elapsed().as_micros())
 }
 
-#[cfg(not(target_os = "ios"))]
 #[must_use]
 pub fn application_args() -> Vec<RawText> {
     application_args_from(std::env::args_os().skip(1))
 }
 
-#[cfg(not(target_os = "ios"))]
 #[must_use]
 pub fn application_args_from(arguments: impl IntoIterator<Item = OsString>) -> Vec<RawText> {
     let mut output = Vec::new();
@@ -242,7 +237,6 @@ pub fn application_args_from(arguments: impl IntoIterator<Item = OsString>) -> V
     output
 }
 
-#[cfg(not(target_os = "ios"))]
 pub fn configure_spawned_process(command: &mut Command) {
     let Some(shared_log) = VERBOSE_LOG.get() else {
         return;
@@ -786,7 +780,7 @@ mod tests {
     /// the bytes survive argv and `PathBuf::from(cwd.to_os_string())` rebuilds
     /// the same directory, matching `ClientHello.working_directory`, byte
     /// preserving since v92.
-    #[cfg(all(unix, not(target_os = "ios")))]
+    #[cfg(unix)]
     #[test]
     fn non_utf8_bootstrap_client_cwd_reaches_the_daemon_as_bytes() {
         use std::os::unix::ffi::OsStringExt as _;

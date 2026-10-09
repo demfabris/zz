@@ -31,7 +31,6 @@ bench-support = ["zpui/bench-support", "zpui-apple/bench-support"]
 test-support = ["zpui/test-support", "zpui-apple/test-support"]
 runtime_shaders = ["zpui-apple/runtime_shaders"]
 font-kit = ["dep:font-kit"]
-screen-capture = ["zpui/screen-capture"]
 
 [dependencies]
 zpui.workspace = true
@@ -93,8 +92,6 @@ objc2-app-kit = { workspace = true, features = [
     "block2",
     "objc2-core-foundation",
 ] }
-objc2-core-graphics.workspace = true
-objc2-core-media.workspace = true
 objc2-foundation = { workspace = true, features = [
     "NSArray",
     "NSAttributedString",
@@ -121,7 +118,6 @@ objc2-foundation = { workspace = true, features = [
     "objc2-core-foundation",
     "std",
 ] }
-objc2-screen-capture-kit.workspace = true
 objc2-user-notifications.workspace = true
 parking_lot.workspace = true
 pathfinder_geometry.workspace = true

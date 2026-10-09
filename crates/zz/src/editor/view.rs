@@ -36,7 +36,7 @@ pub fn init(cx: &mut App) {
     cx.bind_keys(editor_key_bindings());
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 fn editor_key_bindings() -> [KeyBinding; 2] {
     [
         KeyBinding::new("cmd-o", OpenFile, Some(EDITOR_KEY_CONTEXT)),
@@ -44,7 +44,7 @@ fn editor_key_bindings() -> [KeyBinding; 2] {
     ]
 }
 
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 fn editor_key_bindings() -> [KeyBinding; 2] {
     [
         KeyBinding::new("ctrl-o", OpenFile, Some(EDITOR_KEY_CONTEXT)),
@@ -52,9 +52,9 @@ fn editor_key_bindings() -> [KeyBinding; 2] {
     ]
 }
 
-#[cfg(any(target_os = "macos", target_os = "ios"))]
+#[cfg(target_os = "macos")]
 const OPEN_HINT: &str = "⌘O to open a file";
-#[cfg(not(any(target_os = "macos", target_os = "ios")))]
+#[cfg(not(target_os = "macos"))]
 const OPEN_HINT: &str = "Ctrl+O to open a file";
 
 #[derive(Clone)]

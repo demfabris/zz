@@ -267,8 +267,8 @@ impl<E: IntoElement + 'static> Element for SpringAnimationElement<E> {
         window: &mut Window,
         cx: &mut App,
     ) -> (crate::LayoutId, Self::RequestLayoutState) {
+        let now = cx.background_executor().now();
         window.with_element_state(global_id.unwrap(), |state, window| {
-            let now = Instant::now();
             let initial = self.initial.unwrap_or(self.target);
             let mut state = state.unwrap_or_else(|| SpringElementState {
                 spring: SpringState {

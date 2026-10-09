@@ -111,22 +111,10 @@ objc = "0.2"
 objc2 = "0.6.4"
 objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSApplication", "NSOpenPanel", "NSPanel", "NSResponder", "NSRunningApplication", "NSSavePanel", "NSView", "NSWindow"] }
 objc2-core-foundation = "0.3.2"
-objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["CGDirectDisplay"] }
-objc2-core-media = { version = "=0.3.2", default-features = false, features = ["CMSampleBuffer", "objc2-core-video"] }
-objc2-core-video = { version = "=0.3.2", default-features = false, features = ["CVBuffer", "CVImageBuffer"] }
 objc2-foundation = { version = "0.3.2", default-features = false }
 objc2-io-surface = "0.3.2"
 objc2-metal = "0.3.2"
 objc2-quartz-core = { version = "0.3.2", default-features = false, features = ["std"] }
-objc2-screen-capture-kit = { version = "=0.3.2", default-features = false, features = [
-    "block2",
-    "dispatch2",
-    "objc2-core-graphics",
-    "objc2-core-media",
-    "SCShareableContent",
-    "SCStream",
-    "std"
-] }
 objc2-user-notifications = "0.3"
 oo7 = { version = "=0.6.0", default-features = false }
 parking_lot = "0.12.5"
@@ -154,7 +142,6 @@ resvg = { version = "0.46.0", default-features = false, features = [
 rusqlite = { version = "=0.40.2", default-features = false, features = ["bundled"] }
 rustc-hash = "2.1.0"
 rustix = { version = "1.1.4", features = ["event", "pipe", "process", "termios"] }
-scap = { git = "https://github.com/zed-industries/scap", rev = "4afea48c3b002197176fb19cd0f9b180dd36eaac", default-features = false, package = "zed-scap", version = "0.0.8-zed" }
 schemars = { version = "1.0", features = ["indexmap2"] }
 security-framework = "=3.7.0"
 semver = { version = "1.0", features = ["serde"] }
@@ -204,7 +191,6 @@ zpui-linux = { path = "crates/zpui-linux", default-features = false }
 zlog = { path = "crates/zpui-log", package = "zpui-log" }
 zpui-macos = { path = "crates/zpui-macos", default-features = false }
 zpui-macros = { path = "crates/zpui-macros" }
-perf = { path = "crates/zpui-perf", package = "zpui-perf" }
 zpui-platform = { path = "crates/zpui-platform", default-features = false }
 refineable = { path = "crates/zpui-refineable", package = "zpui-refineable" }
 derive_refineable = { path = "crates/zpui-refineable-derive", package = "zpui-refineable-derive" }
@@ -227,6 +213,7 @@ zz-cli = { path = "crates/zz-cli" }
 zz-client = { path = "crates/zz-client" }
 zz-config = { path = "crates/zz-config" }
 zz-daemon = { path = "crates/zz-daemon", default-features = false }
+zz-daemon-client = { path = "crates/zz-daemon-client" }
 zz-mux = { path = "crates/zz-mux" }
 zz-protocol = { path = "crates/zz-protocol" }
 zz-terminal = { path = "crates/zz-terminal", default-features = false }

@@ -45,12 +45,15 @@ chrono = { workspace = true, features = ["default"] }
 dioxus-devtools = { version = "=0.7.10", default-features = false, optional = true }
 env_logger.workspace = true
 zpui = { workspace = true, features = ["default"] }
+zpui-platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
 fff-search = { version = "=0.10.6", optional = true }
 ignore = { workspace = true, optional = true }
 image = { workspace = true, features = ["bmp", "gif", "ico", "jpeg", "png", "pnm", "tiff", "webp"] }
 log.workspace = true
+mimalloc.workspace = true
 naga.workspace = true
 parking_lot.workspace = true
+semver = "1"
 serde.workspace = true
 serde_json.workspace = true
 smallvec.workspace = true
@@ -58,21 +61,17 @@ sysinfo.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 url.workspace = true
-zz-client.workspace = true
-zz-mux.workspace = true
-zz-protocol.workspace = true
-zz-ui = { workspace = true, features = ["editor", "tree-sitter"] }
-
-[target.'cfg(not(target_os = "ios"))'.dependencies]
-zpui-platform = { workspace = true, features = ["font-kit", "wayland", "x11"] }
-mimalloc.workspace = true
-semver = "1"
 wgpu.workspace = true
 zz-browser.workspace = true
 zz-chrome-import.workspace = true
+zz-client.workspace = true
 zz-daemon = { workspace = true, features = ["default"] }
+zz-daemon-client.workspace = true
+zz-mux.workspace = true
+zz-protocol.workspace = true
 zz-terminal = { workspace = true, features = ["default"] }
 zz-tui.workspace = true
+zz-ui = { workspace = true, features = ["editor", "tree-sitter"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 cef.workspace = true
@@ -104,7 +103,7 @@ tempfile.workspace = true
 # The X11/Wayland backend also compiles into unix test builds so it
 # type-checks from a mac; wayland-sys cannot compile on Windows at all, which
 # is what an ungated dev-dependency used to break there.
-[target.'cfg(all(unix, not(target_os = "ios")))'.dev-dependencies]
+[target.'cfg(unix)'.dev-dependencies]
 wayland-client.workspace = true
 x11rb.workspace = true
 

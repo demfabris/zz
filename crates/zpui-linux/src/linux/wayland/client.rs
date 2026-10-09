@@ -1140,24 +1140,6 @@ impl LinuxClient for WaylandClient {
         None
     }
 
-    #[cfg(feature = "screen-capture")]
-    fn screen_capture_sources(
-        &self,
-    ) -> futures::channel::oneshot::Receiver<anyhow::Result<Vec<Rc<dyn zpui::ScreenCaptureSource>>>>
-    {
-        // TODO: Get screen capture working on wayland. Be sure to try window resizing as that may
-        // be tricky.
-        //
-        // start_scap_default_target_source()
-        let (sources_tx, sources_rx) = futures::channel::oneshot::channel();
-        sources_tx
-            .send(Err(anyhow::anyhow!(
-                "Wayland screen capture not yet implemented."
-            )))
-            .ok();
-        sources_rx
-    }
-
     fn open_window(
         &self,
         handle: AnyWindowHandle,

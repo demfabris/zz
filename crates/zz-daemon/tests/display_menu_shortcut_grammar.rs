@@ -5,7 +5,7 @@
 //! the same question with the vocabulary its own clients speak, so a spelling
 //! the pin parses but no attached client can press is no key here either.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod overlay;
 

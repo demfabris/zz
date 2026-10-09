@@ -10,8 +10,8 @@ impl StatusHooks for Hooks<'_> {
     fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
         String::new()
     }
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
-        self.0.format_option_value(context, name)
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
+        self.0.format_option_value(context, name).map(RawText::from)
     }
 }
 
@@ -381,8 +381,10 @@ fn selective_detach_keeps_table_values_introduced_by_shell_output() {
             expand_format_values("#{pane_title}", self.context, &mut Hooks(self.engine))
         }
 
-        fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
-            self.engine.format_option_value(context, name)
+        fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
+            self.engine
+                .format_option_value(context, name)
+                .map(RawText::from)
         }
     }
 

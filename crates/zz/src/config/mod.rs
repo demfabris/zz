@@ -8,8 +8,8 @@ use std::{
 use zpui::{App, Corners, Global, Hsla, Pixels, WindowBackgroundAppearance, WindowDecorations, px};
 use zz_browser::SearchProvider;
 use zz_client::StatusBarSettings;
-use zz_daemon::{Endpoint, InteractiveClient};
-pub(crate) use zz_daemon::{HostEntry, validate_fleet_host};
+use zz_daemon_client::{Endpoint, InteractiveClient};
+pub(crate) use zz_daemon_client::{HostEntry, validate_fleet_host};
 use zz_protocol::{CommandInvocation, ConfigOverrideEntry, PROTOCOL_VERSION};
 
 use crate::{
@@ -20,7 +20,6 @@ use crate::{
 };
 
 pub(crate) mod import;
-#[cfg(not(target_os = "ios"))]
 pub(crate) mod import_prompt;
 mod mux_bindings;
 pub(crate) mod settings;
@@ -291,31 +290,26 @@ pub(crate) fn window_corner_radius(cx: &App) -> Pixels {
 }
 
 /// Whether quitting the app stops the daemon even when live sessions remain.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn quit_daemon_on_exit(cx: &App) -> bool {
     resolved_config(cx).quit_daemon_on_exit.value
 }
 
 /// Whether the GUI should replace a stale local daemon without asking first.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn auto_restart_stale_daemon(cx: &App) -> bool {
     resolved_config(cx).auto_restart_stale_daemon.value
 }
 
 /// Whether the GUI looks up the newest release once a day and offers it.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn check_for_updates(cx: &App) -> bool {
     resolved_config(cx).check_for_updates.value
 }
 
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn tray_enabled(cx: &App) -> bool {
     resolved_config(cx).tray.value
 }
 
 /// Whether a browser pane attached to a remote ssh host routes its traffic
 /// through that host. Client-local: it never crosses the wire.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn browser_egress_enabled(cx: &App) -> bool {
     resolved_config(cx).browser_egress.value
 }
@@ -466,7 +460,6 @@ pub(crate) fn pane_content_radii(cx: &App, corners: WindowCorners) -> Corners<Pi
     corners.surface_radii(exposed, base)
 }
 
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn window_background_appearance(cx: &App) -> WindowBackgroundAppearance {
     crate::window::background::native_appearance(requested_window_background_appearance(cx))
 }
@@ -488,7 +481,6 @@ fn apply_animations(cx: &mut App) {
 
 /// The titlebar every zz window opens with: a transparent strip, nothing else.
 /// The macOS traffic lights keep their native size and placement.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn titlebar_options() -> zpui::TitlebarOptions {
     zz_ui::TitleBar::title_bar_options()
 }
@@ -579,7 +571,6 @@ pub(crate) fn browser_config(cx: &App) -> BrowserConfig {
         .unwrap_or_default()
 }
 
-#[cfg_attr(target_os = "ios", allow(dead_code))]
 pub(crate) fn browser_search_provider(cx: &App) -> SearchProvider {
     browser_config(cx).search_provider.value
 }
@@ -605,7 +596,7 @@ fn log_fleet_hosts(cx: &App) {
         return;
     }
     let registry = HostRegistry::new(
-        zz_daemon::default_socket_path(),
+        zz_daemon_client::default_socket_path(),
         &configured,
         crate::profile::LocalHostPolicy::Always,
     );
@@ -686,17 +677,16 @@ fn send_current_config_overrides(cx: &App) {
     }
 }
 
-#[cfg(not(target_os = "ios"))]
-pub(crate) fn local_command_client() -> Result<zz_daemon::CommandClient, String> {
+pub(crate) fn local_command_client() -> Result<zz_daemon_client::CommandClient, String> {
     let arguments = crate::application_arguments(
         crate::diagnostics::application_args(),
-        zz_daemon::default_socket_path(),
+        zz_daemon_client::default_socket_path(),
     )
     .map_err(|_| "could not resolve the local daemon socket".to_owned())?;
-    zz_daemon::CommandClient::connect(&arguments.socket_path).map_err(|error| error.to_string())
+    zz_daemon_client::CommandClient::connect(&arguments.socket_path)
+        .map_err(|error| error.to_string())
 }
 
-#[cfg(not(target_os = "ios"))]
 pub(crate) fn import_tmux_config(path: &Path) -> Result<String, String> {
     local_command_client()?
         .execute(CommandInvocation::new(
@@ -1597,7 +1587,7 @@ mod tests {
             parsed.hosts,
             [HostEntry {
                 name: "arch-desktop".to_owned(),
-                endpoint: Endpoint::Ssh(zz_daemon::SshEndpoint {
+                endpoint: Endpoint::Ssh(zz_daemon_client::SshEndpoint {
                     user: Some("fabrico".to_owned()),
                     host: "arch-desktop".to_owned(),
                     port: Some(2222),

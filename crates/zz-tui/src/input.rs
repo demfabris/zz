@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use zz_client::{
     ChromeAction, Disposition, Effect, MenuKeyResult, MenuPointerKind, PrefixView, resolve_menu_key,
 };
-use zz_daemon::{
+use zz_daemon_client::{
     Endpoint, InteractiveClient, configured_fleet_hosts, validate_fleet_host, write_fleet_host,
 };
 use zz_protocol::{
@@ -2292,8 +2292,8 @@ mod tests {
         use zz_terminal::{SessionStatus, TerminalMode, TerminalViewAction, TerminalViewport};
 
         let core = zz_client::ClientCore::new();
-        let endpoint =
-            zz_daemon::Endpoint::parse("unix:///tmp/zz-input-test.sock").expect("test endpoint");
+        let endpoint = zz_daemon_client::Endpoint::parse("unix:///tmp/zz-input-test.sock")
+            .expect("test endpoint");
         let mut model = crate::state::Model::new(
             &core,
             crate::tty::TerminalSize {
@@ -3710,6 +3710,7 @@ mod tests {
             prompt: "Confirm? ".to_owned(),
             confirm_key,
             default_yes,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         }
     }
 

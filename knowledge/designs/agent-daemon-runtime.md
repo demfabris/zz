@@ -150,10 +150,9 @@ queue without accepting stale adapter state or output.
 
 # Daemon host (`zz-daemon/src/agent/`)
 
-Behind an `agent` cargo feature (`default = ["daemon", "agent"]`; `zz-tui`/`zz-client-ffi`
-depend on `zz-daemon` with `default-features = false` and never inherit
-`agent-client-protocol`, while the desktop takes the default and consumes the stream vocabulary
-`zz-daemon`'s crate root re-exports).
+Behind an `agent` cargo feature (`default = ["agent"]`; `zz-tui` depends only on
+`zz-daemon-client` and never inherits `agent-client-protocol`, while the desktop takes the default
+and consumes the stream vocabulary `zz-daemon`'s crate root re-exports).
 
 - One `std::thread` per agent pane running
   `futures_lite::future::block_on(run_agent_connection(..))` — the crate is runtime-agnostic

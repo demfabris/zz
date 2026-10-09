@@ -8,7 +8,7 @@ use zz_client::completion::PaneKindAvailability;
 use zz_protocol::{
     ChooseTreeItem, ChooseTreeKind, ChooseTreePaneKind, ChooseTreeState, ChooseTreeTarget,
     CommandInvocation, CommandPromptKind, CommandPromptMode, CommandPromptState, CommandPromptType,
-    InputMessage, MuxSnapshot, PaneId, SessionId, WindowId,
+    InputMessage, MuxSnapshot, PaneId, PromptCursor, SessionId, WindowId,
 };
 use zz_ui::{
     ActiveTheme as _, IconName, StyledExt as _,
@@ -589,6 +589,8 @@ fn prompt_state(
         prompt_type: CommandPromptType::Command,
         no_freeze: false,
         pane: None,
+        command_mode: false,
+        prompt_cursor: PromptCursor::default(),
     }
 }
 

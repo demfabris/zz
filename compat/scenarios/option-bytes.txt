@@ -1,0 +1,12 @@
+shim:
+# tmux 3.8 stores a user option's value as the bytes it was given, from argv
+# or from a sourced stream. show-options prints it through args_escape, whose
+# utf8_stravis writes a byte that opens no UTF-8 sequence as \ooo, while
+# show-options -v and #{@x} hand the raw bytes to cmdq_print, which sanitizes
+# them only for a client that never raised CLIENT_UTF8. A command block is
+# parsed with its file, so the bytes inside it reach set-buffer unchanged, and
+# a $NAME read from the global environment keeps the bytes an earlier file
+# assigned.
+stage: fixtures/option-bytes.sh ~/option-bytes.sh
+run-shell 'sh ~/option-bytes.sh'
+out: show-buffer -b transcript

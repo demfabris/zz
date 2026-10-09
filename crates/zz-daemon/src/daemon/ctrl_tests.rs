@@ -534,6 +534,25 @@ fn quiet_control_close_and_overflow_release_the_held_frames() {
 }
 
 #[test]
+fn legacy_control_guard_preserves_raw_output() {
+    let shared = Arc::new(Shared::new(38));
+    let mailbox = OutboundMailbox::new();
+    let (client, _) =
+        shared.register_subscribed(ClientKind::Control, None, None, Arc::clone(&mailbox));
+    shared.publish_control_command_guard(
+        Some((client, 1)),
+        RawText::from_bytes(vec![b'a', 0xfe, b'b', b'\n']),
+        false,
+        false,
+    );
+    let messages = super::tests::take_reliable_messages(&mailbox);
+    assert!(
+        matches!(messages.as_slice(), [ProtocolMessage::Event(Event { payload: EventPayload::ControlCommandGuard { output, flags: 1, .. }, .. })] if output.as_bytes() == [b'a', 0xfe, b'b', b'\n']),
+        "{messages:?}"
+    );
+}
+
+#[test]
 fn compact_callback_guard_preserves_raw_output() {
     let shared = Arc::new(Shared::new(38));
     let (client, mailbox) = compact_registered(&shared, zz_protocol::Subscriptions::control());

@@ -34,7 +34,7 @@ objc = "0.2"
 percent-encoding = "2.3.2"
 raw-window-handle.workspace = true
 zpui-ios.workspace = true
-zz-daemon.workspace = true
+zz-daemon-client.workspace = true
 
 [dev-dependencies]
 zpui = { workspace = true, features = ["test-support"] }

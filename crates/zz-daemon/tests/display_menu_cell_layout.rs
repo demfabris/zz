@@ -6,7 +6,7 @@
 //! `format_trim_right` and marked with `>`, and a row keeps its action key even
 //! when the annotation is dropped.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod overlay;
 

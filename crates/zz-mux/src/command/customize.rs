@@ -511,7 +511,7 @@ impl MuxEngine {
                         }
                     } else {
                         self.user_option_at_target(*target, &name)
-                            .map(str::to_owned)
+                            .map(ToString::to_string)
                     };
                     if let Some(found) = found {
                         owner = *target;

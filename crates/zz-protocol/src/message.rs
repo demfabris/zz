@@ -2660,6 +2660,14 @@ pub struct CommandPromptState {
     /// row - its first under `status-position top` - leaving the status row
     /// alone. `None` is the client prompt `status_prompt_set` raises.
     pub pane: Option<PaneId>,
+    pub command_mode: bool,
+    pub prompt_cursor: PromptCursor,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PromptCursor {
+    pub style: u8,
+    pub colour: Option<crate::TmuxColour>,
 }
 
 #[repr(u8)]
@@ -2952,6 +2960,7 @@ pub enum ChooserPreview {
         /// The previewed client's own width, which its status screen was
         /// composed at before the box copies the first columns of it.
         status_width: u32,
+        border_style: String,
     },
     /// `window_client_draw_info`: the info view `i` raises, already expanded
     /// into the pin's own styled lines.
@@ -3230,6 +3239,7 @@ pub struct ConfirmState {
     pub prompt: String,
     pub confirm_key: u8,
     pub default_yes: bool,
+    pub prompt_cursor: PromptCursor,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -3660,7 +3670,7 @@ pub enum EventPayload {
         message_id: u64,
     },
     ControlCommandGuard {
-        output: String,
+        output: RawText,
         error: bool,
         sticky_failure: bool,
         flags: u8,
@@ -5360,23 +5370,41 @@ mod tests {
             mode: super::CommandPromptMode::Incremental,
             no_freeze: true,
             pane: None,
+            command_mode: false,
+            prompt_cursor: crate::PromptCursor::default(),
         };
         let bytes = postcard::to_stdvec(&state).expect("prompt state");
         assert_eq!(
             postcard::from_bytes::<super::CommandPromptState>(&bytes).expect("state decodes"),
             state
         );
-        assert_eq!(bytes.last().copied(), Some(0));
+        assert_eq!(bytes[bytes.len() - 4..], [0, 0, 0, 0]);
         let on_pane = super::CommandPromptState {
             pane: Some(crate::PaneId(7)),
             ..state.clone()
         };
         let pane_bytes = postcard::to_stdvec(&on_pane).expect("pane prompt state");
-        assert_eq!(pane_bytes[..bytes.len() - 1], bytes[..bytes.len() - 1]);
-        assert_eq!(pane_bytes[bytes.len() - 1..], [1, 7]);
+        assert_eq!(pane_bytes[..bytes.len() - 4], bytes[..bytes.len() - 4]);
+        assert_eq!(pane_bytes[bytes.len() - 4..], [1, 7, 0, 0, 0]);
         assert_eq!(
             postcard::from_bytes::<super::CommandPromptState>(&pane_bytes).expect("pane decodes"),
             on_pane
+        );
+        let command = super::CommandPromptState {
+            command_mode: true,
+            prompt_cursor: super::PromptCursor {
+                style: 6,
+                colour: Some(crate::TmuxColour::Basic(1)),
+            },
+            ..state.clone()
+        };
+        let command_bytes = postcard::to_stdvec(&command).expect("command mode state");
+        assert_eq!(command_bytes[..bytes.len() - 3], bytes[..bytes.len() - 3]);
+        assert_eq!(command_bytes[bytes.len() - 3..], [1, 6, 1, 0, 1]);
+        assert_eq!(
+            postcard::from_bytes::<super::CommandPromptState>(&command_bytes)
+                .expect("command mode decodes"),
+            command
         );
     }
 
@@ -5446,12 +5474,31 @@ mod tests {
     }
 
     #[test]
+    fn control_command_guard_output_round_trips_bytes_that_are_not_utf8() {
+        let event = super::Event {
+            sequence: 7,
+            payload: super::EventPayload::ControlCommandGuard {
+                output: super::RawText::from_bytes(b"a\xfeb\n".to_vec()),
+                error: false,
+                sticky_failure: false,
+                flags: 1,
+            },
+        };
+        let bytes = postcard::to_stdvec(&event).expect("control command guard encodes");
+        let decoded = postcard::from_bytes::<super::Event>(&bytes).expect("guard decodes");
+        assert!(matches!(
+            decoded.payload,
+            super::EventPayload::ControlCommandGuard { output, .. } if output.as_bytes() == b"a\xfeb\n"
+        ));
+    }
+
+    #[test]
     fn control_command_guard_holds_wire_tag_forty_seven_and_round_trips_flags() {
         for flags in [0, 1] {
             let event = super::Event {
                 sequence: 7,
                 payload: super::EventPayload::ControlCommandGuard {
-                    output: "diagnostic\n".to_owned(),
+                    output: "diagnostic\n".into(),
                     error: true,
                     sticky_failure: false,
                     flags,

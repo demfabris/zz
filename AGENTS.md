@@ -10,11 +10,11 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zpui-kit` - widget kit on zpui (theme, primitives, widgets, icons): a maintained fork of gpui-component with no zz dependencies, usable by other apps
 - `crates/zz` - desktop client: zpui shell, terminal/browser/agent panes, settings, daemon client
 - `crates/zz-daemon` — the daemon: session state, PTY workers, client connections
+- `crates/zz-daemon-client` - the client half of the daemon: local and ssh endpoints, askpass, `CommandClient`/`InteractiveClient`, transport, paths, and process facts; client-only crates depend on it instead of `zz-daemon`
 - `crates/zz-mux` — tmux-compatible model: sessions, windows, panes, key tables
 - `crates/zz-protocol` — wire protocol between daemon and clients, plus the shared key contract (tables, engine, fold, command catalog)
 - `crates/zz-client` - sans-IO client core: protocol reduction, chrome keymap, daemon-backed convergence simulator, the browser element picker
 - `crates/zz-config` - renderer-free application config, settings actions, preference persistence; update checks behind its `update` feature
-- `crates/zz-client-ffi` — C ABI over the client core (`include/zz-client.h`, link-verified by a C integration client)
 - `crates/zz-cli` — headless `zz_cli` binary: the CLI, raw-terminal attach, and the ssh-side entry point
 - `crates/zz-terminal` — terminal engine: PTY sessions, libghostty-vt state, frame snapshots
 - `crates/zz-browser` — CEF off-screen-rendering browser runtime
@@ -55,9 +55,9 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 
 | Command | What it does |
 |---|---|
-| `cargo test --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-features` | Tests (what CI runs; the excludes keep Zed's optional features off, see the zpui block) |
-| `cargo clippy --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-targets --all-features -- -D warnings` | Lint (what CI runs; zpui's libraries are still linted as dependencies) |
-| `cargo clippy -p zz-daemon --no-default-features --features daemon --all-targets -- -D warnings` | Lint the daemon without agent support (CI runs this too) |
+| `cargo ci-test` | Tests (what CI runs): `cargo test --workspace --all-features` minus the zpui renderer and platform crates, whose tests need a GPU or a display (alias in `.cargo/config.toml`) |
+| `cargo clippy --workspace --all-targets --all-features -- -D warnings` | Lint (what CI runs) |
+| `cargo clippy -p zz-daemon -p zz-daemon-client --no-default-features --all-targets -- -D warnings` | Lint the daemon without agent support (CI runs this too) |
 | `cargo fmt --all` | Format |
 | `just run <mac\|linux> [--verbose] [--features <list>]` | Launch isolated zz Dev (own daemon, config, browser, and data). Extra args are those two flags, not Cargo passthrough. No `windows` |
 | `just watch <platform>` | Rebuild and relaunch on source change |
@@ -81,7 +81,7 @@ Multiple agent sessions often share this checkout in parallel. Never `git stash`
 <important if="you are changing zpui (our gpui)">
 
 - zpui is `crates/zpui` plus the `crates/zpui-*` crates: our copy of the gpui crates split out of Zed and the Zed utility crates they need, renamed `zpui-*`. It is not a patch branch: there is nothing to rebase, and upstream Zed fixes come in by hand. Change zpui in the same commit as the zz code that needs it.
-- They are root workspace members. CI's clippy and test runs pass `--exclude zpui --exclude 'zpui-[!k]*'` (every Zed-derived crate, not `zpui-kit`): `--all-features` on them switches on Zed's optional extras together (Linux screen capture, tracy, Zed's perf harness), which breaks the build or their tests. Clippy still lints their libraries, since every member it compiles goes through clippy. Their own tests are not in CI; run `cargo test -p <crate>` for the crates you touch (`test_spring_animation_preserves_velocity_when_retargeted` in `zpui` is timing-flaky). The Zed-derived crates carry Zed's relaxed `[lints]` table instead of the workspace's pedantic set, and `[profile.dev.package]` in the root `Cargo.toml` keeps them at opt-level 2 so debug builds stay fast enough to use; a new zpui crate needs both. `crates/zpui-kit` is ours and takes the workspace lints.
+- They are root workspace members, so the root clippy run covers them with all features. Zed's extras zz never used (screen capture, the tracy profiler, Zed's perf test harness) are gone. `cargo ci-test` leaves out the tests of zpui-apple, zpui-linux, zpui-macos, zpui-platform, zpui-web, zpui-wgpu and zpui-windows, which need a GPU or a display server that CI runners lack; run `cargo test -p <crate>` for those when you touch them, on a machine with a GPU. The Zed-derived crates carry Zed's relaxed `[lints]` table instead of the workspace's pedantic set, and `[profile.dev.package]` in the root `Cargo.toml` keeps them at opt-level 2 so debug builds stay fast enough to use; a new zpui crate needs both. `crates/zpui-kit` is ours and takes the workspace lints.
 - `clients/web` consumes zpui's WASM renderer in an excluded workspace; check `just web build` after a zpui change.
 - `knowledge/references/zpui.md` has the full recipe; the `fork-rebase` skill covers pulling upstream Zed fixes and syncing the vendored Ghostty.
 </important>

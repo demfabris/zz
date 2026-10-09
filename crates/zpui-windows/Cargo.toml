@@ -28,7 +28,6 @@ doctest = false
 [features]
 default = ["zpui/default"]
 test-support = ["zpui/test-support"]
-screen-capture = ["zpui/screen-capture", "scap"]
 
 [dependencies]
 zpui.workspace = true
@@ -130,12 +129,5 @@ windows-core.workspace = true
 windows-numerics = "0.3"
 windows-registry.workspace = true
 
-[target.'cfg(target_os = "windows")'.dependencies.scap]
-workspace = true
-optional = true
-
 [target.'cfg(target_os = "windows")'.build-dependencies]
 windows-registry.workspace = true
-
-[package.metadata.cargo-shear]
-ignored = ["scap"]

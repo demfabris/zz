@@ -5,7 +5,7 @@
 //! final row, so a different order moves both. Neither name exists outside the
 //! loop, and a nested loop replaces them for the length of its own rows.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod clients;
 

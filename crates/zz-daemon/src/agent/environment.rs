@@ -14,7 +14,7 @@ use std::{
 
 use agent_client_protocol::AcpAgent;
 
-use crate::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
 pub(crate) fn with_platform_environment(agent: AcpAgent) -> AcpAgent {
     with_executable_path(agent, executable_path())
@@ -225,7 +225,7 @@ mod login_shell {
         time::{Duration, Instant},
     };
 
-    use crate::unmasked::SpawnUnmasked as _;
+    use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
     /// A shell whose init hangs must not stall an agent pane spawn: every
     /// attempt is killed at this deadline.

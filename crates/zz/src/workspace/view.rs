@@ -170,7 +170,6 @@ fn prompt_stale_daemon(
             )
             .on_ok(move |_, _, cx| {
                 restart_mux.update(cx, |mux, cx| {
-                    #[cfg(not(target_os = "ios"))]
                     if explicit {
                         mux.restart_daemon_for_update(cx);
                         return;
@@ -1016,7 +1015,6 @@ impl AppView {
         )
         .detach();
         let sidebar = cx.new(|cx| WorkspaceSidebar::new(mux.clone(), &agent_controller, cx));
-        #[cfg(not(target_os = "ios"))]
         if cx.try_global::<crate::tray::DesktopTray>().is_some() {
             cx.global_mut::<crate::tray::DesktopTray>().sidebar = Some(sidebar.downgrade());
         }
@@ -1675,7 +1673,6 @@ impl AppView {
         )
     }
 
-    #[cfg_attr(target_os = "ios", allow(dead_code))]
     // Reached from the app shell's ClosePane action.
     pub(crate) fn close_active_pane(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(pane) = self.active_pane(cx) else {
@@ -1687,7 +1684,6 @@ impl AppView {
         true
     }
 
-    #[cfg(not(target_os = "ios"))]
     pub(crate) fn prompt_daemon_update(mux: &Entity<MuxClient>, window: &mut Window, cx: &mut App) {
         prompt_stale_daemon(mux, true, window, cx);
     }
@@ -4466,6 +4462,8 @@ mod tests {
             mode: zz_protocol::CommandPromptMode::Text,
             no_freeze: false,
             pane: None,
+            command_mode: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         }
     }
 
@@ -4549,7 +4547,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn input_test_client() -> Option<(zz_daemon::InteractiveClient, InputTestServer)> {
+    fn input_test_client() -> Option<(zz_daemon_client::InteractiveClient, InputTestServer)> {
         use zz_protocol::{ProtocolMessage, read_protocol_message, write_protocol_message};
 
         let directory = tempfile::Builder::new()
@@ -4602,7 +4600,7 @@ mod tests {
             .unwrap();
             while read_protocol_message(&mut stream).is_ok() {}
         });
-        let client = zz_daemon::InteractiveClient::connect(&socket).unwrap();
+        let client = zz_daemon_client::InteractiveClient::connect(&socket).unwrap();
         let stream = receiver.recv().unwrap();
         Some((
             client,
@@ -4617,7 +4615,7 @@ mod tests {
     #[cfg(unix)]
     fn input_test_workspace(
         cx: &mut TestAppContext,
-        client: zz_daemon::InteractiveClient,
+        client: zz_daemon_client::InteractiveClient,
     ) -> (Entity<AppView>, &mut zpui::VisualTestContext) {
         cx.update(zz_ui::init);
         let workspace_slot = Rc::new(RefCell::new(None));
@@ -4627,7 +4625,8 @@ mod tests {
                 BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
             });
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
-            let mux = cx.new(|cx| MuxClient::new(Ok(client), zz_daemon::default_socket_path(), cx));
+            let mux = cx
+                .new(|cx| MuxClient::new(Ok(client), zz_daemon_client::default_socket_path(), cx));
             let workspace = cx.new(|cx| {
                 AppView::new(
                     controller.clone(),
@@ -5073,10 +5072,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread(
+                    Err(zz_daemon_client::DaemonError::Thread(
                         "palette lifecycle".to_owned(),
                     )),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5087,7 +5086,7 @@ mod tests {
             mux.attach_snapshot_for_test(SessionId(0), one_pane_snapshot(1), cx);
         });
         cx.run_until_parked();
-        let shortcuts = if cfg!(any(target_os = "macos", target_os = "ios")) {
+        let shortcuts = if cfg!(target_os = "macos") {
             ["cmd-k", "cmd-p"]
         } else {
             ["ctrl-shift-k", "ctrl-shift-p"]
@@ -5163,7 +5162,7 @@ mod tests {
     #[zpui::test]
     fn window_shortcuts_intercept_before_pane_input_and_honor_unbinds(cx: &mut TestAppContext) {
         let fallback_count = Rc::new(Cell::new(0));
-        let (modifier, key) = if cfg!(any(target_os = "macos", target_os = "ios")) {
+        let (modifier, key) = if cfg!(target_os = "macos") {
             ("cmd", "D-1")
         } else {
             ("ctrl", "C-1")
@@ -5190,10 +5189,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread(
+                    Err(zz_daemon_client::DaemonError::Thread(
                         "window shortcuts".to_owned(),
                     )),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5235,8 +5234,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("window palette".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "window palette".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5426,8 +5427,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("overlay matrix".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "overlay matrix".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5537,6 +5540,7 @@ mod tests {
                         prompt: "Confirm? (y/n) ".to_owned(),
                         confirm_key: b'y',
                         default_yes: false,
+                        prompt_cursor: zz_protocol::PromptCursor::default(),
                     }),
                 },
                 retire: zz_protocol::EventPayload::Confirm { state: None },
@@ -5689,8 +5693,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("menu mouse".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "menu mouse".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5813,8 +5819,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("menu mouse".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "menu mouse".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6026,8 +6034,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6147,8 +6157,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6217,6 +6229,7 @@ mod tests {
                             prompt: "Confirm? (y/n) ".to_owned(),
                             confirm_key: b'y',
                             default_yes: false,
+                            prompt_cursor: zz_protocol::PromptCursor::default(),
                         }),
                     },
                 }),
@@ -6336,8 +6349,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6440,8 +6455,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6503,8 +6520,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6581,8 +6600,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6723,8 +6744,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6862,8 +6885,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7012,7 +7037,7 @@ mod tests {
             crate::config::set_fleet_hosts_for_test(
                 vec![crate::config::HostEntry {
                     name: "remote".to_owned(),
-                    endpoint: zz_daemon::Endpoint::parse("unix:///tmp/zz-cross-host.sock")
+                    endpoint: zz_daemon_client::Endpoint::parse("unix:///tmp/zz-cross-host.sock")
                         .expect("test endpoint"),
                 }],
                 cx,
@@ -7026,8 +7051,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7131,8 +7158,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7341,8 +7370,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("path picker".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "path picker".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

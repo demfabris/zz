@@ -13,7 +13,7 @@ fn main() {
     };
 
     use zz_client::{ClientCore, Outbound};
-    use zz_daemon::InteractiveClient;
+    use zz_daemon_client::InteractiveClient;
     use zz_protocol::{ClientHello, Event, EventPayload, ProtocolMessage};
     use zz_terminal::TerminalColorScheme;
 

@@ -37,6 +37,10 @@ struct Glass {
     glow: vec4<f32>,
     // viewport size, then where level 0 of the chain starts in the frame
     viewport: vec4<f32>,
+    // the window's rounded clip: rect, radii, then smoothing and whether set
+    mask_rect: vec4<f32>,
+    mask_radii: vec4<f32>,
+    mask: vec4<f32>,
 }
 
 struct Blur {
@@ -219,7 +223,13 @@ fn fs_glass(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     if (contour_width > 0.0) {
         contour = glass.rim.y * (1.0 - saturate(distance / contour_width)) * mix(0.35, 1.0, facing);
     }
-    let coverage = saturate(0.5 - distance);
+    var clip = 1.0;
+    if (glass.mask.y > 0.5) {
+        let window = GlassShape(glass.mask_rect, glass.mask_radii);
+        clip = saturate(0.5 - rounded_rect(position, window, glass.mask.x, 0.0).x);
+    }
+    contour = contour * clip;
+    let coverage = saturate(0.5 - distance) * clip;
     if (coverage <= 0.0) {
         if (contour <= 0.0) {
             discard;

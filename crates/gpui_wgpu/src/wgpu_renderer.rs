@@ -1938,6 +1938,7 @@ impl WgpuRendererCore {
                         &scene.glasses[range],
                         frame,
                         frame_view,
+                        scene.window_corner_mask,
                     );
                     pass = begin_pass(
                         encoder,

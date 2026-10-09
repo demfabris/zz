@@ -1,5 +1,8 @@
 use anyhow::{Context as _, Result};
-use gpui::{Bounds, GLASS_SHADER, Glass, GlassBlurPass, Size, glass_level_size, plan_glass};
+use gpui::{
+    Bounds, GLASS_SHADER, Glass, GlassBlurPass, Size, WindowCornerMask, glass_level_size,
+    plan_glass,
+};
 use metal::MTLPixelFormat;
 use std::ffi::c_void;
 
@@ -207,12 +210,13 @@ impl MetalGlass {
         command_buffer: &metal::CommandBufferRef,
         glasses: &[Glass],
         target: &metal::TextureRef,
+        window_mask: Option<WindowCornerMask>,
     ) {
         let viewport = Size {
             width: target.width() as i32,
             height: target.height() as i32,
         };
-        for run in plan_glass(glasses, viewport) {
+        for run in plan_glass(glasses, viewport, window_mask) {
             self.ensure_chain(device, run.extent, run.depth);
 
             let blit = command_buffer.new_blit_command_encoder();

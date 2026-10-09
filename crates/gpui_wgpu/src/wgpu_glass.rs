@@ -1,6 +1,6 @@
 use gpui::{
     Bounds, GLASS_MAX_BLUR_LEVELS, GLASS_SHADER, Glass, GlassBlurPass, GlassBlurUniform,
-    GlassUniform, Size, glass_level_size, plan_glass,
+    GlassUniform, Size, WindowCornerMask, glass_level_size, plan_glass,
 };
 use std::num::NonZeroU64;
 
@@ -341,12 +341,13 @@ impl GlassResources {
         glasses: &[Glass],
         target: &wgpu::Texture,
         target_view: &wgpu::TextureView,
+        window_mask: Option<WindowCornerMask>,
     ) {
         let viewport = Size {
             width: target.width() as i32,
             height: target.height() as i32,
         };
-        for run in plan_glass(glasses, viewport) {
+        for run in plan_glass(glasses, viewport, window_mask) {
             self.ensure_chain(device, run.extent, run.depth);
             let Some(bind_group) = self.glass_bind_group.clone() else {
                 return;

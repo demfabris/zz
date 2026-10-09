@@ -876,7 +876,13 @@ impl MetalRenderer {
                         continue;
                     };
                     command_encoder.end_encoding();
-                    glass.draw(&self.device, command_buffer, &scene.glasses[range], texture);
+                    glass.draw(
+                        &self.device,
+                        command_buffer,
+                        &scene.glasses[range],
+                        texture,
+                        scene.window_corner_mask,
+                    );
                     command_encoder = new_command_encoder_for_texture(
                         command_buffer,
                         texture,

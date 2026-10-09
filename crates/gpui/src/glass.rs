@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     Bounds, Corners, Hsla, Interpolate, Pixels, Point, ScaledPixels, Size, SpringConfig,
-    SpringState, hsla, point, px, size,
+    SpringState, WindowCornerMask, hsla, point, px, size,
 };
 
 /// The WGSL source every renderer draws glass with.
@@ -481,6 +481,12 @@ pub struct GlassUniform {
     pub glow: [f32; 4],
     /// Viewport size, then where the chain's level 0 starts in the frame.
     pub viewport: [f32; 4],
+    /// The window's rounded clip, as a shape: `[x, y, width, height]`.
+    pub mask_rect: [f32; 4],
+    /// Its corner radii.
+    pub mask_radii: [f32; 4],
+    /// Its corner smoothing, then 1 when there is a clip.
+    pub mask: [f32; 4],
 }
 
 impl GlassUniform {
@@ -592,7 +598,9 @@ impl Glass {
         origin: Point<i32>,
         blurred_level: u32,
         viewport: Size<i32>,
+        window_mask: Option<WindowCornerMask>,
     ) -> GlassUniform {
+        let mask = window_mask.filter(|mask| !mask.bounds.is_empty());
         let region = Bounds {
             origin: region.origin - origin,
             size: region.size,
@@ -691,6 +699,23 @@ impl Glass {
                 origin.x as f32,
                 origin.y as f32,
             ],
+            mask_rect: mask.map_or([0.; 4], |mask| {
+                [
+                    mask.bounds.origin.x.0,
+                    mask.bounds.origin.y.0,
+                    mask.bounds.size.width.0,
+                    mask.bounds.size.height.0,
+                ]
+            }),
+            mask_radii: mask.map_or([0.; 4], |mask| {
+                [
+                    mask.corner_radii.top_left.0,
+                    mask.corner_radii.top_right.0,
+                    mask.corner_radii.bottom_right.0,
+                    mask.corner_radii.bottom_left.0,
+                ]
+            }),
+            mask: mask.map_or([0.; 4], |mask| [mask.corner_smoothing, 1., 0., 0.]),
         }
     }
 
@@ -747,7 +772,11 @@ pub struct GlassBlurPass {
 ///
 /// Glass whose backdrop overlaps an earlier one's goes in a later run, so
 /// that it sees the earlier glass and the chain holds one region per texel.
-pub fn plan_glass(glasses: &[Glass], viewport: Size<i32>) -> Vec<GlassRun> {
+pub fn plan_glass(
+    glasses: &[Glass],
+    viewport: Size<i32>,
+    window_mask: Option<WindowCornerMask>,
+) -> Vec<GlassRun> {
     struct Planned<'a> {
         glass: &'a Glass,
         region: Bounds<i32>,
@@ -855,7 +884,8 @@ pub fn plan_glass(glasses: &[Glass], viewport: Size<i32>) -> Vec<GlassRun> {
                 .map(|p| {
                     let blurred_level = if p.blur.levels > 0 { 1 } else { 0 };
                     (
-                        p.glass.uniform(p.region, origin, blurred_level, viewport),
+                        p.glass
+                            .uniform(p.region, origin, blurred_level, viewport, window_mask),
                         p.scissor,
                     )
                 })
@@ -1131,6 +1161,25 @@ pub fn check_glass_rendering(
         "the flat face should not bend, got {middle:?}"
     );
 
+    let masked = |material: Option<GlassMaterial>| {
+        let mut scene = glass_test_scene(material);
+        scene.window_corner_mask = Some(WindowCornerMask {
+            bounds: Bounds {
+                origin: point(ScaledPixels(16.), ScaledPixels(0.)),
+                size: size(ScaledPixels(48.), ScaledPixels(64.)),
+            },
+            corner_radii: Corners::all(ScaledPixels(8.)),
+            corner_smoothing: 2.,
+        });
+        scene
+    };
+    let clipped = render(&masked(None))?.get_pixel(9, 32).0;
+    let lensed_clipped = render(&masked(Some(lens)))?.get_pixel(9, 32).0;
+    anyhow::ensure!(
+        clipped == lensed_clipped,
+        "glass should stay inside the window's rounded clip, got {lensed_clipped:?} for {clipped:?}"
+    );
+
     let frost = GlassMaterial::regular().vanished().blur(px(3.));
     let frosted = render(&glass_test_scene(Some(frost)))?;
     let seam = frosted.get_pixel(12, 32).0;
@@ -1153,7 +1202,7 @@ mod tests {
 
     #[test]
     fn uniform_blocks_match_the_shader_layout() {
-        assert_eq!(std::mem::size_of::<GlassUniform>(), 416);
+        assert_eq!(std::mem::size_of::<GlassUniform>(), 464);
         assert_eq!(std::mem::size_of::<GlassBlurUniform>(), 32);
     }
 
@@ -1200,7 +1249,11 @@ mod tests {
     #[test]
     fn glass_plans_split_where_backdrops_overlap() {
         let viewport = size(1000, 1000);
-        let apart = plan_glass(&[test_glass(100., 4.), test_glass(400., 12.)], viewport);
+        let apart = plan_glass(
+            &[test_glass(100., 4.), test_glass(400., 12.)],
+            viewport,
+            None,
+        );
         assert_eq!(apart.len(), 1);
         let run = &apart[0];
         assert_eq!(run.draws.len(), 2);
@@ -1211,7 +1264,11 @@ mod tests {
         assert_eq!(run.passes.len() as u32, 2 * deepest - 1);
         assert!(run.passes.iter().all(|pass| !pass.draws.is_empty()));
 
-        let stacked = plan_glass(&[test_glass(100., 4.), test_glass(120., 4.)], viewport);
+        let stacked = plan_glass(
+            &[test_glass(100., 4.), test_glass(120., 4.)],
+            viewport,
+            None,
+        );
         assert_eq!(stacked.len(), 2);
     }
 

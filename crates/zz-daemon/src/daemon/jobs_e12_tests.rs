@@ -76,7 +76,7 @@ fn twenty_registered_jobs_add_no_monitor_threads_and_reap_once() {
     let mut token = 4;
     let (done, results) = mpsc::channel();
     let pid = std::process::id();
-    let before = crate::process_info::sample(pid).unwrap().threads;
+    let before = zz_daemon_client::process_info::sample(pid).unwrap().threads;
     for _ in 0..20 {
         jobs.register(
             poll.registry(),
@@ -89,7 +89,7 @@ fn twenty_registered_jobs_add_no_monitor_threads_and_reap_once() {
         )
         .unwrap();
     }
-    assert!(crate::process_info::sample(pid).unwrap().threads <= before);
+    assert!(zz_daemon_client::process_info::sample(pid).unwrap().threads <= before);
     pump(&mut poll, &mut jobs, |jobs| jobs.jobs.is_empty());
     let results = results.try_iter().collect::<Vec<_>>();
     assert_eq!(results.len(), 20);

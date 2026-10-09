@@ -633,7 +633,7 @@ impl CommandClient {
         if matches!(self.link, CommandLink::Exec { spent: true, .. }) {
             self.link = self.route.connect()?;
         }
-        #[cfg(all(unix, feature = "daemon"))]
+        #[cfg(unix)]
         let _signal = self
             .stdin_enabled
             .then(StdinReadSignal::install)
@@ -909,7 +909,7 @@ impl CommandClient {
         command: CommandInvocation,
         prepared: bool,
     ) -> Result<CommandOutcome, DaemonError> {
-        #[cfg(all(unix, feature = "daemon"))]
+        #[cfg(unix)]
         let _signal = self
             .stdin_enabled
             .then(StdinReadSignal::install)
@@ -2097,7 +2097,7 @@ impl InteractiveClient {
     }
 }
 
-pub(crate) struct TracedMessage<'a>(pub(crate) &'a ProtocolMessage);
+pub struct TracedMessage<'a>(pub &'a ProtocolMessage);
 
 impl fmt::Debug for TracedMessage<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -2138,8 +2138,8 @@ struct ProtocolReceiver<S> {
     skipped_decode: bool,
 }
 
-#[cfg(all(test, unix, feature = "daemon"))]
-#[path = "daemon/ctrl_client_tests.rs"]
+#[cfg(all(test, unix))]
+#[path = "ctrl_client_tests.rs"]
 mod ctrl_client_tests;
 
 #[cfg(unix)]
@@ -3068,7 +3068,7 @@ fn read_command_stdin_chunk() -> Result<Vec<u8>, String> {
 }
 
 fn read_command_stdin_chunk_from(mut reader: impl Read) -> Result<Vec<u8>, String> {
-    #[cfg(all(unix, feature = "daemon"))]
+    #[cfg(unix)]
     let _signal = StdinReadSignal::install().map_err(|error| error.to_string())?;
     let mut chunk = vec![0; STDIN_CHUNK_BYTES];
     loop {
@@ -3084,7 +3084,7 @@ fn read_command_stdin_chunk_from(mut reader: impl Read) -> Result<Vec<u8>, Strin
 }
 
 fn read_command_stdin_from(reader: impl Read, binary: bool) -> Result<Vec<u8>, String> {
-    #[cfg(all(unix, feature = "daemon"))]
+    #[cfg(unix)]
     let _signal = StdinReadSignal::install().map_err(|error| error.to_string())?;
     let limit = zz_protocol::MAX_AGENT_SEND_BYTES;
     let mut payload = Vec::new();
@@ -3101,10 +3101,10 @@ fn read_command_stdin_from(reader: impl Read, binary: bool) -> Result<Vec<u8>, S
     Ok(payload)
 }
 
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 struct StdinReadSignal(libc::sigaction);
 
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 #[allow(
     unsafe_code,
     reason = "sigaction saves and restores the exact previous disposition"
@@ -3127,7 +3127,7 @@ impl StdinReadSignal {
     }
 }
 
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 #[allow(
     unsafe_code,
     reason = "restore the saved signal disposition when the scope ends"
@@ -3259,7 +3259,7 @@ mod tests {
         assert_eq!(receiver.recv_decodable().unwrap(), (next, true));
     }
 
-    #[cfg(all(unix, feature = "daemon"))]
+    #[cfg(unix)]
     #[test]
     #[allow(
         unsafe_code,
@@ -3596,7 +3596,7 @@ mod tests {
         assert!(EndpointFactsScope::LocalHostWorkingDirectoryAndTerminal.includes_tty());
     }
 
-    #[cfg(all(unix, feature = "daemon"))]
+    #[cfg(unix)]
     #[test]
     fn handshake_advertises_native_ui_only_for_graphical_terminal_clients() {
         use super::{ProtocolReceiver, ProtocolSender, connect_stream_with_startup_owner};

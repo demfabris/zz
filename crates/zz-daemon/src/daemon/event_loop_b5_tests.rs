@@ -21,7 +21,7 @@ fn signal_shutdown_waits_for_a_foreground_job_that_ends_within_its_grace() {
         ClientId(301),
         format!(
             "sleep 0.2; printf finished > {}",
-            crate::endpoint::shell_quote(marker.to_str().unwrap())
+            zz_daemon_client::shell_quote(marker.to_str().unwrap())
         ),
     );
     event_loop.request_signal_shutdown(&shared, Duration::from_secs(2));

@@ -93,7 +93,7 @@ fn twenty_parked_overlays_add_zero_workers() {
         let targets = (0..20)
             .map(|index| target(&shared, &context, index))
             .collect::<Vec<_>>();
-        let before = crate::process_info::sample(std::process::id())
+        let before = zz_daemon_client::process_info::sample(std::process::id())
             .unwrap()
             .threads;
         let mut tasks = (0..20)
@@ -101,7 +101,7 @@ fn twenty_parked_overlays_add_zero_workers() {
             .collect::<Vec<_>>();
         assert_eq!(shared.connection_threads.worker_count(), 0);
         assert!(
-            crate::process_info::sample(std::process::id())
+            zz_daemon_client::process_info::sample(std::process::id())
                 .unwrap()
                 .threads
                 <= before

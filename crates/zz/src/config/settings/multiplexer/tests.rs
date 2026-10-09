@@ -9,7 +9,7 @@ use std::{
     thread,
 };
 
-use zz_daemon::InteractiveClient;
+use zz_daemon_client::InteractiveClient;
 use zz_protocol::{
     ClientId, ClientInstanceId, Event, EventPayload, KeyTableSnapshot, MuxOptions,
     PROTOCOL_VERSION, ProtocolMessage, ServerHello, StatusLine, read_protocol_message,

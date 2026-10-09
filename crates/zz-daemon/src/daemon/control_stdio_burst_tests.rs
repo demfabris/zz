@@ -347,7 +347,7 @@ fn input_past_the_read_limit_is_answered_without_another_write() {
     let count = INPUT_READ_LIMIT / 256;
     let payload = padded_lines(count);
     assert!(payload.len() > INPUT_READ_LIMIT + INPUT_CHUNK);
-    let _thread = crate::transport::LoopThread::enter(&burst.event_loop.waker);
+    let _thread = crate::wake::LoopThread::enter(&burst.event_loop.waker);
     let mut events = mio::Events::with_capacity(16);
     pending_wake(&mut burst, &mut events);
     assert_eq!(
@@ -363,7 +363,7 @@ fn input_past_the_read_limit_is_answered_without_another_write() {
             Instant::now() < deadline,
             "stdin past the read limit stalled"
         );
-        crate::transport::clear_loop_again();
+        crate::wake::clear_loop_again();
         burst
             .event_loop
             .poll
@@ -397,7 +397,7 @@ fn input_past_the_read_limit_is_answered_without_another_write() {
 #[test]
 fn a_pass_that_stops_at_the_read_limit_wakes_the_loop_for_the_rest() {
     let mut burst = deep_burst();
-    let _thread = crate::transport::LoopThread::enter(&burst.event_loop.waker);
+    let _thread = crate::wake::LoopThread::enter(&burst.event_loop.waker);
     let mut events = mio::Events::with_capacity(16);
     pending_wake(&mut burst, &mut events);
     rustix::io::write(&burst.stdin, b"display-message -p a\n").unwrap();
@@ -408,7 +408,7 @@ fn a_pass_that_stops_at_the_read_limit_wakes_the_loop_for_the_rest() {
         rustix::io::write(&burst.stdin, payload.as_bytes()).unwrap(),
         payload.len()
     );
-    crate::transport::clear_loop_again();
+    crate::wake::clear_loop_again();
     assert!(burst.event_loop.pump_stdio(burst.token, &burst.shared));
     assert!(!burst.stdio().drained);
     assert!(pending_wake(&mut burst, &mut events));

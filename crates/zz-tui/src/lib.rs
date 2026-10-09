@@ -23,7 +23,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use zz_daemon::{
+use zz_daemon_client::{
     DaemonError, Endpoint, InteractiveClient, classify_local_connect_error, configured_fleet_hosts,
     default_socket_path, short_device_name, terminate_incompatible_daemon,
 };
@@ -209,7 +209,7 @@ struct ResolvedRun {
     local_endpoint: Endpoint,
     host_label: String,
     local_host_label: String,
-    fleet_hosts: Vec<zz_daemon::HostEntry>,
+    fleet_hosts: Vec<zz_daemon_client::HostEntry>,
 }
 
 fn resolve_run(options: &RunOptions) -> Result<ResolvedRun, Error> {
@@ -396,7 +396,7 @@ pub fn run_connected<'a>(
 
 fn resolve_endpoint(
     options: &RunOptions,
-    hosts: &[zz_daemon::HostEntry],
+    hosts: &[zz_daemon_client::HostEntry],
 ) -> Result<Endpoint, Error> {
     let Some(name) = options.host.as_deref() else {
         return Ok(Endpoint::Local(options.socket_path.clone()));

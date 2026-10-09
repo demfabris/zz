@@ -1,10 +1,9 @@
 //! The terminal features a client's roster carries, and the colours they
-//! decide. `tty-features.c` keeps the same table for the pin, and both halves
-//! of this crate read it: the daemon to publish `client_termfeatures` and
+//! decide. `tty-features.c` keeps the same table for the pin, and both the server and
+//! its clients read it: the daemon to publish `client_termfeatures` and
 //! `client_colours`, and a client to know what its own terminal takes.
 
-#[cfg_attr(not(feature = "daemon"), allow(dead_code))]
-pub(crate) const TERMINAL_FEATURES: [&str; 21] = [
+pub const TERMINAL_FEATURES: [&str; 21] = [
     "256",
     "bpaste",
     "ccolour",
@@ -35,7 +34,7 @@ pub(crate) fn terminal_feature_bit(name: &str) -> Option<u32> {
         .map(|index| 1 << index)
 }
 
-pub(crate) fn terminal_features_list(features: u32) -> String {
+pub fn terminal_features_list(features: u32) -> String {
     TERMINAL_FEATURES
         .iter()
         .enumerate()

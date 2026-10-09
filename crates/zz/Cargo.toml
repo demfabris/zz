@@ -71,6 +71,7 @@ wgpu.workspace = true
 zz-browser.workspace = true
 zz-chrome-import.workspace = true
 zz-daemon = { workspace = true, features = ["default"] }
+zz-daemon-client.workspace = true
 zz-terminal = { workspace = true, features = ["default"] }
 zz-tui.workspace = true
 

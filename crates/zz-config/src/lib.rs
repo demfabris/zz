@@ -10,7 +10,7 @@ use std::{
 use zz_client::StatusBarSettings;
 use zz_client::chrome_palette::{AppIconSetting, ChromeColor, ChromePresetId, ThemeModeSetting};
 use zz_client::url_input::SearchProvider;
-pub use zz_daemon::{HostEntry, RejectedHost, configured_fleet_hosts, validate_fleet_host};
+pub use zz_daemon_client::{HostEntry, RejectedHost, configured_fleet_hosts, validate_fleet_host};
 use zz_protocol::{ConfigOverrideEntry, MAX_GUI_TEXT_BYTES, MuxOptionKey};
 use zz_terminal::{
     AppearanceColor, AppearanceConfigKey, CellHeightAdjustment, Color, CursorBlinkPolicy,
@@ -865,7 +865,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
         let value = config_value_without_comment(value).trim();
 
         if let Some(name) = key.strip_prefix("host-") {
-            if let Some(message) = zz_daemon::apply_fleet_host_entry(
+            if let Some(message) = zz_daemon_client::apply_fleet_host_entry(
                 &mut parsed.hosts,
                 &mut parsed.rejected_hosts,
                 key,

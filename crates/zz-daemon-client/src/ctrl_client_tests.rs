@@ -1,4 +1,4 @@
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 fn readiness_pair() -> (tempfile::TempDir, super::LocalStream, super::LocalStream) {
     use crate::transport::{LocalTransport, Transport, TransportListener};
     let directory = tempfile::Builder::new()
@@ -18,7 +18,7 @@ fn readiness_pair() -> (tempfile::TempDir, super::LocalStream, super::LocalStrea
     (directory, daemon, client)
 }
 
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 #[test]
 fn readiness_retains_partial_frames_and_resumes_blocking_receive() {
     use super::TransportStream as _;
@@ -50,11 +50,11 @@ fn readiness_retains_partial_frames_and_resumes_blocking_receive() {
     assert_eq!(rustix::fs::fcntl_getfl(&fd).unwrap(), flags);
 }
 
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 #[test]
 fn readiness_drains_initial_pending_and_buffered_frames_before_eof() {
     use std::io::Write as _;
-    if !crate::daemon::solo_tests::rerun_alone(
+    if !crate::solo_tests::rerun_alone(
         "client::ctrl_client_tests::readiness_drains_initial_pending_and_buffered_frames_before_eof",
     ) {
         return;
@@ -94,7 +94,7 @@ fn readiness_drains_initial_pending_and_buffered_frames_before_eof() {
     );
 }
 
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 #[test]
 fn readiness_preserves_decode_resync_across_an_empty_poll() {
     use std::io::{BufRead as _, Write as _};
@@ -138,7 +138,7 @@ fn readiness_preserves_decode_resync_across_an_empty_poll() {
         );
     }
 }
-#[cfg(all(unix, feature = "daemon"))]
+#[cfg(unix)]
 #[test]
 fn readiness_rejects_invalid_lengths_before_reading_a_body() {
     use std::io::{BufRead as _, Write as _};
@@ -167,7 +167,7 @@ fn readiness_rejects_invalid_lengths_before_reading_a_body() {
 #[test]
 fn readiness_buffered_decode_leaves_kernel_data_and_eof_for_the_readiness_read() {
     use std::io::Write as _;
-    if !crate::daemon::solo_tests::rerun_alone(
+    if !crate::solo_tests::rerun_alone(
         "client::ctrl_client_tests::readiness_buffered_decode_leaves_kernel_data_and_eof_for_the_readiness_read",
     ) {
         return;

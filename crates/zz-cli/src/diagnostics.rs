@@ -15,9 +15,9 @@ use std::{
 };
 
 use env_logger::{Builder, Env, Target, WriteStyle};
-use zz_daemon::process_info::{self, ProcessSample};
+use zz_daemon_client::process_info::{self, ProcessSample};
 #[cfg(target_os = "macos")]
-use zz_daemon::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 use zz_protocol::RawText;
 
 pub const INTERNAL_LOG_ARGUMENT: &str = "--zz-verbose-log";

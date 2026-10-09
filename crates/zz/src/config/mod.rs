@@ -8,8 +8,8 @@ use std::{
 use zpui::{App, Corners, Global, Hsla, Pixels, WindowBackgroundAppearance, WindowDecorations, px};
 use zz_browser::SearchProvider;
 use zz_client::StatusBarSettings;
-use zz_daemon::{Endpoint, InteractiveClient};
-pub(crate) use zz_daemon::{HostEntry, validate_fleet_host};
+use zz_daemon_client::{Endpoint, InteractiveClient};
+pub(crate) use zz_daemon_client::{HostEntry, validate_fleet_host};
 use zz_protocol::{CommandInvocation, ConfigOverrideEntry, PROTOCOL_VERSION};
 
 use crate::{
@@ -605,7 +605,7 @@ fn log_fleet_hosts(cx: &App) {
         return;
     }
     let registry = HostRegistry::new(
-        zz_daemon::default_socket_path(),
+        zz_daemon_client::default_socket_path(),
         &configured,
         crate::profile::LocalHostPolicy::Always,
     );
@@ -687,13 +687,14 @@ fn send_current_config_overrides(cx: &App) {
 }
 
 #[cfg(not(target_os = "ios"))]
-pub(crate) fn local_command_client() -> Result<zz_daemon::CommandClient, String> {
+pub(crate) fn local_command_client() -> Result<zz_daemon_client::CommandClient, String> {
     let arguments = crate::application_arguments(
         crate::diagnostics::application_args(),
-        zz_daemon::default_socket_path(),
+        zz_daemon_client::default_socket_path(),
     )
     .map_err(|_| "could not resolve the local daemon socket".to_owned())?;
-    zz_daemon::CommandClient::connect(&arguments.socket_path).map_err(|error| error.to_string())
+    zz_daemon_client::CommandClient::connect(&arguments.socket_path)
+        .map_err(|error| error.to_string())
 }
 
 #[cfg(not(target_os = "ios"))]
@@ -1597,7 +1598,7 @@ mod tests {
             parsed.hosts,
             [HostEntry {
                 name: "arch-desktop".to_owned(),
-                endpoint: Endpoint::Ssh(zz_daemon::SshEndpoint {
+                endpoint: Endpoint::Ssh(zz_daemon_client::SshEndpoint {
                     user: Some("fabrico".to_owned()),
                     host: "arch-desktop".to_owned(),
                     port: Some(2222),

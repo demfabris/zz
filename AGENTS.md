@@ -10,6 +10,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zpui-kit` - widget kit on zpui (theme, primitives, widgets, icons): a maintained fork of gpui-component with no zz dependencies, usable by other apps
 - `crates/zz` - desktop client: zpui shell, terminal/browser/agent panes, settings, daemon client
 - `crates/zz-daemon` — the daemon: session state, PTY workers, client connections
+- `crates/zz-daemon-client` - the client half of the daemon: local and ssh endpoints, askpass, `CommandClient`/`InteractiveClient`, transport, paths, and process facts; client-only crates depend on it instead of `zz-daemon`
 - `crates/zz-mux` — tmux-compatible model: sessions, windows, panes, key tables
 - `crates/zz-protocol` — wire protocol between daemon and clients, plus the shared key contract (tables, engine, fold, command catalog)
 - `crates/zz-client` - sans-IO client core: protocol reduction, chrome keymap, daemon-backed convergence simulator, the browser element picker
@@ -56,7 +57,7 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 |---|---|
 | `cargo test --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-features` | Tests (what CI runs; the excludes keep Zed's optional features off, see the zpui block) |
 | `cargo clippy --workspace --exclude zpui --exclude 'zpui-[!k]*' --all-targets --all-features -- -D warnings` | Lint (what CI runs; zpui's libraries are still linted as dependencies) |
-| `cargo clippy -p zz-daemon --no-default-features --features daemon --all-targets -- -D warnings` | Lint the daemon without agent support (CI runs this too) |
+| `cargo clippy -p zz-daemon -p zz-daemon-client --no-default-features --all-targets -- -D warnings` | Lint the daemon without agent support (CI runs this too) |
 | `cargo fmt --all` | Format |
 | `just run <mac\|linux> [--verbose] [--features <list>]` | Launch isolated zz Dev (own daemon, config, browser, and data). Extra args are those two flags, not Cargo passthrough. No `windows` |
 | `just watch <platform>` | Rebuild and relaunch on source change |

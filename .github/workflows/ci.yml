@@ -76,7 +76,7 @@ jobs:
 
       - name: Lint daemon without agent support
         if: runner.os == 'Linux'
-        run: cargo clippy -p zz-daemon --no-default-features --features daemon --all-targets -- -D warnings
+        run: cargo clippy -p zz-daemon -p zz-daemon-client --no-default-features --all-targets -- -D warnings
 
       - name: Check browser client
         if: runner.os == 'Linux'

@@ -92,7 +92,7 @@ impl Session {
         }
         let startup_reentry_capability = format!(
             "{}{}",
-            crate::STARTUP_REENTRY_CAPABILITY_PREFIX,
+            zz_daemon_client::STARTUP_REENTRY_CAPABILITY_PREFIX,
             shared.server_id
         );
         let startup_reentry = hello.kind == ClientKind::Command

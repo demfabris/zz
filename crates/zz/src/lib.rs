@@ -60,8 +60,8 @@ pub(crate) use zz_cli::application_arguments;
 #[cfg(not(target_os = "ios"))]
 use zz_cli::{CommandLineOrigin, Startup, StartupOptions};
 #[cfg(not(target_os = "ios"))]
-use zz_daemon::default_socket_path;
-use zz_daemon::{DaemonError, InteractiveClient};
+use zz_daemon_client::default_socket_path;
+use zz_daemon_client::{DaemonError, InteractiveClient};
 #[cfg(not(target_os = "ios"))]
 use zz_protocol::CommandInvocation;
 use zz_terminal::TerminalColorScheme;

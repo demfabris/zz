@@ -129,7 +129,7 @@ impl SettingsView {
                 ],
             };
             let donor_path = match kind {
-                ConfigFileKind::Mux => zz_daemon::discover_tmux_config(),
+                ConfigFileKind::Mux => zz_daemon_client::discover_tmux_config(),
                 ConfigFileKind::Terminal => discover_ghostty_config(),
             };
             let donor = text_value_input(
@@ -793,8 +793,10 @@ mod tests {
         let (_, cx) = cx.add_window_view(move |window, cx| {
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

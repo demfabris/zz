@@ -3231,7 +3231,7 @@ tmux set-option -g @plugin loaded
             .prefix("zz app cwd ")
             .tempdir_in("/tmp")
             .expect("temporary app working directory");
-        let client = zz_daemon::InteractiveClient::connect(&fixture.socket)
+        let client = zz_daemon_client::InteractiveClient::connect(&fixture.socket)
             .expect("connect GUI-style interactive client");
         client
             .attach_default_in(working_directory.path())

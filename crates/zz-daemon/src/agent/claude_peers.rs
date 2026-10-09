@@ -18,7 +18,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::unmasked::SpawnUnmasked as _;
+use zz_daemon_client::unmasked::SpawnUnmasked as _;
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -320,7 +320,12 @@ pub(crate) fn record_for_pane<'a>(
     pane: &str,
     pane_pid: Option<u32>,
 ) -> Option<&'a PeerRecord> {
-    record_for_pane_with_parents(records, pane, pane_pid, crate::process_info::parent)
+    record_for_pane_with_parents(
+        records,
+        pane,
+        pane_pid,
+        zz_daemon_client::process_info::parent,
+    )
 }
 
 pub(crate) fn record_for_pane_with_parents<'a>(
@@ -1171,7 +1176,7 @@ mod tests {
         let lookups = std::cell::Cell::new(0);
         let parent_of = |pid| {
             lookups.set(lookups.get() + 1);
-            crate::process_info::parent(pid)
+            zz_daemon_client::process_info::parent(pid)
         };
         let me = std::process::id();
         let records = [PeerRecord {

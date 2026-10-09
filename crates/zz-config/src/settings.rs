@@ -470,7 +470,7 @@ impl SettingsModel {
     pub fn mux_path(&self) -> io::Result<PathBuf> {
         self.explicit_mux
             .clone()
-            .or_else(zz_daemon::mux_config_write_path)
+            .or_else(zz_daemon_client::mux_config_write_path)
             .ok_or_else(|| {
                 io::Error::new(
                     io::ErrorKind::NotFound,
@@ -577,7 +577,7 @@ impl SettingsModel {
             "editor_error":terminal_source.err().or_else(||mux_source.err()).map(|error|error.to_string()),
             "hosts":hosts,"diagnostics":self.parsed.diagnostics.iter().map(|error|json!({"line":error.line,"message":error.message})).collect::<Vec<_>>(),
             "ghostty_path":zz_terminal::discover_ghostty_config(),
-            "mux_sources":zz_daemon::mux_config_candidates(),"error":self.error,"chrome_overrides":overrides,
+            "mux_sources":zz_daemon_client::mux_config_candidates(),"error":self.error,"chrome_overrides":overrides,
             "horizontal":split(mux_bindings::SplitDirection::Horizontal),"vertical":split(mux_bindings::SplitDirection::Vertical),
             "prefix_bindings":bindings.iter().map(|binding|json!({"key":binding.key,"command":binding.commands.iter().map(zz_mux::format_command).collect::<Vec<_>>().join(" ; ")})).collect::<Vec<_>>(),
             "presets":CHROME_PRESETS.iter().map(|preset|json!({"id":preset.id.as_str(),"name":preset.name,"dark":preset.dark,

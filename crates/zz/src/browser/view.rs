@@ -4196,7 +4196,7 @@ mod tests {
     use zz_browser::BrowserError;
     #[cfg(not(target_os = "macos"))]
     use zz_browser::SessionId;
-    use zz_daemon::DaemonError;
+    use zz_daemon_client::DaemonError;
     use zz_ui::Root;
 
     use super::*;
@@ -4830,7 +4830,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -4898,7 +4898,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -4964,7 +4964,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5061,7 +5061,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5116,7 +5116,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

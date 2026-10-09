@@ -377,7 +377,7 @@ impl Render for NewSessionView {
 #[cfg(test)]
 mod tests {
     use zpui::{Modifiers, TestAppContext, VisualTestContext};
-    use zz_daemon::DaemonError;
+    use zz_daemon_client::DaemonError;
 
     use super::*;
 
@@ -517,7 +517,7 @@ mod tests {
             let mux = cx.new(|cx| {
                 MuxClient::new(
                     Err(DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

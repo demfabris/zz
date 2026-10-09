@@ -4549,7 +4549,7 @@ mod tests {
     }
 
     #[cfg(unix)]
-    fn input_test_client() -> Option<(zz_daemon::InteractiveClient, InputTestServer)> {
+    fn input_test_client() -> Option<(zz_daemon_client::InteractiveClient, InputTestServer)> {
         use zz_protocol::{ProtocolMessage, read_protocol_message, write_protocol_message};
 
         let directory = tempfile::Builder::new()
@@ -4602,7 +4602,7 @@ mod tests {
             .unwrap();
             while read_protocol_message(&mut stream).is_ok() {}
         });
-        let client = zz_daemon::InteractiveClient::connect(&socket).unwrap();
+        let client = zz_daemon_client::InteractiveClient::connect(&socket).unwrap();
         let stream = receiver.recv().unwrap();
         Some((
             client,
@@ -4617,7 +4617,7 @@ mod tests {
     #[cfg(unix)]
     fn input_test_workspace(
         cx: &mut TestAppContext,
-        client: zz_daemon::InteractiveClient,
+        client: zz_daemon_client::InteractiveClient,
     ) -> (Entity<AppView>, &mut zpui::VisualTestContext) {
         cx.update(zz_ui::init);
         let workspace_slot = Rc::new(RefCell::new(None));
@@ -4627,7 +4627,8 @@ mod tests {
                 BrowserController::new(Err(zz_browser::BrowserError::AlreadyShutdown), cx)
             });
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
-            let mux = cx.new(|cx| MuxClient::new(Ok(client), zz_daemon::default_socket_path(), cx));
+            let mux = cx
+                .new(|cx| MuxClient::new(Ok(client), zz_daemon_client::default_socket_path(), cx));
             let workspace = cx.new(|cx| {
                 AppView::new(
                     controller.clone(),
@@ -5073,10 +5074,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread(
+                    Err(zz_daemon_client::DaemonError::Thread(
                         "palette lifecycle".to_owned(),
                     )),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5190,10 +5191,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread(
+                    Err(zz_daemon_client::DaemonError::Thread(
                         "window shortcuts".to_owned(),
                     )),
-                    zz_daemon::default_socket_path(),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5235,8 +5236,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("window palette".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "window palette".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5426,8 +5429,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("overlay matrix".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "overlay matrix".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5689,8 +5694,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("menu mouse".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "menu mouse".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -5813,8 +5820,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("menu mouse".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "menu mouse".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6026,8 +6035,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6147,8 +6158,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6336,8 +6349,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6440,8 +6455,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6503,8 +6520,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6581,8 +6600,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6723,8 +6744,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -6862,8 +6885,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7012,7 +7037,7 @@ mod tests {
             crate::config::set_fleet_hosts_for_test(
                 vec![crate::config::HostEntry {
                     name: "remote".to_owned(),
-                    endpoint: zz_daemon::Endpoint::parse("unix:///tmp/zz-cross-host.sock")
+                    endpoint: zz_daemon_client::Endpoint::parse("unix:///tmp/zz-cross-host.sock")
                         .expect("test endpoint"),
                 }],
                 cx,
@@ -7026,8 +7051,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7131,8 +7158,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });
@@ -7341,8 +7370,10 @@ mod tests {
             let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
             let mux = cx.new(|cx| {
                 MuxClient::new(
-                    Err(zz_daemon::DaemonError::Thread("path picker".to_owned())),
-                    zz_daemon::default_socket_path(),
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "path picker".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
                     cx,
                 )
             });

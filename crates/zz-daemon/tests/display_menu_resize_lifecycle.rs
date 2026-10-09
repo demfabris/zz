@@ -5,7 +5,7 @@
 //! the rows, not the choice, not the commands — and never closes the menu, not
 //! even when the box no longer fits.
 
-#![cfg(all(unix, feature = "daemon"))]
+#![cfg(unix)]
 
 mod overlay;
 

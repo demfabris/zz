@@ -5,6 +5,7 @@
 * [zz-chrome-import crate](zz-chrome-import.md) - Store-agnostic Google Chrome data import - profile discovery, cookie snapshot/decryption, and read-only history extraction - isolating the app's only sqlite/crypto/keychain dependencies.
 * [zz-cli crate](zz-cli.md) - Headless CLI, daemon entrypoint, and terminal attach client shared with the desktop app.
 * [zz-client crate](zz-client.md) - Renderer-free client state, effects, chrome keymaps, and normalized pane geometry shared by native and terminal skins.
+* [zz-daemon-client crate](zz-daemon-client.md) - The client half of the zz daemon. Local and ssh endpoints, ssh askpass, the command and interactive clients, and the transport, config paths, and process facts the server shares.
 * [zz-daemon crate](zz-daemon.md) - The persistent local daemon. Sole authority for mux state, owner of PTY-backed terminal sessions and Agent-pane ACP adapter children, and the fan-out engine that streams coalesced terminal frames and agent transcripts to attached and short-lived clients over a socket or named pipe.
 * [zz-mux crate . renderer-free mux state machine](zz-mux.md) - The pure, UI-agnostic multiplexer core that owns sessions/windows/panes/splits, resolves tmux-style targets, executes tmux-compatible commands, holds key tables, and parses .tmux.conf.
 * [zz-protocol crate](zz-protocol.md) - The stable, versioned wire vocabulary (IDs, framing, control messages, packed terminal lanes, and mux snapshots) shared by every zz client and the daemon.

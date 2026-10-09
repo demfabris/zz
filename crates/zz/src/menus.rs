@@ -269,8 +269,10 @@ mod tests {
     fn session_menu_follows_replaced_snapshots_and_empty_workspaces(cx: &mut zpui::TestAppContext) {
         let mux = cx.new(|cx| {
             MuxClient::new(
-                Err(zz_daemon::DaemonError::Thread("test client".to_owned())),
-                zz_daemon::default_socket_path(),
+                Err(zz_daemon_client::DaemonError::Thread(
+                    "test client".to_owned(),
+                )),
+                zz_daemon_client::default_socket_path(),
                 cx,
             )
         });

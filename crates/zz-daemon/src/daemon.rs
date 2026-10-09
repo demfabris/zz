@@ -699,17 +699,19 @@ fn add_winlink_payload(
         .insert("hook_window_index".to_owned(), index.to_string());
 }
 
-fn pane_event_if_hooked(
+fn pane_event_if_observed(
     inner: &ServerState,
     name: &'static str,
     pane: PaneId,
 ) -> Option<PendingHookEvent> {
+    let waited = hook_events::event_waited_in(&inner.event_waiters, name);
     let event = PendingHookEvent::live_pane(name, pane, &inner.engine)?;
-    inner
-        .engine
-        .event_hook_commands(&event.context, name)
-        .is_some_and(|commands| !commands.is_empty())
-        .then_some(event)
+    (waited
+        || inner
+            .engine
+            .event_hook_commands(&event.context, name)
+            .is_some_and(|commands| !commands.is_empty()))
+    .then_some(event)
 }
 
 fn window_alert_notifications(
@@ -9222,20 +9224,27 @@ impl Shared {
         );
         let mut control_variables = event.variables.clone();
         hook_events::fit_payload(event.name, &mut control_variables);
-        if event.name == "client-session-changed"
-            && let Some(session) = event.context.session
-        {
-            control_variables.insert("hook_session".to_owned(), session.to_string());
-            if let Some(name) = self
+        if let Some(session) = event.context.session {
+            let name = self
                 .inner
                 .lock()
                 .engine
                 .state
                 .sessions
                 .get(&session)
-                .map(|session| session.name.clone())
-            {
-                control_variables.insert("hook_session_name".to_owned(), name);
+                .map(|session| session.name.clone());
+            if event.name == "client-session-changed" {
+                control_variables.insert("hook_session".to_owned(), session.to_string());
+                if let Some(name) = &name {
+                    control_variables.insert("hook_session_name".to_owned(), name.clone());
+                }
+            }
+            control_variables.insert(
+                zz_protocol::EVENT_SESSION_VARIABLE.to_owned(),
+                session.to_string(),
+            );
+            if let Some(name) = name {
+                control_variables.insert(zz_protocol::EVENT_SESSION_NAME_VARIABLE.to_owned(), name);
             }
         }
         (
@@ -28784,7 +28793,7 @@ impl Shared {
             {
                 return;
             }
-            let activity_hook = pane_event_if_hooked(&inner, "pane-activity", pane);
+            let activity_hook = pane_event_if_observed(&inner, "pane-activity", pane);
             let mut silence_schedule = None;
             let mut alert_window = None;
             terminal_reads::pane_changed(&mut inner, pane);
@@ -30975,7 +30984,7 @@ impl Shared {
                         zz_terminal::ShellMarkKind::CommandStarted => "pane-command-started",
                         zz_terminal::ShellMarkKind::CommandFinished => "pane-command-finished",
                     };
-                    pane_event_if_hooked(&inner, name, pane).map(|mut event| {
+                    pane_event_if_observed(&inner, name, pane).map(|mut event| {
                         if mark.kind != zz_terminal::ShellMarkKind::Prompt {
                             add_command_payload(&inner, &mut event, pane, &mark.facts);
                         }
@@ -30990,7 +30999,7 @@ impl Shared {
     fn raise_pane_bell(self: &Arc<Self>, pane: PaneId) {
         let pane_hook = {
             let inner = self.inner.lock();
-            pane_event_if_hooked(&inner, "pane-bell", pane)
+            pane_event_if_observed(&inner, "pane-bell", pane)
         };
         if let Some(hook) = pane_hook {
             self.run_event_hooks(vec![hook]);
@@ -52706,7 +52715,7 @@ The keys, in text output order, are `session_id`, `session_name`, `window_id`, `
 ### `zz events [-t %N]`
 
 Stream hook events.
-Print JSON lines, flushed per line: `{"seq":1,"event":"agent-state-changed","time":1750000000000,"hook_pane":"%3","agent_state":"working",...}`. Each line includes the hook's string variables. `time` is Unix milliseconds. Wait for the first line, `{"seq":0,"event":"ready","time":...}`, before starting work. On subscriber overflow, `gap` consumes the next sequence number; the client reconnects and continues counting without another `ready` line. Use `-t %N` for a pane, `-t @N` for a window, `-t '$N'` for a session ID, or `-t name` for a session name. Filters match exact hook fields; `ready` and `gap` always print. Omit `-t` to stream without filtering. `agent-state-changed` carries `agent_state` for every pane kind and `agent_pending_permission` with the permission ID or an empty string. Agent panes also emit `agent-tool-call` for new calls and completed or failed status changes. Each event carries `tool_call_id`, `tool_title`, `tool_kind`, and `tool_status`; titles collapse whitespace and stop at 200 characters: `{"seq":2,"event":"agent-tool-call","time":1750000000000,"hook_pane":"%3","tool_call_id":"call-1","tool_title":"cargo test","tool_kind":"execute","tool_status":"in_progress"}`. These agent events are stream-only; `set-hook` cannot bind them. Other `@option-changed` firings are not streamed; use a hook for those. Invalid arguments exit 2. Connection and daemon errors, or any disconnect other than overflow, exit 1, including server shutdown.
+Print JSON lines, flushed per line: `{"seq":1,"event":"agent-state-changed","time":1750000000000,"hook_pane":"%3","agent_state":"working",...}`. Each line includes the hook's string variables. `time` is Unix milliseconds. Wait for the first line, `{"seq":0,"event":"ready","time":...}`, before starting work. On subscriber overflow, `gap` consumes the next sequence number; the client reconnects and continues counting without another `ready` line. Use `-t %N` for a pane, `-t @N` for a window, `-t '$N'` for a session ID, or `-t name` for a session name. Filters match exact hook fields, and a session filter also passes the events of that session's windows and panes; `ready` and `gap` always print. Omit `-t` to stream without filtering. `agent-state-changed` carries `agent_state` for every pane kind and `agent_pending_permission` with the permission ID or an empty string. Agent panes also emit `agent-tool-call` for new calls and completed or failed status changes. Each event carries `tool_call_id`, `tool_title`, `tool_kind`, and `tool_status`; titles collapse whitespace and stop at 200 characters: `{"seq":2,"event":"agent-tool-call","time":1750000000000,"hook_pane":"%3","tool_call_id":"call-1","tool_title":"cargo test","tool_kind":"execute","tool_status":"in_progress"}`. These agent events are stream-only; `set-hook` cannot bind them. Other `@option-changed` firings are not streamed; use a hook for those. Invalid arguments exit 2. Connection and daemon errors, or any disconnect other than overflow, exit 1, including server shutdown.
 
 "#;
     WORKSPACE_TOOLS_TERMINAL = r#"## Terminal panes

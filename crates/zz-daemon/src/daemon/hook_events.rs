@@ -1956,13 +1956,13 @@ pub(super) fn take_event_waiter_wakes(
     wakes
 }
 
+pub(super) fn event_waited_in(waiters: &[EventWaiter], name: &str) -> bool {
+    waiters.iter().any(|waiter| waiter.name == name)
+}
+
 impl Shared {
     pub(super) fn event_waited(&self, name: &str) -> bool {
-        self.inner
-            .lock()
-            .event_waiters
-            .iter()
-            .any(|waiter| waiter.name == name)
+        event_waited_in(&self.inner.lock().event_waiters, name)
     }
 
     pub(super) fn feed_event_waiters(

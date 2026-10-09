@@ -228,5 +228,7 @@ main_client select-window -t w:0
 main_client kill-window -t w:5
 payload window-pane-changed split-window -t w:0
 main_client kill-pane -t w:0.1
+payload pane-bell split-window -d -t w:0 "printf '\\007'; exec sleep 5"
+main_client kill-pane -t w:0.1
 
 main_client set-environment -g HOOKS_EVENTS_SINK "$(echo $seen)"

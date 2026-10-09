@@ -269,17 +269,23 @@ impl<W: Write> EventWriter<W> {
     }
 
     fn hook(&mut self, payload: EventPayload) -> io::Result<()> {
-        let EventPayload::HookEvent { name, variables } = payload else {
+        let EventPayload::HookEvent {
+            name,
+            mut variables,
+        } = payload
+        else {
             return Ok(());
         };
+        let session = variables.remove(zz_protocol::EVENT_SESSION_VARIABLE);
+        let session_name = variables.remove(zz_protocol::EVENT_SESSION_NAME_VARIABLE);
         if let Some(target) = &self.target {
-            let key = match target.as_bytes().first() {
-                Some(b'%') => "hook_pane",
-                Some(b'@') => "hook_window",
-                Some(b'$') => "hook_session",
-                _ => "hook_session_name",
+            let (key, fallback) = match target.as_bytes().first() {
+                Some(b'%') => ("hook_pane", None),
+                Some(b'@') => ("hook_window", None),
+                Some(b'$') => ("hook_session", session.as_ref()),
+                _ => ("hook_session_name", session_name.as_ref()),
             };
-            if variables.get(key) != Some(target) {
+            if variables.get(key) != Some(target) && fallback != Some(target) {
                 return Ok(());
             }
         }
@@ -752,6 +758,46 @@ mod tests {
             assert_eq!(rows[0]["event"], "ready");
             assert_eq!(rows.last().unwrap()["event"], "gap");
             assert_eq!(rows.last().unwrap()["seq"], rows.len() as u64 - 1);
+        }
+    }
+
+    #[test]
+    fn a_pane_event_passes_the_session_filter_of_its_own_session_only() {
+        let event = || EventPayload::HookEvent {
+            name: "pane-title-changed".to_owned(),
+            variables: BTreeMap::from([
+                ("hook_pane".to_owned(), "%2".to_owned()),
+                ("hook_window".to_owned(), "@3".to_owned()),
+                ("hook_new_title".to_owned(), "t".to_owned()),
+                (
+                    zz_protocol::EVENT_SESSION_VARIABLE.to_owned(),
+                    "$4".to_owned(),
+                ),
+                (
+                    zz_protocol::EVENT_SESSION_NAME_VARIABLE.to_owned(),
+                    "work".to_owned(),
+                ),
+            ]),
+        };
+        for (target, passes) in [
+            ("$4", true),
+            ("work", true),
+            ("$5", false),
+            ("other", false),
+        ] {
+            let mut writer = EventWriter {
+                output: Vec::new(),
+                next_seq: 0,
+                target: Some(target.to_owned()),
+            };
+            writer.hook(event()).unwrap();
+            let rows = lines(&writer.output);
+            assert_eq!(rows.len(), usize::from(passes), "{target}");
+            if let Some(row) = rows.first() {
+                assert_eq!(row["hook_pane"], "%2");
+                assert!(row.get(zz_protocol::EVENT_SESSION_VARIABLE).is_none());
+                assert!(row.get(zz_protocol::EVENT_SESSION_NAME_VARIABLE).is_none());
+            }
         }
     }
 }

@@ -44,6 +44,8 @@ pub use control::{
     Subscriptions, TTY_INPUT_CAPABILITY, TreeSubscription, Welcome, key_tables_hash,
 };
 pub const UNZOOMED_LAYOUT_VARIABLE: &str = "unzoomed_layout";
+pub const EVENT_SESSION_VARIABLE: &str = "zz_event_session";
+pub const EVENT_SESSION_NAME_VARIABLE: &str = "zz_event_session_name";
 pub use exec::{
     ClientEnvironmentBlob, EXEC_CAPABILITY, ExecExit, ExecFlags, ExecOutcome, ExecRequest,
     ExecResume, ExecResumeKind, MAX_EXEC_TTY_BYTES,

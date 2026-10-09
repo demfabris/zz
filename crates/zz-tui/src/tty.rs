@@ -68,6 +68,7 @@ pub(crate) struct TerminalGuard {
     pixel_mouse: bool,
     kitty_keyboard: bool,
     kitty_graphics: bool,
+    clear_on_attach: bool,
     file_probe: Option<PathBuf>,
     #[cfg(unix)]
     original: Termios,
@@ -79,7 +80,7 @@ const MOUSE_CLEAR_SEQUENCE: &[u8] = b"\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?100
 /// `tty_send_requests`: the primary device attributes the kitty probe already
 /// fences on, then the secondary and the extended ones, whose replies name the
 /// terminal and the features it carries.
-const TERMINAL_REQUESTS: &[u8] = b"\x1b[c\x1b[>c\x1b[>q";
+const TERMINAL_REQUESTS: &[u8] = b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p";
 const DEVICE_ATTRIBUTES_REQUEST: &[u8] = b"\x1b[c";
 
 /// How many colours the terminal this client writes to takes. `tty.c` asks it
@@ -102,11 +103,25 @@ fn raise_terminal_colours(colours: u32) {
 }
 
 /// `CLIENT_UTF8`, the flag `tty_check_codeset` reads before it writes a cell.
-/// `tmux.c` decides it in the client process from `-u` and the locale and
-/// never revisits it, so this reads it once too.
+/// `tmux.c` decides it in the client process from `-u` and the locale, and
+/// `tty_apply_features` sets it again once the `utf8` feature applies.
 pub(crate) fn terminal_takes_utf8() -> bool {
     static TAKES_UTF8: OnceLock<bool> = OnceLock::new();
     *TAKES_UTF8.get_or_init(zz_daemon_client::client_takes_utf8_terminal)
+        || UTF8_FEATURE.load(Ordering::Relaxed)
+}
+
+static UTF8_FEATURE: AtomicBool = AtomicBool::new(false);
+static UTF8_REPAINT: AtomicBool = AtomicBool::new(false);
+
+fn note_utf8_feature() {
+    if terminal_carries("utf8") && !UTF8_FEATURE.swap(true, Ordering::Relaxed) {
+        UTF8_REPAINT.store(true, Ordering::Relaxed);
+    }
+}
+
+pub(crate) fn take_utf8_repaint() -> bool {
+    UTF8_REPAINT.swap(false, Ordering::Relaxed)
 }
 
 /// `tty_keys_device_attributes2` reads the first parameter of a secondary DA
@@ -115,6 +130,10 @@ pub(crate) fn note_secondary_device_attributes(kind: u8) {
     learn_terminal_features(terminal_default_features(secondary_device_attributes_name(
         kind,
     )));
+}
+
+pub(crate) fn note_synchronized_output() {
+    learn_terminal_features("sync");
 }
 
 fn secondary_device_attributes_name(kind: u8) -> &'static str {
@@ -137,7 +156,7 @@ pub(crate) fn note_extended_device_attributes(name: &str) {
 }
 
 fn extended_device_attributes_name(reply: &str) -> &'static str {
-    const NAMED: [(&str, &str); 7] = [
+    const NAMED: [(&str, &str); 8] = [
         ("iTerm2 ", "iTerm2"),
         ("tmux ", "tmux"),
         ("XTerm(", "XTerm"),
@@ -145,6 +164,7 @@ fn extended_device_attributes_name(reply: &str) -> &'static str {
         ("foot(", "foot"),
         ("WezTerm ", "WezTerm"),
         ("ghostty ", "ghostty"),
+        ("Rio ", "Rio"),
     ];
     NAMED
         .iter()
@@ -162,14 +182,49 @@ fn learn_terminal_features(features: &str) {
     zz_daemon_client::learn_client_terminal_features(features);
     raise_terminal_colours(zz_daemon_client::client_terminal_colour_count());
     arm_extended_keys();
+    arm_application_escape();
+    note_utf8_feature();
 }
 
-pub(crate) fn adopt_negotiated_features(features: &[String]) {
+pub(crate) fn adopt_negotiated_features(features: &[String], application_escape: &[String]) {
+    if let Ok(mut escape) = APPLICATION_ESCAPE.lock() {
+        *escape = [0, 1].map(|index| {
+            application_escape
+                .get(index)
+                .map(|value| value.as_bytes().to_vec())
+                .unwrap_or_default()
+        });
+    }
     zz_daemon_client::adopt_negotiated_terminal_features(features);
     if terminal_colours().is_some() {
         raise_terminal_colours(zz_daemon_client::client_terminal_colour_count());
     }
     arm_extended_keys();
+    arm_application_escape();
+    note_utf8_feature();
+}
+
+static APPLICATION_ESCAPE_ARMED: AtomicBool = AtomicBool::new(false);
+static APPLICATION_ESCAPE: std::sync::Mutex<[Vec<u8>; 2]> =
+    std::sync::Mutex::new([Vec::new(), Vec::new()]);
+
+fn application_escape(index: usize) -> Vec<u8> {
+    APPLICATION_ESCAPE
+        .lock()
+        .map(|escape| escape[index].clone())
+        .unwrap_or_default()
+}
+
+fn arm_application_escape() {
+    let enable = application_escape(0);
+    if enable.is_empty() || APPLICATION_ESCAPE_ARMED.swap(true, Ordering::Relaxed) {
+        return;
+    }
+    ACTIVE_OUTPUT.with(|output| {
+        if let Some(writer) = output.borrow().as_ref() {
+            let _ = writer.borrow_mut().control(enable);
+        }
+    });
 }
 
 static EXTENDED_KEYS_OPTION: AtomicBool = AtomicBool::new(false);
@@ -228,10 +283,21 @@ const FOCUS_EVENTS_ENABLE: &[u8] = b"\x1b[?1004h";
 const EXTENDED_KEYS_ENABLE: &[u8] = b"\x1b[>4;2m";
 const EXTENDED_KEYS_DISABLE: &[u8] = b"\x1b[>4m";
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct TerminalOptions {
     pub extended_keys: bool,
     pub focus_events: bool,
+    pub clear_on_attach: bool,
+}
+
+impl Default for TerminalOptions {
+    fn default() -> Self {
+        Self {
+            extended_keys: false,
+            focus_events: false,
+            clear_on_attach: true,
+        }
+    }
 }
 
 impl TerminalOptions {
@@ -241,7 +307,29 @@ impl TerminalOptions {
                 &hello.mux_options.get(MuxOptionKey::ExtendedKeys)?.value,
             ),
             focus_events: hello.mux_options.get(MuxOptionKey::FocusEvents)?.value == "on",
+            clear_on_attach: clear_on_attach_enabled(&hello.mux_options),
         })
+    }
+}
+
+pub(crate) fn clear_on_attach_enabled(options: &zz_protocol::MuxOptions) -> bool {
+    options
+        .get(MuxOptionKey::ClearOnAttach)
+        .is_none_or(|option| option.value == "on")
+}
+
+fn attach_screen_sequence(clear_on_attach: bool, rows: u16) -> Vec<u8> {
+    if clear_on_attach {
+        return b"\x1b[?1049h\x1b[H\x1b[2J".to_vec();
+    }
+    format!("\x1b[1;{rows}r\x1b[{rows};1H\x1b[{}S", u32::from(rows) + 1).into_bytes()
+}
+
+const fn detach_screen_sequence(clear_on_attach: bool) -> &'static [u8] {
+    if clear_on_attach {
+        b"\x1b[?1049l"
+    } else {
+        b"\x1b[H\x1b[2J"
     }
 }
 
@@ -285,7 +373,12 @@ impl TerminalGuard {
     }
 
     #[cfg(unix)]
-    pub fn enter(mouse: MouseArming, extended_keys: bool, focus_events: bool) -> io::Result<Self> {
+    pub fn enter(
+        mouse: MouseArming,
+        extended_keys: bool,
+        focus_events: bool,
+        clear_on_attach: bool,
+    ) -> io::Result<Self> {
         let original = rustix::termios::tcgetattr(io::stdin())?;
         let file_probe = supports_kitty_graphics()
             .then(create_probe_file)
@@ -298,12 +391,13 @@ impl TerminalGuard {
             pixel_mouse: supports_pixel_mouse(),
             kitty_keyboard: supports_kitty_keyboard(),
             kitty_graphics: false,
+            clear_on_attach,
             file_probe,
             original,
             writer: std::rc::Rc::clone(&writer),
         };
         ACTIVE_OUTPUT.with(|output| *output.borrow_mut() = Some(writer));
-        guard.resume(mouse, extended_keys, focus_events)?;
+        guard.resume(mouse, extended_keys, focus_events, clear_on_attach)?;
         Ok(guard)
     }
 
@@ -313,10 +407,12 @@ impl TerminalGuard {
         mouse: MouseArming,
         extended_keys: bool,
         focus_events: bool,
+        clear_on_attach: bool,
     ) -> io::Result<()> {
         if self.active {
             return Ok(());
         }
+        self.clear_on_attach = clear_on_attach;
         let mut raw = self.original.clone();
         raw.make_raw();
         rustix::termios::tcsetattr(io::stdin(), OptionalActions::Now, &raw)?;
@@ -327,7 +423,9 @@ impl TerminalGuard {
             Ordering::Relaxed,
         );
         let mut output = Vec::new();
-        output.write_all(b"\x1b[?1049h\x1b[?25l")?;
+        let rows = rustix::termios::tcgetwinsize(io::stdout()).map_or(24, |size| size.ws_row);
+        output.write_all(&attach_screen_sequence(clear_on_attach, rows))?;
+        output.write_all(b"\x1b[?25l")?;
         if focus_events {
             output.write_all(FOCUS_EVENTS_ENABLE)?;
         }
@@ -342,9 +440,11 @@ impl TerminalGuard {
         }
         output.write_all(TERMINAL_REQUESTS)?;
         output.write_all(THEME_SUBSCRIBE)?;
-        output.write_all(b"\x1b[16t\x1b[2J")?;
+        output.write_all(b"\x1b[16t")?;
         self.writer.borrow_mut().control(output)?;
         arm_extended_keys();
+        arm_application_escape();
+        note_utf8_feature();
         Ok(())
     }
 
@@ -353,6 +453,7 @@ impl TerminalGuard {
         _mouse: MouseArming,
         _extended_keys: bool,
         _focus_events: bool,
+        _clear_on_attach: bool,
     ) -> io::Result<Self> {
         Err(io::Error::new(
             io::ErrorKind::Unsupported,
@@ -417,11 +518,15 @@ impl TerminalGuard {
         if EXTENDED_KEYS_ARMED.swap(false, Ordering::Relaxed) {
             let _ = output.write_all(EXTENDED_KEYS_DISABLE);
         }
+        if APPLICATION_ESCAPE_ARMED.swap(false, Ordering::Relaxed) {
+            let _ = output.write_all(&application_escape(1));
+        }
         let _ = output.write_all(THEME_UNSUBSCRIBE);
         let _ = output.write_all(KEYPAD_LOCAL);
         let _ = output.write_all(
-            b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?25h\x1b[?1049l",
+            b"\x1b[?2004l\x1b[?1016l\x1b[?1006l\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?25h",
         );
+        let _ = output.write_all(detach_screen_sequence(self.clear_on_attach));
         let _ = self.writer.borrow_mut().control(output);
         #[cfg(unix)]
         let _ = rustix::termios::tcsetattr(io::stdin(), OptionalActions::Now, &self.original);
@@ -491,6 +596,8 @@ fn terminal_supports<const N: usize>(names: [&str; N]) -> bool {
 mod tests {
     use super::*;
 
+    static NEGOTIATION_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn the_hello_arms_the_terminal_from_subscribed_options() {
         let mut hello = ServerHello {
@@ -524,8 +631,32 @@ mod tests {
             Some(TerminalOptions {
                 extended_keys: true,
                 focus_events: true,
+                clear_on_attach: true,
             })
         );
+        hello.mux_options.set(
+            MuxOptionKey::ClearOnAttach,
+            "off",
+            zz_protocol::MuxOptionSource::RuntimeCommand,
+        );
+        assert_eq!(
+            TerminalOptions::from_hello(&hello).map(|options| options.clear_on_attach),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn clear_on_attach_off_scrolls_the_terminal_into_its_history_like_3_8() {
+        assert_eq!(
+            attach_screen_sequence(true, 24),
+            b"\x1b[?1049h\x1b[H\x1b[2J".to_vec()
+        );
+        assert_eq!(detach_screen_sequence(true), b"\x1b[?1049l");
+        assert_eq!(
+            attach_screen_sequence(false, 24),
+            b"\x1b[1;24r\x1b[24;1H\x1b[25S".to_vec()
+        );
+        assert_eq!(detach_screen_sequence(false), b"\x1b[H\x1b[2J");
     }
 
     #[test]
@@ -572,6 +703,7 @@ mod tests {
         assert_eq!(extended_device_attributes_name("ghostty 1.2.3"), "ghostty");
         assert_eq!(extended_device_attributes_name("XTerm(400)"), "XTerm");
         assert_eq!(extended_device_attributes_name("tmux 3.8"), "tmux");
+        assert_eq!(extended_device_attributes_name("Rio 0.2.30"), "Rio");
         assert_eq!(extended_device_attributes_name("Konsole 2.0"), "");
         assert_eq!(extended_device_attributes_name("tmux"), "");
         assert!(terminal_default_features("tmux").contains("RGB"));
@@ -581,11 +713,14 @@ mod tests {
 
     #[test]
     fn the_startup_requests_carry_the_pin_three_attribute_queries() {
-        assert!(TERMINAL_REQUESTS.ends_with(b"\x1b[c\x1b[>c\x1b[>q"));
+        assert!(TERMINAL_REQUESTS.ends_with(b"\x1b[c\x1b[>c\x1b[>q\x1b[?2026$p"));
     }
 
     #[test]
     fn a_negotiated_extkeys_feature_writes_the_extended_key_request() {
+        let _serial = NEGOTIATION_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let sink = std::sync::Arc::clone(&written);
         let writer = crate::writer::TerminalWriter::with_sink(Box::new(move |bytes| {
@@ -596,12 +731,40 @@ mod tests {
             *output.borrow_mut() = Some(std::rc::Rc::new(std::cell::RefCell::new(writer)));
         });
         EXTENDED_KEYS_OPTION.store(true, Ordering::Relaxed);
-        adopt_negotiated_features(&["extkeys".to_owned()]);
+        adopt_negotiated_features(&["extkeys".to_owned()], &[]);
         let armed = EXTENDED_KEYS_ARMED.swap(false, Ordering::Relaxed);
         EXTENDED_KEYS_OPTION.store(false, Ordering::Relaxed);
         ACTIVE_OUTPUT.with(|output| output.borrow_mut().take());
         assert!(armed);
         assert_eq!(written.lock().unwrap().as_slice(), EXTENDED_KEYS_ENABLE);
+    }
+
+    #[test]
+    fn application_escape_writes_the_terms_own_enesc_and_nothing_without_it() {
+        let _serial = NEGOTIATION_TESTS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let written = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = std::sync::Arc::clone(&written);
+        let writer = crate::writer::TerminalWriter::with_sink(Box::new(move |bytes| {
+            sink.lock().unwrap().extend_from_slice(bytes);
+            Ok(())
+        }));
+        ACTIVE_OUTPUT.with(|output| {
+            *output.borrow_mut() = Some(std::rc::Rc::new(std::cell::RefCell::new(writer)));
+        });
+        adopt_negotiated_features(&["appesc".to_owned()], &[String::new(), String::new()]);
+        assert!(!APPLICATION_ESCAPE_ARMED.load(Ordering::Relaxed));
+        assert!(written.lock().unwrap().is_empty());
+        adopt_negotiated_features(
+            &["appesc".to_owned()],
+            &["\x1b[?7727h".to_owned(), "\x1b[?7727l".to_owned()],
+        );
+        let armed = APPLICATION_ESCAPE_ARMED.swap(false, Ordering::Relaxed);
+        adopt_negotiated_features(&[], &[]);
+        ACTIVE_OUTPUT.with(|output| output.borrow_mut().take());
+        assert!(armed);
+        assert_eq!(written.lock().unwrap().as_slice(), b"\x1b[?7727h");
     }
 
     #[test]

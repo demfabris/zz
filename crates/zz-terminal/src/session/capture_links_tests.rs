@@ -740,3 +740,55 @@ fn mode_escaped_capture_keeps_the_pin_codes_and_drops_links_like_its_mode_screen
         "\x1b]8;;http://a\x1b\\aa\x1b]8;;\x1b\\ \x1b]8;;http://b\x1b\\bb\x1b]8;;\x1b\\"
     );
 }
+
+#[test]
+fn mode_capture_ranges_count_from_the_frozen_screen_not_the_scroll_position() {
+    let mut terminal = new_terminal(10, 4, 64).expect("terminal");
+    let mut filter = EngineFilter::default();
+    let lines = (1..=12)
+        .map(|line| line.to_string())
+        .collect::<Vec<_>>()
+        .join("\r\n");
+    feed(&mut terminal, &mut filter, lines.as_bytes());
+    let mut selection = None;
+    let mut copy_mode = None;
+    enter_copy_mode(
+        &mut terminal,
+        &mut selection,
+        &mut copy_mode,
+        false,
+        false,
+        None,
+        false,
+    )
+    .expect("copy mode");
+    copy_mode
+        .as_deref_mut()
+        .expect("frozen revision")
+        .viewport_offset = 3;
+    let capture = |start, end| {
+        capture_terminal_marked(
+            &terminal,
+            copy_mode.as_deref(),
+            CaptureOptions {
+                mode: true,
+                start,
+                end,
+                ..CaptureOptions::default()
+            },
+            &[],
+        )
+        .expect("mode capture")
+        .lines()
+        .collect::<Vec<_>>()
+        .join(",")
+    };
+    assert_eq!(
+        capture(CaptureBoundary::Relative(-3), CaptureBoundary::Relative(1)),
+        "6,7,8,9,10"
+    );
+    assert_eq!(
+        capture(CaptureBoundary::Relative(0), CaptureBoundary::VisibleEnd),
+        "9,10,11,12"
+    );
+}

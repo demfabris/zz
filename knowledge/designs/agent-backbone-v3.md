@@ -51,7 +51,7 @@ zz kill-server                       # when done
 | hook on state writes | `set-hook -g @option-changed 'run-shell "echo #{hook_target} #{hook_option}"'` fires with `%N @agent_state` |
 | timers | `zz run-shell -b -d 1 'touch marker'` |
 | control-mode push | `zz -C attach -t ai` then `refresh-client -B st:%0:#{@agent_state}` emits `%subscription-changed st $0 @0 1 %0 : idle` on each write; `%output` streams pane bytes |
-| hooks | `alert-bell`, `pane-exited` run with `#{hook_pane}` |
+| hooks | `pane-exited` runs with `#{hook_pane}`; `alert-bell` runs targeted at the ringing pane, so `#{pane_id}` names it (tmux 3.8's alert payload carries session, window and window_index, not the pane) |
 | tmux wrapper | a symlink `tmux -> zz` answers `tmux -V` with `tmux 3.8-zz` and works when both `TMUX` and `ZZ_SOCKET` are set, which every zz pane already has (`crates/zz-daemon/src/daemon.rs:7575`, `:7586`) |
 | ACP agent pane end to end | `zz set-option -g experimental-agent-pane on`, `zz split-picker -h -d`, `zz select-pane-kind -t %N agent`, `zz set-agent-provider -t %N claude`, `zz agent-send -t %N --wait "Reply pong"`. The adapter spawned and the turn ran; it failed with a real API error (see B4) that came back as exit 1 plus the message plus the projection text |
 

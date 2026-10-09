@@ -198,7 +198,7 @@ fn shared_tree(
         &contexts,
         &mut tree,
     );
-    stamp_pane_border_chrome(
+    let _ = stamp_pane_border_chrome(
         &inner.engine,
         &inner.config_files,
         facts,

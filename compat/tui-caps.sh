@@ -26,6 +26,8 @@
 #   ---------------------------------------------------------------------------
 #   alternate screen               alternate_on, attached and detached   driven
 #   alternate-screen restoration   the whole mode tuple after detach     driven
+#   clear-on-attach off            alternate_on attached and detached,   driven
+#                                  and the outer pane's history_size
 #   bracketed paste                bracket_paste_flag                    driven
 #   cursor visibility              cursor_flag                           driven
 #   cursor shape                   cursor_shape                          driven
@@ -156,7 +158,9 @@
 # RECORDED DIVERGENCES. A recorded row prints its two measured values and does
 # not fail the run; its disposition is per case and fixed in the driver below,
 # never discovered at runtime. Nothing was recorded here from 2026-09-13 until
-# the 3.8 pin; known_drift names each row recorded since, with its owner. The
+# the 3.8 pin, whose DECRQM ?2026 query kept the client_termfeatures rows
+# recorded until the raw TUI asked it too (pin.formats-options-2, 2026-10-09);
+# known_drift names each row recorded since, with its owner, and is empty. The
 # last three causes closed together with the v102 capability wire (a client
 # reports what its terminal answered after the hello and the daemon folds it
 # with the terminfo-derived base set for the TERM), the client's own UTF-8 flag
@@ -552,18 +556,11 @@ declare -A RECORD_OWNERS=([unattributed]=0)
 
 known_drift() {
   case "$1" in
-  'facts/'*' client_termfeatures' | 'sc/control client_termfeatures' | \
-    'sc/one-sided-'*' client_termfeatures')
-    printf 'gap:pin.formats-options'
-    ;;
   esac
 }
 
 known_drift_reason() {
   case "$1" in
-  gap:pin.formats-options)
-    printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 asks the terminal for synchronized output with DECRQM ?2026 (tty.c, tty-keys.c tty_keys_sync) and adds sync to client_termfeatures when it answers; the zz client sends no such query"
-    ;;
   esac
 }
 
@@ -873,6 +870,30 @@ case_restore() {
   zz_tuple="$(read_modes zz)"
   pin_tuple="$(read_modes tmux)"
   compare_tuple "restore/detached" "" "$zz_tuple" "$pin_tuple" "${MODE_NAMES[@]}"
+}
+
+# 3.8's clear-on-attach off: tty_start_tty skips the alternate screen and
+# scrolls one line more than the client's height into the outer terminal's
+# history instead, and tty_stop_tty clears rather than leaving an alternate
+# screen it never entered. Both decoded halves assert: the mode tuple (with
+# alternate_on) attached and detached, and the outer pane's history_size,
+# which only the scroll grows.
+case_clear_on_attach_off() {
+  local side
+  for side in zz tmux; do
+    side_command "$side" set-option -g clear-on-attach off >/dev/null ||
+      die "$side refused clear-on-attach off"
+  done
+  case_modes 'clear-on-attach/off' xterm '' ''
+  assert_row 'clear-on-attach/off history_size' \
+    "$(tmux_outer_command display-message -p -t "$(outer_window zz)" '#{history_size}')" \
+    "$(tmux_outer_command display-message -p -t "$(outer_window tmux)" '#{history_size}')"
+  detach_case
+  compare_tuple "clear-on-attach/off/detached" "" "$(read_modes zz)" "$(read_modes tmux)" \
+    "${MODE_NAMES[@]}"
+  for side in zz tmux; do
+    side_command "$side" set-option -gu clear-on-attach >/dev/null
+  done
 }
 
 # The colour case reads the decoder's own grid, where the class survives. The
@@ -1293,6 +1314,7 @@ printf 'outer-terminal capability differential (pin %s)\n' "$(basename -- "$TMUX
 if [ "$SELF_CHECK" -eq 0 ]; then
   case_modes 'legacy' xterm '' ''
   case_restore
+  case_clear_on_attach_off
   case_extended_key 'keys/off'
   side_command zz set-option -s extended-keys on >/dev/null
   side_command tmux set-option -s extended-keys on >/dev/null
@@ -1322,6 +1344,7 @@ if [ "$SELF_CHECK" -eq 0 ]; then
   CASE_LOCALE=C
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/non-utf8
   case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-u -u -u
+  case_widths "$WIDTH_SUFFIX" "$WIDTH_SUFFIX" widths/-T-utf8 '-T utf8' '-T utf8'
   case_colours
   case_silent
   case_silent_tc 'silent/tc' ',*:Tc' ',*:Tc'

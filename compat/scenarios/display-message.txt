@@ -29,3 +29,13 @@ new-window -d -n canfail-window
 out: display-message -p -t =w:missing #{session_name}:#{window_name}:#{pane_index}:#{client_name}
 out: display-message -p -t =w:canfail-window.999 #{session_name}:#{window_name}:#{pane_index}:#{client_name}
 out: display-message -p -c missing-client -t =w:missing #{session_name}:#{window_name}:#{pane_index}:#{client_name}
+# 3.8 -j parses the expanded message as JSON and prints it compacted with keys
+# sorted (json.c json_to_string); the quotes come from #{a:34} because query
+# lines cannot hold them.
+out: display-message -pj {#{a:34}s#{a:34}:#{a:34}#{session_name}#{a:34},#{a:34}n#{a:34}:#{window_index},#{a:34}a#{a:34}:[{},{#{a:34}z#{a:34}:false}]}
+out: display-message -paj {#{a:34}k#{a:34}:-0}
+out: display-message -pIj {#{a:34}k#{a:34}:1}
+err: display-message -pj []
+err: display-message -pj
+err: display-message -pjl {#{a:34}k#{a:34}:1}
+err: display-message -pj {#{a:34}k#{a:34}:1,#{a:34}k#{a:34}:2}

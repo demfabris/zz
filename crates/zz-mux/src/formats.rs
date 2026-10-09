@@ -3590,7 +3590,7 @@ pub trait StatusHooks {
         None
     }
 
-    fn option_variable(&mut self, _name: &str, _context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, _name: &str, _context: &StatusContext) -> Option<RawText> {
         None
     }
 
@@ -4059,7 +4059,7 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         self.inner.shell(command, tag)
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         let option_context = if context.session_id.is_empty()
             && context.window_id.is_empty()
             && context.pane_id.is_empty()
@@ -4070,6 +4070,7 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
         };
         self.engine
             .format_option_value(option_context, name)
+            .map(RawText::from)
             .or_else(|| self.inner.option_variable(name, context))
     }
 
@@ -4078,7 +4079,7 @@ impl<H: StatusHooks> StatusHooks for OptionFormatHooks<'_, H> {
             let option = self
                 .option_variable("copy-mode-line-numbers", context)
                 .unwrap_or_default();
-            return self.inner.copy_line_numbers(context, &option);
+            return self.inner.copy_line_numbers(context, option.as_str());
         }
         self.inner.variable(name, context)
     }
@@ -5283,13 +5284,16 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             .hooks
             .option_variable(key, self.context.values())
             .or_else(|| match self.client_row {
-                Some(row) if client_loop_scoped(key) => {
-                    Some(row.variables.get(key).cloned().unwrap_or_default())
-                }
-                _ => self.hooks.variable(key, self.context.values()),
+                Some(row) if client_loop_scoped(key) => Some(RawText::from(
+                    row.variables.get(key).cloned().unwrap_or_default(),
+                )),
+                _ => self
+                    .hooks
+                    .variable(key, self.context.values())
+                    .map(RawText::from),
             });
         let mut value = if let Some(hooked) = hooked {
-            RawText::from(hooked)
+            hooked
         } else if self.context.variable_kind(key).is_some() {
             RawText::from(self.context.variable(key).map(Cow::into_owned)?)
         } else if let Some(value) = self.hooks.tree_variable(key, self.context.values()) {

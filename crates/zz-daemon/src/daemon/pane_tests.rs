@@ -786,3 +786,70 @@ fn a_rename_that_falls_due_reads_the_pane_command_afresh() {
     assert_eq!(name(&shared), "cat");
     shared.request_shutdown();
 }
+
+#[test]
+fn the_mode_tree_reads_the_tree_mode_style_options() {
+    let shared = Arc::new(Shared::new(1));
+    let (client, _mailbox, idle, _printing) = printing_session(&shared, "tree-styles");
+    let mut context =
+        ExecutionContext::for_pane(&shared.inner.lock().engine.state, idle).expect("idle context");
+    for (name, value) in [
+        ("mode-style", "bg=cyan"),
+        ("tree-mode-selection-style", "bg=red,fg=white"),
+        ("tree-mode-border-style", "fg=blue"),
+        (
+            "tree-mode-preview-style",
+            "fg=#{?pane_format,green,magenta},underscore",
+        ),
+        (
+            "tree-mode-preview-format",
+            "#{?pane_format,P#{pane_index},W#{window_index}}",
+        ),
+    ] {
+        run(&shared, &mut context, "set-option", &["-g", name, value]);
+    }
+    run(
+        &shared,
+        &mut context,
+        "set-option",
+        &[
+            "-w",
+            "-t",
+            "tree-styles:1",
+            "tree-mode-border-style",
+            "fg=yellow",
+        ],
+    );
+    shared
+        .execute(
+            client,
+            ClientKind::Interactive,
+            &mut context,
+            &CommandInvocation::new("choose-tree", ["-s"]),
+        )
+        .expect("open the session tree");
+    let presentation = chooser_presentation::chooser_presentation(&shared.inner.lock(), client)
+        .expect("a chooser presentation");
+    assert_eq!(presentation.selection_style, "bg=red,fg=white");
+    assert_eq!(presentation.border_style, "fg=blue");
+    let Some(zz_protocol::ChooserPreview::Tiles { tiles, .. }) = presentation.preview else {
+        panic!("the session tree previews its windows");
+    };
+    let tiles = tiles
+        .iter()
+        .map(|tile| {
+            (
+                tile.label.as_str(),
+                tile.label_style.as_str(),
+                tile.border_style.as_str(),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        tiles,
+        [
+            ("W0", "fg=magenta,underscore", "fg=blue"),
+            ("W1", "fg=magenta,underscore", "fg=yellow"),
+        ]
+    );
+}

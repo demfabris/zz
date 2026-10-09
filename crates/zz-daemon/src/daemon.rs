@@ -107,7 +107,7 @@ use zz_protocol::{
     PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PaneStatus, PaneStatusKind, PaneStatusState,
     PanesModeArea, PanesModeBorder, PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction,
     PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
-    PreparedCommandResult, ProtocolError, ProtocolMessage, RawText,
+    PreparedCommandResult, PromptCursor, ProtocolError, ProtocolMessage, RawText,
     SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
     SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
     encode_protocol_message_into, encode_terminal_patch_event_into,
@@ -1147,9 +1147,10 @@ impl StatusHooks for InertFormatHooks<'_> {
         String::new()
     }
 
-    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &zz_mux::StatusContext) -> Option<RawText> {
         self.option_engine
             .and_then(|engine| engine.format_option_value(context, name))
+            .map(RawText::from)
     }
 }
 
@@ -7908,7 +7909,7 @@ impl Shared {
                 let body = MuxEngine::command_alias_group_body(command).expect("alias body");
                 parent.insert_foreground_child(InsertedQueueChild {
                     context: context.clone(),
-                    source: InsertedCommandSource::Block(body.to_owned()),
+                    source: InsertedCommandSource::Block(body.into()),
                     label: "<command-alias>".to_owned(),
                     control_target: context.control_command_target(),
                     mux_source,
@@ -10040,6 +10041,14 @@ impl Shared {
                         {
                             streamed.remove(pane);
                         }
+                        for feed in inner
+                            .clients
+                            .values()
+                            .filter_map(|c| c.subscriber.as_ref())
+                            .filter_map(|subscriber| subscriber.control_feed())
+                        {
+                            feed.reset_pane(*pane);
+                        }
                         inner.preview_watched.remove(pane);
                         respawned_terminals = true;
                         inner.engine.set_pane_runtime_facts_with_hooks(
@@ -10747,7 +10756,11 @@ impl Shared {
                                 *no_freeze,
                                 *pane,
                             )
-                            .with_key_options(vi_keys, word_separators);
+                            .with_key_options(vi_keys, word_separators)
+                            .with_cursors(prompt_cursors(
+                                &inner,
+                                client_attached_session(&inner, client),
+                            ));
                             prompt.waiter = self
                                 .command_item
                                 .as_ref()
@@ -13613,7 +13626,13 @@ impl Shared {
             let command = parsed.positional.first().map(|command| {
                 if parsed.command_mode {
                     if invocation.argument_is_command_block(parsed.positional_start) {
-                        typed_inserted_command_source(command, true)
+                        typed_inserted_command_source(
+                            invocation
+                                .args
+                                .get(parsed.positional_start)
+                                .expect("run-shell command argument"),
+                            true,
+                        )
                     } else {
                         let mut hooks = DaemonFormatHooks::command_with_optional_variables(
                             &facts,
@@ -14060,9 +14079,9 @@ impl Shared {
             .iter()
             .enumerate()
             .skip(1)
-            .map(|(position, branch)| {
+            .map(|(position, _)| {
                 typed_inserted_command_source(
-                    branch,
+                    &command.args[parsed.positional_start + position],
                     command.argument_is_command_block(parsed.positional_start + position),
                 )
             })
@@ -14438,7 +14457,7 @@ impl Shared {
         let body = MuxEngine::command_alias_group_body(command).ok_or_else(|| {
             ServerError::CommandParse(format!("unknown command: {}", command.name))
         })?;
-        let source = InsertedCommandSource::Block(body.to_owned());
+        let source = InsertedCommandSource::Block(body.into());
         let control_target = context.control_command_target();
         let result = self.execute_inserted_commands_with_control_target_and_mux_source(
             client,
@@ -15178,18 +15197,20 @@ impl Shared {
         let (commands, prepared) = if let InsertedCommandSource::Commands(commands) = source {
             (commands.clone(), true)
         } else {
-            let (input, prepared) = match source {
-                InsertedCommandSource::String(input) => (input, false),
-                InsertedCommandSource::Block(input) => (input, true),
-                InsertedCommandSource::Commands(_)
-                | InsertedCommandSource::Shell(_)
-                | InsertedCommandSource::Hooks(_)
-                | InsertedCommandSource::Events(_) => unreachable!(),
-            };
             let mut parsed = {
                 let inner = self.inner.lock();
-                inner.engine.parse_config(label, input)
+                match source {
+                    InsertedCommandSource::String(input) => inner.engine.parse_config(label, input),
+                    InsertedCommandSource::Block(input) => {
+                        inner.engine.parse_config_raw(label, input)
+                    }
+                    InsertedCommandSource::Commands(_)
+                    | InsertedCommandSource::Shell(_)
+                    | InsertedCommandSource::Hooks(_)
+                    | InsertedCommandSource::Events(_) => unreachable!(),
+                }
             };
+            let prepared = matches!(source, InsertedCommandSource::Block(_));
             if let Some(diagnostic) = parsed.diagnostics.into_iter().next() {
                 return Err(DaemonError::InsertedCommandParse(diagnostic.message));
             }
@@ -15920,8 +15941,8 @@ impl Shared {
                 output,
                 error: true,
                 ..
-            } => Some(output.clone()),
-            EventPayload::ControlCommandGuardRaw {
+            }
+            | EventPayload::ControlCommandGuardRaw {
                 output,
                 error: true,
                 ..
@@ -18391,11 +18412,16 @@ impl Shared {
         }
     }
 
-    fn set_control_client_size(&self, client: ClientId, value: &str) -> Result<(), DaemonError> {
+    fn set_control_client_size(
+        self: &Arc<Self>,
+        client: ClientId,
+        value: &str,
+    ) -> Result<(), DaemonError> {
         let update = parse_control_client_size(value)?;
-        let (changed, resizes, notifications) = {
+        let (changed, resizes, mut events) = {
             let mut inner = self.inner.lock();
             let scope = hook_events::HookScope::open(&mut inner.engine);
+            let unzoomed_layouts = zoomed_window_layouts(&inner);
             let mut affected = control_client_sized_panes(&inner, client);
             let output = inner
                 .client_entry(client)
@@ -18413,28 +18439,38 @@ impl Shared {
             affected.extend(control_client_sized_panes(&inner, client));
             let changed = write_back_terminal_geometries(&mut inner, &affected);
             let resizes = terminal_resizes_for_panes(&inner, &affected);
-            let notifications = scope
-                .finish(&inner.engine, "refresh-client")
-                .events
-                .into_iter()
-                .filter(|event| event.name == "window-layout-changed")
-                .collect::<Vec<_>>();
-            (changed, resizes, notifications)
+            let sized = client_sized_windows(&inner);
+            let mut events = scope.finish(&inner.engine, "refresh-client").events;
+            events.retain(|event| !hook_events::is_window_resize_event(event, &sized));
+            events.extend(hook_events::window_resize_events(
+                &inner.engine,
+                &sized,
+                &unzoomed_layouts,
+            ));
+            (changed, resizes, events)
         };
         apply_terminal_resizes(resizes);
         if changed {
             self.publish_snapshot_state();
         }
-        for event in notifications {
+        for event in events
+            .iter_mut()
+            .filter(|event| event.name == "window-layout-changed")
+        {
             self.publish_to_control_clients(
                 EventPayload::HookEvent {
                     name: event.name.to_owned(),
-                    variables: event.variables,
+                    variables: event.variables.clone(),
                 },
                 None,
                 true,
             );
+            event
+                .variables
+                .remove(hook_events::UNZOOMED_LAYOUT_VARIABLE);
+            event.control_notified = true;
         }
+        self.run_event_hooks(events);
         Ok(())
     }
 
@@ -18468,7 +18504,7 @@ impl Shared {
     }
 
     fn refresh_client(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         _kind: ClientKind,
         name: &str,
@@ -19631,10 +19667,15 @@ impl Shared {
             &prompt,
             None,
         );
+        let prompt_cursors = {
+            let inner = self.inner.lock();
+            prompt_cursors(&inner, client_attached_session(&inner, target_client))
+        };
         let state = ConfirmState {
             prompt,
             confirm_key: bytes[0],
             default_yes: parsed.default_yes,
+            prompt_cursor: prompt_cursors[0],
         };
         let blocking_commands = commands.clone();
         let waiter = (!parsed.background
@@ -29764,7 +29805,7 @@ impl Shared {
                 }
             } else {
                 EventPayload::ControlCommandGuard {
-                    output: String::from(output),
+                    output,
                     error,
                     sticky_failure,
                     flags,
@@ -34671,7 +34712,7 @@ impl ConfigParse {
                 .into_iter()
                 .map(|assignment| ConfigEnvironmentEntry {
                     name: assignment.name,
-                    value: assignment.value.into(),
+                    value: assignment.value,
                     hidden: assignment.hidden,
                 })
                 .collect(),
@@ -35396,18 +35437,18 @@ impl CapturedControlCommandEvents {
                 continue;
             };
             match event {
+                EventPayload::ControlCommandOutput { output } => {
+                    output.clear();
+                    output.push_str(&diagnostic.message);
+                    qualified += 1;
+                }
                 EventPayload::ControlCommandGuard {
                     output,
                     error: true,
                     sticky_failure: false,
                     ..
                 }
-                | EventPayload::ControlCommandOutput { output } => {
-                    output.clear();
-                    output.push_str(&diagnostic.message);
-                    qualified += 1;
-                }
-                EventPayload::ControlCommandGuardRaw {
+                | EventPayload::ControlCommandGuardRaw {
                     output,
                     error: true,
                     sticky_failure: false,
@@ -38945,6 +38986,27 @@ struct CommandPrompt {
     vi_keys: bool,
     command_mode: bool,
     word_separators: String,
+    cursors: [PromptCursor; 2],
+}
+
+fn prompt_cursors(inner: &ServerState, session: Option<SessionId>) -> [PromptCursor; 2] {
+    inner
+        .engine
+        .prompt_cursor_options(session)
+        .map(|(style, colour)| PromptCursor {
+            style,
+            colour: zz_protocol::parse_tmux_colour(&if colour.contains("#{") {
+                chooser_presentation::expand_without_context(inner, &colour)
+            } else {
+                colour
+            })
+            .filter(|colour| {
+                !matches!(
+                    colour,
+                    zz_protocol::TmuxColour::Default | zz_protocol::TmuxColour::Terminal
+                )
+            }),
+        })
 }
 
 impl CommandPrompt {
@@ -38987,7 +39049,13 @@ impl CommandPrompt {
             vi_keys: false,
             command_mode: false,
             word_separators: String::new(),
+            cursors: [PromptCursor::default(); 2],
         }
+    }
+
+    const fn with_cursors(mut self, cursors: [PromptCursor; 2]) -> Self {
+        self.cursors = cursors;
+        self
     }
 
     /// `prompt_set_options`: the prompt keeps the session's `status-keys` and
@@ -39060,6 +39128,8 @@ impl CommandPrompt {
             mode: self.mode,
             no_freeze: self.no_freeze,
             pane: self.pane,
+            command_mode: self.command_mode,
+            prompt_cursor: self.cursors[usize::from(self.command_mode)],
         }
     }
 
@@ -41195,6 +41265,41 @@ fn control_client_geometry_from_source(
         .or(output.geometry)
 }
 
+fn zoomed_window_layouts(inner: &ServerState) -> BTreeMap<WindowId, String> {
+    inner
+        .engine
+        .state
+        .windows
+        .iter()
+        .filter(|(_, window)| window.zoomed_pane.is_some())
+        .map(|(id, window)| {
+            (
+                *id,
+                window.layout_string(
+                    zz_mux::LayoutFormat::V2,
+                    inner.engine.state.pane_base_index(*id),
+                ),
+            )
+        })
+        .collect()
+}
+
+fn client_sized_windows(inner: &ServerState) -> Vec<WindowId> {
+    inner
+        .engine
+        .state
+        .windows
+        .iter()
+        .filter(|(id, window)| {
+            inner.engine.window_size(**id) == WindowSize::Manual
+                || window.panes.keys().any(|pane| {
+                    pane_geometry_from(inner, *pane, GeometrySource::ClientReport).is_some()
+                })
+        })
+        .map(|(window, _)| *window)
+        .collect()
+}
+
 fn control_client_sized_panes(inner: &ServerState, client: ClientId) -> BTreeSet<PaneId> {
     let Some(output) = inner.client(client).and_then(|c| c.control_output.as_ref()) else {
         return BTreeSet::new();
@@ -42226,8 +42331,49 @@ fn prepare_command_request(
     }
     let guarded = read_only_guard_client(inner, client, &command);
     let blocked = guarded.is_some_and(|guarded| inner.client_flags.contains(guarded))
-        && !command_is_read_only_safe(&command);
+        && !read_only_client_may_run(inner, client, &command);
     Ok((command, blocked))
+}
+
+fn read_only_client_may_run(
+    inner: &ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+) -> bool {
+    if MuxEngine::is_command_alias_group(command) {
+        return MuxEngine::command_alias_group_commands(command).is_ok_and(|commands| {
+            commands.is_some_and(|commands| {
+                commands
+                    .iter()
+                    .all(|command| read_only_client_may_run(inner, client, command))
+            })
+        });
+    }
+    command_is_read_only_safe(command) || control_command_is_read_only_safe(inner, client, command)
+}
+
+fn control_command_is_read_only_safe(
+    inner: &ServerState,
+    client: ClientId,
+    command: &CommandInvocation,
+) -> bool {
+    if inner.client(client).and_then(|c| c.kind) != Some(ClientKind::Control) {
+        return false;
+    }
+    let name = canonical_command(&command.name);
+    if name == "refresh-client" {
+        return parse_buffer_command_args(
+            name,
+            &command.args,
+            &['A', 'B', 'C', 'F', 'f', 'r', 't'],
+            &['c', 'D', 'l', 'L', 'R', 'S', 'U'],
+        )
+        .ok()
+        .and_then(|parsed| parsed.value('t').map(str::to_owned))
+        .and_then(|target| find_attached_client_with_aliases(inner, &target, true))
+        .is_none_or(|target| target == client);
+    }
+    hook_events::command_is_read_only(name, &command.args)
 }
 
 /// `server_client_print` runs `utf8_sanitize` over a message bound for a
@@ -44400,7 +44546,7 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                             let (state, mut presentation, prompt) =
                                 engine.customize_presentation(*pane, mode, &mut expand);
                             presentation.selection_style =
-                                chooser_presentation::mode_style_for_pane(inner, *pane);
+                                chooser_presentation::tree_selection_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
                             presentation.prompt_style =
@@ -45095,6 +45241,7 @@ fn command_prompt_key(
     {
         return PromptKeyAction::Close;
     }
+    let before = (prompt.command_mode, prompt.cursor);
     let translated = prompt.vi_keys.then(|| prompt_translate_key(prompt, input));
     let action = match translated {
         None => command_prompt_edit_key(prompt, input, text_follows, history),
@@ -45135,6 +45282,9 @@ fn command_prompt_key(
         },
     };
     match action {
+        PromptKeyAction::Handled if (prompt.command_mode, prompt.cursor) != before => {
+            PromptKeyAction::Updated
+        }
         PromptKeyAction::Updated if incremental => PromptKeyAction::Incremental('='),
         PromptKeyAction::Submit if incremental => PromptKeyAction::SubmitIncremental,
         other => other,
@@ -48993,7 +49143,7 @@ enum InsertedCommandSource {
     Commands(Vec<CommandInvocation>),
     Shell(String),
     String(String),
-    Block(String),
+    Block(RawText),
     Hooks(Box<HookQueueSource>),
     Events(Box<EventQueueSource>),
 }
@@ -49558,11 +49708,16 @@ fn parse_shell_delay_seconds(value: &str) -> Option<f64> {
     (seconds.is_finite() && seconds >= 0.0).then_some(seconds)
 }
 
-fn typed_inserted_command_source(argument: &str, command_block: bool) -> InsertedCommandSource {
-    if command_block && let Some(body) = command_block_body(argument) {
-        return InsertedCommandSource::Block(body.to_owned());
+fn typed_inserted_command_source(argument: &RawText, command_block: bool) -> InsertedCommandSource {
+    if command_block
+        && let Some(body) = argument
+            .as_bytes()
+            .strip_prefix(b"{")
+            .and_then(|rest| rest.strip_suffix(b"}"))
+    {
+        return InsertedCommandSource::Block(RawText::from_bytes(body));
     }
-    InsertedCommandSource::String(argument.to_owned())
+    InsertedCommandSource::String(argument.to_string())
 }
 
 fn select_if_shell_branch(
@@ -59044,16 +59199,61 @@ mod tests {
                 .as_bytes()
                 .to_vec()
         };
-        let option = output("show-options", &["-gv", "@binary"]);
-        assert!(
-            option.starts_with(b"a") && option.ends_with(b"b"),
-            "{option:?}"
+        assert_eq!(output("show-options", &["-gv", "@binary"]), b"a\xfeb");
+        assert_eq!(
+            output("show-options", &["-g", "@binary"]),
+            b"@binary a\\376b"
         );
+        assert_eq!(output("display-message", &["-p", "#{@binary}"]), b"a\xfeb");
         assert_eq!(output("show-buffer", &["-b", "sourced"]), b"c\xfed");
         assert_eq!(
             output("show-environment", &["-g", "BINARY_ENV"]),
             b"BINARY_ENV=e\xfef"
         );
+    }
+
+    #[test]
+    fn sourced_command_blocks_and_variables_keep_bytes_that_are_not_utf8() {
+        let shared = Arc::new(Shared::new(1));
+        let client = ClientId(1);
+        let mut context = ExecutionContext::default();
+        let mut source = |stdin: &[u8]| {
+            let mut command = CommandInvocation::new("source-file", ["-"]);
+            command.set_stdin(RawText::from_bytes(stdin.to_vec()));
+            assert!(matches!(
+                shared.execute_command_request(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    1,
+                    &command
+                ),
+                CommandResponse::Success { exit_code: 0, .. }
+            ));
+        };
+        source(b"if-shell -F 1 { set-buffer -b block a\xfeb }\n");
+        source(b"BYTES_VARIABLE=a\xfdb\n");
+        source(b"set-buffer -b variable \"$BYTES_VARIABLE\"\n");
+        source(b"OCTAL_VARIABLE=a\\375b\n");
+        source(b"set-buffer -b octal \"$OCTAL_VARIABLE\"\n");
+        source(b"set-buffer -b escaped \"\\303\\251\\376\"\n");
+        let mut buffer = |name: &str| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("show-buffer", ["-b", name]),
+                )
+                .expect("show-buffer")
+                .output
+                .as_bytes()
+                .to_vec()
+        };
+        assert_eq!(buffer("block"), b"a\xfeb");
+        assert_eq!(buffer("variable"), b"a\xfdb");
+        assert_eq!(buffer("octal"), b"a\xfdb");
+        assert_eq!(buffer("escaped"), b"\xc3\xa9\xfe");
     }
 
     #[test]
@@ -66259,11 +66459,416 @@ mod tests {
         assert_eq!(notifications.len(), 1);
         assert!(snapshot_position < notifications[0]);
         shared.set_control_client_size(control, "100,30").unwrap();
-        assert!(!take_reliable_messages(&mailbox).iter().any(|message| matches!(
-            message,
-            ProtocolMessage::Event(Event { payload: EventPayload::HookEvent { name, .. }, .. })
-                if name == "window-layout-changed"
-        )));
+        let repeated = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed"
+                        && variables.get("hook_window") == Some(&window.to_string())
+                )
+            })
+            .count();
+        assert_eq!(repeated, 1);
+    }
+
+    #[test]
+    fn control_resize_fires_every_sized_window_even_when_no_size_changes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-all", "all");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("new-window", ["-d", "-t", "resize-all"]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-resized",
+                    "set-option -gF @resized '#{@resized}r'",
+                ],
+            ),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-layout-changed",
+                    "set-option -gF @layout '#{@layout}l'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let windows = shared.inner.lock().engine.state.sessions[&session]
+            .windows
+            .clone();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-all".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        let layout_notices = |mailbox: &OutboundMailbox| {
+            take_reliable_messages(mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed" => variables.get("hook_window").cloned(),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let every_window = windows.iter().map(ToString::to_string).collect::<Vec<_>>();
+        layout_notices(&mailbox);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        shared
+            .set_control_client_size(control, &format!("{}:", windows[1]))
+            .unwrap();
+        assert_eq!(layout_notices(&mailbox), every_window);
+        let option = |name: &str| {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut ExecutionContext::default(),
+                    &CommandInvocation::new("show-options", ["-gv", name]),
+                )
+                .expect("option readback")
+                .output
+                .to_string()
+                .trim_end()
+                .to_owned()
+        };
+        assert_eq!(option("@resized"), "rrrrrr");
+        assert_eq!(option("@layout"), "llllll");
+    }
+
+    #[test]
+    fn control_resize_of_a_zoomed_window_reports_the_unzoom_step_to_control_only() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-zoom", "zoom");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("split-window", ["-d", "-t", &pane.to_string()]),
+            CommandInvocation::new("resize-pane", ["-Z", "-t", &pane.to_string()]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-layout-changed",
+                    "set-option -gF @seen '#{@seen}[#{unzoomed_layout}]'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let tiled = {
+            let inner = shared.inner.lock();
+            inner.engine.state.windows[&window].layout_string(
+                zz_mux::LayoutFormat::V2,
+                inner.engine.state.pane_base_index(window),
+            )
+        };
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-zoom".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        shared.set_control_client_size(control, "100,30").unwrap();
+        let unzoomed = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::HookEvent { name, variables },
+                    ..
+                }) if name == "window-layout-changed"
+                    && variables.get("hook_window") == Some(&window.to_string()) =>
+                {
+                    Some(
+                        variables
+                            .get(zz_protocol::UNZOOMED_LAYOUT_VARIABLE)
+                            .cloned(),
+                    )
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(unzoomed, vec![Some(tiled), None, None]);
+        let seen = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gv", "@seen"]),
+            )
+            .expect("hook readback")
+            .output
+            .to_string();
+        assert_eq!(seen.trim_end(), "[][][]");
+    }
+
+    #[test]
+    fn read_only_control_clients_run_queries_and_refresh_themselves_only() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "ro-control", "ro");
+        let control = |name: &str| {
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Control,
+                Some(name.to_owned()),
+                None,
+                OutboundMailbox::new(),
+            );
+            shared.attach(client, session).unwrap();
+            client
+        };
+        let viewer = control("viewer");
+        let peer = control("peer");
+        let (interactive, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("watcher".to_owned()),
+            None,
+            OutboundMailbox::new(),
+        );
+        shared.attach(interactive, session).unwrap();
+        {
+            let mut inner = shared.inner.lock();
+            inner.client_flags.insert(viewer);
+            inner.client_flags.insert(interactive);
+        }
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        let pane_target = pane.to_string();
+        let mut request_id = 0;
+        let mut run = |client: ClientId, kind: ClientKind, name: &str, args: &[&str]| {
+            request_id += 1;
+            shared.execute_command_request(
+                client,
+                kind,
+                &mut context,
+                request_id,
+                &CommandInvocation::new(name, args.iter().copied()),
+            )
+        };
+        let read_only = |response: &CommandResponse| {
+            matches!(
+                response,
+                CommandResponse::Error {
+                    error: ServerError::InvalidCommand(message),
+                    ..
+                } if message == "client is read-only"
+            )
+        };
+        for (name, args) in [
+            ("list-windows", &["-F", "#{window_index}"][..]),
+            ("display-message", &["-p", "#{client_readonly}"][..]),
+            ("show-options", &["-g", "base-index"][..]),
+            ("capture-pane", &["-p", "-t", pane_target.as_str()][..]),
+            ("has-session", &["-t", "ro-control"][..]),
+            ("list-clients", &[][..]),
+            ("refresh-client", &["-C", "100,30"][..]),
+            (
+                "refresh-client",
+                &["-t", "viewer", "-B", "sub::#{window_id}"][..],
+            ),
+            ("refresh-client", &["-f", "!read-only"][..]),
+        ] {
+            let response = run(viewer, ClientKind::Control, name, args);
+            assert!(
+                matches!(response, CommandResponse::Success { .. }),
+                "{name} {args:?} answered {response:?}"
+            );
+        }
+        for (name, args) in [
+            ("new-window", &["-d"][..]),
+            ("set-option", &["-g", "@ro", "1"][..]),
+            ("send-keys", &["-t", pane_target.as_str(), "x"][..]),
+            ("set-buffer", &["-b", "ro", "x"][..]),
+            ("capture-pane", &["-b", "ro"][..]),
+            ("display-message", &["-I", "-t", pane_target.as_str()][..]),
+            ("refresh-client", &["-t", "peer", "-C", "90,30"][..]),
+            ("kill-session", &["-t", "ro-control"][..]),
+        ] {
+            let response = run(viewer, ClientKind::Control, name, args);
+            assert!(
+                read_only(&response),
+                "{name} {args:?} answered {response:?}"
+            );
+        }
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new(
+                    "set-option",
+                    ["-s", "command-alias[41]", "romix=copy-mode ; list-windows"],
+                ),
+            )
+            .expect("mixed alias");
+        let response = run(viewer, ClientKind::Control, "romix", &[]);
+        assert!(!read_only(&response), "mixed alias answered {response:?}");
+        let response = run(interactive, ClientKind::Interactive, "list-windows", &[]);
+        assert!(
+            read_only(&response),
+            "interactive list-windows answered {response:?}"
+        );
+        let inner = shared.inner.lock();
+        assert!(inner.client_flags.contains(viewer));
+        assert_eq!(inner.engine.state.sessions[&session].windows.len(), 1);
+        assert!(inner.paste_buffers.iter().all(|buffer| buffer.name != "ro"));
+        assert!(
+            inner
+                .client(peer)
+                .and_then(|c| c.control_output.as_ref())
+                .is_none_or(|output| output.geometry.is_none())
+        );
+    }
+
+    #[test]
+    fn respawn_drops_the_output_control_clients_still_had_queued() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "respawn-feed", "feed");
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("respawn-feed".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        let feed = mailbox.ensure_control_feed(&shared.control_wake);
+        feed.queue_at(pane, b"OLD-PROCESS-OUTPUT", Instant::now());
+        assert!(feed.order(&mailbox, shard_sink::ControlOrder::AfterOutput, |_| true));
+        assert_eq!(feed.queued_lines(), 1);
+        assert!(
+            feed.queued_bytes(pane)
+                .windows(18)
+                .any(|bytes| bytes == b"OLD-PROCESS-OUTPUT")
+        );
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut context,
+                &CommandInvocation::new("respawn-pane", ["-k", "-t", &pane.to_string()]),
+            )
+            .expect("respawn");
+        assert!(
+            !feed
+                .queued_bytes(pane)
+                .windows(18)
+                .any(|bytes| bytes == b"OLD-PROCESS-OUTPUT")
+        );
+    }
+
+    #[test]
+    fn control_resize_fires_manual_windows_no_client_sizes() {
+        let shared = Arc::new(Shared::new(1));
+        let (session, pane, _) = output_view_session_fixture(&shared, "resize-manual", "manual");
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new("set-option", ["-w", "window-size", "manual"]),
+            CommandInvocation::new(
+                "set-hook",
+                [
+                    "-g",
+                    "window-resized",
+                    "set-option -gF @resized '#{@resized}r'",
+                ],
+            ),
+        ] {
+            shared
+                .execute(
+                    ClientId(u64::MAX),
+                    ClientKind::Command,
+                    &mut context,
+                    &command,
+                )
+                .unwrap();
+        }
+        let window = shared
+            .inner
+            .lock()
+            .engine
+            .state
+            .window_for_pane(pane)
+            .unwrap();
+        let mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            Some("resize-manual".to_owned()),
+            None,
+            Arc::clone(&mailbox),
+        );
+        shared.attach(control, session).unwrap();
+        take_reliable_messages(&mailbox);
+        shared
+            .set_control_client_size(control, &format!("{window}:"))
+            .unwrap();
+        let notices = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter(|message| {
+                matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::HookEvent { name, variables },
+                        ..
+                    }) if name == "window-layout-changed"
+                        && variables.get("hook_window") == Some(&window.to_string())
+                )
+            })
+            .count();
+        assert_eq!(notices, 1);
+        let resized = shared
+            .execute(
+                ClientId(u64::MAX),
+                ClientKind::Command,
+                &mut ExecutionContext::default(),
+                &CommandInvocation::new("show-options", ["-gv", "@resized"]),
+            )
+            .expect("hook readback")
+            .output
+            .to_string();
+        assert_eq!(resized.trim_end(), "r");
     }
 
     #[test]
@@ -68778,8 +69383,13 @@ set-option -g @alias-mixed-next yes
                     .filter(|message| matches!(
                         message,
                         ProtocolMessage::Event(Event {
-                            payload: EventPayload::ControlCommandGuard { output, .. }
-                                | EventPayload::ControlCommandOutput { output },
+                            payload: EventPayload::ControlCommandGuard { output, .. },
+                            ..
+                        }) if output == &diagnostic
+                    ) || matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::ControlCommandOutput { output },
                             ..
                         }) if output == &diagnostic
                     ))
@@ -68852,8 +69462,13 @@ set-option -g @alias-mixed-next yes
                         .filter(|message| matches!(
                             message,
                             ProtocolMessage::Event(Event {
-                                payload: EventPayload::ControlCommandGuard { output, .. }
-                                    | EventPayload::ControlCommandOutput { output },
+                                payload: EventPayload::ControlCommandGuard { output, .. },
+                                ..
+                            }) if output == "syntax error"
+                        ) || matches!(
+                            message,
+                            ProtocolMessage::Event(Event {
+                                payload: EventPayload::ControlCommandOutput { output },
                                 ..
                             }) if output == "syntax error"
                         ))
@@ -74596,7 +75211,7 @@ set-option -g @alias-mixed-next yes
                             ..
                         },
                     ..
-                }) => Some(("guard", output, error, sticky_failure)),
+                }) => Some(("guard", String::from(output), error, sticky_failure)),
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ControlConfigError { text },
                     ..
@@ -107899,7 +108514,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             ..
                         },
                     ..
-                }) => Some((output, error, flags)),
+                }) => Some((String::from(output), error, flags)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -107951,7 +108566,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 ProtocolMessage::Event(Event {
                     payload: EventPayload::ControlCommandGuard { output, error, .. },
                     ..
-                }) => Some((output, error)),
+                }) => Some((String::from(output), error)),
                 _ => None,
             })
             .collect::<Vec<_>>();
@@ -115629,6 +116244,171 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
+    fn prompts_carry_the_prompt_cursor_options_and_their_command_mode_pair() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let mut context = ExecutionContext::default();
+        for (name, value) in [
+            ("@cursor", "red"),
+            ("@command-cursor", "#00ff00"),
+            ("prompt-cursor-style", "bar"),
+            ("prompt-cursor-colour", "#{@cursor}"),
+            ("prompt-command-cursor-style", "blinking-underline"),
+            ("prompt-command-cursor-colour", "#{@command-cursor}"),
+            ("status-keys", "vi"),
+        ] {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", name, value]),
+                )
+                .unwrap_or_else(|error| panic!("set {name}: {error}"));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-session", ["-s", "cursor"]),
+            )
+            .expect("new session");
+        let session = context.session.expect("session");
+        let pane = context.pane.expect("pane");
+        shared.attach(client, session).expect("attach session");
+        let key = |context: &mut ExecutionContext, code: KeyCode, ctrl: bool| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::Key {
+                        pane,
+                        input: test_key(code, Modifiers::new(false, ctrl, false, false), None),
+                        text_follows: false,
+                    },
+                )
+                .expect("prompt key");
+        };
+        key(&mut context, KeyCode::Character('b'), true);
+        for text in [":", "abc"] {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    InputMessage::Text {
+                        pane,
+                        text: text.to_owned(),
+                    },
+                )
+                .expect("open and type the prompt");
+        }
+        let state = |shared: &Shared| {
+            command_prompt_state(&shared.inner.lock(), client).expect("an open prompt")
+        };
+        let typed = state(&shared);
+        assert_eq!(typed.input, "abc");
+        assert!(!typed.command_mode);
+        assert_eq!(
+            typed.prompt_cursor,
+            PromptCursor {
+                style: 6,
+                colour: Some(zz_protocol::TmuxColour::Basic(1)),
+            }
+        );
+        take_reliable_messages(&mailbox);
+        key(&mut context, KeyCode::Escape, false);
+        let command = state(&shared);
+        assert!(command.command_mode);
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::CommandPrompt {
+                            state: Some(published),
+                        },
+                        ..
+                    }) if published.command_mode && published.cursor == 2
+                )),
+            "entering command mode republishes the prompt"
+        );
+        key(&mut context, KeyCode::Character('0'), false);
+        assert_eq!(state(&shared).cursor, 0);
+        take_reliable_messages(&mailbox);
+        key(&mut context, KeyCode::Character('I'), false);
+        assert!(!state(&shared).command_mode);
+        assert!(
+            take_reliable_messages(&mailbox)
+                .iter()
+                .any(|message| matches!(
+                    message,
+                    ProtocolMessage::Event(Event {
+                        payload: EventPayload::CommandPrompt {
+                            state: Some(published),
+                        },
+                        ..
+                    }) if !published.command_mode
+                        && published.cursor == 0
+                        && published.prompt_cursor.style == 6
+                )),
+            "leaving command mode at column zero republishes the prompt"
+        );
+        assert_eq!(
+            command.prompt_cursor,
+            PromptCursor {
+                style: 3,
+                colour: Some(zz_protocol::TmuxColour::Rgb(0x00_ff_00)),
+            }
+        );
+        shared
+            .inner
+            .lock()
+            .client_entry(client)
+            .command_prompt
+            .take();
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("set-option", ["-gu", "prompt-cursor-colour"]),
+            )
+            .expect("unset the colour");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "confirm-before",
+                    ["-b", "-p", "sure? ", "set-option -g @confirmed yes"],
+                ),
+            )
+            .expect("confirm-before");
+        let confirm = shared
+            .inner
+            .lock()
+            .client(client)
+            .and_then(|c| c.confirm.as_ref())
+            .map(|confirm| confirm.state.clone())
+            .expect("an open confirm prompt");
+        assert_eq!(
+            confirm.prompt_cursor,
+            PromptCursor {
+                style: 6,
+                colour: None,
+            }
+        );
+    }
+
+    #[test]
     fn typed_command_prompt_templates_execute_their_constructed_commands() {
         let (shared, client, _, mut context) = popup_test_workspace("prompt-alias");
         for (index, value) in [
@@ -120598,7 +121378,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             ..
                         },
                     ..
-                }) => Some((output, error, sticky_failure)),
+                }) => Some((String::from(output), error, sticky_failure)),
                 _ => None,
             })
             .collect()
@@ -120647,7 +121427,7 @@ bind - split-window -v -c "#{pane_current_path}"
                             flags,
                         },
                     ..
-                }) => Some((output, error, sticky_failure, flags)),
+                }) => Some((String::from(output), error, sticky_failure, flags)),
                 _ => None,
             })
             .collect()

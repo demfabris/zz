@@ -1371,6 +1371,7 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
                     status,
                     status_style,
                     status_width,
+                    border_style,
                 }) => {
                     let rows = narrow(status.len()).min(box_y);
                     let body = box_y.saturating_sub(2 + rows);
@@ -1382,7 +1383,7 @@ fn draw_tree_grid(drawing: TreeDrawing<'_>) -> (Grid, (u16, u16, bool), usize) {
                             2,
                             box_top + box_y - rows,
                             box_x,
-                            &Paint::Style(border.clone()),
+                            &Paint::Style(layered(border_style, &plain())),
                         );
                     }
                     let compose = u16::try_from(*status_width).unwrap_or(box_x).max(box_x);

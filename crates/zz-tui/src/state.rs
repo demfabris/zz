@@ -1376,6 +1376,7 @@ mod tests {
             prompt: "Confirm attached? ".to_owned(),
             confirm_key: b'Y',
             default_yes: true,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         };
         let mut core = ClientCore::new();
         core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
@@ -1417,6 +1418,7 @@ mod tests {
             prompt: "Confirm? ".to_owned(),
             confirm_key: b'y',
             default_yes: false,
+            prompt_cursor: zz_protocol::PromptCursor::default(),
         });
         assert_eq!(model.message_row_y(), Some(23));
 

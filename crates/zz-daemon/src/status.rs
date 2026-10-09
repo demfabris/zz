@@ -2847,7 +2847,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         entries
     }
 
-    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<String> {
+    fn option_variable(&mut self, name: &str, context: &StatusContext) -> Option<RawText> {
         self.expect_facts();
         self.option_engine
             .and_then(|engine| engine.format_option_value(context, name))
@@ -2861,13 +2861,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                     )
                 })
             })
+            .map(RawText::from)
             .or_else(|| {
                 name.starts_with('@')
                     .then(|| {
                         context
                             .engine()
                             .and_then(|engine| {
-                                engine.format_user_option(
+                                engine.format_user_option_bytes(
                                     &context.pane_id,
                                     &context.window_id,
                                     &context.session_id,
@@ -2875,14 +2876,14 @@ impl StatusHooks for DaemonFormatHooks<'_> {
                                 )
                             })
                             .or_else(|| {
-                                self.facts.mux().user_option(
+                                self.facts.mux().user_option_bytes(
                                     &context.pane_id,
                                     &context.window_id,
                                     &context.session_id,
                                     name,
                                 )
                             })
-                            .map(str::to_owned)
+                            .cloned()
                     })
                     .flatten()
             })
@@ -2912,6 +2913,7 @@ impl StatusHooks for DaemonFormatHooks<'_> {
         if COPY_MODE_CONTEXT_FORMATS.contains(&name) {
             let line_option = if name == "copy_line_numbers" {
                 self.option_variable("copy-mode-line-numbers", context)
+                    .map(String::from)
                     .unwrap_or_default()
             } else {
                 String::new()

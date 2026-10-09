@@ -1078,8 +1078,8 @@ mod tests {
             fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 String::new()
             }
-            fn option_variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
-                (name == "pane_id").then(|| "option".to_owned())
+            fn option_variable(&mut self, name: &str, _context: &StatusContext) -> Option<RawText> {
+                (name == "pane_id").then(|| "option".into())
             }
             fn variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
                 (name == "pane_in_mode").then(|| "callback".to_owned())
@@ -1460,8 +1460,8 @@ mod tests {
             fn shell(&mut self, _command: &str, _tag: &FormatJobTag) -> String {
                 panic!("clock argument test must not invoke a shell")
             }
-            fn option_variable(&mut self, name: &str, _context: &StatusContext) -> Option<String> {
-                (name == "@clock_width").then(|| "%S".to_owned())
+            fn option_variable(&mut self, name: &str, _context: &StatusContext) -> Option<RawText> {
+                (name == "@clock_width").then(|| "%S".into())
             }
         }
         for enabled in [false, true] {

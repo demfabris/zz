@@ -699,21 +699,29 @@ pub(super) fn border_style_for_pane(inner: &ServerState, pane: PaneId) -> String
 pub(super) fn mode_prompt_look(
     inner: &ServerState,
     session: Option<SessionId>,
+    prompt_type: &str,
+    flags: &[&str],
+    input: &str,
     command_mode: bool,
 ) -> (String, PromptCursor) {
     let (style, command_style) = inner.engine.message_styles_for_session(session);
     let style = if command_mode { command_style } else { style };
     let engine = &inner.engine;
     let context = server_format_context(engine, &inner.config_files, None, None, None);
-    let flags = if command_mode {
-        "COMMANDMODE,ISMODE"
-    } else {
-        "ISMODE"
-    };
+    let mut names = flags.to_vec();
+    if command_mode {
+        names.push("COMMANDMODE");
+    }
+    names.push("ISMODE");
+    if prompt_type == "search" && flags.contains(&"INCREMENTAL") {
+        names.push("EDITARROWS");
+    }
     let mut hooks = ScopedHooks {
         engine,
         variables: BTreeMap::from([
-            ("prompt_flags".to_owned(), flags.to_owned()),
+            ("prompt_flags".to_owned(), names.join(",")),
+            ("prompt_type".to_owned(), prompt_type.to_owned()),
+            ("prompt_input".to_owned(), input.to_owned()),
             (
                 "command_prompt".to_owned(),
                 u8::from(command_mode).to_string(),
@@ -724,6 +732,32 @@ pub(super) fn mode_prompt_look(
         expand_format_values(&style, &context, &mut hooks),
         super::prompt_cursors(inner, session)[usize::from(command_mode)],
     )
+}
+
+fn chooser_prompt_look(
+    inner: &ServerState,
+    client: ClientId,
+    prompt: Option<&super::ChooserPrompt>,
+    search: Option<&str>,
+    accept: bool,
+) -> (String, PromptCursor) {
+    let session = super::client_attached_session(inner, client);
+    let (prompt_type, flags, input): (_, &[&str], _) = match prompt {
+        Some(prompt) => match prompt.kind {
+            super::ChooserPromptKind::Kill if accept => (
+                "command",
+                &["SINGLE", "NOFORMAT", "ACCEPT"],
+                prompt.input.as_str(),
+            ),
+            super::ChooserPromptKind::Kill => {
+                ("command", &["SINGLE", "NOFORMAT"], prompt.input.as_str())
+            }
+            super::ChooserPromptKind::Command => ("command", &["NOFORMAT"], prompt.input.as_str()),
+            super::ChooserPromptKind::Filter => ("search", &["NOFORMAT"], prompt.input.as_str()),
+        },
+        None => ("search", &["NOFORMAT"], search.unwrap_or_default()),
+    };
+    mode_prompt_look(inner, session, prompt_type, flags, input, false)
 }
 
 pub(super) fn pane_session(inner: &ServerState, pane: PaneId) -> Option<SessionId> {
@@ -749,9 +783,14 @@ pub(super) fn chooser_presentation(
         return None;
     }
     let styles = Styles { inner };
-    let (prompt_style, prompt_cursor) =
-        mode_prompt_look(inner, super::client_attached_session(inner, client), false);
     if let Some(chooser) = inner.client(client).and_then(|c| c.choose_tree.as_ref()) {
+        let (prompt_style, prompt_cursor) = chooser_prompt_look(
+            inner,
+            client,
+            chooser.prompt.as_ref(),
+            chooser.search.as_ref().map(|search| search.query.as_str()),
+            chooser.prompt_accept,
+        );
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
         let preview = chooser
             .rendered
@@ -780,6 +819,13 @@ pub(super) fn chooser_presentation(
     let chooser = inner
         .client(client)
         .and_then(|c| c.choose_buffer.as_ref())?;
+    let (prompt_style, prompt_cursor) = chooser_prompt_look(
+        inner,
+        client,
+        chooser.prompt.as_ref(),
+        chooser.search.as_ref().map(|search| search.query.as_str()),
+        false,
+    );
     let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
     let preview = chooser
         .names

@@ -29697,6 +29697,9 @@ impl Shared {
                     return;
                 }
                 entry.published_chooser[slot] = Some(payload.clone());
+                if slot != PUBLISHED_PRESENTATION_SLOT {
+                    entry.published_chooser[PUBLISHED_PRESENTATION_SLOT] = None;
+                }
             }
         }
         if matches!(
@@ -38943,11 +38946,13 @@ enum Overlay {
     Confirm,
 }
 
+const PUBLISHED_PRESENTATION_SLOT: usize = 2;
+
 fn published_chooser_slot(payload: &EventPayload) -> Option<usize> {
     match payload {
         EventPayload::ChooseTree { .. } => Some(0),
         EventPayload::ChooseBuffer { .. } => Some(1),
-        EventPayload::ChooserPresentation { .. } => Some(2),
+        EventPayload::ChooserPresentation { .. } => Some(PUBLISHED_PRESENTATION_SLOT),
         _ => None,
     }
 }
@@ -44682,6 +44687,9 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::mode_prompt_look(
                                     inner,
                                     chooser_presentation::pane_session(inner, *pane),
+                                    "command",
+                                    &["NOFORMAT"],
+                                    &mode.prompt_input(),
                                     mode.prompt_command_mode(),
                                 );
                             let (prompt, prompt_cursor, prompt_top) = prompt.unwrap_or_default();
@@ -44719,6 +44727,9 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::mode_prompt_look(
                                     inner,
                                     chooser_presentation::pane_session(inner, *pane),
+                                    "search",
+                                    &["INCREMENTAL", "NOFORMAT"],
+                                    &mode.prompt.input(),
                                     mode.prompt.command_mode(),
                                 );
                             let matches = entries

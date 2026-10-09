@@ -486,3 +486,71 @@ fn chooser_prompts_take_the_session_message_style_and_prompt_cursor() {
         zz_protocol::parse_tmux_colour("red")
     );
 }
+
+#[test]
+fn a_full_chooser_state_is_always_followed_by_its_presentation() {
+    for (command, buffer) in [("choose-tree", false), ("choose-buffer", true)] {
+        let mut scene = attached_scene();
+        scene.open("set-buffer", &["-b", "alpha", "alpha"]);
+        scene.open(command, &["-N"]);
+        take_reliable_messages(&scene.outbound);
+        scene.press(key('f', Modifiers::default()), buffer);
+        let mut cleared = false;
+        let mut full = false;
+        for message in take_reliable_messages(&scene.outbound) {
+            match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooseTree { state: Some(_) }
+                        | EventPayload::ChooseBuffer { state: Some(_) },
+                    ..
+                }) => {
+                    cleared = true;
+                    full = true;
+                }
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooserPresentation {
+                            presentation: Some(_),
+                        },
+                    ..
+                }) => cleared = false,
+                _ => {}
+            }
+        }
+        assert!(full, "{command} f sends the full state");
+        assert!(!cleared, "{command} f leaves the client a presentation");
+    }
+}
+
+#[test]
+fn chooser_prompt_styles_see_the_prompt_type_and_input() {
+    for (typed, style) in [('x', "bg=blue"), ('/', "bg=red")] {
+        let mut scene = attached_scene();
+        scene.open(
+            "set-option",
+            &[
+                "-t",
+                "keys",
+                "message-style",
+                "bg=#{?#{==:#{prompt_type},search},red,blue}",
+            ],
+        );
+        scene.open("choose-tree", &[]);
+        scene.press(key(typed, Modifiers::default()), false);
+        let last = take_reliable_messages(&scene.outbound)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::ChooserPresentation {
+                            presentation: Some(presentation),
+                        },
+                    ..
+                }) => Some(presentation.prompt_style),
+                _ => None,
+            })
+            .last();
+        assert_eq!(last.as_deref(), Some(style), "{typed}");
+    }
+}

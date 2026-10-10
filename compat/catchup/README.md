@@ -282,3 +282,6 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: zz keeps tmux's option-name parsing (`set x[a]b] v` fails, as in tmux); a customize
   rename to a key holding `]` is refused with "Bad array key" instead of loosening the parser to create the
   key 3.8's customize can make. A tmux error stays an error rather than gaining a meaning in zz.
+- 2026-10-10 fabrico: zz's bash integration yields to the shell's own title. It writes its idle `bash` title only
+  when the shell did not set one at that prompt, so idle panes on Arch-like hosts read `user@host:dir` as in
+  tmux; running commands keep their command line.

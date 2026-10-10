@@ -82,7 +82,9 @@ const HELP_CUSTOMIZE: &[(&str, &str)] = &[
     ("          u", "Unset an %1"),
     ("          U", "Unset tagged %1s"),
     ("          a", "Change array key"),
+    ("          e", "Open %1 value in editor"),
     ("          f", "Enter a filter"),
+    ("          C", "Toggle only changed items"),
     ("          v", "Toggle information"),
 ];
 const HELP_CUSTOMIZE_WIDTH: u16 = 52;
@@ -1043,7 +1045,7 @@ fn help(grid: &mut Grid, kind: HelpKind, border: &TmuxStyle, colours: &Colours) 
         HelpKind::Tree => (HELP_TREE_WIDTH, "item", HELP_TREE),
         HelpKind::Client => (HELP_CLIENT_WIDTH, "client", HELP_CLIENT),
         HelpKind::Buffer => (HELP_DEFAULT_WIDTH, "buffer", HELP_BUFFER),
-        HelpKind::Customize => (HELP_CUSTOMIZE_WIDTH, "option", HELP_CUSTOMIZE),
+        HelpKind::Customize => (HELP_CUSTOMIZE_WIDTH, "item", HELP_CUSTOMIZE),
     };
     let count = narrow(HELP_START.len() + lines.len() + HELP_END.len());
     let (box_width, box_height) = (width + 2, count + 2);

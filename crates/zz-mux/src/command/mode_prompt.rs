@@ -258,6 +258,11 @@ impl ModePrompt {
     }
 
     #[must_use]
+    pub const fn is_single(&self) -> bool {
+        self.single
+    }
+
+    #[must_use]
     pub fn input(&self) -> String {
         self.buffer.iter().collect()
     }
@@ -313,7 +318,12 @@ impl ModePrompt {
             ModeKey::Right | ModeKey::Ctrl('f') => self.index = (self.index + 1).min(size),
             ModeKey::Home | ModeKey::Ctrl('a') => self.index = 0,
             ModeKey::End | ModeKey::Ctrl('e') => self.index = size,
-            ModeKey::Char('\t') | ModeKey::Up | ModeKey::Down | ModeKey::Ctrl('p' | 'n') => {}
+            ModeKey::Down | ModeKey::Ctrl('n') => {
+                self.buffer.clear();
+                self.index = 0;
+                return self.changed(prefix);
+            }
+            ModeKey::Char('\t') | ModeKey::Up | ModeKey::Ctrl('p') => {}
             ModeKey::Backspace | ModeKey::Ctrl('h') => {
                 if self.index == 0 {
                     return PromptOutcome::Handled;

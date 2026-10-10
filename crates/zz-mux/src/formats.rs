@@ -7368,7 +7368,7 @@ fn format_time_value(value: &str, flags: &TimeFlags<'_>, now: Option<i64>) -> St
     format_datetime(&time, flags.format.unwrap_or("%a %b %e %H:%M:%S %Y"))
 }
 
-fn pretty_time(timestamp: i64, now: i64) -> String {
+pub(crate) fn pretty_time(timestamp: i64, now: i64) -> String {
     let effective_now = now.max(timestamp);
     let age = effective_now.saturating_sub(timestamp);
     let Some(time) = crate::localtime::local_time(timestamp) else {

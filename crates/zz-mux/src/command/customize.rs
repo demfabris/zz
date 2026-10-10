@@ -69,6 +69,21 @@ enum PromptPurpose {
         table: String,
         key: String,
     },
+    Environment {
+        name: String,
+        session: Option<SessionId>,
+        hidden: bool,
+    },
+    AddOption {
+        target: TmuxOptionTarget,
+        hook: bool,
+    },
+    AddEnvironment {
+        session: Option<SessionId>,
+    },
+    AddKey {
+        table: String,
+    },
     Reset,
     Unset,
     ResetTagged,
@@ -89,6 +104,7 @@ pub struct CustomizeMode {
     help: bool,
     format: Option<String>,
     hide_global: bool,
+    changed_only: bool,
     accept: bool,
     rebuild: bool,
     rebuild_tag: Option<String>,
@@ -104,6 +120,15 @@ impl CustomizeMode {
         self.prompt
             .as_ref()
             .is_some_and(|(prompt, _)| prompt.command_mode())
+    }
+
+    #[must_use]
+    pub fn prompt_kind(&self) -> (&'static str, &'static [&'static str]) {
+        match &self.prompt {
+            Some((prompt, _)) if prompt.is_single() => ("command", &["SINGLE", "NOFORMAT"]),
+            Some((_, PromptPurpose::Search | PromptPurpose::Filter)) => ("search", &["NOFORMAT"]),
+            _ => ("command", &["NOFORMAT"]),
+        }
     }
 
     #[must_use]
@@ -125,6 +150,14 @@ enum Item {
         metadata: Option<TmuxOption>,
         value: String,
         global: bool,
+        hook: bool,
+        monitor: Option<String>,
+    },
+    Environment {
+        name: String,
+        session: Option<SessionId>,
+        value: Option<String>,
+        hidden: bool,
     },
     Key {
         table: String,
@@ -175,8 +208,28 @@ pub struct CustomizeResult {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CustomizeEdit {
     pub value: String,
-    name: String,
-    target: TmuxOptionTarget,
+    kind: EditKind,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EditKind {
+    Option {
+        name: String,
+        array_key: Option<String>,
+        target: TmuxOptionTarget,
+    },
+    KeyCommand {
+        table: String,
+        key: String,
+    },
+    KeyNote {
+        table: String,
+        key: String,
+    },
+    Environment {
+        name: String,
+        session: Option<SessionId>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -194,12 +247,18 @@ pub struct CustomizeMenuItem {
     pub feed: &'static str,
 }
 
-pub const CUSTOMIZE_MENU_ITEMS: [Option<CustomizeMenuItem>; 8] = [
+pub const CUSTOMIZE_MENU_ITEMS: [Option<CustomizeMenuItem>; 11] = [
     Some(CustomizeMenuItem {
         name: "Select",
         key: "Enter",
         annotation: "Enter",
         feed: "Enter",
+    }),
+    Some(CustomizeMenuItem {
+        name: "Edit",
+        key: "e",
+        annotation: "e",
+        feed: "e",
     }),
     Some(CustomizeMenuItem {
         name: "Expand",
@@ -225,6 +284,13 @@ pub const CUSTOMIZE_MENU_ITEMS: [Option<CustomizeMenuItem>; 8] = [
         key: "T",
         annotation: "T",
         feed: "T",
+    }),
+    None,
+    Some(CustomizeMenuItem {
+        name: "Changed Only",
+        key: "C",
+        annotation: "C",
+        feed: "C",
     }),
     None,
     Some(CustomizeMenuItem {
@@ -334,6 +400,22 @@ impl CustomizeMode {
         true
     }
 
+    fn check_selected(&mut self, size: usize) {
+        if self.height == 0 {
+            return;
+        }
+        if size <= self.height {
+            self.offset = 0;
+        } else if self.offset > size - self.height {
+            self.offset = size - self.height;
+        }
+        if self.current < self.offset {
+            self.offset = self.current;
+        } else if self.current >= self.offset + self.height {
+            self.offset = self.current + 1 - self.height;
+        }
+    }
+
     fn offset_for_current(&mut self) {
         self.offset = if below(self.height, self.current) {
             self.current + 1 - self.height
@@ -415,18 +497,14 @@ impl MuxEngine {
             })
         });
         let lines = customize_lines(&rows, mode);
+        self.customize_height(pane, mode);
         if let Some(found) = tag.and_then(|tag| lines.iter().position(|line| rows[*line].id == tag))
         {
             mode.current = found;
-            mode.offset_for_current();
         } else if mode.current >= lines.len() && !lines.is_empty() {
             mode.current = lines.len() - 1;
-            mode.offset_for_current();
         }
-        self.customize_height(pane, mode);
-        if below(mode.height, mode.current) {
-            mode.offset = mode.current + 1 - mode.height;
-        }
+        mode.check_selected(lines.len());
     }
 
     pub fn customize_finish(
@@ -456,201 +534,466 @@ impl MuxEngine {
         };
         let format = mode.format.clone();
         let mut rows = Vec::new();
+        let session_targets = vec![
+            TmuxOptionTarget::Session(window.session),
+            TmuxOptionTarget::GlobalSession,
+        ];
+        let window_targets = vec![
+            TmuxOptionTarget::Pane(pane),
+            TmuxOptionTarget::Window(window.id),
+            TmuxOptionTarget::GlobalWindow,
+        ];
         for (index, title, targets) in [
             (0, "Server Options", vec![TmuxOptionTarget::Server]),
-            (
-                1,
-                "Session Options",
-                vec![
-                    TmuxOptionTarget::Session(window.session),
-                    TmuxOptionTarget::GlobalSession,
-                ],
-            ),
-            (
-                2,
-                "Window & Pane Options",
-                vec![
-                    TmuxOptionTarget::Pane(pane),
-                    TmuxOptionTarget::Window(window.id),
-                    TmuxOptionTarget::GlobalWindow,
-                ],
-            ),
+            (1, "Session Options", session_targets.clone()),
+            (2, "Window & Pane Options", window_targets.clone()),
+            (3, "Session Hooks", session_targets),
+            (4, "Window & Pane Hooks", window_targets),
         ] {
-            let section = rows.len();
-            let section_id = format!("options:{index}");
-            rows.push(Row {
-                id: section_id.clone(),
-                name: title.to_owned(),
-                text: None,
-                depth: 0,
-                parent: None,
-                children: false,
-                no_tag: true,
-                item: Item::Section,
-            });
-            let mut user = Vec::<String>::new();
-            for target in targets.iter().rev() {
-                if let Some(options) = self.user_options_at_target(*target) {
-                    for name in options.keys() {
-                        if !user.contains(name) {
-                            user.push(name.clone());
-                        }
-                    }
-                }
-            }
-            let table = tmux_options()
-                .filter(|option| !tmux_option_is_hook(option.name))
-                .filter(|option| match option.scope {
-                    TmuxOptionScope::Server => index == 0,
-                    TmuxOptionScope::Session => index == 1,
-                    TmuxOptionScope::Window | TmuxOptionScope::WindowPane => index == 2,
-                })
-                .map(|option| (option.name.to_owned(), option))
-                .collect::<BTreeMap<_, _>>();
-            let names = user
-                .into_iter()
-                .map(|name| (name, None))
-                .chain(table.into_iter().map(|(name, option)| (name, Some(option))));
-            for (name, metadata) in names {
-                let mut owner = *targets.last().expect("a section has a target");
-                let mut value = None;
-                for target in &targets {
-                    let found = if let Some(option) = metadata {
-                        if option.is_array {
-                            self.array_option(*target, &name).map(|values| {
-                                values.values().cloned().collect::<Vec<_>>().join(" ")
-                            })
-                        } else {
-                            self.tmux_option_readback(option, *target, false)
-                                .ok()
-                                .flatten()
-                                .map(|(value, _)| value)
-                        }
-                    } else {
-                        self.user_option_at_target(*target, &name)
-                            .map(ToString::to_string)
-                    };
-                    if let Some(found) = found {
-                        owner = *target;
-                        value = Some(found);
-                        break;
-                    }
-                }
-                let value = value.unwrap_or_else(|| {
-                    metadata
-                        .and_then(|option| {
-                            if option.is_array {
-                                Some(
-                                    self.customize_array_values(owner, &name)
-                                        .into_values()
-                                        .collect::<Vec<_>>()
-                                        .join(" "),
-                                )
-                            } else {
-                                self.tmux_option_readback(option, owner, true)
-                                    .ok()
-                                    .flatten()
-                                    .map(|(value, _)| value)
-                            }
-                        })
-                        .unwrap_or_default()
-                });
-                let global = matches!(
-                    owner,
-                    TmuxOptionTarget::Server
-                        | TmuxOptionTarget::GlobalSession
-                        | TmuxOptionTarget::GlobalWindow
-                );
-                if mode.hide_global && global {
-                    continue;
-                }
-                let array = metadata.is_some_and(|option| option.is_array);
-                let scope = self.customize_scope(owner);
-                let unit = metadata.map_or("", |option| option.metadata.unit);
-                let mut vars = BTreeMap::from([
-                    ("is_option".to_owned(), "1".to_owned()),
-                    ("is_key".to_owned(), "0".to_owned()),
-                    ("option_name".to_owned(), name.clone()),
-                    ("option_is_global".to_owned(), u8::from(global).to_string()),
-                    ("option_is_array".to_owned(), u8::from(array).to_string()),
-                    ("option_scope".to_owned(), scope.clone()),
-                    ("option_unit".to_owned(), unit.to_owned()),
-                ]);
-                if !array {
-                    vars.insert("option_value".to_owned(), value.clone());
-                }
-                if let Some(filter) = &mode.filter
-                    && !format_true(&expand(filter, &vars))
-                {
-                    continue;
-                }
-                let text = |vars: &BTreeMap<String, String>, expand: &mut CustomizeExpand<'_>| {
-                    format.as_ref().map_or_else(
-                        || {
-                            format!(
-                                "{}#[fg=themelightgrey]#[ignore]{}{}",
-                                if global {
-                                    String::new()
-                                } else {
-                                    format!("#[reverse]({scope})#[default] ")
-                                },
-                                vars.get("option_value").map_or("", String::as_str),
-                                if unit.is_empty() {
-                                    String::new()
-                                } else {
-                                    format!(" {unit}")
-                                }
-                            )
-                        },
-                        |format| expand(format, vars),
-                    )
-                };
-                let option_row = rows.len();
-                let row_id = format!("{section_id}/{name}");
-                rows.push(Row {
-                    id: row_id.clone(),
-                    name: name.clone(),
-                    text: (!array).then(|| text(&vars, expand)),
-                    depth: 1,
-                    parent: Some(section),
-                    children: false,
-                    no_tag: false,
-                    item: Item::Option {
-                        name: name.clone(),
-                        array_key: None,
-                        target: owner,
-                        metadata,
-                        value: value.clone(),
-                        global,
-                    },
-                });
-                if array {
-                    for (key, entry) in self.customize_array_values(owner, &name) {
-                        let key = key.display();
-                        let full_name = format!("{name}[{key}]");
-                        vars.insert("option_name".to_owned(), full_name.clone());
-                        vars.insert("option_value".to_owned(), entry.clone());
-                        rows.push(Row {
-                            id: format!("{row_id}/{key}"),
-                            name: full_name,
-                            text: Some(text(&vars, expand)),
-                            depth: 2,
-                            parent: Some(option_row),
-                            children: false,
-                            no_tag: false,
-                            item: Item::Option {
-                                name: name.clone(),
-                                array_key: Some(key),
-                                target: owner,
-                                metadata,
-                                value: entry,
-                                global,
-                            },
-                        });
-                    }
+            self.customize_option_rows(
+                &mut rows,
+                mode,
+                index,
+                title,
+                &targets,
+                format.as_deref(),
+                expand,
+            );
+        }
+        if !mode.changed_only {
+            self.customize_environment_rows(&mut rows, mode, None, format.as_deref(), expand);
+            self.customize_environment_rows(
+                &mut rows,
+                mode,
+                Some(window.session),
+                format.as_deref(),
+                expand,
+            );
+        }
+        self.customize_key_rows(&mut rows, mode, format.as_deref(), expand);
+        for index in 0..rows.len() {
+            rows[index].children = rows
+                .get(index + 1)
+                .is_some_and(|next| next.depth > rows[index].depth);
+        }
+        rows
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn customize_option_rows(
+        &self,
+        rows: &mut Vec<Row>,
+        mode: &CustomizeMode,
+        index: usize,
+        title: &str,
+        targets: &[TmuxOptionTarget],
+        format: Option<&str>,
+        expand: &mut CustomizeExpand<'_>,
+    ) {
+        let hooks = index >= 3;
+        let section = rows.len();
+        let section_id = format!("options:{index}");
+        rows.push(Row {
+            id: section_id.clone(),
+            name: title.to_owned(),
+            text: None,
+            depth: 0,
+            parent: None,
+            children: false,
+            no_tag: true,
+            item: Item::Section,
+        });
+        let mut user = Vec::<String>::new();
+        for target in targets.iter().rev() {
+            let mut names = self
+                .user_options_at_target(*target)
+                .map(|options| options.keys().cloned().collect::<BTreeSet<_>>())
+                .unwrap_or_default();
+            names.extend(
+                self.format_monitors
+                    .iter()
+                    .filter(|monitor| monitor.target == *target)
+                    .map(|monitor| monitor.name.clone()),
+            );
+            for name in names {
+                let is_hook = self.hook_events.contains(&name)
+                    || self.customize_monitor(*target, &name).is_some();
+                if is_hook == hooks && !user.contains(&name) {
+                    user.push(name);
                 }
             }
         }
+        let table = tmux_options()
+            .filter(|option| tmux_option_is_hook(option.name) == hooks)
+            .filter(|option| match option.scope {
+                TmuxOptionScope::Server => index == 0,
+                TmuxOptionScope::Session => index == 1 || index == 3,
+                TmuxOptionScope::Window | TmuxOptionScope::WindowPane => index == 2 || index == 4,
+            })
+            .map(|option| (option.name.to_owned(), option))
+            .collect::<BTreeMap<_, _>>();
+        let names = user
+            .into_iter()
+            .map(|name| (name, None))
+            .chain(table.into_iter().map(|(name, option)| (name, Some(option))));
+        let mut count = 0;
+        for (name, metadata) in names {
+            let (owner, value, entries) = self.customize_option_value(targets, &name, metadata);
+            let global = matches!(
+                owner,
+                TmuxOptionTarget::Server
+                    | TmuxOptionTarget::GlobalSession
+                    | TmuxOptionTarget::GlobalWindow
+            );
+            if mode.hide_global && global {
+                continue;
+            }
+            if mode.changed_only && !customize_option_changed(metadata, &value, &entries, None) {
+                continue;
+            }
+            let array = metadata.is_some_and(|option| option.is_array);
+            let scope = self.customize_scope(owner);
+            let unit = metadata.map_or("", |option| option.metadata.unit);
+            let monitor = metadata
+                .is_none()
+                .then(|| self.customize_monitor(owner, &name))
+                .flatten()
+                .map(|monitor| {
+                    format_monitor_display(&monitor.name, monitor.scope, &monitor.format)
+                });
+            let mut vars = BTreeMap::from([
+                ("is_option".to_owned(), "1".to_owned()),
+                ("is_key".to_owned(), "0".to_owned()),
+                ("is_environment".to_owned(), "0".to_owned()),
+                ("option_name".to_owned(), name.clone()),
+                ("option_is_global".to_owned(), u8::from(global).to_string()),
+                ("option_is_array".to_owned(), u8::from(array).to_string()),
+                (
+                    "option_is_hook".to_owned(),
+                    u8::from(hooks && metadata.is_some()).to_string(),
+                ),
+                (
+                    "option_is_monitor".to_owned(),
+                    u8::from(monitor.is_some()).to_string(),
+                ),
+                ("option_scope".to_owned(), scope.clone()),
+                ("option_unit".to_owned(), unit.to_owned()),
+                (
+                    "option_monitor".to_owned(),
+                    monitor.clone().unwrap_or_default(),
+                ),
+            ]);
+            if !array {
+                vars.insert("option_value".to_owned(), value.clone());
+            }
+            if let Some(filter) = &mode.filter
+                && !format_true(&expand(filter, &vars))
+            {
+                continue;
+            }
+            let text = |vars: &BTreeMap<String, String>, expand: &mut CustomizeExpand<'_>| {
+                format.map_or_else(
+                    || {
+                        format!(
+                            "{}#[fg=themelightgrey]#[ignore]{}{}",
+                            if global {
+                                String::new()
+                            } else {
+                                format!("#[reverse]({scope})#[default] ")
+                            },
+                            vars.get("option_value").map_or("", String::as_str),
+                            if unit.is_empty() {
+                                String::new()
+                            } else {
+                                format!(" {unit}")
+                            }
+                        )
+                    },
+                    |format| expand(format, vars),
+                )
+            };
+            let option_row = rows.len();
+            let row_id = format!("{section_id}/{name}");
+            rows.push(Row {
+                id: row_id.clone(),
+                name: name.clone(),
+                text: (!array).then(|| text(&vars, expand)),
+                depth: 1,
+                parent: Some(section),
+                children: false,
+                no_tag: false,
+                item: Item::Option {
+                    name: name.clone(),
+                    array_key: None,
+                    target: owner,
+                    metadata,
+                    value: value.clone(),
+                    global,
+                    hook: hooks,
+                    monitor: monitor.clone(),
+                },
+            });
+            count += 1;
+            if array {
+                for (key, entry) in &entries {
+                    if mode.changed_only
+                        && !customize_option_changed(metadata, entry, &entries, Some(key))
+                    {
+                        continue;
+                    }
+                    let full_name = format!("{name}[{key}]");
+                    vars.insert("option_name".to_owned(), full_name.clone());
+                    vars.insert("option_value".to_owned(), entry.clone());
+                    rows.push(Row {
+                        id: format!("{row_id}/{key}"),
+                        name: full_name,
+                        text: Some(text(&vars, expand)),
+                        depth: 2,
+                        parent: Some(option_row),
+                        children: false,
+                        no_tag: false,
+                        item: Item::Option {
+                            name: name.clone(),
+                            array_key: Some(key.clone()),
+                            target: owner,
+                            metadata,
+                            value: entry.clone(),
+                            global,
+                            hook: hooks,
+                            monitor: None,
+                        },
+                    });
+                    count += 1;
+                }
+            }
+        }
+        if mode.changed_only && count == 0 {
+            rows.truncate(section);
+        }
+    }
+
+    fn customize_option_value(
+        &self,
+        targets: &[TmuxOptionTarget],
+        name: &str,
+        metadata: Option<TmuxOption>,
+    ) -> (TmuxOptionTarget, String, Vec<(String, String)>) {
+        let last = *targets.last().expect("a section has a target");
+        if let Some(option) = metadata
+            && tmux_option_is_hook(option.name)
+        {
+            let owner = targets
+                .iter()
+                .copied()
+                .find(|target| self.hook_array(*target, name).is_some())
+                .unwrap_or(last);
+            let entries = self
+                .hook_array(owner, name)
+                .map(|hook| {
+                    hook.iter()
+                        .map(|(key, commands)| {
+                            (
+                                key.display(),
+                                commands
+                                    .iter()
+                                    .map(format_command)
+                                    .collect::<Vec<_>>()
+                                    .join(" ; "),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            let value = entries
+                .iter()
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            return (owner, value, entries);
+        }
+        let mut owner = last;
+        let mut value = None;
+        for target in targets {
+            let found = if let Some(option) = metadata {
+                if option.is_array {
+                    self.array_option(*target, name)
+                        .map(|values| values.values().cloned().collect::<Vec<_>>().join(" "))
+                } else {
+                    self.tmux_option_readback(option, *target, false)
+                        .ok()
+                        .flatten()
+                        .map(|(value, _)| value)
+                }
+            } else {
+                self.user_option_at_target(*target, name)
+                    .map(ToString::to_string)
+                    .or_else(|| self.customize_monitor(*target, name).map(|_| String::new()))
+            };
+            if let Some(found) = found {
+                owner = *target;
+                value = Some(found);
+                break;
+            }
+        }
+        let array = metadata.is_some_and(|option| option.is_array);
+        let entries = if array {
+            self.customize_array_values(owner, name)
+                .into_iter()
+                .map(|(key, value)| (key.display(), value))
+                .collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+        let value = value.unwrap_or_else(|| {
+            metadata
+                .and_then(|option| {
+                    if option.is_array {
+                        Some(
+                            entries
+                                .iter()
+                                .map(|(_, value)| value.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        )
+                    } else {
+                        self.tmux_option_readback(option, owner, true)
+                            .ok()
+                            .flatten()
+                            .map(|(value, _)| value)
+                    }
+                })
+                .unwrap_or_default()
+        });
+        (owner, value, entries)
+    }
+
+    fn customize_monitor(
+        &self,
+        target: TmuxOptionTarget,
+        name: &str,
+    ) -> Option<&FormatMonitorEntry> {
+        self.format_monitors
+            .iter()
+            .find(|monitor| monitor.target == target && monitor.name == name)
+    }
+
+    fn customize_environment_entries(
+        &self,
+        session: Option<SessionId>,
+    ) -> Vec<(String, Option<String>, bool)> {
+        let collect = |environment: &Environment| {
+            environment
+                .iter()
+                .map(|(name, entry)| {
+                    (
+                        name.to_string(),
+                        entry.value.as_ref().map(ToString::to_string),
+                        entry.hidden,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        match session {
+            None => collect(&self.global_environment),
+            Some(session) => self
+                .session_environments
+                .get(&session)
+                .map(|retained| collect(&retained.inner.lock()))
+                .unwrap_or_default(),
+        }
+    }
+
+    fn customize_environment_rows(
+        &self,
+        rows: &mut Vec<Row>,
+        mode: &CustomizeMode,
+        session: Option<SessionId>,
+        format: Option<&str>,
+        expand: &mut CustomizeExpand<'_>,
+    ) {
+        let section = rows.len();
+        let (title, section_id) = match session {
+            None => ("Global Environment", "environment:global"),
+            Some(_) => ("Session Environment", "environment:session"),
+        };
+        rows.push(Row {
+            id: section_id.to_owned(),
+            name: title.to_owned(),
+            text: None,
+            depth: 0,
+            parent: None,
+            children: false,
+            no_tag: true,
+            item: Item::Section,
+        });
+        let scope = session.map_or_else(String::new, |session| {
+            self.customize_scope(TmuxOptionTarget::Session(session))
+        });
+        let mut vars = BTreeMap::from([
+            ("is_option".to_owned(), "0".to_owned()),
+            ("is_key".to_owned(), "0".to_owned()),
+            ("is_environment".to_owned(), "1".to_owned()),
+            (
+                "environment_is_global".to_owned(),
+                u8::from(session.is_none()).to_string(),
+            ),
+            ("environment_scope".to_owned(), scope),
+        ]);
+        for (name, value, hidden) in self.customize_environment_entries(session) {
+            vars.insert("environment_name".to_owned(), name.clone());
+            vars.insert(
+                "environment_hidden".to_owned(),
+                u8::from(hidden).to_string(),
+            );
+            vars.insert(
+                "environment_removed".to_owned(),
+                u8::from(value.is_none()).to_string(),
+            );
+            vars.insert(
+                "environment_value".to_owned(),
+                value.clone().unwrap_or_default(),
+            );
+            if let Some(filter) = &mode.filter
+                && !format_true(&expand(filter, &vars))
+            {
+                continue;
+            }
+            let (row_name, text) = match &value {
+                None => (format!("-{name}"), None),
+                Some(value) => (
+                    name.clone(),
+                    Some(format.map_or_else(
+                        || format!("#[fg=themelightgrey]#[ignore]{value}"),
+                        |format| expand(format, &vars),
+                    )),
+                ),
+            };
+            rows.push(Row {
+                id: format!("{section_id}/{name}"),
+                name: row_name,
+                text,
+                depth: 1,
+                parent: Some(section),
+                children: false,
+                no_tag: false,
+                item: Item::Environment {
+                    name,
+                    session,
+                    value,
+                    hidden,
+                },
+            });
+        }
+    }
+
+    fn customize_key_rows(
+        &self,
+        rows: &mut Vec<Row>,
+        mode: &CustomizeMode,
+        format: Option<&str>,
+        expand: &mut CustomizeExpand<'_>,
+    ) {
+        let defaults = mode.changed_only.then(KeyTables::default);
         let tables = self
             .keys
             .table_names()
@@ -674,11 +1017,18 @@ impl MuxEngine {
                 no_tag: true,
                 item: Item::Section,
             });
+            let mut count = 0;
             for listed in bindings {
+                if let Some(defaults) = &defaults
+                    && !customize_key_changed(defaults.get(&table, &listed.key), listed.binding)
+                {
+                    continue;
+                }
                 let key = listed.key.clone();
                 let mut vars = BTreeMap::from([
                     ("is_option".to_owned(), "0".to_owned()),
                     ("is_key".to_owned(), "1".to_owned()),
+                    ("is_environment".to_owned(), "0".to_owned()),
                     ("key".to_owned(), key.clone()),
                 ]);
                 if let Some(note) = &listed.binding.note {
@@ -693,9 +1043,7 @@ impl MuxEngine {
                 let key_id = format!("{id}\u{0}{key}");
                 rows.push(Row {
                     id: key_id.clone(),
-                    name: format
-                        .as_ref()
-                        .map_or_else(|| key.clone(), |format| expand(format, &vars)),
+                    name: format.map_or_else(|| key.clone(), |format| expand(format, &vars)),
                     text: None,
                     depth: 1,
                     parent: Some(section),
@@ -706,20 +1054,26 @@ impl MuxEngine {
                         key: key.clone(),
                     },
                 });
+                count += 1;
                 let command = customize_command_print(listed.binding);
                 for (field, text) in [
-                    ("Command", format!("#[ignore]{command}")),
+                    ("Command", format!("#[fg=themelightgrey]#[ignore]{command}")),
                     (
                         "Note",
                         listed
                             .binding
                             .note
                             .as_ref()
-                            .map_or_else(String::new, |note| format!("#[ignore]{note}")),
+                            .map_or_else(String::new, |note| {
+                                format!("#[fg=themelightgrey]#[ignore]{note}")
+                            }),
                     ),
                     (
                         "Repeat",
-                        if listed.binding.repeat { "on" } else { "off" }.to_owned(),
+                        format!(
+                            "#[fg=themelightgrey]#[ignore]{}",
+                            if listed.binding.repeat { "on" } else { "off" }
+                        ),
                     ),
                 ] {
                     rows.push(Row {
@@ -737,13 +1091,10 @@ impl MuxEngine {
                     });
                 }
             }
+            if defaults.is_some() && count == 0 {
+                rows.truncate(section);
+            }
         }
-        for index in 0..rows.len() {
-            rows[index].children = rows
-                .get(index + 1)
-                .is_some_and(|next| next.depth > rows[index].depth);
-        }
-        rows
     }
 
     fn customize_scope(&self, target: TmuxOptionTarget) -> String {
@@ -815,12 +1166,10 @@ impl MuxEngine {
         let found = rows[found].id.clone();
         self.customize_build(pane, mode, Some(tag), expand);
         let rows = self.customize_rows(pane, mode, expand);
-        if let Some(position) = customize_lines(&rows, mode)
-            .iter()
-            .position(|line| rows[*line].id == found)
-        {
+        let lines = customize_lines(&rows, mode);
+        if let Some(position) = lines.iter().position(|line| rows[*line].id == found) {
             mode.current = position;
-            mode.offset_for_current();
+            mode.check_selected(lines.len());
         }
     }
 
@@ -853,6 +1202,9 @@ impl MuxEngine {
                 Item::Option { .. } => self.customize_draw_option(pane, row, &mut writer, expand),
                 Item::Key { table, key } | Item::KeyField { table, key } => {
                     self.customize_draw_key(table, key, &mut writer);
+                }
+                Item::Environment { name, session, .. } => {
+                    self.customize_draw_environment(name, *session, &mut writer);
                 }
                 Item::Section => {}
             }
@@ -982,28 +1334,66 @@ impl MuxEngine {
             return;
         }
         if !writer.text(false, "", &format!("This key is in the {table} table."))
-            || !writer.text(
-                false,
-                "",
-                &format!(
-                    "This key {} repeat.",
-                    if binding.repeat { "does" } else { "does not" }
-                ),
-            )
+            || !writer.value("Repeat: ", if binding.repeat { "on" } else { "off" })
             || !writer.skip_line()
         {
             return;
         }
         let command = customize_command_print(binding);
-        if !writer.text(false, "", &format!("Command: {command}")) {
+        if !writer.value("Command: ", &command) {
             return;
         }
         if let Some(default) = KeyTables::default().get(table, key) {
             let default_command = customize_command_print(default);
             if default_command != command {
-                writer.text(false, "", &format!("The default is: {default_command}"));
+                writer.value("The default is: ", &default_command);
             }
         }
+    }
+
+    fn customize_draw_environment(
+        &self,
+        name: &str,
+        session: Option<SessionId>,
+        writer: &mut PreviewWriter,
+    ) {
+        let entries = self.customize_environment_entries(session);
+        let Some((_, value, hidden)) = entries.iter().find(|(entry, _, _)| entry == name) else {
+            return;
+        };
+        let scope = if session.is_none() {
+            "global"
+        } else {
+            "session"
+        };
+        if !writer.text(
+            false,
+            "",
+            &format!("This is a {scope} environment variable."),
+        ) {
+            return;
+        }
+        if *hidden && !writer.text(false, "", "This variable is hidden.") {
+            return;
+        }
+        if !writer.skip_line() {
+            return;
+        }
+        let shown = match value {
+            None => writer.text(false, "", "Variable is removed."),
+            Some(value) => writer.value("Variable value: ", value),
+        };
+        if !shown || session.is_none() {
+            return;
+        }
+        let global = self.customize_environment_entries(None);
+        let Some((_, parent, _)) = global.iter().find(|(entry, _, _)| entry == name) else {
+            return;
+        };
+        match parent {
+            None => writer.text(false, "", "Global variable is removed."),
+            Some(parent) => writer.value("Global value: ", parent),
+        };
     }
 
     fn customize_draw_option(
@@ -1019,18 +1409,29 @@ impl MuxEngine {
             target,
             metadata,
             value,
+            hook,
+            monitor,
             ..
         } = &row.item
         else {
             return;
         };
+        let is_hook = *hook && metadata.is_some();
+        let is_user_hook = *hook && metadata.is_none();
+        let fire = monitor
+            .as_ref()
+            .and_then(|_| self.customize_monitor(*target, name))
+            .map_or_else(|| self.hook_fire(*target, name), |monitor| monitor.fire);
         let (space, unit) = match metadata.map(|option| option.metadata.unit) {
             Some(unit) if !unit.is_empty() => (" ", unit),
             _ => ("", ""),
         };
-        let description = metadata.map_or("This option doesn't have a description.", |option| {
-            option.metadata.description
-        });
+        let description = match metadata {
+            Some(option) if !option.metadata.description.is_empty() => option.metadata.description,
+            _ if monitor.is_some() => "This hook runs when a monitor changes.",
+            _ if is_user_hook => "This hook doesn't have a description.",
+            _ => "This option doesn't have a description.",
+        };
         if !writer.text(false, "", description) || !writer.skip_line() {
             return;
         }
@@ -1040,16 +1441,39 @@ impl MuxEngine {
             TmuxOptionScope::Window => "window",
             TmuxOptionScope::WindowPane => "window and pane",
         });
-        if !writer.text(false, "", &format!("This is a {scope} option.")) {
+        let kind_line = if monitor.is_some() {
+            "This is a monitor hook.".to_owned()
+        } else if is_user_hook {
+            "This is a user hook.".to_owned()
+        } else if is_hook {
+            format!("This is a {scope} hook.")
+        } else {
+            format!("This is a {scope} option.")
+        };
+        if !writer.text(false, "", &kind_line) {
+            return;
+        }
+        if let Some(monitor) = monitor
+            && !writer.value("Monitor: ", monitor)
+        {
             return;
         }
         if metadata.is_some_and(|option| option.is_array) {
-            let line = array_key.as_ref().map_or_else(
-                || "This is an array option.".to_owned(),
-                |key| format!("This is an array option, key {key}."),
-            );
-            if !writer.text(false, "", &line) || array_key.is_none() {
-                return;
+            if is_hook {
+                if array_key.is_none() {
+                    if writer.text(false, "", "This is an array hook.") {
+                        customize_draw_hook_fire(fire, writer);
+                    }
+                    return;
+                }
+            } else {
+                let line = array_key.as_ref().map_or_else(
+                    || "This is an array option.".to_owned(),
+                    |key| format!("This is an array option, key {key}."),
+                );
+                if !writer.text(false, "", &line) || array_key.is_none() {
+                    return;
+                }
             }
         }
         if !writer.skip_line() {
@@ -1059,26 +1483,28 @@ impl MuxEngine {
             .filter(|_| array_key.is_none())
             .and_then(customize_default_value)
             .filter(|default| default != value);
-        if !writer.text(false, "", &format!("Option value: {value}{space}{unit}")) {
+        if is_hook || is_user_hook {
+            if !writer.value("Hook command: ", &format!("{value}{space}{unit}"))
+                || !customize_draw_hook_fire(fire, writer)
+            {
+                return;
+            }
+        } else if !writer.value("Option value: ", &format!("{value}{space}{unit}")) {
             return;
         }
         let kind = metadata.map(|option| option.metadata.kind);
         let expanded = expand(value, &BTreeMap::new());
         if matches!(kind, None | Some(TmuxOptionKind::String))
             && expanded != *value
-            && !writer.text(false, "", &format!("This expands to: {expanded}"))
+            && !writer.value("This expands to: ", &expanded)
         {
             return;
         }
         if let Some(option) = metadata
             && option.metadata.kind == TmuxOptionKind::Choice
-            && !writer.text(
-                false,
-                "",
-                &format!(
-                    "Available values are: {}",
-                    option.metadata.choices.join(", ")
-                ),
+            && !writer.value(
+                "Available values are: ",
+                &option.metadata.choices.join(", "),
             )
         {
             return;
@@ -1104,11 +1530,7 @@ impl MuxEngine {
             return;
         }
         if let Some(default) = default_value
-            && !writer.text(
-                false,
-                "",
-                &format!("The default is: {default}{space}{unit}"),
-            )
+            && !writer.value("The default is: ", &format!("{default}{space}{unit}"))
         {
             return;
         }
@@ -1130,10 +1552,9 @@ impl MuxEngine {
                 .windows
                 .get(&window)
                 .map_or(0, |entry| entry.index);
-            if !writer.text(
-                false,
-                "",
-                &format!("Window value (from window {index}): {parent}{space}{unit}"),
+            if !writer.value(
+                &format!("Window value (from window {index}): "),
+                &format!("{parent}{space}{unit}"),
             ) {
                 return;
             }
@@ -1148,7 +1569,7 @@ impl MuxEngine {
         if let Some(global) = global
             && let Ok(Some((parent, _))) = self.tmux_option_readback(option, global, false)
         {
-            writer.text(false, "", &format!("Global value: {parent}{space}{unit}"));
+            writer.value("Global value: ", &format!("{parent}{space}{unit}"));
         }
     }
 
@@ -1372,29 +1793,9 @@ impl MuxEngine {
                 };
             }
             ModeKey::Char('e') => {
-                if let Item::Option {
-                    name,
-                    array_key,
-                    target,
-                    metadata,
-                    value,
-                    ..
-                } = &row_at(mode).item
-                    && !metadata.is_some_and(|option| {
-                        matches!(
-                            option.metadata.kind,
-                            TmuxOptionKind::Flag | TmuxOptionKind::Choice
-                        )
-                    })
-                {
+                if let Some(edit) = self.customize_start_edit(row_at(mode)) {
                     return CustomizeResult {
-                        edit: Some(CustomizeEdit {
-                            value: value.clone(),
-                            name: array_key
-                                .as_ref()
-                                .map_or_else(|| name.clone(), |key| format!("{name}[{key}]")),
-                            target: *target,
-                        }),
+                        edit: Some(edit),
                         ..CustomizeResult::stay()
                     };
                 }
@@ -1579,8 +1980,15 @@ impl MuxEngine {
                 match &row.item {
                     Item::Section => {
                         if matches!(key, ModeKey::Char('\r' | 's')) {
+                            self.customize_add_current(pane, mode, &row, &separators);
                             return CustomizeResult::stay();
                         }
+                    }
+                    Item::Environment { name, session, .. } => {
+                        if matches!(key, ModeKey::Char('w')) {
+                            return CustomizeResult::stay();
+                        }
+                        self.customize_set_environment(mode, name, *session, global, &separators);
                     }
                     Item::Key {
                         table,
@@ -1615,7 +2023,7 @@ impl MuxEngine {
                 return self.customize_commands(pane, mode, commands, tag, expand);
             }
             ModeKey::Char('d') => {
-                if matches!(row.item, Item::Section)
+                if matches!(row.item, Item::Section | Item::Environment { .. })
                     || matches!(
                         row.item,
                         Item::Option {
@@ -1674,6 +2082,10 @@ impl MuxEngine {
                 mode.hide_global = !mode.hide_global;
                 self.customize_build(pane, mode, tag, expand);
             }
+            ModeKey::Char('C') => {
+                mode.changed_only = !mode.changed_only;
+                self.customize_build(pane, mode, tag, expand);
+            }
             _ => {}
         }
         CustomizeResult::stay()
@@ -1727,6 +2139,70 @@ impl MuxEngine {
         }
     }
 
+    fn customize_start_edit(&self, row: &Row) -> Option<CustomizeEdit> {
+        match &row.item {
+            Item::Option {
+                name,
+                array_key,
+                target,
+                metadata,
+                value,
+                ..
+            } => {
+                if metadata.is_some_and(|option| {
+                    matches!(
+                        option.metadata.kind,
+                        TmuxOptionKind::Flag | TmuxOptionKind::Choice
+                    )
+                }) {
+                    return None;
+                }
+                Some(CustomizeEdit {
+                    value: value.clone(),
+                    kind: EditKind::Option {
+                        name: name.clone(),
+                        array_key: array_key.clone(),
+                        target: *target,
+                    },
+                })
+            }
+            Item::KeyField { table, key } => {
+                let binding = self.keys.get(table, key)?;
+                let (value, kind) = match row.name.as_str() {
+                    "Command" => (
+                        customize_command_print(binding),
+                        EditKind::KeyCommand {
+                            table: table.clone(),
+                            key: key.clone(),
+                        },
+                    ),
+                    "Note" => (
+                        binding.note.clone().unwrap_or_default(),
+                        EditKind::KeyNote {
+                            table: table.clone(),
+                            key: key.clone(),
+                        },
+                    ),
+                    _ => return None,
+                };
+                Some(CustomizeEdit { value, kind })
+            }
+            Item::Environment {
+                name,
+                session,
+                value: Some(value),
+                ..
+            } => Some(CustomizeEdit {
+                value: value.clone(),
+                kind: EditKind::Environment {
+                    name: name.clone(),
+                    session: *session,
+                },
+            }),
+            _ => None,
+        }
+    }
+
     pub fn customize_edited(
         &self,
         pane: PaneId,
@@ -1738,13 +2214,82 @@ impl MuxEngine {
         let rows = self.customize_rows(pane, mode, expand);
         let lines = customize_lines(&rows, mode);
         let tag = lines.get(mode.current).map(|line| rows[*line].id.clone());
-        self.customize_commands(
-            pane,
-            mode,
-            vec![customize_set_command(&edit.name, edit.target, value)],
-            tag,
-            expand,
-        )
+        let command = match &edit.kind {
+            EditKind::Option {
+                name,
+                array_key,
+                target,
+            } => self.customize_option_set_command(name, array_key.as_deref(), *target, value),
+            EditKind::KeyCommand { table, key } => self.keys.get(table, key).map(|binding| {
+                customize_bind(table, key, binding.repeat, binding.note.as_deref(), value)
+            }),
+            EditKind::KeyNote { table, key } => self.keys.get(table, key).map(|binding| {
+                customize_bind(
+                    table,
+                    key,
+                    binding.repeat,
+                    (!value.is_empty()).then_some(value),
+                    &customize_command_print(binding),
+                )
+            }),
+            EditKind::Environment { name, session } => {
+                Some(self.customize_environment_set(name, *session, value, false))
+            }
+        };
+        self.customize_commands(pane, mode, command.into_iter().collect(), tag, expand)
+    }
+
+    fn customize_option_set_command(
+        &self,
+        name: &str,
+        array_key: Option<&str>,
+        target: TmuxOptionTarget,
+        value: &str,
+    ) -> Option<CommandInvocation> {
+        let array = tmux_options().any(|option| option.name == name && option.is_array);
+        if !array {
+            return Some(customize_set_command(name, target, value));
+        }
+        let key = match array_key {
+            Some(key) => key.to_owned(),
+            None if tmux_option_is_hook(name) => {
+                let used = self
+                    .hook_array(target, name)
+                    .map(|hook| hook.keys().cloned().collect::<Vec<_>>())
+                    .unwrap_or_default();
+                first_free_array_index(used.iter()).ok()?.to_string()
+            }
+            None => {
+                let values = self.customize_array_values(target, name);
+                first_free_array_index(values.keys()).ok()?.to_string()
+            }
+        };
+        Some(customize_set_command(
+            &format!("{name}[{key}]"),
+            target,
+            value,
+        ))
+    }
+
+    fn customize_environment_set(
+        &self,
+        name: &str,
+        session: Option<SessionId>,
+        value: &str,
+        hidden: bool,
+    ) -> CommandInvocation {
+        let hidden = self
+            .customize_environment_entries(session)
+            .iter()
+            .find(|(entry, _, _)| entry == name)
+            .map_or(hidden, |(_, _, hidden)| *hidden);
+        let mut args = Vec::new();
+        if hidden {
+            args.push("-h".to_owned());
+        }
+        args.extend(customize_environment_target(session));
+        args.extend([name.to_owned(), value.to_owned()]);
+        CommandInvocation::new("set-environment", args)
     }
 
     fn customize_set_key(
@@ -1789,6 +2334,106 @@ impl MuxEngine {
             }
             _ => None,
         }
+    }
+
+    fn customize_add_current(
+        &self,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        row: &Row,
+        separators: &ModePromptOptions,
+    ) {
+        let Some(window) = self.state.window_for_pane(pane) else {
+            return;
+        };
+        let session = self.state.windows[&window].session;
+        let (label, input, purpose) = match row.name.as_str() {
+            "Server Options" => (
+                "New user option: ".to_owned(),
+                "@",
+                PromptPurpose::AddOption {
+                    target: TmuxOptionTarget::Server,
+                    hook: false,
+                },
+            ),
+            "Session Options" | "Session Hooks" => {
+                let hook = row.name == "Session Hooks";
+                (
+                    format!("New user {}: ", if hook { "hook" } else { "option" }),
+                    "@",
+                    PromptPurpose::AddOption {
+                        target: TmuxOptionTarget::Session(session),
+                        hook,
+                    },
+                )
+            }
+            "Window & Pane Options" | "Window & Pane Hooks" => {
+                let hook = row.name == "Window & Pane Hooks";
+                (
+                    format!("New user {}: ", if hook { "hook" } else { "option" }),
+                    "@",
+                    PromptPurpose::AddOption {
+                        target: TmuxOptionTarget::Pane(pane),
+                        hook,
+                    },
+                )
+            }
+            "Global Environment" => (
+                "New environment: ".to_owned(),
+                "",
+                PromptPurpose::AddEnvironment { session: None },
+            ),
+            "Session Environment" => (
+                "New environment: ".to_owned(),
+                "",
+                PromptPurpose::AddEnvironment {
+                    session: Some(session),
+                },
+            ),
+            name => {
+                let Some(table) = name.strip_prefix("Key Table - ") else {
+                    return;
+                };
+                (
+                    format!("New key in {table}: "),
+                    "",
+                    PromptPurpose::AddKey {
+                        table: table.to_owned(),
+                    },
+                )
+            }
+        };
+        mode.prompt = Some((separators.prompt(label, input), purpose));
+    }
+
+    fn customize_set_environment(
+        &self,
+        mode: &mut CustomizeMode,
+        name: &str,
+        session: Option<SessionId>,
+        global: bool,
+        separators: &ModePromptOptions,
+    ) {
+        let entries = self.customize_environment_entries(session);
+        let Some((_, value, hidden)) = entries.iter().find(|(entry, _, _)| entry == name) else {
+            return;
+        };
+        let session = if global { None } else { session };
+        let label = match session {
+            Some(session) => format!(
+                "({name}, for {}) ",
+                self.customize_scope(TmuxOptionTarget::Session(session))
+            ),
+            None => format!("({name}, global) "),
+        };
+        mode.prompt = Some((
+            separators.prompt(label, value.as_deref().unwrap_or_default()),
+            PromptPurpose::Environment {
+                name: name.to_owned(),
+                session,
+                hidden: *hidden,
+            },
+        ));
     }
 
     fn customize_set_option(
@@ -1978,6 +2623,38 @@ impl MuxEngine {
                     expand,
                 )
             }
+            PromptPurpose::Environment {
+                name,
+                session,
+                hidden,
+            } => {
+                let Some(value) = value else {
+                    return CustomizeResult::stay();
+                };
+                let command = self.customize_environment_set(&name, session, &value, hidden);
+                self.customize_commands(pane, mode, vec![command], tag, expand)
+            }
+            PromptPurpose::AddOption { target, hook } => {
+                let Some(value) = value.filter(|value| !value.is_empty()) else {
+                    return CustomizeResult::stay();
+                };
+                let commands = customize_add_option(&value, target, hook);
+                self.customize_commands(pane, mode, commands, tag, expand)
+            }
+            PromptPurpose::AddEnvironment { session } => {
+                let Some(value) = value.filter(|value| !value.is_empty()) else {
+                    return CustomizeResult::stay();
+                };
+                let commands = customize_add_environment(&value, session);
+                self.customize_commands(pane, mode, commands, tag, expand)
+            }
+            PromptPurpose::AddKey { table } => {
+                let Some(value) = value.filter(|value| !value.is_empty()) else {
+                    return CustomizeResult::stay();
+                };
+                let commands = customize_add_key(&value, &table);
+                self.customize_commands(pane, mode, commands, tag, expand)
+            }
             PromptPurpose::Command { table, key } => {
                 let Some(command) = value.filter(|value| !value.is_empty()) else {
                     return CustomizeResult::stay();
@@ -2054,6 +2731,18 @@ impl MuxEngine {
     ) -> Vec<CommandInvocation> {
         match &row.item {
             Item::Section => Vec::new(),
+            Item::Environment { name, session, .. } => {
+                if reset {
+                    return Vec::new();
+                }
+                if is_current {
+                    mode.up(lines.len(), false);
+                }
+                let mut args = vec!["-u".to_owned()];
+                args.extend(customize_environment_target(*session));
+                args.push(name.clone());
+                vec![CommandInvocation::new("set-environment", args)]
+            }
             Item::Option {
                 name,
                 array_key,
@@ -2101,6 +2790,78 @@ impl MuxEngine {
             }
         }
     }
+}
+
+fn customize_draw_hook_fire(fire: HookFire, writer: &mut PreviewWriter) -> bool {
+    if fire.time != 0 {
+        let now = i64::try_from(unix_seconds()).unwrap_or(i64::MAX);
+        let time = crate::formats::pretty_time(i64::try_from(fire.time).unwrap_or(i64::MAX), now);
+        return writer.text(
+            false,
+            "",
+            &format!(
+                "This hook has been fired {} times, last {time}.",
+                fire.count
+            ),
+        );
+    }
+    writer.text(
+        false,
+        "",
+        &format!("This hook has been fired {} times.", fire.count),
+    )
+}
+
+fn customize_option_changed(
+    metadata: Option<TmuxOption>,
+    value: &str,
+    entries: &[(String, String)],
+    key: Option<&str>,
+) -> bool {
+    let Some(option) = metadata else {
+        return true;
+    };
+    if tmux_option_is_hook(option.name) {
+        return key.is_some() || !entries.is_empty();
+    }
+    if option.is_array {
+        let defaults = customize_default_array(option);
+        if let Some(key) = key {
+            let default = defaults
+                .iter()
+                .find(|(default_key, _)| default_key == key)
+                .map(|(_, value)| value.as_str());
+            return default != Some(value);
+        }
+        return entries != defaults.as_slice();
+    }
+    customize_default_value(option).is_none_or(|default| default != value)
+}
+
+fn customize_default_array(option: TmuxOption) -> Vec<(String, String)> {
+    thread_local! {
+        static DEFAULTS: MuxEngine = MuxEngine::default();
+    }
+    let target = match option.scope {
+        TmuxOptionScope::Server => TmuxOptionTarget::Server,
+        TmuxOptionScope::Session => TmuxOptionTarget::GlobalSession,
+        TmuxOptionScope::Window | TmuxOptionScope::WindowPane => TmuxOptionTarget::GlobalWindow,
+    };
+    DEFAULTS.with(|engine| {
+        engine
+            .customize_array_values(target, option.name)
+            .into_iter()
+            .map(|(key, value)| (key.display(), value))
+            .collect()
+    })
+}
+
+fn customize_key_changed(default: Option<&Binding>, binding: &Binding) -> bool {
+    default.is_none_or(|default| {
+        default.repeat != binding.repeat
+            || default.note != binding.note
+            || customize_command_print(default) != customize_command_print(binding)
+    })
 }
 
 fn customize_default_value(option: TmuxOption) -> Option<String> {
@@ -2161,7 +2922,7 @@ fn customize_flat(rows: &[Row], line: usize) -> bool {
 
 fn customize_item_name(row: &Row) -> String {
     match &row.item {
-        Item::Option { name, .. } => name.clone(),
+        Item::Option { name, .. } | Item::Environment { name, .. } => name.clone(),
         Item::Key { key, .. } | Item::KeyField { key, .. } => key.clone(),
         Item::Section => row.name.clone(),
     }
@@ -2230,6 +2991,81 @@ fn customize_target_args(target: TmuxOptionTarget) -> Vec<String> {
         TmuxOptionTarget::Session(id) => vec!["-t".to_owned(), id.to_string()],
         TmuxOptionTarget::Window(id) => vec!["-w".to_owned(), "-t".to_owned(), id.to_string()],
         TmuxOptionTarget::Pane(id) => vec!["-p".to_owned(), "-t".to_owned(), id.to_string()],
+    }
+}
+
+fn customize_message(text: &str) -> CommandInvocation {
+    CommandInvocation::new("display-message", ["-l".to_owned(), text.to_owned()])
+}
+
+fn customize_split_pair(value: &str) -> Option<(&str, &str)> {
+    let end = value.find([' ', '\t'])?;
+    let rest = value[end..].trim_start_matches([' ', '\t']);
+    (end != 0 && !rest.is_empty()).then(|| (&value[..end], rest))
+}
+
+fn customize_add_option(
+    value: &str,
+    target: TmuxOptionTarget,
+    hook: bool,
+) -> Vec<CommandInvocation> {
+    let Some((name, value)) = customize_split_pair(value) else {
+        return vec![customize_message("User option must be @name value")];
+    };
+    if !name.starts_with('@') || name.contains('[') {
+        return vec![customize_message(&format!(
+            "User {} name must start with @",
+            if hook { "hook" } else { "option" }
+        ))];
+    }
+    if !hook {
+        return vec![customize_set_command(name, target, value)];
+    }
+    let mut args = customize_target_args(target);
+    args.extend([name.to_owned(), value.to_owned()]);
+    vec![CommandInvocation::new("set-hook", args)]
+}
+
+fn customize_add_environment(value: &str, session: Option<SessionId>) -> Vec<CommandInvocation> {
+    let mut args = customize_environment_target(session);
+    if let Some(name) = value.strip_prefix('-') {
+        if name.is_empty() || name.contains('=') {
+            return vec![customize_message(&format!(
+                "Bad environment variable: {value}"
+            ))];
+        }
+        args.extend(["-r".to_owned(), name.to_owned()]);
+    } else {
+        let Some((name, value)) = value.split_once('=').filter(|(name, _)| !name.is_empty()) else {
+            return vec![customize_message("Environment variable must be NAME=value")];
+        };
+        args.extend([name.to_owned(), value.to_owned()]);
+    }
+    vec![CommandInvocation::new("set-environment", args)]
+}
+
+fn customize_add_key(value: &str, table: &str) -> Vec<CommandInvocation> {
+    let Some((key, command)) = customize_split_pair(value) else {
+        return vec![customize_message("Key binding must be key command")];
+    };
+    if parse_tmux_key_details(key).is_none() {
+        return vec![customize_message(&format!("Unknown key: {key}"))];
+    }
+    vec![CommandInvocation::new(
+        "bind-key",
+        [
+            "-T".to_owned(),
+            table.to_owned(),
+            key.to_owned(),
+            command.to_owned(),
+        ],
+    )]
+}
+
+fn customize_environment_target(session: Option<SessionId>) -> Vec<String> {
+    match session {
+        None => vec!["-g".to_owned()],
+        Some(session) => vec!["-t".to_owned(), session.to_string()],
     }
 }
 
@@ -2346,6 +3182,13 @@ impl PreviewWriter {
             self.x = 0;
         }
         true
+    }
+
+    fn value(&mut self, label: &str, value: &str) -> bool {
+        if self.y >= self.height || !self.text(true, "", label) || self.y >= self.height {
+            return false;
+        }
+        self.text(false, "fg=themelightgrey", value)
     }
 
     fn skip_line(&mut self) -> bool {
@@ -2514,24 +3357,118 @@ mod tests {
     }
 
     #[test]
-    fn customize_hides_hook_arrays_like_the_pin() {
+    fn customize_lists_hooks_and_environment_in_their_own_sections_like_3_8() {
         let (engine, _, pane) = engine_with_session();
         let mut expand = customize_expand;
         let rows = engine.customize_rows(pane, &CustomizeMode::default(), &mut expand);
+        let sections = rows
+            .iter()
+            .filter(|row| row.parent.is_none())
+            .map(|row| row.name.as_str())
+            .take(7)
+            .collect::<Vec<_>>();
         assert_eq!(
+            sections,
+            [
+                "Server Options",
+                "Session Options",
+                "Window & Pane Options",
+                "Session Hooks",
+                "Window & Pane Hooks",
+                "Global Environment",
+                "Session Environment",
+            ]
+        );
+        let in_section = |title: &str| {
+            let section = rows.iter().position(|row| row.name == title).unwrap();
             rows.iter()
+                .filter(|row| row.parent == Some(section))
+                .collect::<Vec<_>>()
+        };
+        let options = ["Server Options", "Session Options", "Window & Pane Options"]
+            .into_iter()
+            .flat_map(in_section)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            options
+                .iter()
                 .filter(|row| matches!(
                     &row.item,
-                    Item::Option {
-                        metadata: Some(option),
-                        array_key: None,
-                        ..
-                    } if option.is_array
+                    Item::Option { metadata: Some(option), .. } if option.is_array
                 ))
                 .count(),
             8
         );
-        assert!(!rows.iter().any(|row| tmux_option_is_hook(&row.name)));
+        assert!(!options.iter().any(|row| tmux_option_is_hook(&row.name)));
+        let session_hooks = in_section("Session Hooks");
+        let window_hooks = in_section("Window & Pane Hooks");
+        assert!(
+            session_hooks
+                .iter()
+                .any(|row| row.name == "after-new-session")
+        );
+        assert!(window_hooks.iter().any(|row| row.name == "pane-exited"));
+        assert!(window_hooks.iter().any(|row| row.name == "window-renamed"));
+        assert_eq!(
+            session_hooks.len() + window_hooks.len(),
+            tmux_options()
+                .filter(|option| tmux_option_is_hook(option.name))
+                .count()
+        );
+        assert!(
+            session_hooks
+                .iter()
+                .chain(&window_hooks)
+                .all(
+                    |row| matches!(row.item, Item::Option { hook: true, .. }) && row.text.is_none()
+                )
+        );
+    }
+
+    #[test]
+    fn customize_changed_only_keeps_changed_rows_and_drops_environment() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new("set-option", ["-g", "status-left", "changed"]),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "set-hook",
+                    ["-g", "after-new-window", "display-message hi"],
+                ),
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "prefix", "F7", "display-message seven"],
+                ),
+            )
+            .unwrap();
+        let mut mode = CustomizeMode::default();
+        press(&mut engine, &mut context, pane, &mut mode, "C");
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let names = rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>();
+        assert!(names.contains(&"status-left"));
+        assert!(!names.contains(&"status-right"));
+        assert!(names.contains(&"after-new-window"));
+        assert!(names.contains(&"after-new-window[0]"));
+        assert!(!names.contains(&"after-new-session"));
+        assert!(names.contains(&"F7"));
+        assert!(!names.contains(&"Global Environment"));
+        assert!(!names.contains(&"Session Environment"));
+        assert!(!names.contains(&"Server Options"));
+        press(&mut engine, &mut context, pane, &mut mode, "C");
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        assert!(rows.iter().any(|row| row.name == "Global Environment"));
     }
 
     #[test]
@@ -2724,14 +3661,17 @@ mod tests {
     #[test]
     fn customize_menu_feed_answers_each_row() {
         assert_eq!(customize_menu_feed(false, 0), Some("Enter"));
-        assert_eq!(customize_menu_feed(false, 1), Some("Right"));
-        assert_eq!(customize_menu_feed(false, 2), None);
-        assert_eq!(customize_menu_feed(false, 3), Some("t"));
-        assert_eq!(customize_menu_feed(false, 4), Some("\x14"));
-        assert_eq!(customize_menu_feed(false, 5), Some("T"));
-        assert_eq!(customize_menu_feed(false, 6), None);
-        assert_eq!(customize_menu_feed(false, 7), Some("q"));
-        assert_eq!(customize_menu_feed(false, 8), None);
+        assert_eq!(customize_menu_feed(false, 1), Some("e"));
+        assert_eq!(customize_menu_feed(false, 2), Some("Right"));
+        assert_eq!(customize_menu_feed(false, 3), None);
+        assert_eq!(customize_menu_feed(false, 4), Some("t"));
+        assert_eq!(customize_menu_feed(false, 5), Some("\x14"));
+        assert_eq!(customize_menu_feed(false, 6), Some("T"));
+        assert_eq!(customize_menu_feed(false, 7), None);
+        assert_eq!(customize_menu_feed(false, 8), Some("C"));
+        assert_eq!(customize_menu_feed(false, 9), None);
+        assert_eq!(customize_menu_feed(false, 10), Some("q"));
+        assert_eq!(customize_menu_feed(false, 11), None);
         assert_eq!(customize_menu_feed(true, 0), Some("<"));
         assert_eq!(customize_menu_feed(true, 1), Some(">"));
         assert_eq!(customize_menu_feed(true, 2), None);

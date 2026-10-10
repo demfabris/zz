@@ -711,35 +711,16 @@ declare -A RECORD_OWNERS=([unattributed]=0)
 
 known_drift() {
   case "$1" in
-  customize-exit-* | customize-screen-right-expand | customize-screen-expand-all | \
-    customize-screen-tag-root | customize-screen-reset-tagged-* | customize-screen-unset-tagged-* | \
-    customize-screen-untag | customize-screen-tag-all | customize-screen-untag-all | \
-    customize-screen-tag-expand | customize-screen-section-unset | customize-screen-show-global | \
-    customize-screen-filter-prompt | customize-screen-filter-escape | customize-screen-filter-clear | \
-    customize-screen-array-search | customize-screen-array-expanded | \
-    customize-screen-array-unset-accept | customize-array-unset-values | \
-    customize-screen-array-root-* | customize-screen-array-left-child) ;;
-  customize-*-open | customize-screen-* | customize-long-* | customize-prompt-vi-* | \
-    customize-unbound-* | customize-retained-* | customize-interrupt-* | customize-sabotage | \
-    customize-array-screen-* | customize-right-sabotage | customize-preview-sabotage | \
-    customize-markup-sabotage | customize-prompt-sabotage | \
-    customize-array-key-values)
-    printf 'gap:pin.formats-options'
-    ;;
   esac
 }
 
 known_drift_reason() {
   case "$1" in
-  customize-*)
-    printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 rebuilt customize mode (window-customize.c: Session Hooks, Window & Pane Hooks, Global and Session Environment sections in the tree, e to edit, C for changed only, editable array keys); zz still draws the d77c9dc6 tree"
-    ;;
   esac
 }
 
 known_drift_channel() {
   case "$1" in
-  gap:pin.formats-options) printf 'screen' ;;
   esac
 }
 
@@ -2142,7 +2123,19 @@ run_cases() {
   SUSPENDED_ZZ_PID="$(zz_command list-clients -F '#{client_pid}')"
   case_run suspend-client same '' -- suspend-client
   wait_for 'the raw client is stopped' client_process_stopped "$SUSPENDED_ZZ_PID"
+  report_cases
+}
 
+run_only_cases() {
+  local group
+  attach_both_at 80 24
+  for group in $ZZ_CLIENT_COMMANDS_ONLY; do
+    "$group"
+  done
+  report_cases
+}
+
+report_cases() {
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded (%s for a sibling lane, %s)\n' \
       "$FAILURES" "$CHECKS" "$RECORDS" "$SIBLINGS" "$(owner_tally)"
@@ -2638,6 +2631,8 @@ wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 
 if [ "$SELF_CHECK" -eq 1 ]; then
   run_self_check
+elif [ -n "${ZZ_CLIENT_COMMANDS_ONLY:-}" ]; then
+  run_only_cases
 else
   run_cases
 fi

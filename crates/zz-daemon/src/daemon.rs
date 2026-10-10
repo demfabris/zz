@@ -44058,12 +44058,13 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::tree_selection_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
+                            let (prompt_type, prompt_flags) = mode.prompt_kind();
                             (presentation.prompt_style, presentation.prompt_cursor) =
                                 chooser_presentation::mode_prompt_look(
                                     inner,
                                     chooser_presentation::pane_session(inner, *pane),
-                                    "command",
-                                    &["NOFORMAT"],
+                                    prompt_type,
+                                    prompt_flags,
                                     &mode.prompt_input(),
                                     mode.prompt_command_mode(),
                                 );

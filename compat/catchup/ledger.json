@@ -1040,7 +1040,7 @@
       "id": "fix.followups-4",
       "track": "fix",
       "title": "Follow-ups, fourth batch (harness robustness at the 3.8 pin)",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "fix.corpus-3-8"
       ],
@@ -1053,7 +1053,7 @@
       "accept": [
         "Each line in the notes is fixed with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
       ],
-      "branch": null,
+      "branch": "catchup/fix.followups-4",
       "sha": null,
       "notes": [
         "(fix.corpus-3-8) chooser-drive.py, send-keys-attach.py, graphics-drive.py and bare-client.py do not answer 3.8's pixel-size query (CSI 14 t), so tmux holds a lone Escape 500 ms on their side; pty-drive.py now answers it. Share one answer path.",

@@ -6,7 +6,7 @@ use crate::web::http_client::FetchHttpClient;
 use crate::web::keyboard::WebKeyboardLayout;
 use crate::web::text_system::WebTextSystem;
 use crate::web::window::WebWindow;
-use crate::wgpu::{PreparedWebGraphics, WebBackendPreference, WgpuContext, wgpu};
+use crate::wgpu::{PreparedWebGraphics, WebBackendPreference, WgpuBackend, WgpuContext, wgpu};
 use anyhow::Result;
 use futures::channel::oneshot;
 use std::{
@@ -41,7 +41,8 @@ pub struct WebPlatform {
     backend_preference: WebBackendPreference,
     wgpu_context: Rc<RefCell<Option<WgpuContext>>>,
     prepared_window: Rc<RefCell<Option<PreparedWebWindow>>>,
-    window_lifecycle: Rc<Cell<WebWindowLifecycle>>,
+    graphics: Rc<Cell<WebGraphics>>,
+    open_windows: Rc<Cell<usize>>,
     cursor_visible: Rc<Cell<bool>>,
     last_cursor_css: Rc<Cell<&'static str>>,
     gestures: Rc<WebGestures>,
@@ -86,17 +87,19 @@ struct PreparedWebWindow {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum WebWindowLifecycle {
-    Available,
-    Open,
-    Closed,
+enum WebGraphics {
+    Pending,
+    Ready,
     Unavailable,
 }
 
 #[derive(Debug)]
 pub enum WebWindowError {
-    AlreadyOpen,
-    ReopeningUnsupported,
+    /// WebGL2 binds its device to one canvas, so only WebGPU can draw more
+    /// than one window, or a window opened after the first one closed.
+    MultipleWindowsNeedWebGpu,
+    /// No element matched the window's [`zz_gpui::WindowOptions::mount`] selector.
+    MountNotFound(String),
     UnsupportedWindowKind(&'static str),
     /// Graphics initialization has not completed yet; retrying after it
     /// finishes (e.g. from the `Platform::run` callback) can succeed.
@@ -109,12 +112,12 @@ pub enum WebWindowError {
 impl std::fmt::Display for WebWindowError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::AlreadyOpen => formatter.write_str(
-                "GPUI web supports only one top-level window; a window is already open",
+            Self::MultipleWindowsNeedWebGpu => formatter.write_str(
+                "this browser fell back to WebGL2, which can draw only the first GPUI window",
             ),
-            Self::ReopeningUnsupported => formatter.write_str(
-                "reopening the GPUI web top-level window after it closes is not supported",
-            ),
+            Self::MountNotFound(selector) => {
+                write!(formatter, "no page element matches the window mount {selector:?}")
+            }
             Self::UnsupportedWindowKind(kind) => write!(
                 formatter,
                 "GPUI web does not support {kind} as a separate top-level window; render it inside the normal window instead"
@@ -204,7 +207,8 @@ impl WebPlatform {
             backend_preference,
             wgpu_context: Rc::new(RefCell::new(None)),
             prepared_window: Rc::new(RefCell::new(None)),
-            window_lifecycle: Rc::new(Cell::new(WebWindowLifecycle::Available)),
+            graphics: Rc::new(Cell::new(WebGraphics::Pending)),
+            open_windows: Rc::new(Cell::new(0)),
             cursor_visible,
             last_cursor_css,
             gestures,
@@ -323,7 +327,7 @@ impl Platform for WebPlatform {
     fn run(&self, on_finish_launching: Box<dyn 'static + FnOnce()>) {
         let wgpu_context = self.wgpu_context.clone();
         let prepared_window = self.prepared_window.clone();
-        let window_lifecycle = self.window_lifecycle.clone();
+        let graphics = self.graphics.clone();
         let browser_window = self.browser_window.clone();
         let backend_preference = self.backend_preference;
         wasm_bindgen_futures::spawn_local(async move {
@@ -334,11 +338,13 @@ impl Platform for WebPlatform {
                         context.backend()
                     );
                     *wgpu_context.borrow_mut() = Some(context);
+                    canvas.style().set_property("display", "none").ok();
                     *prepared_window.borrow_mut() = Some(PreparedWebWindow { canvas, surface });
+                    graphics.set(WebGraphics::Ready);
                     on_finish_launching();
                 }
                 Err(error) => {
-                    window_lifecycle.set(WebWindowLifecycle::Unavailable);
+                    graphics.set(WebGraphics::Unavailable);
                     log::error!("Failed to initialize browser graphics: {error:#}");
                     show_graphics_unavailable_message(&browser_window, &error);
                 }
@@ -391,27 +397,49 @@ impl Platform for WebPlatform {
             }
         }
 
-        match self.window_lifecycle.get() {
-            WebWindowLifecycle::Open => return Err(WebWindowError::AlreadyOpen.into()),
-            WebWindowLifecycle::Closed => {
-                return Err(WebWindowError::ReopeningUnsupported.into());
+        match self.graphics.get() {
+            WebGraphics::Ready => {}
+            WebGraphics::Pending => {
+                return Err(WebWindowError::GraphicsInitializationPending.into());
             }
-            WebWindowLifecycle::Unavailable => {
-                return Err(WebWindowError::GraphicsUnavailable.into());
-            }
-            WebWindowLifecycle::Available => {}
+            WebGraphics::Unavailable => return Err(WebWindowError::GraphicsUnavailable.into()),
         }
 
         let context_ref = self.wgpu_context.borrow();
         let context = context_ref
             .as_ref()
             .ok_or(WebWindowError::GraphicsInitializationPending)?;
-        let prepared_window = self
-            .prepared_window
-            .borrow_mut()
-            .take()
-            .ok_or(WebWindowError::GraphicsInitializationPending)?;
-        let canvas = prepared_window.canvas;
+        let mount = match params.mount.as_ref() {
+            Some(selector) => Some(find_mount(&self.browser_window, selector)?),
+            None => None,
+        };
+        let prepared = self.prepared_window.borrow_mut().take();
+        let (canvas, surface) = match prepared {
+            Some(prepared) => (prepared.canvas, prepared.surface),
+            None => {
+                if context.backend() != WgpuBackend::BrowserWebGpu {
+                    return Err(WebWindowError::MultipleWindowsNeedWebGpu.into());
+                }
+                let canvas = WebWindow::prepare_canvas(&self.browser_window)?;
+                match context
+                    .instance
+                    .create_surface(wgpu::SurfaceTarget::Canvas(canvas.clone()))
+                {
+                    Ok(surface) => (canvas, surface),
+                    Err(error) => {
+                        let element: &web_sys::Element = canvas.as_ref();
+                        element.remove();
+                        return Err(anyhow::anyhow!(
+                            "creating a surface for another window: {error}"
+                        ));
+                    }
+                }
+            }
+        };
+        canvas.style().set_property("display", "block").ok();
+        if let Some(mount) = &mount {
+            WebWindow::mount_canvas(&self.browser_window, &canvas, mount);
+        }
         let canvas_for_cleanup = canvas.clone();
 
         let window = WebWindow::new(
@@ -419,21 +447,23 @@ impl Platform for WebPlatform {
             params,
             context,
             canvas,
-            prepared_window.surface,
+            surface,
+            mount,
             self.browser_window.clone(),
-            self.window_lifecycle.clone(),
+            self.open_windows.clone(),
             self.active_window.clone(),
         );
         match window {
             Ok(window) => {
-                self.window_lifecycle.set(WebWindowLifecycle::Open);
-                *self.active_window.borrow_mut() = Some(handle);
+                self.open_windows.set(self.open_windows.get() + 1);
+                if self.active_window.borrow().is_none() {
+                    *self.active_window.borrow_mut() = Some(handle);
+                }
                 Ok(Box::new(window))
             }
             Err(error) => {
                 let canvas: &web_sys::Element = canvas_for_cleanup.as_ref();
                 canvas.remove();
-                self.window_lifecycle.set(WebWindowLifecycle::Unavailable);
                 Err(error)
             }
         }
@@ -810,6 +840,17 @@ fn cursor_restore_listeners(
     add_listener(document_target, "visibilitychange");
 
     handles
+}
+
+fn find_mount(
+    browser_window: &web_sys::Window,
+    selector: &str,
+) -> Result<web_sys::HtmlElement, WebWindowError> {
+    browser_window
+        .document()
+        .and_then(|document| document.query_selector(selector).ok().flatten())
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+        .ok_or_else(|| WebWindowError::MountNotFound(selector.to_owned()))
 }
 
 fn show_graphics_unavailable_message(browser_window: &web_sys::Window, error: &anyhow::Error) {

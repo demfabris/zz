@@ -9039,7 +9039,7 @@ impl CaptureWork {
             Ok((
                 u64::from(mode.revision.total_rows()),
                 u64::from(mode.revision.viewport_rows),
-                u64::from(mode.viewport_offset),
+                u64::from(mode.revision.maximum_offset()),
             ))
         } else {
             terminal
@@ -10096,7 +10096,7 @@ fn capture_mode_revision(
 ) -> Result<String, TerminalCaptureError> {
     capture_revision(
         &mode.revision,
-        mode.viewport_offset,
+        mode.revision.maximum_offset(),
         options,
         &mut CaptureCarry::default(),
     )

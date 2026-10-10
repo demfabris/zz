@@ -88,6 +88,7 @@ impl ImeMirror {
         document: &web_sys::Document,
         body: &web_sys::HtmlElement,
         touch_input: bool,
+        focus: bool,
     ) -> anyhow::Result<Self> {
         // A textarea rather than an input: single-line inputs silently strip
         // newlines from assigned values, which would make the mirror text
@@ -110,7 +111,9 @@ impl ImeMirror {
         style.set_property("font-size", "16px").ok();
         body.append_child(&element)
             .map_err(|e| anyhow::anyhow!("Failed to append input to body: {e:?}"))?;
-        Self::focus_element(&element);
+        if focus {
+            Self::focus_element(&element);
+        }
         // The element must stay focused to receive hardware-key and IME
         // events, but on touch-first devices a focused *editable* element
         // invites the browser to summon the virtual keyboard on the next

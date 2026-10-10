@@ -17,13 +17,13 @@ below.
 
 Pinned tmux commit: `7f2a35ad3321f9ba57a1062ca73b1f3ff26aca53`.
 
-Tracked gap groups: **49**. Classified items: **329**.
+Tracked gap groups: **50**. Classified items: **335**.
 
-- Status: open: 2, accepted: 47.
-- Decision: adopt: 2, native: 38, never: 9.
-- Priority: now: 1, next: 1, none: 47.
+- Status: open: 3, accepted: 47.
+- Decision: adopt: 3, native: 38, never: 9.
+- Priority: now: 1, next: 1, later: 1, none: 47.
 - Closed history entries: 224.
-- Surface: command: 2, flag: 8, extension-flag: 13, native-command: 26, option: 16, format: 44, hook: 2, key: 19, binding: 37, native-key: 93, semantic: 60, presentation: 8, protocol: 1.
+- Surface: command: 2, flag: 8, extension-flag: 13, native-command: 26, option: 16, format: 44, hook: 2, key: 19, binding: 37, native-key: 93, semantic: 66, presentation: 8, protocol: 1.
 
 ## Measured surface
 
@@ -58,6 +58,12 @@ structure as proof.
 | ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | `pane.floating-model` | Build floating panes in the mux model as tmux 3.8 does | adopt | open | hard | mux | daily, scripts, gui | none |
+
+## Later
+
+| ID | Gap | Decision | Status | Ease | Owner | Impact | Depends on |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `options.byte-path-residue` | Keep non-UTF-8 bytes on the text paths fix.option-bytes left lossy | adopt | open | hard | mux | scripts | none |
 
 ## None
 
@@ -822,6 +828,31 @@ Re-pointed 2026-10-09 by the catch-up lane fix.small-semantics, from the 2026-10
   - `resource:knowledge/tmux/key-tables.md`
 - Acceptance:
   - `Native pointer handling keeps scrollbar and slider gestures without a scrollbar location, the two remaining mouse-context flags stay loudly unsupported, and a target spelling that only a bound mouse event can resolve resolves to that event's pane.`
+
+### `options.byte-path-residue`: Keep non-UTF-8 bytes on the text paths fix.option-bytes left lossy
+
+Measured 2026-10-09 on tmux 3.8 (7f2a35ad) by fix.followups-2 after fix.option-bytes made the user option store, command blocks and sourced variables byte-clean. Four paths still pass bytes through a lossy text view: the format expander takes its template as text, so a format argument that is not UTF-8 reaches expand_format_bytes already replaced (display-message, and show-options -F, whose option_value is also a text variable); the stored binding and hook command lists print through tmux_command_print from text arguments; and the control client's $NAME expansion asks the daemon for values over an EnvironmentRequest whose answer is text. rename-window is the reverse case: 3.8 refuses a name that is not valid UTF-8 and zz accepts it lossily. The #{O:} option loop and the #{W:} loop's prev_ and next_ neighbour options lose the byte on the value side as well: FormatOptionRow.value and format_window_user_options are text, and the loop expander's variables are text, so only #{@x} through StatusHooks::option_variable reaches a client as bytes. Each fix crosses the expander or the wire, so it was registered rather than folded into the follow-up batch.
+
+- Decision: `adopt`
+- Status: `open`
+- Priority and ease: `later` / `hard`
+- Owner: `mux`
+- User impact: scripts
+- Items: `semantic:command-print-argument-bytes`, `semantic:control-environment-request-bytes`, `semantic:format-loop-option-bytes`, `semantic:format-template-argument-bytes`, `semantic:show-options-format-value-bytes`, `semantic:window-name-invalid-utf8`
+- Depends on: none
+- Evidence:
+  - `resource:crates/zz-mux/src/formats.rs`
+  - `resource:crates/zz-mux/src/command.rs`
+  - `resource:crates/zz-daemon/src/daemon.rs`
+  - `scenario:compat/scenarios/option-bytes.txt`
+  - `file:compat/scenarios/fixtures/option-bytes.sh`
+- Acceptance:
+  - `With LC_ALL=C, TMUX unset and @x holding 61 fe 62, a -u command client's `display-message -p a<fe>b` and `show-options -g -F '#{option_value}' @x` print 61 fe 62 0a as tmux 3.8 does (zz prints 61 ef bf bd 62 0a; both sides print 61 5f 62 0a without -u).`
+  - ``list-keys` after `bind-key -T t x display-message a<fe>b`, and `show-hooks` for a hook whose command holds that byte, print the argument as `a\376b` as 3.8 does (zz prints `a_b`).`
+  - `A control client line `set-buffer -b b "$X"` with a global X of 61 fe 62 stores 61 fe 62 as 3.8 does (zz stores 61 ef bf bd 62 because the EnvironmentRequest answer is text).`
+  - ``rename-window a<fe>b` answers `invalid window name: a_b` and keeps the old name as 3.8 does (zz renames the window to 61 ef bf bd 62).`
+  - `Measured 2026-10-09 with @x 61 fe 62 set globally and @y 61 fe 62 set on window 0 of two: `#{O/g:#{?#{==:#{option_name},@x},#{option_value},}}` and `#{O/w:...}` for @y print 61 fe 62 0a to a -u client on 3.8 (format_loop_add_option adds options_to_string's bytes) and 61 ef bf bd 62 0a on zz, and `#{W:#{?#{==:#{window_index},1},#{prev_@y},}}` prints 61 fe 62 0a on 3.8 (format_add_window_neighbour copies options_to_string(o, NULL, 1)) and 61 ef bf bd 62 0a on zz; without -u both sides print 61 5f 62 0a. Both close when FormatOptionRow.value and the neighbour copies carry RawText through the loop expander.`
+  - `Each row is a hex row in compat/scenarios/fixtures/option-bytes.sh that reads clean on both binaries.`
 
 ### `options.client-terminal-negotiation`: Keep extended-keys-format, assume-paste-time and xterm-keys native; capability-string overrides open
 

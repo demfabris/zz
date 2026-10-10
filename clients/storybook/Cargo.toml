@@ -1,0 +1,61 @@
+[workspace]
+resolver = "3"
+
+[package]
+name = "zz-storybook"
+version = "0.1.0"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+rust-version = "1.97"
+description = "zz's UI pieces in every state, on one web page, for people and agents"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+syntax-highlighting = ["zz-ui/tree-sitter"]
+
+[dependencies]
+serde_json = "1"
+web-time = "1"
+zz-gpui = { path = "../../crates/zz-gpui" }
+zz-gpui-platform = { path = "../../crates/zz-gpui-platform", default-features = false }
+zz-client = { path = "../../crates/zz-client" }
+zz-protocol = { path = "../../crates/zz-protocol" }
+zz-terminal = { path = "../../crates/zz-terminal", default-features = false }
+zz-ui = { path = "../../crates/zz-ui", features = ["agent", "editor"] }
+
+[target.'cfg(not(target_family = "wasm"))'.dependencies]
+zz-gpui-platform = { path = "../../crates/zz-gpui-platform", default-features = false, features = ["font-kit", "wayland", "x11"] }
+
+[target.'cfg(target_family = "wasm")'.dependencies]
+wasm-bindgen = "=0.2.128"
+
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+all = { level = "warn", priority = -2 }
+pedantic = { level = "warn", priority = -1 }
+too_many_lines = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+cast_possible_truncation = "allow"
+cast_possible_wrap = "allow"
+cast_precision_loss = "allow"
+cast_sign_loss = "allow"
+float_cmp = "allow"
+struct_excessive_bools = "allow"
+too_many_arguments = "allow"
+type_complexity = "allow"
+unused_self = "allow"
+
+[profile.dev]
+debug = 1
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1

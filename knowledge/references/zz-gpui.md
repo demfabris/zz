@@ -249,6 +249,10 @@ uses to show macOS browser frames on a native layer under the window (see
 display link after three vsyncs without frame demand, restarting it through `schedule_frame`
 and a new `frame_waker`, the same contract `zz_gpui_platform::web` uses for `requestAnimationFrame`.
 
+The web backend hosts several windows per page through `WindowOptions::mount`, mirrors each
+window's accessibility tree into ARIA elements, and installs a `globalThis.zzGpui` automation API;
+see [zz-gpui web windows for agents](/references/zz-gpui-web-agents.md).
+
 `git log -- gpui` is the authority (it carries
 more commits than this list numbers, because a few patches landed as follow-up fixes to an entry
 above).

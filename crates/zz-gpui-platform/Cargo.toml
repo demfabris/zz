@@ -367,6 +367,7 @@ unicode-segmentation.workspace = true
 wgpu.workspace = true
 
 [target.'cfg(target_family = "wasm")'.dependencies]
+accesskit.workspace = true
 parking_lot = { workspace = true, features = ["nightly"] }
 anyhow.workspace = true
 futures.workspace = true
@@ -415,6 +416,7 @@ web-sys = { version = "0.3", features = [
     "MediaQueryListEvent",
     "MouseEvent",
     "Navigator",
+    "Node",
     "OffscreenCanvas",
     "OffscreenCanvasRenderingContext2d",
     "PointerEvent",

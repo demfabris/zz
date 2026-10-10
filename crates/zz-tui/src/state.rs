@@ -1134,6 +1134,7 @@ impl Model {
                             border_status: window.pane_border_status,
                             status_on_border: false,
                             source: (0, 0),
+                            whole: None,
                         }],
                         dividers: Vec::new(),
                         floats: Vec::new(),

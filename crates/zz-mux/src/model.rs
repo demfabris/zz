@@ -326,6 +326,7 @@ struct SavedSelection {
     pane_order: Vec<PaneId>,
     active: PaneId,
     last_panes: Vec<PaneId>,
+    z_order: Vec<PaneId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -517,6 +518,7 @@ impl Window {
                 .copied()
                 .filter(|pane| *pane != self.active_pane)
                 .collect(),
+            z_order: self.z_order.clone(),
         });
         SavedLayout {
             layout: self.layout.clone(),
@@ -2439,6 +2441,18 @@ impl MuxState {
                 .filter_map(|pane| moved(*pane, &saved))
                 .collect();
             apply_window_selection(window, active, last_panes, Some(active_point));
+            let mut z_order = window.modal_pane().into_iter().collect::<Vec<_>>();
+            for pane in saved.z_order.iter().filter_map(|pane| moved(*pane, &saved)) {
+                if window.layout.is_floating(pane) && !z_order.contains(&pane) {
+                    z_order.push(pane);
+                }
+            }
+            for pane in window.z_order.clone() {
+                if !z_order.contains(&pane) {
+                    z_order.push(pane);
+                }
+            }
+            window.z_order = z_order;
         }
         self.bump_generation();
         Ok(())
@@ -4081,31 +4095,24 @@ impl MuxState {
             .window_for_pane(target)
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
 
+        let pushed_target = self.push_zoom(target_window, false, preserve_zoom);
         if source == target {
-            let window = self
-                .windows
-                .get_mut(&mut self.journal, &source_window)
-                .expect("window exists");
-            if window.zoomed_pane.is_some() && !preserve_zoom {
-                window.zoomed_pane = None;
-                self.bump_generation();
-            }
+            self.pop_zoom(target_window, pushed_target);
             return Ok(());
         }
-
+        let pushed_source = (source_window != target_window)
+            .then(|| self.push_zoom(source_window, false, preserve_zoom));
         if source_window == target_window {
-            let was_zoomed = {
+            {
                 let window = self
                     .windows
                     .get_mut(&mut self.journal, &source_window)
                     .expect("window exists");
-                let was_zoomed = window.zoomed_pane.is_some();
                 let swapped = window.layout.swap(source, target);
                 debug_assert!(swapped);
                 swap_pane_order(&mut window.pane_order, source, target);
                 swap_pane_order(&mut window.z_order, source, target);
-                was_zoomed
-            };
+            }
             if detached {
                 if self.windows[&source_window].active_pane == source {
                     let changed = activate_window_pane(
@@ -4143,17 +4150,11 @@ impl MuxState {
                     self.touch_pane_active_point(target);
                 }
             }
-            let active = self.windows[&source_window].active_pane;
-            self.windows
-                .get_mut(&mut self.journal, &source_window)
-                .expect("window exists")
-                .zoomed_pane = (preserve_zoom && was_zoomed).then_some(active);
+            self.pop_zoom(source_window, pushed_target);
             self.bump_generation();
             return Ok(());
         }
 
-        let source_was_zoomed = self.windows[&source_window].zoomed_pane.is_some();
-        let target_was_zoomed = self.windows[&target_window].zoomed_pane.is_some();
         let source_active = self.windows[&source_window].active_pane;
         let target_active = self.windows[&target_window].active_pane;
 
@@ -4198,10 +4199,6 @@ impl MuxState {
             activate_relocated_window_pane(&mut source_state, next_source_active, source);
         let target_changed =
             activate_relocated_window_pane(target_state, next_target_active, target);
-        source_state.zoomed_pane =
-            (preserve_zoom && source_was_zoomed).then_some(source_state.active_pane);
-        target_state.zoomed_pane =
-            (preserve_zoom && target_was_zoomed).then_some(target_state.active_pane);
         self.windows
             .insert(&mut self.journal, source_window, source_state);
         if source_changed {
@@ -4210,6 +4207,10 @@ impl MuxState {
         if target_changed {
             self.touch_pane_active_point(next_target_active);
         }
+        if let Some(pushed_source) = pushed_source {
+            self.pop_zoom(source_window, pushed_source);
+        }
+        self.pop_zoom(target_window, pushed_target);
         self.bump_generation();
         Ok(())
     }

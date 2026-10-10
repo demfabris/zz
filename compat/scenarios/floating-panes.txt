@@ -239,3 +239,15 @@ move-pane -P top-left -t rt.0
 select-layout -t rt '{"V":2,"L":{"t":"p","w":28,"h":6,"x":4,"y":2,"a":true,"i":0,"z":0,"I":"%37"}}'
 out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
 out: display-message -p -t rt #{window_layout}
+
+# select-layout -o puts the floats back in the z order the layout was saved with.
+new-session -d -s lz
+new-pane -x 30 -y 8 -X 2 -Y 2 -t lz.0
+new-pane -x 30 -y 8 -X 6 -Y 4 -t lz.0
+new-pane -x 30 -y 8 -X 10 -Y 6 -t lz.0
+select-layout -t lz tiled
+select-pane -t lz.1
+out: list-panes -t lz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}
+select-layout -o -t lz
+out: list-panes -t lz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}
+out: display-message -p -t lz #{window_layout}

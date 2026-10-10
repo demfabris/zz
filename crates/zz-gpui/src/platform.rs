@@ -2348,6 +2348,12 @@ pub struct WindowOptions {
 
     /// Tab group name, allows opening the window as a native tab on macOS 10.12+. Windows with the same tabbing identifier will be grouped together.
     pub tabbing_identifier: Option<String>,
+
+    /// The page element a web window draws into, as a CSS selector. The
+    /// window's canvas fills that element and follows its size, so a page can
+    /// host several windows among its own content. `None` fills the page.
+    /// Ignored off the web.
+    pub mount: Option<SharedString>,
 }
 
 /// The variables that can be configured when creating a new window
@@ -2413,6 +2419,10 @@ pub struct WindowParams {
 
     #[cfg(target_os = "macos")]
     pub tabbing_identifier: Option<String>,
+
+    /// The page element a web window draws into; see [`WindowOptions::mount`].
+    #[cfg_attr(not(target_family = "wasm"), allow(dead_code))]
+    pub mount: Option<SharedString>,
 }
 
 /// Represents the status of how a window should be opened.
@@ -2475,6 +2485,7 @@ impl Default for WindowOptions {
             window_min_size: None,
             window_decorations: None,
             tabbing_identifier: None,
+            mount: None,
         }
     }
 }

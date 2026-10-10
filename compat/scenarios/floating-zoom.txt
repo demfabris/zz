@@ -85,3 +85,14 @@ resize-pane -Z -t jz.2
 join-pane -d -s jz.0 -t jz.1
 out: list-panes -t jz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}
 out: display-message -p -t jz #{window_zoomed_flag}
+
+# swap-pane -Z pushes and pops the zoom, so an over-zoom float stays active
+# above the zoomed tile it swaps.
+new-session -d -s sz
+split-window -h -t sz.0
+resize-pane -Z -t sz.0
+new-pane -A -t sz.0
+swap-pane -d -Z -s sz.0 -t sz.1
+out: list-panes -t sz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}:#{pane_flags}
+out: display-message -p -t sz #{window_zoomed_flag}:#{window_flags}
+out: display-message -p -t sz #{window_visible_layout}

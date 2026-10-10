@@ -26287,6 +26287,7 @@ PS1='zz-path-fixture> '
         let expected_directory = directory
             .canonicalize()
             .expect("canonical working directory");
+        let home = tempfile::tempdir().expect("temporary home");
         let session = TerminalSession::spawn(
             DEFAULT_HISTORY_LIMIT,
             Arc::new(TerminalAppearance {
@@ -26295,6 +26296,11 @@ PS1='zz-path-fixture> '
             }),
             TerminalSpawn {
                 working_directory: Some(expected_directory.clone()),
+                terminal_type: (shell_name.as_deref() == Some("bash")).then(|| "dumb".to_owned()),
+                env: vec![
+                    ("HOME".into(), Some(home.path().as_os_str().to_owned())),
+                    ("ZDOTDIR".into(), None),
+                ],
                 ..TerminalSpawn::default()
             },
         );
@@ -26336,6 +26342,61 @@ PS1='zz-path-fixture> '
                     })
         });
         assert!(matches!(viewport.status, SessionStatus::Running));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_integration_idle_title_yields_to_a_title_the_prompt_sets() {
+        for (name, startup, hook) in [
+            (
+                "bash",
+                ".bash_profile",
+                "PS1='yield-ready> '\nPROMPT_COMMAND+=('printf \"\\033]0;%s\\007\" prompt-title')\n",
+            ),
+            (
+                "zsh",
+                ".zshrc",
+                "PS1='yield-ready> '\nprompt_title() { print -n '\\e]2;prompt-title\\a'; }\nprecmd_functions+=(prompt_title)\n",
+            ),
+        ] {
+            let Some(shell) = ["/usr/bin", "/bin"]
+                .iter()
+                .map(|directory| std::path::Path::new(directory).join(name))
+                .find(|path| path.is_file())
+            else {
+                continue;
+            };
+            if cfg!(target_os = "macos") && shell == std::path::Path::new("/bin/bash") {
+                continue;
+            }
+            let home = tempfile::tempdir().expect("temporary home");
+            std::fs::write(home.path().join(startup), hook).expect("startup file");
+            let session = TerminalSession::spawn(
+                DEFAULT_HISTORY_LIMIT,
+                Arc::new(TerminalAppearance::default()),
+                TerminalSpawn {
+                    shell: Some(shell.to_string_lossy().into_owned()),
+                    working_directory: Some(home.path().to_path_buf()),
+                    env: vec![
+                        ("HOME".into(), Some(home.path().as_os_str().to_owned())),
+                        (
+                            "ZZ_ZSH_ZDOTDIR".into(),
+                            Some(home.path().as_os_str().to_owned()),
+                        ),
+                        ("PROMPT_COMMAND".into(), None),
+                        ("PS1".into(), None),
+                        ("PS0".into(), None),
+                    ],
+                    ..TerminalSpawn::default()
+                },
+            );
+            attach_streaming(&session, TerminalViewId(45));
+            wait_for_test_capture(&session, |capture| capture.contains("yield-ready>"));
+            wait_for_test_viewport(&session, |viewport| viewport.title() == "prompt-title");
+            session.send_text("sleep 1\n");
+            wait_for_test_viewport(&session, |viewport| viewport.title() == "sleep 1");
+            wait_for_test_viewport(&session, |viewport| viewport.title() == "prompt-title");
+        }
     }
 
     #[cfg(unix)]

@@ -32,14 +32,20 @@ _zz_title_precmd() {
     print -rn -- $'\e]133;D;'$zz_status$'\a'
   fi
   typeset -gi _zz_command_running=0
-  local shell_name=${ZSH_NAME:-zsh}
   _zz_write_working_directory
-  _zz_write_title "$shell_name"
   # DECSCUSR default: the prompt restores the configured cursor style instead of
   # imposing one, so a program that exits without resetting cannot keep its shape.
   print -rn -- $'\e[0 q'
   [[ $PS1 == *$'%{\e]133;B\a%}' ]] || PS1+=$'%{\e]133;B\a%}'
   print -rn -- $'\e]133;A\a'
+}
+
+# The idle title runs first among the precmd hooks, so a title a prompt
+# framework sets lands after it and is the one the pane keeps, the way it is
+# under tmux.
+_zz_idle_title() {
+  emulate -L zsh
+  _zz_write_title "${ZSH_NAME:-zsh}"
 }
 
 _zz_title_preexec() {
@@ -58,10 +64,12 @@ _zz_install_title_hooks() {
   fi
   typeset -ga precmd_functions preexec_functions
   precmd_functions=(${precmd_functions:#_zz_install_title_hooks})
+  (( ${precmd_functions[(I)_zz_idle_title]} )) || precmd_functions=(_zz_idle_title $precmd_functions)
   (( ${precmd_functions[(I)_zz_title_precmd]} )) || precmd_functions+=(_zz_title_precmd)
   (( ${preexec_functions[(I)_zz_title_preexec]} )) || preexec_functions+=(_zz_title_preexec)
+  _zz_idle_title
   _zz_title_precmd "$zz_status"
 }
 
 typeset -ga precmd_functions
-precmd_functions+=(_zz_install_title_hooks)
+precmd_functions=(_zz_install_title_hooks $precmd_functions)

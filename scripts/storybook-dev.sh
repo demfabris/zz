@@ -20,7 +20,7 @@ fi
 
 cd "$ROOT"
 "$ROOT/scripts/build-storybook.sh"
-python3 -m http.server --bind 127.0.0.1 --directory "$ROOT/clients/storybook/dist" "$PORT" >/dev/null 2>&1 &
+"$ROOT/scripts/storybook-serve.py" "$ROOT/clients/storybook/dist" "$PORT" >/dev/null 2>&1 &
 SERVER_PID=$!
 echo "storybook at http://127.0.0.1:$PORT/ (rebuilds on save; reload the page)"
 

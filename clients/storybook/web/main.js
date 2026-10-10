@@ -1,6 +1,33 @@
 import init, * as zz from "./wasm/zz_storybook.js";
 
-const KNOBS = ["theme", "preset", "radius", "smoothing", "shadow", "contrast", "zoom", "pane-opacity", "pane-glow", "motion"];
+const GLASS_KNOBS = [
+    "glass-blur",
+    "glass-tint",
+    "glass-refraction",
+    "glass-bezel",
+    "glass-dispersion",
+    "glass-saturation",
+    "glass-brightness",
+    "glass-specular",
+    "glass-fresnel",
+    "glass-edge",
+    "glass-noise",
+];
+const KNOBS = [
+    "theme",
+    "preset",
+    "radius",
+    "smoothing",
+    "shadow",
+    "contrast",
+    "zoom",
+    "pane-opacity",
+    "pane-glow",
+    "motion",
+    "backdrop",
+    "glass",
+    ...GLASS_KNOBS,
+];
 const DEFAULTS = {
     theme: "system",
     preset: "default",
@@ -12,6 +39,8 @@ const DEFAULTS = {
     "pane-opacity": "0.5",
     "pane-glow": "1",
     motion: "1",
+    backdrop: "plain",
+    glass: "off",
 };
 
 const nav = document.getElementById("nav");
@@ -19,6 +48,7 @@ const storyRoot = document.getElementById("story");
 const form = document.getElementById("knob-form");
 
 let stories = [];
+let glassPresets = {};
 let current = null;
 
 function parseHash() {
@@ -38,13 +68,34 @@ function setKnobValue(name, value) {
     else field.value = value;
 }
 
+function knobDefault(name, glass = knobValue("glass")) {
+    if (!GLASS_KNOBS.includes(name)) return DEFAULTS[name];
+    const value = glassPresets[glass]?.[name];
+    return value === undefined ? undefined : String(value);
+}
+
+function isDefault(name) {
+    const value = knobValue(name);
+    const fallback = knobDefault(name);
+    if (!GLASS_KNOBS.includes(name)) return value === fallback;
+    if (knobValue("glass") === "off") return true;
+    const step = Number(form.elements[name].step) || 0.01;
+    return Math.abs(Number(value) - Number(fallback)) < step / 2;
+}
+
 function knobQuery() {
     const params = new URLSearchParams();
     for (const name of KNOBS) {
-        const value = knobValue(name);
-        if (value !== DEFAULTS[name]) params.set(name, value);
+        if (!isDefault(name)) params.set(name, knobValue(name));
     }
     return params.toString();
+}
+
+function resetGlassSliders() {
+    for (const name of GLASS_KNOBS) {
+        const value = knobDefault(name);
+        if (value !== undefined) setKnobValue(name, value);
+    }
 }
 
 function writeHash(story, section) {
@@ -132,6 +183,7 @@ function show(storyId, sectionId) {
 }
 
 function applyKnobs() {
+    form.querySelector("#glass-knobs").hidden = knobValue("glass") === "off";
     for (const name of KNOBS) {
         const output = form.elements[`${name}-value`];
         if (output) output.value = knobValue(name);
@@ -153,8 +205,10 @@ function paintChrome() {
 }
 
 function loadKnobs(params) {
+    const glass = params.get("glass") ?? DEFAULTS.glass;
     for (const name of KNOBS) {
-        setKnobValue(name, params.get(name) ?? DEFAULTS[name]);
+        const value = params.get(name) ?? knobDefault(name, glass);
+        if (value !== undefined) setKnobValue(name, value);
     }
 }
 
@@ -181,6 +235,7 @@ await init();
 zz.run();
 await waitFor(zz.is_ready);
 stories = JSON.parse(zz.stories());
+glassPresets = JSON.parse(zz.glass_presets());
 renderNav();
 renderPresets();
 const initial = parseHash();
@@ -188,8 +243,14 @@ loadKnobs(initial.params);
 applyKnobs();
 show(initial.story, initial.section);
 
-form.addEventListener("input", applyKnobs);
-form.addEventListener("reset", () => setTimeout(applyKnobs));
+form.addEventListener("input", (event) => {
+    if (event.target.name === "glass") resetGlassSliders();
+    applyKnobs();
+});
+form.addEventListener("reset", () => setTimeout(() => {
+    resetGlassSliders();
+    applyKnobs();
+}));
 window.addEventListener("hashchange", () => {
     const { story, section, query, params } = parseHash();
     if (query) {
@@ -208,6 +269,10 @@ window.storybook = {
         return globalThis.zzGpui?.idle();
     },
     setKnobs: (knobs) => {
+        if ("glass" in knobs) {
+            setKnobValue("glass", String(knobs.glass));
+            resetGlassSliders();
+        }
         for (const [name, value] of Object.entries(knobs)) {
             if (form.elements[name]) setKnobValue(name, String(value));
         }
@@ -216,4 +281,5 @@ window.storybook = {
     },
     knobs: () => Object.fromEntries(KNOBS.map((name) => [name, knobValue(name)])),
     presets: () => JSON.parse(zz.presets()),
+    glassPresets: () => glassPresets,
 };

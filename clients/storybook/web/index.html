@@ -57,6 +57,71 @@
                     <span>Pane glow <output name="pane-glow-value"></output></span>
                     <input type="range" name="pane-glow" min="0" max="2" step="0.1" value="1" />
                 </label>
+                <label>
+                    <span>Backdrop under floating surfaces</span>
+                    <select name="backdrop">
+                        <option value="plain">Plain</option>
+                        <option value="code">Terminal output</option>
+                        <option value="color">Color and stripes</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Glass</span>
+                    <select name="glass">
+                        <option value="off">Off</option>
+                        <option value="regular">Regular</option>
+                        <option value="clear">Clear</option>
+                        <option value="frosted">Frosted</option>
+                        <option value="smoked">Smoked</option>
+                        <option value="bubble">Bubble</option>
+                    </select>
+                </label>
+                <fieldset id="glass-knobs" hidden>
+                    <label>
+                        <span>Blur <output name="glass-blur-value"></output></span>
+                        <input type="range" name="glass-blur" min="0" max="40" step="0.05" />
+                    </label>
+                    <label>
+                        <span>Surface tint <output name="glass-tint-value"></output></span>
+                        <input type="range" name="glass-tint" min="0" max="1" step="0.01" />
+                    </label>
+                    <label>
+                        <span>Refraction <output name="glass-refraction-value"></output></span>
+                        <input type="range" name="glass-refraction" min="-60" max="150" step="1" />
+                    </label>
+                    <label>
+                        <span>Bezel <output name="glass-bezel-value"></output></span>
+                        <input type="range" name="glass-bezel" min="0" max="60" step="1" />
+                    </label>
+                    <label>
+                        <span>Dispersion <output name="glass-dispersion-value"></output></span>
+                        <input type="range" name="glass-dispersion" min="0" max="0.6" step="0.01" />
+                    </label>
+                    <label>
+                        <span>Saturation <output name="glass-saturation-value"></output></span>
+                        <input type="range" name="glass-saturation" min="0.5" max="2.5" step="0.05" />
+                    </label>
+                    <label>
+                        <span>Brightness <output name="glass-brightness-value"></output></span>
+                        <input type="range" name="glass-brightness" min="-0.3" max="0.3" step="0.01" />
+                    </label>
+                    <label>
+                        <span>Glint <output name="glass-specular-value"></output></span>
+                        <input type="range" name="glass-specular" min="0" max="1.5" step="0.05" />
+                    </label>
+                    <label>
+                        <span>Rim glow <output name="glass-fresnel-value"></output></span>
+                        <input type="range" name="glass-fresnel" min="0" max="0.5" step="0.01" />
+                    </label>
+                    <label>
+                        <span>Edge shadow <output name="glass-edge-value"></output></span>
+                        <input type="range" name="glass-edge" min="0" max="1" step="0.05" />
+                    </label>
+                    <label>
+                        <span>Grain <output name="glass-noise-value"></output></span>
+                        <input type="range" name="glass-noise" min="0" max="0.1" step="0.005" />
+                    </label>
+                </fieldset>
                 <label class="check">
                     <input type="checkbox" name="motion" checked />
                     <span>Animations</span>

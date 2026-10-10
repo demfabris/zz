@@ -170,6 +170,19 @@ form label span {
     justify-content: space-between;
 }
 
+form fieldset {
+    display: grid;
+    gap: 14px;
+    margin: 0;
+    padding: 0 0 0 10px;
+    border: 0;
+    border-left: 1px solid var(--zz-border);
+}
+
+form fieldset[hidden] {
+    display: none;
+}
+
 form label.check {
     display: flex;
     align-items: center;

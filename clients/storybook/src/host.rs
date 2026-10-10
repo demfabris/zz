@@ -8,11 +8,12 @@ const PADDING: f32 = 24.0;
 
 pub struct SectionHost {
     content: AnyView,
+    floats: bool,
 }
 
 impl SectionHost {
-    pub fn new(content: AnyView) -> Self {
-        Self { content }
+    pub fn new(content: AnyView, floats: bool) -> Self {
+        Self { content, floats }
     }
 }
 
@@ -20,6 +21,10 @@ impl Render for SectionHost {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dialog_layer = Root::render_dialog_layer(window, cx);
         let notification_layer = Root::render_notification_layer(window, cx);
+        let backdrop = self
+            .floats
+            .then(|| crate::backdrop::backdrop(crate::knobs().backdrop, cx))
+            .flatten();
         let theme = cx.theme();
         div()
             .relative()
@@ -27,6 +32,7 @@ impl Render for SectionHost {
             .bg(theme.background)
             .text_color(theme.foreground)
             .font_family(theme.font_family.clone())
+            .children(backdrop)
             .child(
                 div()
                     .relative()

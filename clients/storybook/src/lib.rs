@@ -7,6 +7,7 @@
 //! sections' accessibility trees are mirrored into the page, and
 //! `globalThis.zzGpui` drives them.
 
+mod backdrop;
 mod host;
 mod knobs;
 mod stories;
@@ -60,6 +61,10 @@ fn launch(cx: &mut App) {
     KNOBS.with(|knobs| knobs.borrow().apply(cx));
 }
 
+pub(crate) fn knobs() -> Knobs {
+    KNOBS.with(|knobs| *knobs.borrow())
+}
+
 pub fn find(id: &str) -> Option<&'static Story> {
     STORIES.iter().find(|story| story.id == id).copied()
 }
@@ -99,6 +104,23 @@ pub fn presets_json() -> String {
     .to_string()
 }
 
+pub fn glass_presets_json() -> String {
+    json!(
+        zz_gpui::GlassMaterial::PRESETS
+            .iter()
+            .map(|(id, material)| {
+                let material = material();
+                let values = knobs::GLASS_KNOBS
+                    .iter()
+                    .map(|(name, get, _)| ((*name).to_owned(), json!(get(&material))))
+                    .collect::<serde_json::Map<_, _>>();
+                ((*id).to_owned(), serde_json::Value::Object(values))
+            })
+            .collect::<serde_json::Map<_, _>>()
+    )
+    .to_string()
+}
+
 pub fn mount_id(story: &Story, section: &Section) -> String {
     format!("section-{}-{}", story.id, section.id)
 }
@@ -109,7 +131,7 @@ pub fn show_story(story: &'static Story, cx: &mut App) -> Result<(), String> {
             .update(cx, |_, window, _| window.remove_window())
             .ok();
     }
-    let knobs = KNOBS.with(|knobs| *knobs.borrow());
+    let knobs = knobs();
     for section in story.sections {
         let mount = format!("#{}", mount_id(story, section));
         let handle = cx
@@ -125,7 +147,8 @@ pub fn show_story(story: &'static Story, cx: &mut App) -> Result<(), String> {
                     window.set_default_corner_smoothing(knobs.smoothing);
                     window.set_adaptive_corner_fraction(Some(0.45));
                     let content = (section.build)(window, cx);
-                    let host = cx.new(|_| SectionHost::new(content));
+                    let floats = backdrop::floats(story.id, section.id);
+                    let host = cx.new(|_| SectionHost::new(content, floats));
                     cx.new(|cx| Root::new(host, window, cx).bordered(false))
                 },
             )
@@ -206,6 +229,11 @@ mod web {
     #[wasm_bindgen]
     pub fn presets() -> String {
         super::presets_json()
+    }
+
+    #[wasm_bindgen]
+    pub fn glass_presets() -> String {
+        super::glass_presets_json()
     }
 
     #[wasm_bindgen]

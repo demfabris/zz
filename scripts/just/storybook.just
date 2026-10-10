@@ -12,7 +12,7 @@ build *args:
 
 # Serve the last build without rebuilding.
 serve:
-    python3 -m http.server --bind 127.0.0.1 --directory clients/storybook/dist 8097
+    @scripts/storybook-serve.py clients/storybook/dist 8097
 
 # Screenshot one story or section of a running storybook: just storybook shot agent/composer?theme=dark out.png
 shot route out *args:

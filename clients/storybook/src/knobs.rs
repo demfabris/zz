@@ -1,4 +1,4 @@
-use zz_gpui::{App, WindowAppearance, px};
+use zz_gpui::{App, GlassMaterial, WindowAppearance, px};
 use zz_ui::{
     Theme, ThemeMode, UiZoom,
     chrome_palette::{ChromePresetId, inherited_chrome_colors},
@@ -18,7 +18,47 @@ pub struct Knobs {
     pub pane_opacity: f32,
     pub pane_glow: f32,
     pub motion: bool,
+    pub glass: Option<GlassMaterial>,
+    pub backdrop: Backdrop,
 }
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Backdrop {
+    #[default]
+    Plain,
+    Code,
+    Color,
+}
+
+pub const GLASS_KNOBS: &[(&str, fn(&GlassMaterial) -> f32, fn(&mut GlassMaterial, f32))] = &[
+    ("glass-blur", |m| m.blur.as_f32(), |m, v| m.blur = px(v)),
+    ("glass-tint", |m| m.tint.a, |m, v| m.tint.a = v),
+    (
+        "glass-refraction",
+        |m| m.refraction.as_f32(),
+        |m, v| m.refraction = px(v),
+    ),
+    ("glass-bezel", |m| m.bezel.as_f32(), |m, v| m.bezel = px(v)),
+    (
+        "glass-dispersion",
+        |m| m.dispersion,
+        |m, v| m.dispersion = v,
+    ),
+    (
+        "glass-saturation",
+        |m| m.saturation,
+        |m, v| m.saturation = v,
+    ),
+    (
+        "glass-brightness",
+        |m| m.brightness,
+        |m, v| m.brightness = v,
+    ),
+    ("glass-specular", |m| m.specular, |m, v| m.specular = v),
+    ("glass-fresnel", |m| m.fresnel, |m, v| m.fresnel = v),
+    ("glass-edge", |m| m.edge_shadow, |m, v| m.edge_shadow = v),
+    ("glass-noise", |m| m.noise, |m, v| m.noise = v),
+];
 
 impl Default for Knobs {
     fn default() -> Self {
@@ -33,6 +73,8 @@ impl Default for Knobs {
             pane_opacity: 0.5,
             pane_glow: 1.0,
             motion: true,
+            glass: None,
+            backdrop: Backdrop::Plain,
         }
     }
 }
@@ -40,6 +82,7 @@ impl Default for Knobs {
 impl Knobs {
     pub fn parse(query: &str) -> Result<Self, String> {
         let mut knobs = Self::default();
+        let mut glass_overrides = Vec::new();
         for pair in query
             .trim_start_matches('?')
             .split('&')
@@ -78,7 +121,38 @@ impl Knobs {
                 "pane-opacity" => knobs.pane_opacity = number(key, value)?,
                 "pane-glow" => knobs.pane_glow = number(key, value)?,
                 "motion" => knobs.motion = value != "0" && value != "off" && value != "false",
-                _ => {}
+                "glass" => {
+                    knobs.glass = match value {
+                        "" | "off" => None,
+                        name => Some(
+                            GlassMaterial::preset(name)
+                                .ok_or_else(|| format!("no glass preset named {name}"))?,
+                        ),
+                    }
+                }
+                "backdrop" => {
+                    knobs.backdrop = match value {
+                        "plain" => Backdrop::Plain,
+                        "code" => Backdrop::Code,
+                        "color" => Backdrop::Color,
+                        _ => {
+                            return Err(format!(
+                                "backdrop must be plain, code or color, not {value}"
+                            ));
+                        }
+                    }
+                }
+                _ => {
+                    if let Some((_, _, set)) = GLASS_KNOBS.iter().find(|(name, _, _)| *name == key)
+                    {
+                        glass_overrides.push((*set, number(key, value)?));
+                    }
+                }
+            }
+        }
+        if let Some(material) = knobs.glass.as_mut() {
+            for (set, value) in glass_overrides {
+                set(material, value);
             }
         }
         Ok(knobs)
@@ -102,6 +176,7 @@ impl Knobs {
         theme.radius = px(self.radius);
         theme.shadow = self.shadow > 0.0;
         theme.shadow_strength = self.shadow;
+        theme.glass = self.glass;
         theme.set_contrast(self.contrast);
         cx.set_global(UiZoom(self.zoom));
         let knobs = *self;
@@ -142,5 +217,16 @@ mod tests {
         assert!(!knobs.motion);
         assert!(Knobs::parse("radius=wide").is_err());
         assert!(Knobs::parse("preset=sepia").is_err());
+    }
+
+    #[test]
+    fn glass_sliders_override_the_preset_in_any_order() {
+        let knobs = Knobs::parse("glass-blur=30&glass=frosted&glass-tint=0.5").unwrap();
+        let glass = knobs.glass.unwrap();
+        assert_eq!(glass.blur, px(30.0));
+        assert_eq!(glass.tint.a, 0.5);
+        assert_eq!(glass.bezel, GlassMaterial::frosted().bezel);
+        assert_eq!(Knobs::parse("glass-blur=30").unwrap().glass, None);
+        assert!(Knobs::parse("glass=lava").is_err());
     }
 }

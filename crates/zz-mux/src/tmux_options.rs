@@ -1223,12 +1223,14 @@ pub(crate) fn parse_tmux_option(input: &str) -> Result<ParsedTmuxOption<'_>, ()>
             index: None,
         });
     };
-    let Some(raw) = input[open + 1..].strip_suffix(']') else {
+    let rest = &input[open + 1..];
+    let Some(close) = rest.find(']') else {
         return Err(());
     };
-    if raw.is_empty() {
+    if close == 0 || open + close + 2 != input.len() {
         return Err(());
     }
+    let raw = &rest[..close];
     let index = if raw.bytes().all(|byte| byte.is_ascii_digit()) {
         raw.parse::<u32>().map_err(|_| ())?.to_string()
     } else {
@@ -1407,13 +1409,6 @@ mod tests {
             ParsedTmuxOption {
                 name: "name]tail",
                 index: None,
-            }
-        );
-        assert_eq!(
-            parse_tmux_option("after-new-window[a]b]").unwrap(),
-            ParsedTmuxOption {
-                name: "after-new-window",
-                index: Some("a]b".to_owned()),
             }
         );
         for invalid in ["", "name[]", "name[0", "name[0]tail", "name[4294967296]"] {

@@ -3085,6 +3085,9 @@ fn customize_target_args(target: TmuxOptionTarget) -> Vec<String> {
 }
 
 fn customize_array_key(key: &str) -> Option<String> {
+    if key.contains(']') {
+        return None;
+    }
     if !key.bytes().all(|byte| byte.is_ascii_digit()) {
         return Some(key.to_owned());
     }
@@ -3715,10 +3718,20 @@ mod tests {
     }
 
     #[test]
-    fn customize_array_key_rename_takes_a_literal_key_and_stops_on_error() {
+    fn customize_array_key_rename_refuses_a_key_the_command_line_cannot_spell() {
         let (hooks, commands) = rename_hook_key("a]b");
-        assert_eq!(hooks, "after-new-window[a]b] display-message kept");
-        assert_eq!(commands.len(), 2);
+        assert_eq!(hooks, "after-new-window[0] display-message kept");
+        assert_eq!(
+            commands,
+            [CommandInvocation::new(
+                "display-message",
+                ["-l", "Bad array key: a]b"]
+            )]
+        );
+    }
+
+    #[test]
+    fn customize_array_key_rename_stops_on_error() {
         let (mut engine, mut context, pane) = engine_with_session();
         run(
             &mut engine,

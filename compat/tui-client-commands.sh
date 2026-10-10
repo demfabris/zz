@@ -1519,8 +1519,6 @@ customize_screen_cases() {
   customize_screen_case hook-key-prompt a
   customize_screen_case hook-key-accept C-u 4 Enter
   case_run customize-hook-key-values same '' -- show-hooks -g after-new-window
-  customize_screen_case hook-literal-key a C-u 'a]b' Enter
-  case_run customize-hook-literal-key-values same '' -- show-hooks -g after-new-window
   customize_screen_case hook-unset u y
   customize_screen_case section-add g Enter
   customize_screen_case section-add-escape Escape

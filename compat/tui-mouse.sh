@@ -710,6 +710,7 @@ case_click_selects_pane() {
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.1" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.1" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 3))"
   wait_for 'the pin selected pane 1' active_pane_index_is tmux 1
   settle_both MARK-click 'the click on pane 1'
@@ -735,6 +736,7 @@ case_click_user_binding() {
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 4))" "$((top + 2))"
   wait_for 'the pin ran its own mouse binding' option_is tmux @mousekey \
     "$(binding_value_for tmux)"
@@ -748,6 +750,13 @@ case_click_user_binding() {
 # The event the binding was invoked FROM. `set-option -F` expands its value
 # through the command's own format tree, which is where format.c publishes
 # mouse_x, mouse_y and mouse_pane from the invoking mouse record.
+#
+# Every first click of a case waits out KEYC_CLICK_TIMEOUT first. A press on
+# the button, location and pane of a press inside its timeout is a SecondClick,
+# and a sabotage can aim one side's click at the pane the next case clicks in.
+# That side then takes the next case's click as a SecondClick no binding
+# claims, the DoubleClick its timer replays raises copy mode, and the copy mode
+# eats the next marker as a jump prompt, on a fast box only.
 outlast_the_pin_click_timeout() {
   sleep 0.35
 }
@@ -845,6 +854,7 @@ case_border_user_binding() {
   mark_both borderbind
   right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((right + 2))" "$((top + 4))"
   wait_for 'the pin ran its own border binding' option_is tmux @borderkey \
     "$(binding_value_for tmux)"
@@ -942,6 +952,7 @@ case_multi_click() {
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   column="$((left + 8))"
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$((top + 1))"
   click_both 0 "$column" "$((top + 1))"
   wait_for 'the pin copied a word' pin_buffer_has alpha
@@ -949,6 +960,7 @@ case_multi_click() {
   check_value MULTI_CLICK multi-click/double-buffer \
     "$(buffer_sample zz)" "$(buffer_sample tmux)"
   delete_buffer_both
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$((top + 1))"
   click_both 0 "$column" "$((top + 1))"
   click_both 0 "$column" "$((top + 1))"
@@ -1163,6 +1175,7 @@ case_border_click() {
   local right top
   right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((right + 2))" "$((top + 4))"
   if pin_border_click_clears_mark; then
     wait_for 'the pin cleared its mark on a border click' pin_marked_set_is 0
@@ -1206,6 +1219,7 @@ case_status_clicks() {
   row="$(status_row)"
   column="$(status_column_of second)"
   [ -n "$column" ] || die 'the second window is not on the status row'
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$row"
   wait_for 'the pin switched window on a status click' pin_window_is 1
   settle_both 'second' 'the status click'
@@ -1290,6 +1304,7 @@ case_app_mouse() {
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 5))" "$((top + 3))"
   wait_for "the pin's program saw the click for $label" program_saw tmux APPMOUSE 'M'
   settle_both APPMOUSE "the click for $label"
@@ -1416,6 +1431,7 @@ case_app_mouse_double_click() {
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   row="$((top + 3))"
   column="$((left + 5))"
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$row"
   click_both 0 "$column" "$row"
   wait_for "the pin's program saw both clicks" program_saw_reports tmux CLICKREPORT 4
@@ -1635,6 +1651,7 @@ case_customize_mouse_click() {
   customize_open_both
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 6))"
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-click/screen
@@ -1681,6 +1698,7 @@ case_customize_mouse_quiet() {
   check_value MODE_POINTER customize-mouse-wheel/pane-mode \
     "$(side_command zz display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')" \
     "$(side_command tmux display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 18))"
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-preview/screen
@@ -1700,6 +1718,7 @@ case_customize_mouse_prompt() {
   settle_pointer
   send_to_pane_both "=$INNER_SESSION:0.0" a b c d e f
   settle_pointer
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 12))" "$((top + ROWS_UNDER_TEST - 1))"
   settle_pointer
   send_to_pane_both "=$INNER_SESSION:0.0" Z
@@ -1723,6 +1742,7 @@ case_switch_mouse() {
   settle_pointer
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 2))"
   settle_pointer
   check_screen MODE_POINTER switch-mouse-click/screen

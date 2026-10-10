@@ -1116,18 +1116,18 @@ Put a scenario with an accepted strict mismatch under `compat/scenarios/known/`.
 still executes every step and writes its diffs. It accepts the result only when the scenario's gap
 ID resolves to the exact registered `TOPO GEO FMT OUT WARN` tuple. An unregistered known scenario,
 a missing tuple, or any tuple drift fails the run.
-The three current entries pin two deliberate refusals of upstream layout bugs plus one native
-presentation choice: `known-main-preset-two-panes.txt` (the pin never sizes the lone "other" pane),
-`known-spread-mixed.txt` (the pin's `-E` corrupts a parent mixing leaf and node children), and
-`known-pane-scrollbar-columns.txt` (the pin builds its pane scrollbar from grid cells, so it costs
-each pane a column, while zz draws one in client chrome outside the cell grid). They use
-`layout.main-horizontal-upstream-bug`, `layout.spread-mixed-upstream-bug`, and
-`options.native-pane-scrollbars`.
+Among the current entries, `known-spread-mixed.txt` refuses an upstream layout bug (the pin's
+`-E` corrupts a parent mixing leaf and node children) and `known-pane-scrollbar-columns.txt` pins a
+native presentation choice (the pin builds its pane scrollbar from grid cells, so it costs each pane
+a column, while zz draws one in client chrome outside the cell grid). They use
+`layout.spread-mixed-upstream-bug` and `options.native-pane-scrollbars`. The former
+`known-main-preset-two-panes.txt` left the set when tmux 3.8 started sizing the lone "other" pane;
+it is the ordinary row `main-preset-two-panes.txt` now.
 
 Inspect a registered tuple directly with:
 
 ```sh
-python3 compat/tmux-tracker.py known-tuple known/known-main-preset-two-panes.txt
+python3 compat/tmux-tracker.py known-tuple known/known-spread-mixed.txt
 ```
 
 Keep the `known/` set narrow. Move a scenario into the normal corpus when zz closes the gap. The

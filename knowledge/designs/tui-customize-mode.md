@@ -115,11 +115,18 @@ puts the prompt in command mode with the cursor stepped back rather than cancell
 three `KEYC_VI` word motions, and the daemon sends `message-command-style` in
 `ChooserPresentation.prompt_style` while the prompt sits there.
 
+Customize prompts share the server's prompt history since 2026-10-10 (`fix.followups-3`):
+`Up`/`C-p` and `Down`/`C-n` walk the command list, or the search list for the search and
+filter prompts (mode-tree.c raises those as `PROMPT_TYPE_SEARCH`), and Enter adds a typed
+non-empty answer to it; a single-key prompt adds nothing. The choosers' filter prompts and
+the window tree's `:` prompt (`ChooserPrompt` in the daemon) walk and feed the same lists. An answer the mode refuses, or a
+command it runs that fails, is a status message for `display-time` with no command behind it,
+so no `after-display-message` hook sees it.
+
 # Limits
 
-Not built: the key-binding reset for keys whose default command changed in place, a shared
-prompt history (`Down` empties a mode prompt the way an empty history does, `Up` does
-nothing), `Tab` completion in a command prompt, and `C-y`
+Not built: the key-binding reset for keys whose default command changed in place,
+`Tab` completion in a command prompt, and `C-y`
 pasting the top buffer, which is also what vi `p` maps onto. Rows are rebuilt live, so an
 option changed from outside shows at once where the pin shows it after its next build.
 `mode_tree_display_menu` on `MouseDown3Pane` is built since 2026-09-19: the press selects

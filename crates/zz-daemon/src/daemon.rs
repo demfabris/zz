@@ -16321,6 +16321,51 @@ impl Shared {
         );
     }
 
+    /// The pin's `status_message_set(c, -1, 1, 0, 0, ...)` from a mode: logged
+    /// under the client's name, shown for the session's `display-time` until a
+    /// key clears it, with no command and so no `after-display-message`.
+    fn publish_status_message(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        text: String,
+    ) {
+        let (publication, retired, deadline) = {
+            let mut inner = self.inner.lock();
+            let client_name = server_log_client_name(&inner, client);
+            push_server_message(&mut inner, format!("{client_name} message: {text}"));
+            let duration_ms = client_attached_session(&inner, client).map_or(750, |session| {
+                inner.engine.display_time_for_session(session)
+            });
+            let message_id = next_timed_message_id(&mut inner);
+            if duration_ms != 0 {
+                let _ = inner
+                    .client_mut(client)
+                    .is_some_and(|client| std::mem::take(&mut client.message_ignore_keys));
+            }
+            let (retired, deadline) =
+                arm_client_message(&mut inner, client, message_id, duration_ms, true);
+            let publication = OwnedClientMessagePublication {
+                client,
+                pane: context.pane,
+                kind: ClientMessageKind::Error,
+                text,
+                duration_ms,
+                message_id,
+            };
+            (publication, retired, deadline)
+        };
+        self.publish_owned_client_message(publication);
+        if let Some(retired) = retired {
+            self.retire_client_message(client, retired, true);
+        }
+        if let Some(deadline) = deadline {
+            let _ = self.timer_tx.send(timers::TimerInput::ClientMessage(
+                ClientMessageDeadlineCommand::Schedule(deadline),
+            ));
+        }
+    }
+
     fn spawn_delay(
         self: &Arc<Self>,
         delay: Duration,
@@ -22949,15 +22994,22 @@ impl Shared {
         };
         match mode {
             PaneModeRequest::Customize(mut mode) => {
+                if matches!(input, PaneModeInput::Key(_)) {
+                    self.ensure_prompt_history();
+                }
                 let result = {
                     let inner = self.inner.lock();
                     let facts = borrowed_format_hook_facts(&inner);
                     let mut expand = customize_expander(&inner, pane, &facts);
                     match input {
                         PaneModeInput::Key(key) => {
+                            let history = zz_mux::PromptHistories {
+                                command: &inner.command_history,
+                                search: &inner.search_history,
+                            };
                             inner
                                 .engine
-                                .customize_key(pane, &mut mode, key, &mut expand)
+                                .customize_key(pane, &mut mode, key, history, &mut expand)
                         }
                         PaneModeInput::Pointer { key, x, y } => {
                             inner
@@ -23168,13 +23220,20 @@ impl Shared {
                 modes.push(PaneModeRequest::Customize(mode));
             }
         }
+        if let Some((prompt_type, input)) = &result.remembered {
+            self.record_prompt_history(*prompt_type, input);
+        }
+        if let Some(message) = &result.message {
+            self.publish_status_message(client, context, message.clone());
+        }
         for command in &result.commands {
-            if self
-                .execute(client, ClientKind::Interactive, context, command)
-                .is_err()
-                && result.stop_on_error
-            {
-                break;
+            if let Err(error) = self.execute(client, ClientKind::Interactive, context, command) {
+                let mut message = daemon_error_text(&error);
+                uppercase_first(&mut message);
+                self.publish_status_message(client, context, message);
+                if result.stop_on_error {
+                    break;
+                }
             }
         }
         {
@@ -23902,6 +23961,10 @@ impl Shared {
             }
             action => action,
         };
+        if matches!(action, ChooseTreeAction::Key(_)) {
+            self.ensure_prompt_history();
+        }
+        let mut remembered = None;
         let (result, state, delta, command, runs) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.client_mut(client).and_then(|c| c.choose_tree.take())
@@ -23946,7 +24009,17 @@ impl Shared {
             let result = if let Some(step) = prompt_step {
                 match step {
                     ChooserPromptStep::Single(answer) => chooser.answer_kill_prompt(answer),
-                    ChooserPromptStep::Edit(edit) => chooser.edit_command_prompt(edit),
+                    ChooserPromptStep::Edit(edit) => {
+                        let prompt_type = chooser
+                            .prompt
+                            .as_ref()
+                            .map_or(CommandPromptType::Command, ChooserPrompt::history_type);
+                        if matches!(edit, ChooserPromptEdit::Accept) {
+                            remembered =
+                                chooser.prompt.as_ref().and_then(ChooserPrompt::remembered);
+                        }
+                        chooser.edit_command_prompt(edit, prompt_history(&inner, prompt_type))
+                    }
                 }
             } else if dismissed_help && matches!(action, ChooseTreeAction::Key(_)) {
                 ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
@@ -23978,6 +24051,13 @@ impl Shared {
                     }
                     action => action,
                 };
+                if matches!(action, ChooseTreeAction::SearchAccept) {
+                    remembered = chooser
+                        .search
+                        .as_ref()
+                        .filter(|search| !search.query.is_empty())
+                        .map(|search| (CommandPromptType::Search, search.query.clone()));
+                }
                 match chooser.apply(action, &inner.engine, attached_session, &facts) {
                     Ok(result) => result,
                     Err(error) => {
@@ -24059,6 +24139,9 @@ impl Shared {
             }
             (result, state, delta, command, runs)
         };
+        if let Some((prompt_type, input)) = remembered {
+            self.record_prompt_history(prompt_type, &input);
+        }
 
         match result {
             ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full) => {
@@ -24266,6 +24349,10 @@ impl Shared {
             action => action,
         };
 
+        if matches!(action, ChooseBufferAction::Key(_)) {
+            self.ensure_prompt_history();
+        }
+        let mut remembered = None;
         let (outcome, deleted) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner
@@ -24355,8 +24442,22 @@ impl Shared {
                 let result = if swallowed_help {
                     ChooseBufferResult::Rebuild
                 } else if let Some(edit) = prompt_edit {
-                    chooser.edit_prompt(edit)
+                    if matches!(edit, ChooserPromptEdit::Accept) {
+                        remembered = chooser.prompt.as_ref().and_then(ChooserPrompt::remembered);
+                    }
+                    let prompt_type = chooser
+                        .prompt
+                        .as_ref()
+                        .map_or(CommandPromptType::Search, ChooserPrompt::history_type);
+                    chooser.edit_prompt(edit, prompt_history(&inner, prompt_type))
                 } else {
+                    if matches!(action, ChooseBufferAction::SearchAccept) {
+                        remembered = chooser
+                            .search
+                            .as_ref()
+                            .filter(|search| !search.query.is_empty())
+                            .map(|search| (CommandPromptType::Search, search.query.clone()));
+                    }
                     match chooser.apply(action, &inner.paste_buffers) {
                         Ok(result) => result,
                         Err(error) => {
@@ -24439,6 +24540,9 @@ impl Shared {
                 (outcome, deleted)
             }
         };
+        if let Some((prompt_type, input)) = remembered {
+            self.record_prompt_history(prompt_type, &input);
+        }
 
         if !deleted.is_empty() {
             self.run_event_hooks(
@@ -36228,11 +36332,13 @@ impl ChooseBufferSession {
         );
     }
 
-    fn edit_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseBufferResult {
+    fn edit_prompt(&mut self, edit: ChooserPromptEdit, history: &[String]) -> ChooseBufferResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseBufferResult::Updated;
         };
         match edit {
+            ChooserPromptEdit::HistoryUp => prompt.walk_history(history, true),
+            ChooserPromptEdit::HistoryDown => prompt.walk_history(history, false),
             ChooserPromptEdit::Append(text) => {
                 if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
                     prompt.input.push_str(&text);
@@ -36394,6 +36500,7 @@ impl ChooseBufferSession {
                     text: "(filter) ".to_owned(),
                     input: self.filter.clone().unwrap_or_default(),
                     targets: Vec::new(),
+                    history_index: 0,
                 });
                 return Ok(ChooseBufferResult::Rebuild);
             }
@@ -36763,9 +36870,46 @@ struct ChooserPrompt {
     text: String,
     input: String,
     targets: Vec<ChooseTreeTarget>,
+    history_index: usize,
 }
 
 impl ChooserPrompt {
+    /// mode-tree.c raises the filter prompt as `PROMPT_TYPE_SEARCH` and
+    /// window-tree.c the `:` prompt as `PROMPT_TYPE_COMMAND`.
+    const fn history_type(&self) -> CommandPromptType {
+        match self.kind {
+            ChooserPromptKind::Filter => CommandPromptType::Search,
+            ChooserPromptKind::Kill | ChooserPromptKind::Command => CommandPromptType::Command,
+        }
+    }
+
+    /// `prompt_up_history` and `prompt_down_history`: newest first from an
+    /// index the prompt owns, and back past the newest line is an empty one.
+    fn walk_history(&mut self, history: &[String], up: bool) {
+        self.history_index = self.history_index.min(history.len());
+        if up {
+            if history.is_empty() || self.history_index == history.len() {
+                return;
+            }
+            self.history_index += 1;
+        } else if history.is_empty() || self.history_index == 0 {
+            self.input.clear();
+            return;
+        } else {
+            self.history_index -= 1;
+        }
+        self.input = if self.history_index == 0 {
+            String::new()
+        } else {
+            history[history.len() - self.history_index].clone()
+        };
+    }
+
+    /// `prompt_add_history` on Enter for a non-empty line.
+    fn remembered(&self) -> Option<(CommandPromptType, String)> {
+        (!self.input.is_empty()).then(|| (self.history_type(), self.input.clone()))
+    }
+
     /// What the mode's screen shows: the prompt string with the line typed so
     /// far after it, which is empty for a `PROMPT_SINGLE` answer.
     fn line(&self) -> String {
@@ -37699,6 +37843,7 @@ impl ChooseTreeSession {
                     text: "(filter) ".to_owned(),
                     input: self.filter.clone().unwrap_or_default(),
                     targets: Vec::new(),
+                    history_index: 0,
                 };
                 self.rendered.prompt = prompt.line();
                 self.prompt = Some(prompt);
@@ -37760,6 +37905,7 @@ impl ChooseTreeSession {
                     text,
                     input: String::new(),
                     targets,
+                    history_index: 0,
                 });
                 self.rendered.prompt = self
                     .prompt
@@ -37874,6 +38020,7 @@ impl ChooseTreeSession {
             text,
             input: String::new(),
             targets,
+            history_index: 0,
         });
         ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
     }
@@ -37881,11 +38028,17 @@ impl ChooseTreeSession {
     /// `prompt_key` on the `:` prompt, which is an ordinary edited line:
     /// `window_tree_command_callback` runs it once per tagged row and an empty
     /// line runs nothing at all.
-    fn edit_command_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseTreeResult {
+    fn edit_command_prompt(
+        &mut self,
+        edit: ChooserPromptEdit,
+        history: &[String],
+    ) -> ChooseTreeResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta);
         };
         match edit {
+            ChooserPromptEdit::HistoryUp => prompt.walk_history(history, true),
+            ChooserPromptEdit::HistoryDown => prompt.walk_history(history, false),
             ChooserPromptEdit::Append(text) => {
                 if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
                     prompt.input.push_str(&text);
@@ -44242,6 +44395,7 @@ fn panes_mode_snapshot(
         border_style,
         copy: geometry.copy,
         format: !options.format.is_empty(),
+        clears: geometry.clears,
     }
 }
 
@@ -54218,11 +54372,100 @@ mod tests {
                 menu: None,
                 edit: None,
                 stop_on_error: false,
+                message: None,
+                remembered: None,
             },
         );
         let inner = shared.inner.lock();
         assert!(!inner.pane_modes.contains_key(&pane));
         assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn customize_errors_are_status_messages_that_fire_no_display_hooks_and_answers_are_history() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-error", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-display-message", "set -g @shown y"],
+            ),
+            CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+        ] {
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("setup");
+        }
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        take_reliable_messages(&mailbox);
+        shared.apply_customize_result(
+            client,
+            &mut context,
+            pane,
+            mode,
+            &CustomizeResult {
+                close: false,
+                commands: vec![CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "root", "C-a", "nosuchcommand"],
+                )],
+                menu: None,
+                edit: None,
+                stop_on_error: false,
+                message: Some("Unknown key: Nope".to_owned()),
+                remembered: Some((CommandPromptType::Command, "C-a nosuchcommand".to_owned())),
+            },
+        );
+        assert_eq!(
+            shared.inner.lock().command_history,
+            ["C-a nosuchcommand".to_owned()]
+        );
+        let shown = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::TimedClientMessage {
+                            kind: ClientMessageKind::Error,
+                            text,
+                            duration_ms,
+                            ..
+                        },
+                    ..
+                }) => Some((text, duration_ms)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shown,
+            [
+                ("Unknown key: Nope".to_owned(), 750),
+                ("Unknown command: nosuchcommand".to_owned(), 750)
+            ]
+        );
+        let hook = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@shown"]),
+            )
+            .expect("show-options");
+        assert_eq!(hook.output, "");
     }
 
     #[test]
@@ -54271,6 +54514,8 @@ mod tests {
                     menu: None,
                     edit: None,
                     stop_on_error,
+                    message: None,
+                    remembered: None,
                 },
             );
             let output = shared

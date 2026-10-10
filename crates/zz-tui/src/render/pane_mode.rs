@@ -1,6 +1,6 @@
 use zz_protocol::{
-    PaneMode, PanesModeArea, PanesModeBorder, StyledSegment, ThemeColours, TmuxAlign,
-    TmuxAttributeState, TmuxColour, TmuxStyle, parse_styled_segments, parse_tmux_colour,
+    PaneMode, PanesModeArea, PanesModeBorder, PanesModeClear, StyledSegment, ThemeColours,
+    TmuxAlign, TmuxAttributeState, TmuxColour, TmuxStyle, parse_styled_segments, parse_tmux_colour,
 };
 
 use super::{
@@ -297,6 +297,7 @@ struct PanesView<'a> {
     border_style: &'a str,
     copy: bool,
     format: bool,
+    clears: &'a [PanesModeClear],
 }
 
 fn panes_label(grid: &mut Grid, area: &PanesModeArea, base: &TmuxStyle) -> Option<(u16, u16)> {
@@ -409,10 +410,24 @@ fn panes_number(
     cursor
 }
 
+fn panes_clear(grid: &mut Grid, view: &PanesView<'_>, before: usize, rect: Rect) {
+    let blank = Paint::Style(plain());
+    for clear in view.clears {
+        if usize::try_from(clear.before).unwrap_or(usize::MAX) != before || clear.x >= rect.width {
+            continue;
+        }
+        let width = clear.width.min(rect.width - clear.x);
+        for row in clear.y..clear.y.saturating_add(clear.height).min(rect.height) {
+            grid.fill(clear.x, row, width, &blank);
+        }
+    }
+}
+
 fn panes_surface(view: &PanesView<'_>, rect: Rect, theme: &ThemeColours) -> ModeSurface {
     let mut grid = Grid::new(rect.width, rect.height);
     let mut cursor = (0, 0);
-    for area in view.areas {
+    for (index, area) in view.areas.iter().enumerate() {
+        panes_clear(&mut grid, view, index, rect);
         if area.x >= rect.width || area.y >= rect.height {
             continue;
         }
@@ -438,6 +453,7 @@ fn panes_surface(view: &PanesView<'_>, rect: Rect, theme: &ThemeColours) -> Mode
         };
         cursor = panes_number(&mut grid, &clipped, view.format, theme);
     }
+    panes_clear(&mut grid, view, view.areas.len(), rect);
     let border = Paint::Style(resolved_style(view.border_style, theme).unwrap_or_else(plain));
     for cell in view.borders {
         let glyph = acs_glyph(CELL_BORDERS[usize::from(cell.cell).min(12)]);
@@ -459,6 +475,7 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
             border_style,
             copy,
             format,
+            clears,
         } => panes_surface(
             &PanesView {
                 areas,
@@ -466,6 +483,7 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
                 border_style,
                 copy: *copy,
                 format: *format,
+                clears,
             },
             rect,
             theme,
@@ -575,6 +593,7 @@ mod tests {
             border_style: "bg=colour235,fg=colour250".to_owned(),
             copy: true,
             format: true,
+            clears: Vec::new(),
         };
         let rect = Rect {
             x: 0,
@@ -610,6 +629,7 @@ mod tests {
             border_style: String::new(),
             copy: true,
             format: true,
+            clears: Vec::new(),
         };
         assert_eq!(surface(&single, rect, &theme).cursor, (42, 13));
     }

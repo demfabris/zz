@@ -554,3 +554,95 @@ fn chooser_prompt_styles_see_the_prompt_type_and_input() {
         assert_eq!(last.as_deref(), Some(style), "{typed}");
     }
 }
+
+#[test]
+fn chooser_filter_prompts_walk_and_feed_the_search_history() {
+    let named = |code| tests::test_key(code, Modifiers::default(), None);
+    let mut scene = attached_scene();
+    scene.shared.inner.lock().search_history = vec!["older".to_owned(), "newer".to_owned()];
+    let filter_input = |scene: &Scene| {
+        scene.shared.inner.lock().clients[&scene.client]
+            .choose_tree
+            .as_ref()
+            .and_then(|chooser| chooser.prompt.as_ref())
+            .map(|prompt| prompt.input.clone())
+    };
+    scene.open("choose-tree", &["-Zw"]);
+    scene.press(key('f', Modifiers::default()), false);
+    scene.press(named(KeyCode::ArrowUp), false);
+    assert_eq!(filter_input(&scene).as_deref(), Some("newer"));
+    scene.press(key('p', control()), false);
+    assert_eq!(filter_input(&scene).as_deref(), Some("older"));
+    scene.press(named(KeyCode::ArrowUp), false);
+    assert_eq!(filter_input(&scene).as_deref(), Some("older"));
+    scene.press(named(KeyCode::ArrowDown), false);
+    assert_eq!(filter_input(&scene).as_deref(), Some("newer"));
+    scene.press(key('n', control()), false);
+    assert_eq!(filter_input(&scene).as_deref(), Some(""));
+    scene.press(key('x', Modifiers::default()), false);
+    scene.press(named(KeyCode::Enter), false);
+    assert_eq!(filter_input(&scene), None);
+    assert_eq!(
+        scene.shared.inner.lock().search_history,
+        ["older".to_owned(), "newer".to_owned(), "x".to_owned()]
+    );
+    assert!(scene.shared.inner.lock().command_history.is_empty());
+
+    scene.press(key(':', Modifiers::default()), false);
+    scene.press(named(KeyCode::ArrowUp), false);
+    let command = scene.shared.inner.lock().clients[&scene.client]
+        .choose_tree
+        .as_ref()
+        .and_then(|chooser| chooser.prompt.as_ref())
+        .map(|prompt| (prompt.kind, prompt.input.clone()));
+    assert_eq!(command, Some((ChooserPromptKind::Command, String::new())));
+}
+
+#[test]
+fn a_chooser_search_answer_is_search_history_the_filter_prompt_recalls() {
+    let named = |code| tests::test_key(code, Modifiers::default(), None);
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zw"]);
+    scene.press(key('/', Modifiers::default()), false);
+    for character in "two".chars() {
+        scene.press(key(character, Modifiers::default()), false);
+    }
+    scene.press(named(KeyCode::Enter), false);
+    assert_eq!(scene.shared.inner.lock().search_history, ["two".to_owned()]);
+    scene.press(key('f', Modifiers::default()), false);
+    scene.press(named(KeyCode::ArrowUp), false);
+    let input = scene.shared.inner.lock().clients[&scene.client]
+        .choose_tree
+        .as_ref()
+        .and_then(|chooser| chooser.prompt.as_ref())
+        .map(|prompt| prompt.input.clone());
+    assert_eq!(input.as_deref(), Some("two"));
+}
+
+#[test]
+fn a_chooser_prompt_clamps_its_walk_when_the_history_shrank() {
+    let full = ["one".to_owned(), "two".to_owned(), "three".to_owned()];
+    let mut prompt = ChooserPrompt {
+        kind: ChooserPromptKind::Filter,
+        text: "(filter) ".to_owned(),
+        input: String::new(),
+        targets: Vec::new(),
+        history_index: 0,
+    };
+    for _ in 0..3 {
+        prompt.walk_history(&full, true);
+    }
+    assert_eq!(prompt.input, "one");
+    let shrunk = ["new".to_owned()];
+    prompt.walk_history(&shrunk, false);
+    assert_eq!(prompt.input, "");
+    prompt.walk_history(&shrunk, true);
+    assert_eq!(prompt.input, "new");
+    for _ in 0..3 {
+        prompt.walk_history(&full, true);
+    }
+    prompt.walk_history(&shrunk, true);
+    assert_eq!(prompt.input, "one");
+    prompt.walk_history(&[], false);
+    assert_eq!(prompt.input, "");
+}

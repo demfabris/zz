@@ -1,7 +1,7 @@
-use zz_protocol::{Axis, PaneBorderStatus, PaneId, WindowId};
+use zz_protocol::{Axis, PaneBorderStatus, PaneId, PanesModeClear, WindowId};
 
 use super::MuxEngine;
-use crate::layout::{CellGeometry, CellNode};
+use crate::layout::{CellGeometry, CellLayout, CellNode};
 
 const BORDER_L: u8 = 0x1;
 const BORDER_R: u8 = 0x2;
@@ -22,6 +22,7 @@ pub struct PanesModeAreaGeometry {
 pub struct PanesModeGeometry {
     pub areas: Vec<PanesModeAreaGeometry>,
     pub borders: Vec<(u16, u16, u8)>,
+    pub clears: Vec<PanesModeClear>,
     pub copy: bool,
 }
 
@@ -260,13 +261,11 @@ fn float_frame(cell: CellGeometry, scale: Scale) -> (i32, i32, i32, i32) {
     )
 }
 
-fn carves(cell: CellGeometry, root: CellGeometry, status: PaneBorderStatus) -> bool {
+fn carves(layout: &CellLayout, pane: PaneId, status: PaneBorderStatus) -> bool {
     match status {
         PaneBorderStatus::Off => false,
-        PaneBorderStatus::Top => cell.yoff == root.yoff,
-        PaneBorderStatus::Bottom => {
-            cell.yoff + i32::from(cell.sy) == root.yoff + i32::from(root.sy)
-        }
+        PaneBorderStatus::Top => layout.is_edge_cell(pane, true),
+        PaneBorderStatus::Bottom => layout.is_edge_cell(pane, false),
     }
 }
 
@@ -319,6 +318,21 @@ impl MuxEngine {
                 continue;
             };
             let floating = state.layout.is_floating(*pane);
+            if floating {
+                let (left, top, right, bottom) = float_frame(cell, scale);
+                let (x, y) = (left.max(0), top.max(0));
+                let x2 = right.min(scale.dsx as i32 - 1);
+                let y2 = bottom.min(scale.dsy as i32 - 1);
+                if x2 >= x && y2 >= y {
+                    geometry.clears.push(PanesModeClear {
+                        before: u32::try_from(geometry.areas.len()).unwrap_or(u32::MAX),
+                        x: u16::try_from(x).unwrap_or(u16::MAX),
+                        y: u16::try_from(y).unwrap_or(u16::MAX),
+                        width: u16::try_from(x2 - x + 1).unwrap_or(u16::MAX),
+                        height: u16::try_from(y2 - y + 1).unwrap_or(u16::MAX),
+                    });
+                }
+            }
             if floating && (cell.xoff < 0 || cell.yoff < 0) {
                 continue;
             }
@@ -352,7 +366,7 @@ impl MuxEngine {
             let mut width = x2.min(scale.dsx) - x;
             let mut height = y2.min(scale.dsy) - y;
             let (mut x, mut y) = (x, y);
-            if carves(cell, extent, status) && height > 1 {
+            if carves(&state.layout, *pane, status) && height > 1 {
                 if status == PaneBorderStatus::Top {
                     y += 1;
                 }
@@ -402,7 +416,7 @@ impl MuxEngine {
                 let Some(cell) = state.layout.pane_geometry(*pane) else {
                     continue;
                 };
-                if !carves(cell, extent, status) {
+                if !carves(&state.layout, *pane, status) {
                     continue;
                 }
                 let x = scale.x(at(cell.xoff));
@@ -619,5 +633,108 @@ mod tests {
             (area.pane, area.x, area.y, area.width, area.height),
             (float, 31, 4, 28, 6)
         );
+    }
+
+    fn float_scene(name: &str) -> (MuxEngine, ExecutionContext, WindowId, PaneId) {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", name, "-x", "80", "-y", "23"]),
+            )
+            .unwrap();
+        let window = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-pane", &["-x", "30", "-y", "8", "-X", "10", "-Y", "3"]),
+            )
+            .unwrap();
+        let float = context.pane.unwrap();
+        (engine, context, window, float)
+    }
+
+    #[test]
+    fn panes_mode_blanks_each_float_frame_before_the_float_is_drawn() {
+        let (engine, _, window, float) = float_scene("dc");
+        let geometry = engine.panes_mode_geometry(window, 80, 23).unwrap();
+        assert_eq!(geometry.areas.len(), 3);
+        assert_eq!(geometry.areas[2].pane, float);
+        assert_eq!(
+            geometry.clears,
+            vec![PanesModeClear {
+                before: 2,
+                x: 10,
+                y: 3,
+                width: 30,
+                height: 8,
+            }]
+        );
+    }
+
+    #[test]
+    fn panes_mode_blanks_a_float_pushed_past_the_left_and_top_edges_without_drawing_it() {
+        let (mut engine, mut context, window, float) = float_scene("de");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "move-pane",
+                    &["-t", &float.to_string(), "-L", "15", "-U", "6"],
+                ),
+            )
+            .unwrap();
+        let geometry = engine.panes_mode_geometry(window, 80, 23).unwrap();
+        assert!(geometry.areas.iter().all(|area| area.pane != float));
+        assert_eq!(
+            geometry.clears,
+            vec![PanesModeClear {
+                before: 2,
+                x: 0,
+                y: 0,
+                width: 25,
+                height: 5,
+            }]
+        );
+    }
+
+    #[test]
+    fn panes_mode_carves_a_status_line_only_for_layout_edge_cells() {
+        let float_rows = |split: bool| {
+            let mut engine = MuxEngine::default();
+            let mut context = ExecutionContext::default();
+            for (name, args) in [
+                ("new-session", &["-s", "ds", "-x", "80", "-y", "23"][..]),
+                ("set-option", &["-g", "pane-border-status", "top"][..]),
+            ] {
+                engine.execute(&mut context, &command(name, args)).unwrap();
+            }
+            let window = context.window.unwrap();
+            if split {
+                engine
+                    .execute(&mut context, &command("split-window", &["-h"]))
+                    .unwrap();
+            }
+            engine
+                .execute(
+                    &mut context,
+                    &command("new-pane", &["-x", "30", "-y", "8", "-X", "10", "-Y", "3"]),
+                )
+                .unwrap();
+            let float = context.pane.unwrap();
+            let geometry = engine.panes_mode_geometry(window, 80, 23).unwrap();
+            let area = geometry
+                .areas
+                .iter()
+                .find(|area| area.pane == float)
+                .unwrap();
+            (area.y, area.height)
+        };
+        assert_eq!(float_rows(true), (5, 5), "a float beside left-right tiles");
+        assert_eq!(float_rows(false), (4, 6), "a float under a top-bottom root");
     }
 }

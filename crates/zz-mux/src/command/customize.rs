@@ -1,11 +1,11 @@
 use std::fmt::Write as _;
 
-use super::mode_prompt::{ModeKey, ModeMouseKey, ModePrompt, PromptOutcome};
+use super::mode_prompt::{ModeKey, ModeMouseKey, ModePrompt, PromptHistories, PromptOutcome};
 use super::*;
 use crate::tmux_option_metadata::TmuxOptionKind;
 use zz_protocol::{
     ChooseTreeItem, ChooseTreeState, ChooseTreeTarget, ChooserPresentation, ChooserPreview,
-    ChooserPreviewSize, ChooserRow,
+    ChooserPreviewSize, ChooserRow, CommandPromptType,
 };
 
 const CUSTOMIZE_COLOUR_FLAG_OPTIONS: &[&str] = &[
@@ -196,6 +196,11 @@ impl ModePromptOptions {
     fn single(&self, label: impl Into<String>) -> ModePrompt {
         ModePrompt::single(label).with_status_keys(self.vi)
     }
+
+    fn search(&self, label: impl Into<String>, input: &str) -> ModePrompt {
+        self.prompt(label, input)
+            .with_history_type(CommandPromptType::Search)
+    }
 }
 
 pub struct CustomizeResult {
@@ -204,6 +209,8 @@ pub struct CustomizeResult {
     pub menu: Option<CustomizeMenu>,
     pub edit: Option<CustomizeEdit>,
     pub stop_on_error: bool,
+    pub message: Option<String>,
+    pub remembered: Option<(CommandPromptType, String)>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -335,6 +342,13 @@ pub fn customize_menu_feed(outside: bool, index: usize) -> Option<&'static str> 
 }
 
 impl CustomizeResult {
+    fn message(message: String) -> Self {
+        Self {
+            message: Some(message),
+            ..Self::stay()
+        }
+    }
+
     const fn stay() -> Self {
         Self {
             close: false,
@@ -342,6 +356,8 @@ impl CustomizeResult {
             menu: None,
             edit: None,
             stop_on_error: false,
+            message: None,
+            remembered: None,
         }
     }
 }
@@ -1651,6 +1667,7 @@ impl MuxEngine {
         pane: PaneId,
         mode: &mut CustomizeMode,
         name: &str,
+        history: PromptHistories<'_>,
         expand: &mut CustomizeExpand<'_>,
     ) -> CustomizeResult {
         let key = ModeKey::parse(name);
@@ -1661,13 +1678,17 @@ impl MuxEngine {
                 menu: None,
                 edit: None,
                 stop_on_error: false,
+                message: None,
+                remembered: None,
             };
         };
         if let Some((prompt, _)) = &mut mode.prompt {
-            let outcome = prompt.key(key);
+            let outcome = prompt.key_with_history(key, history.of(prompt.history_type()));
+            let mut remembered = None;
             let (value, purpose) = match outcome {
                 PromptOutcome::Done => {
                     let value = prompt.input();
+                    remembered = prompt.remembered();
                     (Some(value), mode.prompt.take().map(|(_, purpose)| purpose))
                 }
                 PromptOutcome::Cancelled => (None, mode.prompt.take().map(|(_, purpose)| purpose)),
@@ -1680,7 +1701,9 @@ impl MuxEngine {
             let Some(purpose) = purpose else {
                 return CustomizeResult::stay();
             };
-            return self.customize_answer(pane, mode, purpose, value, expand);
+            let mut result = self.customize_answer(pane, mode, purpose, value, expand);
+            result.remembered = remembered;
+            return result;
         }
         if mode.help {
             mode.help = false;
@@ -1725,6 +1748,8 @@ impl MuxEngine {
                 menu: None,
                 edit: None,
                 stop_on_error: false,
+                message: None,
+                remembered: None,
             };
         };
         let columns = self.customize_screen_columns(pane);
@@ -1794,13 +1819,15 @@ impl MuxEngine {
                 menu: None,
                 edit: None,
                 stop_on_error: false,
+                message: None,
+                remembered: None,
             };
         };
         if line >= size {
             return CustomizeResult::stay();
         }
         mode.current = line;
-        self.customize_key(pane, mode, name, expand)
+        self.customize_key(pane, mode, name, PromptHistories::default(), expand)
     }
 
     fn customize_menu_result(
@@ -1827,6 +1854,8 @@ impl MuxEngine {
             }),
             edit: None,
             stop_on_error: false,
+            message: None,
+            remembered: None,
         }
     }
 
@@ -1847,6 +1876,8 @@ impl MuxEngine {
                 menu: None,
                 edit: None,
                 stop_on_error: false,
+                message: None,
+                remembered: None,
             };
         }
         let mut key = key;
@@ -1869,6 +1900,8 @@ impl MuxEngine {
                     menu: None,
                     edit: None,
                     stop_on_error: false,
+                    message: None,
+                    remembered: None,
                 };
             }
             ModeKey::Char('e') => {
@@ -1994,7 +2027,7 @@ impl MuxEngine {
             }
             ModeKey::Char('?' | '/') | ModeKey::Ctrl('s') => {
                 mode.prompt = Some((
-                    self.customize_prompt_options(pane).prompt("(search) ", ""),
+                    self.customize_prompt_options(pane).search("(search) ", ""),
                     PromptPurpose::Search,
                 ));
             }
@@ -2005,7 +2038,7 @@ impl MuxEngine {
                 let input = mode.filter.clone().unwrap_or_default();
                 mode.prompt = Some((
                     self.customize_prompt_options(pane)
-                        .prompt("(filter) ", &input),
+                        .search("(filter) ", &input),
                     PromptPurpose::Filter,
                 ));
             }
@@ -2216,6 +2249,8 @@ impl MuxEngine {
             menu: None,
             edit: None,
             stop_on_error: false,
+            message: None,
+            remembered: None,
         }
     }
 
@@ -2667,13 +2702,7 @@ impl MuxEngine {
                     return CustomizeResult::stay();
                 };
                 let Some(new_key) = customize_array_key(&new_key) else {
-                    return self.customize_commands(
-                        pane,
-                        mode,
-                        vec![customize_message(&format!("Bad array key: {new_key}"))],
-                        tag,
-                        expand,
-                    );
+                    return CustomizeResult::message(format!("Bad array key: {new_key}"));
                 };
                 let values = self.customize_array_entries(target, &name);
                 if values.iter().any(|(key, _)| *key == new_key) {
@@ -2714,22 +2743,28 @@ impl MuxEngine {
                 let Some(value) = value.filter(|value| !value.is_empty()) else {
                     return CustomizeResult::stay();
                 };
-                let commands = customize_add_option(&value, target, hook);
-                self.customize_commands(pane, mode, commands, tag, expand)
+                match customize_add_option(&value, target, hook) {
+                    Ok(command) => self.customize_commands(pane, mode, vec![command], tag, expand),
+                    Err(message) => CustomizeResult::message(message),
+                }
             }
             PromptPurpose::AddEnvironment { session } => {
                 let Some(value) = value.filter(|value| !value.is_empty()) else {
                     return CustomizeResult::stay();
                 };
-                let commands = customize_add_environment(&value, session);
-                self.customize_commands(pane, mode, commands, tag, expand)
+                match customize_add_environment(&value, session) {
+                    Ok(command) => self.customize_commands(pane, mode, vec![command], tag, expand),
+                    Err(message) => CustomizeResult::message(message),
+                }
             }
             PromptPurpose::AddKey { table } => {
                 let Some(value) = value.filter(|value| !value.is_empty()) else {
                     return CustomizeResult::stay();
                 };
-                let commands = customize_add_key(&value, &table);
-                self.customize_commands(pane, mode, commands, tag, expand)
+                match customize_add_key(&value, &table) {
+                    Ok(command) => self.customize_commands(pane, mode, vec![command], tag, expand),
+                    Err(message) => CustomizeResult::message(message),
+                }
             }
             PromptPurpose::Command { table, key } => {
                 let Some(command) = value.filter(|value| !value.is_empty()) else {
@@ -3094,10 +3129,6 @@ fn customize_array_key(key: &str) -> Option<String> {
     key.parse::<u32>().ok().map(|index| index.to_string())
 }
 
-fn customize_message(text: &str) -> CommandInvocation {
-    CommandInvocation::new("display-message", ["-l".to_owned(), text.to_owned()])
-}
-
 fn customize_split_pair(value: &str) -> Option<(&str, &str)> {
     let end = value.find([' ', '\t'])?;
     let rest = value[end..].trim_start_matches([' ', '\t']);
@@ -3108,50 +3139,51 @@ fn customize_add_option(
     value: &str,
     target: TmuxOptionTarget,
     hook: bool,
-) -> Vec<CommandInvocation> {
+) -> Result<CommandInvocation, String> {
     let Some((name, value)) = customize_split_pair(value) else {
-        return vec![customize_message("User option must be @name value")];
+        return Err("User option must be @name value".to_owned());
     };
     if !name.starts_with('@') || name.contains('[') {
-        return vec![customize_message(&format!(
+        return Err(format!(
             "User {} name must start with @",
             if hook { "hook" } else { "option" }
-        ))];
+        ));
     }
     if !hook {
-        return vec![customize_set_command(name, target, value)];
+        return Ok(customize_set_command(name, target, value));
     }
     let mut args = customize_target_args(target);
     args.extend([name.to_owned(), value.to_owned()]);
-    vec![CommandInvocation::new("set-hook", args)]
+    Ok(CommandInvocation::new("set-hook", args))
 }
 
-fn customize_add_environment(value: &str, session: Option<SessionId>) -> Vec<CommandInvocation> {
+fn customize_add_environment(
+    value: &str,
+    session: Option<SessionId>,
+) -> Result<CommandInvocation, String> {
     let mut args = customize_environment_target(session);
     if let Some(name) = value.strip_prefix('-') {
         if name.is_empty() || name.contains('=') {
-            return vec![customize_message(&format!(
-                "Bad environment variable: {value}"
-            ))];
+            return Err(format!("Bad environment variable: {value}"));
         }
         args.extend(["-r".to_owned(), name.to_owned()]);
     } else {
         let Some((name, value)) = value.split_once('=').filter(|(name, _)| !name.is_empty()) else {
-            return vec![customize_message("Environment variable must be NAME=value")];
+            return Err("Environment variable must be NAME=value".to_owned());
         };
         args.extend([name.to_owned(), value.to_owned()]);
     }
-    vec![CommandInvocation::new("set-environment", args)]
+    Ok(CommandInvocation::new("set-environment", args))
 }
 
-fn customize_add_key(value: &str, table: &str) -> Vec<CommandInvocation> {
+fn customize_add_key(value: &str, table: &str) -> Result<CommandInvocation, String> {
     let Some((key, command)) = customize_split_pair(value) else {
-        return vec![customize_message("Key binding must be key command")];
+        return Err("Key binding must be key command".to_owned());
     };
     if parse_tmux_key_details(key).is_none() {
-        return vec![customize_message(&format!("Unknown key: {key}"))];
+        return Err(format!("Unknown key: {key}"));
     }
-    vec![CommandInvocation::new(
+    Ok(CommandInvocation::new(
         "bind-key",
         [
             "-T".to_owned(),
@@ -3159,7 +3191,7 @@ fn customize_add_key(value: &str, table: &str) -> Vec<CommandInvocation> {
             key.to_owned(),
             command.to_owned(),
         ],
-    )]
+    ))
 }
 
 fn customize_environment_target(session: Option<SessionId>) -> Vec<String> {
@@ -3353,7 +3385,7 @@ mod tests {
         key: &str,
     ) -> bool {
         let mut expand = customize_expand;
-        let result = engine.customize_key(pane, mode, key, &mut expand);
+        let result = engine.customize_key(pane, mode, key, PromptHistories::default(), &mut expand);
         for command in &result.commands {
             engine.execute(context, command).unwrap();
         }
@@ -3655,19 +3687,19 @@ mod tests {
         pane: PaneId,
         mode: &mut CustomizeMode,
         key: &str,
-    ) -> Vec<CommandInvocation> {
+    ) -> CustomizeResult {
         let mut expand = customize_expand;
-        let result = engine.customize_key(pane, mode, key, &mut expand);
+        let result = engine.customize_key(pane, mode, key, PromptHistories::default(), &mut expand);
         for command in &result.commands {
             if engine.execute(context, command).is_err() && result.stop_on_error {
                 break;
             }
         }
         engine.customize_finish(pane, mode, &mut expand);
-        result.commands
+        result
     }
 
-    fn rename_hook_key(new_key: &str) -> (String, Vec<CommandInvocation>) {
+    fn rename_hook_key(new_key: &str) -> (String, CustomizeResult) {
         let (mut engine, mut context, pane) = engine_with_session();
         run(
             &mut engine,
@@ -3683,7 +3715,7 @@ mod tests {
         press(&mut engine, &mut context, pane, &mut mode, "a");
         press(&mut engine, &mut context, pane, &mut mode, "C-u");
         type_text(&mut engine, &mut context, pane, &mut mode, new_key);
-        let commands = press_lenient(&mut engine, &mut context, pane, &mut mode, "Enter");
+        let result = press_lenient(&mut engine, &mut context, pane, &mut mode, "Enter");
         (
             output(
                 &mut engine,
@@ -3691,43 +3723,129 @@ mod tests {
                 "show-hooks",
                 &["-g", "after-new-window"],
             ),
-            commands,
+            result,
         )
     }
 
     #[test]
     fn customize_array_key_rename_keeps_the_entry_when_the_new_key_is_invalid() {
-        let (hooks, commands) = rename_hook_key("4294967296");
+        let (hooks, result) = rename_hook_key("4294967296");
         assert_eq!(hooks, "after-new-window[0] display-message kept");
-        assert_eq!(
-            commands,
-            [CommandInvocation::new(
-                "display-message",
-                ["-l", "Bad array key: 4294967296"]
-            )]
-        );
+        assert!(result.commands.is_empty(), "{:?}", result.commands);
+        assert_eq!(result.message.as_deref(), Some("Bad array key: 4294967296"));
     }
 
     #[test]
     fn customize_array_key_rename_sees_an_occupied_key_in_any_spelling() {
-        let (hooks, commands) = rename_hook_key("00");
+        let (hooks, result) = rename_hook_key("00");
         assert_eq!(hooks, "after-new-window[0] display-message kept");
-        assert!(commands.is_empty(), "{commands:?}");
+        assert!(result.commands.is_empty(), "{:?}", result.commands);
+        assert_eq!(result.message, None);
         let (hooks, _) = rename_hook_key("007");
         assert_eq!(hooks, "after-new-window[7] display-message kept");
     }
 
     #[test]
     fn customize_array_key_rename_refuses_a_key_the_command_line_cannot_spell() {
-        let (hooks, commands) = rename_hook_key("a]b");
+        let (hooks, result) = rename_hook_key("a]b");
         assert_eq!(hooks, "after-new-window[0] display-message kept");
+        assert!(result.commands.is_empty(), "{:?}", result.commands);
+        assert_eq!(result.message.as_deref(), Some("Bad array key: a]b"));
+    }
+
+    #[test]
+    fn customize_prompts_walk_the_shared_history_of_their_type() {
+        let (engine, _, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        let mut expand = customize_expand;
+        let command = ["set -g @x 1".to_owned()];
+        let search = ["status".to_owned()];
+        let history = PromptHistories {
+            command: &command,
+            search: &search,
+        };
+        engine.customize_key(pane, &mut mode, "/", history, &mut expand);
+        engine.customize_key(pane, &mut mode, "Up", history, &mut expand);
         assert_eq!(
-            commands,
-            [CommandInvocation::new(
-                "display-message",
-                ["-l", "Bad array key: a]b"]
-            )]
+            mode.prompt.as_ref().map(|(prompt, _)| prompt.input()),
+            Some("status".to_owned())
         );
+        let result = engine.customize_key(pane, &mut mode, "Enter", history, &mut expand);
+        assert!(mode.prompt.is_none());
+        assert_eq!(
+            result.remembered,
+            Some((CommandPromptType::Search, "status".to_owned()))
+        );
+        engine.customize_key(pane, &mut mode, "f", history, &mut expand);
+        engine.customize_key(pane, &mut mode, "C-p", history, &mut expand);
+        assert_eq!(
+            mode.prompt.as_ref().map(|(prompt, _)| prompt.input()),
+            Some("status".to_owned()),
+            "the filter prompt is a search prompt too"
+        );
+        let result = engine.customize_key(pane, &mut mode, "Escape", history, &mut expand);
+        assert_eq!(result.remembered, None);
+    }
+
+    #[test]
+    fn customize_add_prompt_errors_are_messages_not_commands() {
+        let (engine, _, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        let mut expand = customize_expand;
+        for (purpose, value, message) in [
+            (
+                PromptPurpose::AddOption {
+                    target: TmuxOptionTarget::GlobalSession,
+                    hook: false,
+                },
+                "mine",
+                "User option must be @name value",
+            ),
+            (
+                PromptPurpose::AddOption {
+                    target: TmuxOptionTarget::GlobalSession,
+                    hook: true,
+                },
+                "mine value",
+                "User hook name must start with @",
+            ),
+            (
+                PromptPurpose::AddEnvironment { session: None },
+                "-",
+                "Bad environment variable: -",
+            ),
+            (
+                PromptPurpose::AddEnvironment { session: None },
+                "NOVALUE",
+                "Environment variable must be NAME=value",
+            ),
+            (
+                PromptPurpose::AddKey {
+                    table: "root".to_owned(),
+                },
+                "C-a",
+                "Key binding must be key command",
+            ),
+            (
+                PromptPurpose::AddKey {
+                    table: "root".to_owned(),
+                },
+                "Nope display-message x",
+                "Unknown key: Nope",
+            ),
+        ] {
+            let result = engine.customize_answer(
+                pane,
+                &mut mode,
+                purpose,
+                Some(value.to_owned()),
+                &mut expand,
+            );
+            assert!(result.commands.is_empty(), "{value}: {:?}", result.commands);
+            assert_eq!(result.message.as_deref(), Some(message), "{value}");
+        }
     }
 
     #[test]

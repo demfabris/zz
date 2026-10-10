@@ -917,6 +917,13 @@ switch modes). Their `prompt_style` is now that session's `message-style` (or
 a fixed default. The raw TUI sends the cursor's DECSCUSR and OSC 12 while a chooser search, filter
 or kill prompt, a customize prompt or the switch prompt is up.
 
+v108 also carries display-panes float blanking (catch-up item `fix.followups-3`).
+`PaneMode::Panes` appends `clears: Vec<PanesModeClear>` (`before`, `x`, `y`, `width`, `height`):
+each float's frame clipped to the mode's screen and the index of the area it comes before. The raw
+TUI paints it blank before it draws that area, as `window_panes_clear_floating_area` does, so a
+float pushed past the window's left or top edge (which has a clear and no area) and a float in the
+scaled `display-panes -Z` view no longer show the tiled panes under them.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

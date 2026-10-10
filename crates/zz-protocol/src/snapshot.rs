@@ -540,6 +540,8 @@ pub enum PaneMode {
         border_style: String,
         copy: bool,
         format: bool,
+        #[serde(default)]
+        clears: Vec<PanesModeClear>,
     },
 }
 
@@ -574,6 +576,17 @@ pub struct PanesModeBorder {
     pub x: u16,
     pub y: u16,
     pub cell: u8,
+}
+
+/// `window_panes_clear_floating_area`: the blank a float's frame paints over
+/// whatever is under it, before `areas[before]` is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PanesModeClear {
+    pub before: u32,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

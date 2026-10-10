@@ -616,9 +616,7 @@ impl MuxEngine {
                     .map(|monitor| monitor.name.clone()),
             );
             for name in names {
-                let is_hook = self.hook_events.contains(&name)
-                    || self.customize_monitor(*target, &name).is_some();
-                if is_hook == hooks && !user.contains(&name) {
+                if !user.contains(&name) {
                     user.push(name);
                 }
             }
@@ -639,6 +637,13 @@ impl MuxEngine {
         let mut count = 0;
         for (name, metadata) in names {
             let (owner, value, entries) = self.customize_option_value(targets, &name, metadata);
+            if metadata.is_none()
+                && (self.hook_events.contains(&name)
+                    || self.customize_monitor(owner, &name).is_some())
+                    != hooks
+            {
+                continue;
+            }
             let global = matches!(
                 owner,
                 TmuxOptionTarget::Server
@@ -846,6 +851,61 @@ impl MuxEngine {
                 .unwrap_or_default()
         });
         (owner, value, entries)
+    }
+
+    fn customize_option_chain(&self, target: TmuxOptionTarget) -> Vec<TmuxOptionTarget> {
+        let window = |pane| {
+            self.state
+                .window_for_pane(pane)
+                .map(TmuxOptionTarget::Window)
+        };
+        match target {
+            TmuxOptionTarget::Pane(pane) => [Some(target), window(pane)]
+                .into_iter()
+                .flatten()
+                .chain([TmuxOptionTarget::GlobalWindow])
+                .collect(),
+            TmuxOptionTarget::Window(_) => vec![target, TmuxOptionTarget::GlobalWindow],
+            TmuxOptionTarget::Session(_) => vec![target, TmuxOptionTarget::GlobalSession],
+            _ => vec![target],
+        }
+    }
+
+    fn customize_holds(&self, name: &str, target: TmuxOptionTarget) -> bool {
+        if self.customize_monitor(target, name).is_some()
+            || self.user_option_at_target(target, name).is_some()
+        {
+            return true;
+        }
+        let Some(option) = tmux_options().find(|option| option.name == name) else {
+            return false;
+        };
+        if tmux_option_is_hook(name) {
+            return self.hook_array(target, name).is_some();
+        }
+        if option.is_array {
+            return self.array_option(target, name).is_some();
+        }
+        self.tmux_option_readback(option, target, false)
+            .ok()
+            .flatten()
+            .is_some()
+    }
+
+    fn customize_remove_option(
+        &self,
+        name: &str,
+        target: TmuxOptionTarget,
+    ) -> Vec<CommandInvocation> {
+        let mut commands = Vec::new();
+        if target != TmuxOptionTarget::Server && self.customize_monitor(target, name).is_some() {
+            let mut args = vec!["-u".to_owned()];
+            args.extend(customize_target_args(target));
+            args.extend(["-B".to_owned(), name.to_owned()]);
+            commands.push(CommandInvocation::new("set-hook", args));
+        }
+        commands.push(customize_unset_command(name, target));
+        commands
     }
 
     fn customize_monitor(
@@ -2597,6 +2657,15 @@ impl MuxEngine {
                 let Some(new_key) = value.filter(|value| !value.is_empty()) else {
                     return CustomizeResult::stay();
                 };
+                let Some(new_key) = customize_array_key(&new_key) else {
+                    return self.customize_commands(
+                        pane,
+                        mode,
+                        vec![customize_message(&format!("Bad array key: {new_key}"))],
+                        tag,
+                        expand,
+                    );
+                };
                 let values = self.customize_array_entries(target, &name);
                 if values.iter().any(|(key, _)| *key == new_key) {
                     return CustomizeResult::stay();
@@ -2751,10 +2820,17 @@ impl MuxEngine {
                 if !reset && array_key.is_some() && is_current {
                     mode.up(lines.len(), false);
                 }
-                let full = array_key
-                    .as_ref()
-                    .map_or_else(|| name.clone(), |key| format!("{name}[{key}]"));
-                vec![customize_unset_command(&full, *target)]
+                if let Some(key) = array_key {
+                    return vec![customize_unset_command(&format!("{name}[{key}]"), *target)];
+                }
+                if !reset {
+                    return self.customize_remove_option(name, *target);
+                }
+                self.customize_option_chain(*target)
+                    .into_iter()
+                    .filter(|target| self.customize_holds(name, *target))
+                    .flat_map(|target| self.customize_remove_option(name, target))
+                    .collect()
             }
             Item::Key { table, key } | Item::KeyField { table, key } => {
                 let Some(binding) = self.keys.get(table, key) else {
@@ -2829,7 +2905,14 @@ fn customize_option_changed(
                 .map(|(_, value)| value.as_str());
             return default != Some(value);
         }
-        return entries != defaults.as_slice();
+        let printed = |entries: &[(String, String)]| {
+            entries
+                .iter()
+                .map(|(_, value)| value.as_str())
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        return printed(entries) != printed(&defaults);
     }
     customize_default_value(option).is_none_or(|default| default != value)
 }
@@ -2988,6 +3071,13 @@ fn customize_target_args(target: TmuxOptionTarget) -> Vec<String> {
         TmuxOptionTarget::Window(id) => vec!["-w".to_owned(), "-t".to_owned(), id.to_string()],
         TmuxOptionTarget::Pane(id) => vec!["-p".to_owned(), "-t".to_owned(), id.to_string()],
     }
+}
+
+fn customize_array_key(key: &str) -> Option<String> {
+    if !key.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Some(key.to_owned());
+    }
+    key.parse::<u32>().ok().map(|index| index.to_string())
 }
 
 fn customize_message(text: &str) -> CommandInvocation {
@@ -3543,6 +3633,200 @@ mod tests {
             ),
             "after-new-window"
         );
+    }
+
+    fn press_lenient(
+        engine: &mut MuxEngine,
+        context: &mut ExecutionContext,
+        pane: PaneId,
+        mode: &mut CustomizeMode,
+        key: &str,
+    ) -> Vec<CommandInvocation> {
+        let mut expand = customize_expand;
+        let result = engine.customize_key(pane, mode, key, &mut expand);
+        for command in &result.commands {
+            let _ = engine.execute(context, command);
+        }
+        engine.customize_finish(pane, mode, &mut expand);
+        result.commands
+    }
+
+    fn rename_hook_key(new_key: &str) -> (String, Vec<CommandInvocation>) {
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &["-g", "after-new-window", "display-message kept"],
+        );
+        let mut mode = CustomizeMode::default();
+        mode.expanded.insert("options:3".to_owned());
+        mode.expanded
+            .insert("options:3/after-new-window".to_owned());
+        select(&engine, pane, &mut mode, "after-new-window[0]");
+        press(&mut engine, &mut context, pane, &mut mode, "a");
+        press(&mut engine, &mut context, pane, &mut mode, "C-u");
+        type_text(&mut engine, &mut context, pane, &mut mode, new_key);
+        let commands = press_lenient(&mut engine, &mut context, pane, &mut mode, "Enter");
+        (
+            output(
+                &mut engine,
+                &mut context,
+                "show-hooks",
+                &["-g", "after-new-window"],
+            ),
+            commands,
+        )
+    }
+
+    #[test]
+    fn customize_array_key_rename_keeps_the_entry_when_the_new_key_is_invalid() {
+        let (hooks, commands) = rename_hook_key("4294967296");
+        assert_eq!(hooks, "after-new-window[0] display-message kept");
+        assert_eq!(
+            commands,
+            [CommandInvocation::new(
+                "display-message",
+                ["-l", "Bad array key: 4294967296"]
+            )]
+        );
+    }
+
+    #[test]
+    fn customize_array_key_rename_sees_an_occupied_key_in_any_spelling() {
+        let (hooks, commands) = rename_hook_key("00");
+        assert_eq!(hooks, "after-new-window[0] display-message kept");
+        assert!(commands.is_empty(), "{commands:?}");
+        let (hooks, _) = rename_hook_key("007");
+        assert_eq!(hooks, "after-new-window[7] display-message kept");
+    }
+
+    #[test]
+    fn customize_unset_removes_a_monitor_with_its_option() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &["-g", "-B", "@mon:%*:#{pane_id}"],
+        );
+        let mut mode = CustomizeMode::default();
+        mode.expanded.insert("options:3".to_owned());
+        select(&engine, pane, &mut mode, "@mon");
+        press_lenient(&mut engine, &mut context, pane, &mut mode, "u");
+        press_lenient(&mut engine, &mut context, pane, &mut mode, "y");
+        assert!(engine.format_monitors.is_empty());
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        assert!(!rows.iter().any(|row| row.name == "@mon"));
+    }
+
+    #[test]
+    fn customize_reset_clears_a_hook_at_every_level_it_is_defined() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &["-g", "after-new-window", "display-message global"],
+        );
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &[
+                "-t",
+                "customize",
+                "after-new-window",
+                "display-message local",
+            ],
+        );
+        let mut mode = CustomizeMode::default();
+        mode.expanded.insert("options:3".to_owned());
+        select(&engine, pane, &mut mode, "after-new-window");
+        assert!(matches!(
+            current_row(&engine, pane, &mode).item,
+            Item::Option {
+                target: TmuxOptionTarget::Session(_),
+                ..
+            }
+        ));
+        press_lenient(&mut engine, &mut context, pane, &mut mode, "d");
+        press_lenient(&mut engine, &mut context, pane, &mut mode, "y");
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-hooks",
+                &["-g", "after-new-window"]
+            ),
+            "after-new-window"
+        );
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-hooks",
+                &["-t", "customize", "after-new-window"]
+            ),
+            ""
+        );
+    }
+
+    #[test]
+    fn customize_classifies_a_user_option_by_its_effective_entry() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &["-g", "-B", "@mon:%*:#{pane_id}"],
+        );
+        run(
+            &mut engine,
+            &mut context,
+            "set-option",
+            &["-t", "customize", "@mon", "plain"],
+        );
+        let mut mode = CustomizeMode::default();
+        for section in 0..5 {
+            mode.expanded.insert(format!("options:{section}"));
+        }
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let sections = rows
+            .iter()
+            .filter(|row| row.name == "@mon")
+            .map(|row| rows[row.parent.unwrap()].name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(sections, ["Session Options"]);
+    }
+
+    #[test]
+    fn customize_changed_only_compares_an_arrays_printed_values() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        let values =
+            engine.customize_array_entries(TmuxOptionTarget::GlobalSession, "update-environment");
+        let (last_key, last_value) = values.last().cloned().unwrap();
+        run(
+            &mut engine,
+            &mut context,
+            "set-option",
+            &["-g", "update-environment[100]", &last_value],
+        );
+        run(
+            &mut engine,
+            &mut context,
+            "set-option",
+            &["-gu", &format!("update-environment[{last_key}]")],
+        );
+        let mode = CustomizeMode {
+            changed_only: true,
+            ..CustomizeMode::default()
+        };
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        assert!(!rows.iter().any(|row| row.name == "update-environment"));
     }
 
     #[test]

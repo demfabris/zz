@@ -55,7 +55,8 @@ run() {
     local kind="$1" seconds="$2" log="$out/$1.log" env_json launch elapsed=0
     shift 2
     env_json="$(python3 -c 'import json, sys; print(json.dumps(dict(arg.split("=", 1) for arg in sys.argv[1:])))' \
-        "ZZ_GPUI_ENDPOINT=$endpoint" "ZZ_GPUI_SESSION=$session" ZZ_GPUI_FRAME_LOG=1 "$@")"
+        "ZZ_GPUI_ENDPOINT=$endpoint" "ZZ_GPUI_SESSION=$session" ZZ_GPUI_FRAME_LOG=1 \
+        ${ZZ_GPUI_GLASS:+"ZZ_GPUI_GLASS=$ZZ_GPUI_GLASS"} "$@")"
     xcrun devicectl device process launch --device "$udid" --terminate-existing --console \
         --environment-variables "$env_json" "$bundle_id" > "$log" 2>&1 &
     launch=$!
@@ -68,12 +69,14 @@ run() {
     wait "$launch" 2>/dev/null || true
 }
 
-run swipe $((15 + cycles * 14 / 10)) "ZZ_GPUI_BENCH=swipe:$cycles"
-run scroll $((15 + cycles * 3)) "ZZ_GPUI_BENCH=scroll:$cycles"
-run idle 25
+kinds=" ${ZZ_BENCH_KINDS:-swipe scroll sheet idle} "
+[[ "$kinds" != *" swipe "* ]] || run swipe $((15 + cycles * 14 / 10)) "ZZ_GPUI_BENCH=swipe:$cycles"
+[[ "$kinds" != *" scroll "* ]] || run scroll $((15 + cycles * 3)) "ZZ_GPUI_BENCH=scroll:$cycles"
+[[ "$kinds" != *" sheet "* ]] || run sheet $((15 + cycles * 3)) "ZZ_GPUI_BENCH=sheet:$cycles"
+[[ "$kinds" != *" idle "* ]] || run idle 25
 
 echo "logs: $out"
-for kind in swipe scroll; do
-    echo "$kind: $(grep -h "frames total" "$out/$kind.log" || echo "no result, see $out/$kind.log")"
+for kind in swipe scroll sheet; do
+    [[ "$kinds" != *" $kind "* ]] || echo "$kind: $(grep -h "frames total" "$out/$kind.log" || echo "no result, see $out/$kind.log")"
 done
-echo "idle: $(grep -h "link:" "$out/idle.log" | tail -2 | tr '\n' ' ')"
+[[ "$kinds" != *" idle "* ]] || echo "idle: $(grep -h "link:" "$out/idle.log" | tail -2 | tr '\n' ' ')"

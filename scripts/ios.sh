@@ -193,7 +193,7 @@ PY
         echo "installed; the phone is locked, so open zz GPUI from the home screen"
         exit 0
     fi
-    launch_env="$(ZZ_GPUI_ENDPOINT="$endpoint" python3 -c 'import json, os; print(json.dumps({key: os.environ[key] for key in ("ZZ_GPUI_ENDPOINT", "ZZ_GPUI_SESSION", "ZZ_GPUI_FRAME_LOG", "ZZ_GPUI_BENCH", "GPUI_FRAME_STATS") if os.environ.get(key)}))')"
+    launch_env="$(ZZ_GPUI_ENDPOINT="$endpoint" python3 -c 'import json, os; print(json.dumps({key: os.environ[key] for key in ("ZZ_GPUI_ENDPOINT", "ZZ_GPUI_SESSION", "ZZ_GPUI_FRAME_LOG", "ZZ_GPUI_BENCH", "ZZ_GPUI_GLASS", "GPUI_FRAME_STATS") if os.environ.get(key)}))')"
     echo "launching on $udid with endpoint $endpoint"
     exec xcrun devicectl device process launch --device "$udid" --terminate-existing --console \
         --environment-variables "$launch_env" "$bundle_id"
@@ -229,7 +229,7 @@ unset SIMCTL_CHILD_ZZ_GPUI_ENDPOINT
 if [[ -n "$endpoint" ]]; then
     export SIMCTL_CHILD_ZZ_GPUI_ENDPOINT="$endpoint"
 fi
-for key in ZZ_GPUI_SESSION ZZ_GPUI_FRAME_LOG ZZ_GPUI_BENCH GPUI_FRAME_STATS; do
+for key in ZZ_GPUI_SESSION ZZ_GPUI_FRAME_LOG ZZ_GPUI_BENCH ZZ_GPUI_GLASS GPUI_FRAME_STATS; do
     unset "SIMCTL_CHILD_$key"
     if [[ -n "${!key:-}" ]]; then
         export "SIMCTL_CHILD_$key=${!key}"

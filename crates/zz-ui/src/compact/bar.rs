@@ -109,8 +109,8 @@ pub fn compact_bar_pill(
         .pr(rems_from_px(12.0))
         .gap(rems_from_px(10.0))
         .rounded(theme.radius)
-        .bg(theme.background.raised(1))
         .control_surface(cx)
+        .surface_fill(theme.background.raised(1), cx)
         .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
         .child(
             div()

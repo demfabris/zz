@@ -291,8 +291,10 @@ every five seconds. `ZZ_GPUI_BENCH=swipe`, `scroll`, `drag`, or `fling` (optiona
 default 16) waits eight seconds after launch and then plays horizontal pager swipes, vertical
 terminal flings, slow 1.5 s terminal drags that hold still before letting go, each followed by a
 fling back, or one terminal fling every 4 s, two toward older output and then three toward newer,
-from the display link. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
-`tmp` directory. Device and simulator launches forward these variables and `ZZ_GPUI_SESSION`;
+from the display link. `ZZ_GPUI_BENCH=sheet` opens the All bindings sheet on attach and flings
+its list down and back, which with `ZZ_GPUI_GLASS` set measures content moving under glass. `GPUI_FRAME_STATS=frames.jsonl` writes gpui's per-frame JSON stats into the app's
+`tmp` directory. `ZZ_GPUI_GLASS=frosted` (or `regular`, `clear`, `bubble`, `smoked`) turns
+floating surfaces into liquid glass. Device and simulator launches forward these variables and `ZZ_GPUI_SESSION`;
 `ZZ_GPUI_CARGO_PROFILE=testflight` builds the device app with line tables for Instruments.
 
 ## Settings

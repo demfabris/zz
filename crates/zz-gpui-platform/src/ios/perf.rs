@@ -218,6 +218,7 @@ enum BenchKind {
     Scroll,
     Drag,
     Fling,
+    Sheet,
 }
 
 struct Bench {
@@ -236,6 +237,7 @@ impl Bench {
             "scroll" => BenchKind::Scroll,
             "drag" => BenchKind::Drag,
             "fling" => BenchKind::Fling,
+            "sheet" => BenchKind::Sheet,
             _ => return None,
         };
         Some(Self {
@@ -254,7 +256,7 @@ impl Bench {
                 Duration::from_millis(160),
                 Duration::ZERO,
             ),
-            BenchKind::Scroll => (
+            BenchKind::Scroll | BenchKind::Sheet => (
                 Duration::from_millis(3000),
                 Duration::from_millis(120),
                 Duration::ZERO,
@@ -289,6 +291,7 @@ impl Bench {
             BenchKind::Scroll | BenchKind::Drag | BenchKind::Fling => {
                 point(px(width * 0.5), px(height * (0.35 + 0.3 * progress)))
             }
+            BenchKind::Sheet => point(px(width * 0.5), px(height * (0.85 - 0.3 * progress))),
         }
     }
 

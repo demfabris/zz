@@ -6,6 +6,7 @@ corpus: none
 # while one that fails to parse reaches the client.
 stage: fixtures/display-menu-action-queue.sh ~/display-menu-action-queue.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_MENU_ACTION_QUEUE
 run-shell 'sh ~/display-menu-action-queue.sh'
 out: show-environment -g DISPLAY_MENU_ACTION_QUEUE

@@ -9,6 +9,7 @@ corpus: none
 # pin session_set_current's last-window move.
 stage: fixtures/chooser-tree-vocabulary.sh ~/chooser-tree-vocabulary.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu CHOOSER_TREE_VOCABULARY
 run-shell 'sh ~/chooser-tree-vocabulary.sh'
 out: show-environment -g CHOOSER_TREE_VOCABULARY

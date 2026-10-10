@@ -13,6 +13,7 @@ shim:
 # that follow.
 stage: ../smoke/fixtures/display-popup-menu-policy.sh ~/display-popup-menu-policy.sh
 stage: ../smoke/fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_MENU_POLICY
 run-shell 'sh ~/display-popup-menu-policy.sh'
 out: show-environment -g DISPLAY_POPUP_MENU_POLICY

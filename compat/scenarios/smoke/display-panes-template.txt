@@ -7,6 +7,7 @@ corpus: none
 # q and the timer, and needs no client. -b is gone.
 stage: fixtures/display-panes-template.sh ~/display-panes-template.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_PANES_TEMPLATE
 run-shell 'sh ~/display-panes-template.sh'
 out: show-environment -g DISPLAY_PANES_TEMPLATE

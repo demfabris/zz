@@ -76,14 +76,14 @@ use zz_mux::{
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
     CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT, DetachScope,
     Execution, ExecutionContext, FormatClient, FormatMonitorScope, FormatMonitorTarget,
-    FormatNeeds, KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine,
-    PaneKind, PaneModeRequest, PaneRuntimeFacts, PanesMode, ParsedConfig, ParsedConfigBytes,
-    RetainedJobEnvironment, SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort,
-    TmuxSortOrder, WindowSize, canonical_command, command_block_body,
-    copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
-    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, legacy_layouts_in, parse_tmux_colour, sanitize_client_output,
-    send_keys_is_read_only_safe, send_keys_target_client, utf8_sanitize,
+    FormatNeeds, KeyDecision, KeyEngine, KeyTables, ModeKey, ModePrompt, MouseEventTarget,
+    MuxEffect, MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts, PanesMode, ParsedConfig,
+    ParsedConfigBytes, PromptOutcome, RetainedJobEnvironment, SourceStream, StatusHooks,
+    SwitchAction, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command,
+    command_block_body, copy_mode_action_is_read_only_safe, customize_menu_feed,
+    expand_format_bytes, expand_format_values, expand_status, format_command, format_true,
+    hook_format_variables, if_shell_truthy, legacy_layouts_in, parse_tmux_colour,
+    sanitize_client_output, send_keys_is_read_only_safe, send_keys_target_client, utf8_sanitize,
     validate_static_command_chain,
 };
 #[cfg(windows)]
@@ -144,7 +144,8 @@ use crate::{
     configure_shell_job_environment,
     keys::{
         ChooserPromptEdit, choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer,
-        chooser_prompt_edit, client_key_inputs, input_key_name, overlay_key_action, send_tokens,
+        chooser_prompt_edit, chooser_search_edit_key, client_key_inputs, input_key_name,
+        overlay_key_action, send_tokens,
     },
     shell_process,
     status::{
@@ -16298,7 +16299,7 @@ impl Shared {
     }
 
     fn publish_background_command_error(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         context: &ExecutionContext,
         error: &DaemonError,
@@ -16309,6 +16310,10 @@ impl Shared {
             && self.read_client(client, |c| c.and_then(|c| c.kind)) == Some(ClientKind::Interactive)
         {
             uppercase_first(&mut message);
+            if client_attached_session(&self.inner.lock(), client).is_some() {
+                self.publish_status_message(client, context, message);
+                return;
+            }
         }
         push_server_message(&mut self.inner.lock(), message.clone());
         self.publish_to_client(
@@ -16343,8 +16348,9 @@ impl Shared {
                     .client_mut(client)
                     .is_some_and(|client| std::mem::take(&mut client.message_ignore_keys));
             }
+            let freeze = !inner.client(client).is_some_and(|c| c.native_chooser);
             let (retired, deadline) =
-                arm_client_message(&mut inner, client, message_id, duration_ms, true);
+                arm_client_message(&mut inner, client, message_id, duration_ms, freeze);
             let publication = OwnedClientMessagePublication {
                 client,
                 pane: context.pane,
@@ -24014,14 +24020,29 @@ impl Shared {
                             .prompt
                             .as_ref()
                             .map_or(CommandPromptType::Command, ChooserPrompt::history_type);
-                        if matches!(edit, ChooserPromptEdit::Accept) {
-                            remembered =
-                                chooser.prompt.as_ref().and_then(ChooserPrompt::remembered);
-                        }
-                        chooser.edit_command_prompt(edit, prompt_history(&inner, prompt_type))
+                        let (vi, separators) = inner.engine.prompt_key_options(attached_session);
+                        chooser.edit_command_prompt(
+                            &edit,
+                            prompt_history(&inner, prompt_type),
+                            (vi, &separators),
+                            &mut remembered,
+                        )
                     }
                 }
             } else if dismissed_help && matches!(action, ChooseTreeAction::Key(_)) {
+                ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
+            } else if let Some(key) = match &action {
+                ChooseTreeAction::Key(input) if chooser.search.is_some() => {
+                    chooser_search_edit_key(input)
+                }
+                _ => None,
+            } {
+                let (_, separators) = inner.engine.prompt_key_options(attached_session);
+                chooser.edit_search(
+                    key,
+                    prompt_history(&inner, CommandPromptType::Search),
+                    &separators,
+                );
                 ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
             } else {
                 let action = match action {
@@ -24371,6 +24392,7 @@ impl Shared {
                 }
                 _ => None,
             };
+            let mut search_edit = None;
             let swallowed_help = chooser.help
                 && prompt_edit.is_none()
                 && matches!(action, ChooseBufferAction::Key(_));
@@ -24421,6 +24443,11 @@ impl Shared {
                         choose_buffer_key_action(&inner.engine.keys, &input, searching)
                     {
                         action
+                    } else if let Some(key) =
+                        searching.then(|| chooser_search_edit_key(&input)).flatten()
+                    {
+                        search_edit = Some(key);
+                        ChooseBufferAction::Key(input)
                     } else {
                         inner.client_entry(client).choose_buffer.replace(chooser);
                         return Ok(());
@@ -24441,15 +24468,27 @@ impl Shared {
             } else {
                 let result = if swallowed_help {
                     ChooseBufferResult::Rebuild
+                } else if let Some(key) = search_edit {
+                    let (_, separators) = inner.engine.prompt_key_options(attached_session);
+                    chooser.edit_search(
+                        &inner.paste_buffers,
+                        key,
+                        prompt_history(&inner, CommandPromptType::Search),
+                        &separators,
+                    );
+                    ChooseBufferResult::Rebuild
                 } else if let Some(edit) = prompt_edit {
-                    if matches!(edit, ChooserPromptEdit::Accept) {
-                        remembered = chooser.prompt.as_ref().and_then(ChooserPrompt::remembered);
-                    }
                     let prompt_type = chooser
                         .prompt
                         .as_ref()
                         .map_or(CommandPromptType::Search, ChooserPrompt::history_type);
-                    chooser.edit_prompt(edit, prompt_history(&inner, prompt_type))
+                    let (vi, separators) = inner.engine.prompt_key_options(attached_session);
+                    chooser.edit_prompt(
+                        &edit,
+                        prompt_history(&inner, prompt_type),
+                        (vi, &separators),
+                        &mut remembered,
+                    )
                 } else {
                     if matches!(action, ChooseBufferAction::SearchAccept) {
                         remembered = chooser
@@ -36141,6 +36180,7 @@ struct ChooseBufferSession {
     names: Vec<String>,
     selected: Option<String>,
     search: Option<ChooseBufferSearchState>,
+    search_editor: Option<ModePrompt>,
     last_search: Option<ChooseBufferSearchState>,
     rendered: ChooseBufferState,
     presentation_rows: Vec<ChooserRow>,
@@ -36183,6 +36223,7 @@ impl ChooseBufferSession {
             names: Vec::new(),
             selected: None,
             search: None,
+            search_editor: None,
             last_search: None,
             rendered: ChooseBufferState {
                 items: Vec::new(),
@@ -36332,27 +36373,44 @@ impl ChooseBufferSession {
         );
     }
 
-    fn edit_prompt(&mut self, edit: ChooserPromptEdit, history: &[String]) -> ChooseBufferResult {
+    fn edit_search(
+        &mut self,
+        buffers: &[PasteBuffer],
+        key: ModeKey,
+        history: &[String],
+        separators: &str,
+    ) {
+        let (Some(search), Some(editor)) = (self.search.as_mut(), self.search_editor.as_mut())
+        else {
+            return;
+        };
+        editor.set_key_options(false, separators);
+        editor.key_with_history(key, history);
+        search.query = editor.input();
+        let search = search.clone();
+        self.rendered.search = Some(search.clone());
+        self.select_search_match(buffers, &search.query, search.reverse, true);
+    }
+
+    fn edit_prompt(
+        &mut self,
+        edit: &ChooserPromptEdit,
+        history: &[String],
+        options: (bool, &str),
+        remembered: &mut Option<(CommandPromptType, String)>,
+    ) -> ChooseBufferResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseBufferResult::Updated;
         };
-        match edit {
-            ChooserPromptEdit::HistoryUp => prompt.walk_history(history, true),
-            ChooserPromptEdit::HistoryDown => prompt.walk_history(history, false),
-            ChooserPromptEdit::Append(text) => {
-                if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
-                    prompt.input.push_str(&text);
-                }
-            }
-            ChooserPromptEdit::Backspace => {
-                prompt.input.pop();
-            }
-            ChooserPromptEdit::Cancel => self.prompt = None,
-            ChooserPromptEdit::Accept => {
-                let input = std::mem::take(&mut prompt.input);
+        match prompt.edit(edit, history, options) {
+            PromptOutcome::Cancelled => self.prompt = None,
+            PromptOutcome::Done => {
+                *remembered = prompt.remembered();
+                let input = prompt.input();
                 self.prompt = None;
                 self.filter = (!input.is_empty()).then_some(input);
             }
+            _ => {}
         }
         ChooseBufferResult::Rebuild
     }
@@ -36413,10 +36471,11 @@ impl ChooseBufferSession {
                     query: String::new(),
                     reverse,
                 });
+                self.search_editor = Some(ModePrompt::new("(search) ", "", ""));
                 self.rendered.search.clone_from(&self.search);
             }
             ChooseBufferAction::SearchAppend(text) => {
-                let Some(search) = self.search.as_mut() else {
+                let Some(search) = self.search.as_ref() else {
                     return Ok(ChooseBufferResult::Updated);
                 };
                 if search.query.len().saturating_add(text.len()) > MAX_CHOOSE_BUFFER_QUERY_BYTES {
@@ -36424,21 +36483,15 @@ impl ChooseBufferSession {
                         "choose-buffer search exceeds {MAX_CHOOSE_BUFFER_QUERY_BYTES} bytes"
                     )));
                 }
-                search.query.push_str(&text);
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(buffers, &search.query, search.reverse, true);
+                for character in text.chars() {
+                    self.edit_search(buffers, ModeKey::Char(character), &[], "");
+                }
             }
             ChooseBufferAction::SearchBackspace => {
-                let Some(search) = self.search.as_mut() else {
-                    return Ok(ChooseBufferResult::Updated);
-                };
-                search.query.pop();
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(buffers, &search.query, search.reverse, true);
+                self.edit_search(buffers, ModeKey::Backspace, &[], "");
             }
             ChooseBufferAction::SearchAccept => {
+                self.search_editor = None;
                 if let Some(search) = self.search.take()
                     && !search.query.is_empty()
                 {
@@ -36447,6 +36500,7 @@ impl ChooseBufferSession {
                 self.rendered.search = None;
             }
             ChooseBufferAction::SearchCancel => {
+                self.search_editor = None;
                 self.search = None;
                 self.rendered.search = None;
             }
@@ -36495,13 +36549,12 @@ impl ChooseBufferSession {
                 return Ok(ChooseBufferResult::Updated);
             }
             ChooseBufferAction::FilterPrompt => {
-                self.prompt = Some(ChooserPrompt {
-                    kind: ChooserPromptKind::Filter,
-                    text: "(filter) ".to_owned(),
-                    input: self.filter.clone().unwrap_or_default(),
-                    targets: Vec::new(),
-                    history_index: 0,
-                });
+                self.prompt = Some(ChooserPrompt::new(
+                    ChooserPromptKind::Filter,
+                    "(filter) ".to_owned(),
+                    self.filter.as_deref().unwrap_or_default(),
+                    Vec::new(),
+                ));
                 return Ok(ChooseBufferResult::Rebuild);
             }
             ChooseBufferAction::ClearFilter => {
@@ -36868,12 +36921,26 @@ enum ChooserPromptKind {
 struct ChooserPrompt {
     kind: ChooserPromptKind,
     text: String,
-    input: String,
+    editor: ModePrompt,
     targets: Vec<ChooseTreeTarget>,
-    history_index: usize,
 }
 
 impl ChooserPrompt {
+    fn new(
+        kind: ChooserPromptKind,
+        text: String,
+        input: &str,
+        targets: Vec<ChooseTreeTarget>,
+    ) -> Self {
+        let editor = ModePrompt::new(text.clone(), input, "");
+        Self {
+            kind,
+            text,
+            editor,
+            targets,
+        }
+    }
+
     /// mode-tree.c raises the filter prompt as `PROMPT_TYPE_SEARCH` and
     /// window-tree.c the `:` prompt as `PROMPT_TYPE_COMMAND`.
     const fn history_type(&self) -> CommandPromptType {
@@ -36883,37 +36950,46 @@ impl ChooserPrompt {
         }
     }
 
-    /// `prompt_up_history` and `prompt_down_history`: newest first from an
-    /// index the prompt owns, and back past the newest line is an empty one.
-    fn walk_history(&mut self, history: &[String], up: bool) {
-        self.history_index = self.history_index.min(history.len());
-        if up {
-            if history.is_empty() || self.history_index == history.len() {
-                return;
+    fn input(&self) -> String {
+        self.editor.input()
+    }
+
+    fn edit(
+        &mut self,
+        edit: &ChooserPromptEdit,
+        history: &[String],
+        (vi, separators): (bool, &str),
+    ) -> PromptOutcome {
+        self.editor.set_key_options(vi, separators);
+        match edit {
+            ChooserPromptEdit::Append(text) => {
+                if self.input().len().saturating_add(text.len()) > MAX_CHOOSE_TREE_QUERY_BYTES {
+                    return PromptOutcome::Handled;
+                }
+                for character in text.chars() {
+                    let outcome = self
+                        .editor
+                        .key_with_history(ModeKey::Char(character), history);
+                    if matches!(outcome, PromptOutcome::Done | PromptOutcome::Cancelled) {
+                        return outcome;
+                    }
+                }
+                PromptOutcome::Handled
             }
-            self.history_index += 1;
-        } else if history.is_empty() || self.history_index == 0 {
-            self.input.clear();
-            return;
-        } else {
-            self.history_index -= 1;
+            ChooserPromptEdit::Key(key) => self.editor.key_with_history(*key, history),
         }
-        self.input = if self.history_index == 0 {
-            String::new()
-        } else {
-            history[history.len() - self.history_index].clone()
-        };
     }
 
     /// `prompt_add_history` on Enter for a non-empty line.
     fn remembered(&self) -> Option<(CommandPromptType, String)> {
-        (!self.input.is_empty()).then(|| (self.history_type(), self.input.clone()))
+        let input = self.input();
+        (!input.is_empty()).then(|| (self.history_type(), input))
     }
 
     /// What the mode's screen shows: the prompt string with the line typed so
     /// far after it, which is empty for a `PROMPT_SINGLE` answer.
     fn line(&self) -> String {
-        format!("{}{}", self.text, self.input)
+        format!("{}{}", self.text, self.input())
     }
 }
 
@@ -36990,6 +37066,7 @@ struct ChooseTreeSession {
     built: Option<(BTreeSet<SessionId>, BTreeSet<zz_protocol::WindowId>)>,
     selected: Option<ChooseTreeTarget>,
     search: Option<ChooseTreeSearchState>,
+    search_editor: Option<ModePrompt>,
     last_search: Option<ChooseTreeSearchState>,
     rendered: ChooseTreeState,
     presentation_rows: Vec<ChooserRow>,
@@ -37073,6 +37150,7 @@ impl ChooseTreeSession {
             built: None,
             selected,
             search: None,
+            search_editor: None,
             last_search: None,
             rendered: ChooseTreeState {
                 items: Vec::new(),
@@ -37677,10 +37755,11 @@ impl ChooseTreeSession {
                     query: String::new(),
                     reverse,
                 });
+                self.search_editor = Some(ModePrompt::new("(search) ", "", ""));
                 self.rendered.search.clone_from(&self.search);
             }
             ChooseTreeAction::SearchAppend(text) => {
-                let Some(search) = self.search.as_mut() else {
+                let Some(search) = self.search.as_ref() else {
                     return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
                 };
                 if search.query.len().saturating_add(text.len()) > MAX_CHOOSE_TREE_QUERY_BYTES {
@@ -37688,21 +37767,15 @@ impl ChooseTreeSession {
                         "choose-tree search exceeds {MAX_CHOOSE_TREE_QUERY_BYTES} bytes"
                     )));
                 }
-                search.query.push_str(&text);
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(&search.query, search.reverse, true);
+                for character in text.chars() {
+                    self.edit_search(ModeKey::Char(character), &[], "");
+                }
             }
             ChooseTreeAction::SearchBackspace => {
-                let Some(search) = self.search.as_mut() else {
-                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
-                };
-                search.query.pop();
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(&search.query, search.reverse, true);
+                self.edit_search(ModeKey::Backspace, &[], "");
             }
             ChooseTreeAction::SearchAccept => {
+                self.search_editor = None;
                 if let Some(search) = self.search.take()
                     && !search.query.is_empty()
                 {
@@ -37711,6 +37784,7 @@ impl ChooseTreeSession {
                 self.rendered.search = None;
             }
             ChooseTreeAction::SearchCancel => {
+                self.search_editor = None;
                 self.search = None;
                 self.rendered.search = None;
             }
@@ -37838,15 +37912,13 @@ impl ChooseTreeSession {
                 self.preview_size = chooser_presentation::next_preview_size(self.preview_size);
             }
             ChooseTreeAction::FilterPrompt => {
-                let prompt = ChooserPrompt {
-                    kind: ChooserPromptKind::Filter,
-                    text: "(filter) ".to_owned(),
-                    input: self.filter.clone().unwrap_or_default(),
-                    targets: Vec::new(),
-                    history_index: 0,
-                };
-                self.rendered.prompt = prompt.line();
-                self.prompt = Some(prompt);
+                self.prompt = Some(ChooserPrompt::new(
+                    ChooserPromptKind::Filter,
+                    "(filter) ".to_owned(),
+                    self.filter.as_deref().unwrap_or_default(),
+                    Vec::new(),
+                ));
+                self.show_prompt();
                 update = ChooseTreeUpdateKind::Full;
             }
             ChooseTreeAction::ClearFilter => {
@@ -37900,17 +37972,13 @@ impl ChooseTreeSession {
                 } else {
                     tagged
                 };
-                self.prompt = Some(ChooserPrompt {
-                    kind: ChooserPromptKind::Command,
+                self.prompt = Some(ChooserPrompt::new(
+                    ChooserPromptKind::Command,
                     text,
-                    input: String::new(),
+                    "",
                     targets,
-                    history_index: 0,
-                });
-                self.rendered.prompt = self
-                    .prompt
-                    .as_ref()
-                    .map_or_else(String::new, ChooserPrompt::line);
+                ));
+                self.show_prompt();
                 update = ChooseTreeUpdateKind::Full;
             }
             ChooseTreeAction::Key(_) => {}
@@ -38015,14 +38083,33 @@ impl ChooseTreeSession {
             return ChooseTreeResult::Kill(targets);
         }
         self.rendered.prompt.clone_from(&text);
-        self.prompt = Some(ChooserPrompt {
-            kind: ChooserPromptKind::Kill,
+        self.prompt = Some(ChooserPrompt::new(
+            ChooserPromptKind::Kill,
             text,
-            input: String::new(),
+            "",
             targets,
-            history_index: 0,
-        });
+        ));
         ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
+    }
+
+    fn show_prompt(&mut self) {
+        self.rendered.prompt = self
+            .prompt
+            .as_ref()
+            .map_or_else(String::new, ChooserPrompt::line);
+    }
+
+    fn edit_search(&mut self, key: ModeKey, history: &[String], separators: &str) {
+        let (Some(search), Some(editor)) = (self.search.as_mut(), self.search_editor.as_mut())
+        else {
+            return;
+        };
+        editor.set_key_options(false, separators);
+        editor.key_with_history(key, history);
+        search.query = editor.input();
+        let search = search.clone();
+        self.rendered.search = Some(search.clone());
+        self.select_search_match(&search.query, search.reverse, true);
     }
 
     /// `prompt_key` on the `:` prompt, which is an ordinary edited line:
@@ -38030,48 +38117,40 @@ impl ChooseTreeSession {
     /// line runs nothing at all.
     fn edit_command_prompt(
         &mut self,
-        edit: ChooserPromptEdit,
+        edit: &ChooserPromptEdit,
         history: &[String],
+        options: (bool, &str),
+        remembered: &mut Option<(CommandPromptType, String)>,
     ) -> ChooseTreeResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta);
         };
-        match edit {
-            ChooserPromptEdit::HistoryUp => prompt.walk_history(history, true),
-            ChooserPromptEdit::HistoryDown => prompt.walk_history(history, false),
-            ChooserPromptEdit::Append(text) => {
-                if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
-                    prompt.input.push_str(&text);
-                }
-            }
-            ChooserPromptEdit::Backspace => {
-                prompt.input.pop();
-            }
-            ChooserPromptEdit::Cancel => {
+        match prompt.edit(edit, history, options) {
+            PromptOutcome::Cancelled => {
                 self.prompt = None;
                 self.rendered.prompt.clear();
                 return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
             }
-            ChooserPromptEdit::Accept => {
+            PromptOutcome::Done => {
                 let prompt = self.prompt.take().expect("the prompt was just borrowed");
+                *remembered = prompt.remembered();
                 self.rendered.prompt.clear();
+                let input = prompt.input();
                 if matches!(prompt.kind, ChooserPromptKind::Filter) {
-                    self.filter = (!prompt.input.is_empty()).then_some(prompt.input);
+                    self.filter = (!input.is_empty()).then_some(input);
                     return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
                 }
-                if prompt.input.is_empty() {
+                if input.is_empty() {
                     return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
                 }
                 return ChooseTreeResult::Command {
-                    template: prompt.input,
+                    template: input,
                     targets: prompt.targets,
                 };
             }
+            _ => {}
         }
-        self.rendered.prompt = self
-            .prompt
-            .as_ref()
-            .map_or_else(String::new, ChooserPrompt::line);
+        self.show_prompt();
         ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
     }
 
@@ -54379,6 +54458,61 @@ mod tests {
         let inner = shared.inner.lock();
         assert!(!inner.pane_modes.contains_key(&pane));
         assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn binding_errors_leave_a_native_clients_terminals_painting() {
+        for native in [false, true] {
+            let shared = Arc::new(Shared::new(1));
+            let mailbox = OutboundMailbox::new();
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                Arc::clone(&mailbox),
+            );
+            if native {
+                shared.inner.lock().client_entry(client).native_chooser = true;
+            }
+            let (_, pane, _) = attached_message_fixture(&shared, "binding-error", &[client]);
+            let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+                .expect("pane context");
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", "display-time", "0"]),
+                )
+                .expect("display-time");
+            let error = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("kill-pane", ["-t", "missing"]),
+                )
+                .expect_err("a missing pane");
+            take_reliable_messages(&mailbox);
+            shared.publish_background_command_error(client, &context, &error, true);
+            let shown = take_reliable_messages(&mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::TimedClientMessage {
+                                text, duration_ms, ..
+                            },
+                        ..
+                    }) => Some((text, duration_ms)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(shown, [("Can't find pane: missing".to_owned(), 0)]);
+            let inner = shared.inner.lock();
+            assert!(inner.client(client).is_some_and(|c| c.message.is_some()));
+            assert_eq!(client_terminal_publication_frozen(&inner, client), !native);
+        }
     }
 
     #[test]
@@ -88455,6 +88589,16 @@ set-option -g @alias-mixed-next yes
                                     },
                                 ..
                             }) => Some(text),
+                            ProtocolMessage::Event(Event {
+                                payload:
+                                    EventPayload::TimedClientMessage {
+                                        kind: ClientMessageKind::Error,
+                                        text,
+                                        duration_ms: 750,
+                                        ..
+                                    },
+                                ..
+                            }) => Some(format!("timed {text}")),
                             _ => None,
                         },
                     ) {
@@ -88491,7 +88635,10 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new("run-shell", ["-b", "-C", "not-a-command"]),
             )
             .expect("interactive background inserted command");
-        assert_eq!(wait_for_error(&mailbox), "Unknown command: not-a-command");
+        assert_eq!(
+            wait_for_error(&mailbox),
+            "timed Unknown command: not-a-command"
+        );
     }
 
     #[cfg(windows)]
@@ -97643,7 +97790,7 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::ClientMessage {
+                    payload: EventPayload::TimedClientMessage {
                         kind: ClientMessageKind::Error,
                         text,
                         ..

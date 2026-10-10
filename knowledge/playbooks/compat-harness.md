@@ -371,7 +371,7 @@ leading-option diagnostics while keeping its positional-session boundary and ext
 option grammar, the common paths validate positional minima and maxima before rejecting a
 recognized parked capability. A too-short or too-long command therefore reports the pin's arity
 diagnostic even when it also names an unsupported flag. The
-`smoke/command-flag-errors` fixture byte-compares 516 probes on each server: 513 failures covering
+`smoke/command-flag-errors` fixture byte-compares 565 probes on each server: 562 failures covering
 unknown and invalid flags, help usage, missing required values, and unsupported-before-unknown
 ordering, plus three successes proving required-value absorption. It checks pane, buffer, file,
 binding, and hook sentinels. Differential scenarios, attached-client fixtures, unit tests, and

@@ -12,6 +12,7 @@ shim:
 # belongs to the popup's job and never moves the box.
 stage: ../smoke/fixtures/display-popup-drag.sh ~/display-popup-drag.sh
 stage: ../smoke/fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_DRAG
 run-shell 'sh ~/display-popup-drag.sh'
 out: show-environment -g DISPLAY_POPUP_DRAG

@@ -12,6 +12,7 @@ shim:
 # back with capture-pane, and the transferred job still running.
 stage: ../smoke/fixtures/display-popup-to-pane.sh ~/display-popup-to-pane.sh
 stage: ../smoke/fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_TO_PANE
 run-shell 'sh ~/display-popup-to-pane.sh'
 out: show-environment -g DISPLAY_POPUP_TO_PANE

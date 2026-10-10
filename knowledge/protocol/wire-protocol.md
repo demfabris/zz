@@ -924,6 +924,17 @@ TUI paints it blank before it draws that area, as `window_panes_clear_floating_a
 float pushed past the window's left or top edge (which has a clear and no area) and a float in the
 scaled `display-panes -Z` view no longer show the tiled panes under them.
 
+v108 also carries the chooser prompts' cursor column (catch-up item `fix.followups-4`).
+`ChooserPresentation` appends `prompt_column: u16` and `prompt_line: String`: for an open filter,
+`:` or search prompt, the row `prompt_draw` would paint at the client's width (the prompt string,
+then the edited line scrolled so the cursor stays on the row) and the cursor's column on it; empty
+and 0 when no edited prompt is open, which leaves the kill prompt on `ChooseTreeState.prompt`. The chooser prompts now edit the line the way 3.8's `prompt_key`
+does (Left and Right, C-a and C-e, C-k, C-u, C-w at the session's `word-separators`, C-d and the
+rest, and the vi table when `status-keys` is vi, whose command mode draws in
+`message-command-style`; the search prompt takes the emacs keys), and the raw TUI draws that row and
+puts its cursor there instead of clipping the line and parking the cursor at its end; a client that
+ignores the fields keeps the old drawing.
+
 # Versioning & compatibility
 
 - **`PROTOCOL_VERSION: u16 = 108`** is stamped into every frame's envelope and re-checked inside

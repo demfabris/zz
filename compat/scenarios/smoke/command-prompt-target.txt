@@ -7,6 +7,7 @@ corpus: none
 # and a read-only client keeps the queue parked until it detaches.
 stage: fixtures/command-prompt-target.sh ~/command-prompt-target.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu COMMAND_PROMPT_TARGET
 run-shell 'sh ~/command-prompt-target.sh'
 out: show-environment -g COMMAND_PROMPT_TARGET

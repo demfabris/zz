@@ -9,7 +9,7 @@ use serde::Deserialize;
 use zz_protocol::{
     COMMAND_ARGS_PARSE_BEHAVES, COMMAND_ARGS_PARSE_SPECS, CommandArgsParseRule, CommandResolution,
     DAEMON_COMMAND_SPECS, KeyTables, NATIVE_COMMAND_NAMES, POSITIONAL_MINIMUMS, canonical_command,
-    canonical_key, resolve_command,
+    canonical_key, resolve_command, unimplemented_tmux_command_spec,
 };
 
 use crate::{
@@ -1056,7 +1056,9 @@ fn command_flag_fixture_matches_the_pin() {
     let mut required = 0;
 
     for command in &oracle.commands {
-        if !specs.contains_key(command.name.as_str()) {
+        if !specs.contains_key(command.name.as_str())
+            && unimplemented_tmux_command_spec(&command.name).is_none()
+        {
             continue;
         }
         assert!(command.aliases.len() <= 1, "{}", command.name);
@@ -1082,7 +1084,7 @@ fn command_flag_fixture_matches_the_pin() {
         rows += 1;
     }
 
-    assert_eq!((rows, aliases, required), (90, 76, 86));
+    assert_eq!((rows, aliases, required), (92, 78, 88));
     assert_eq!(
         fs::read_to_string(root().join("compat/scenarios/smoke/fixtures/command-flag-errors.tsv"))
             .expect("command flag fixture corpus"),

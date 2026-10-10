@@ -1,6 +1,7 @@
 corpus: none
 stage: fixtures/copy-mode-revision.sh ~/copy-mode-revision.sh
 stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu COPY_MODE_RESIZE_FREEZE
 run-shell 'sh ~/copy-mode-revision.sh resize'
 out: show-environment -g COPY_MODE_RESIZE_FREEZE

@@ -7,6 +7,7 @@ corpus: none
 # resolves a pointer position to a pane.
 stage: fixtures/focus-follows-mouse.sh ~/focus-follows-mouse.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu FOCUS_FOLLOWS_MOUSE
 run-shell 'sh ~/focus-follows-mouse.sh'
 out: show-environment -g FOCUS_FOLLOWS_MOUSE

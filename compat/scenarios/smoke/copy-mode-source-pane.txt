@@ -1,6 +1,7 @@
 corpus: none
 stage: fixtures/copy-mode-source-pane.sh ~/copy-mode-source-pane.sh
 stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu COPY_MODE_SOURCE_PANE
 run-shell 'sh ~/copy-mode-source-pane.sh'
 out: show-environment -g COPY_MODE_SOURCE_PANE

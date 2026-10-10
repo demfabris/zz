@@ -10,6 +10,7 @@ corpus: none
 # answered 142, added back 28 and declined 28).
 stage: fixtures/format-listing.sh ~/format-listing.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu FORMAT_LISTING
 run-shell 'sh ~/format-listing.sh'
 out: show-environment -g FORMAT_LISTING

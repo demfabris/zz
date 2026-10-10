@@ -1,6 +1,7 @@
 corpus: none
 stage: fixtures/copy-mode-copy-line.sh ~/copy-mode-copy-line.sh
 stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu COPY_MODE_COPY_LINE
 run-shell 'sh ~/copy-mode-copy-line.sh'
 out: show-environment -g COPY_MODE_COPY_LINE

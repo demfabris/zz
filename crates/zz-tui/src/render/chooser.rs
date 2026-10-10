@@ -1173,6 +1173,21 @@ impl Renderer {
                     HelpKind::Buffer,
                 )
             };
+        let edited = !presentation.prompt_line.is_empty()
+            && model.choose_tree.as_ref().map_or_else(
+                || {
+                    model
+                        .choose_buffer
+                        .as_ref()
+                        .is_some_and(|state| !state.prompt.is_empty() || state.search.is_some())
+                },
+                |state| !state.prompt.is_empty() || state.search.is_some(),
+            );
+        let prompt = if edited {
+            Some(presentation.prompt_line.clone())
+        } else {
+            prompt
+        };
         let status_rows = model.status_block_rows();
         let sx = model.size.columns;
         let sy = model.size.rows.saturating_sub(status_rows);
@@ -1202,6 +1217,9 @@ impl Renderer {
             title: None,
         });
         self.mode_tree.offset = offset;
+        if edited {
+            cursor.0 = presentation.prompt_column.min(sx - 1);
+        }
         cursor.1 += top;
         grid.emit(
             &mut self.output,

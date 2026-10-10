@@ -19,6 +19,8 @@ import termios
 import threading
 import time
 
+from pty_queries import Answerer
+
 STEP_TIMEOUT = 120.0
 
 
@@ -77,6 +79,7 @@ def resize(master, columns, rows):
 
 
 def drain(master, drawn, lock):
+    answerer = Answerer(master)
     while True:
         try:
             chunk = os.read(master, 4096)
@@ -86,6 +89,7 @@ def drain(master, drawn, lock):
             break
         with lock:
             drawn += chunk
+        answerer.feed(chunk)
 
 
 def wait_for(path):

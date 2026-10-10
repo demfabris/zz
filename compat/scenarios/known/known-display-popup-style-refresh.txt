@@ -8,6 +8,7 @@ shim:
 # again.
 stage: ../smoke/fixtures/display-popup-style-refresh.sh ~/display-popup-style-refresh.sh
 stage: ../smoke/fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_STYLE_REFRESH
 run-shell 'sh ~/display-popup-style-refresh.sh'
 out: show-environment -g DISPLAY_POPUP_STYLE_REFRESH

@@ -12,6 +12,7 @@ corpus: none
 # draws the popup's text and never emits a graphics escape.
 stage: fixtures/display-popup-kitty.sh ~/display-popup-kitty.sh
 stage: fixtures/graphics-drive.py ~/graphics-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_KITTY
 run-shell 'sh ~/display-popup-kitty.sh'
 out: show-environment -g DISPLAY_POPUP_KITTY

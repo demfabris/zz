@@ -1385,6 +1385,8 @@ impl MuxEngine {
                 },
                 preview,
                 prompt_cursor: zz_protocol::PromptCursor::default(),
+                prompt_column: 0,
+                prompt_line: String::new(),
             },
             prompt,
         )

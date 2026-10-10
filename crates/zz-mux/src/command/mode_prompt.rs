@@ -269,6 +269,11 @@ impl ModePrompt {
         self
     }
 
+    pub fn set_key_options(&mut self, vi: bool, separators: &str) {
+        self.vi_keys = vi;
+        separators.clone_into(&mut self.word_separators);
+    }
+
     #[must_use]
     pub const fn with_history_type(mut self, history_type: CommandPromptType) -> Self {
         self.history_type = history_type;

@@ -5,6 +5,7 @@ corpus: none
 # never read again.
 stage: fixtures/display-menu-style-refresh.sh ~/display-menu-style-refresh.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_MENU_STYLE_REFRESH
 run-shell 'sh ~/display-menu-style-refresh.sh'
 out: show-environment -g DISPLAY_MENU_STYLE_REFRESH

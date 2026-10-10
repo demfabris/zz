@@ -6,6 +6,7 @@ corpus: none
 # command is refused there and the stored list survives.
 stage: fixtures/default-client-command.sh ~/default-client-command.sh
 stage: fixtures/bare-client.py ~/bare-client.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DEFAULT_CLIENT_COMMAND
 run-shell 'sh ~/default-client-command.sh'
 out: show-environment -g DEFAULT_CLIENT_COMMAND

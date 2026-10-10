@@ -1038,14 +1038,25 @@ impl Session {
                 } else {
                     Arc::clone(shared)
                 };
+                let key_input = matches!(
+                    &input,
+                    InputMessage::Key { .. } | InputMessage::MouseKey { .. }
+                );
                 if let Err(error) = item.input(client, hello.kind, context, input) {
-                    let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
-                        CommandResponse::Error {
-                            request_id: 0,
-                            error: daemon_server_error(error),
-                            output: RawText::default(),
-                        },
-                    ));
+                    if key_input
+                        && binding_error_is_a_status_message(&error)
+                        && client_attached_session(&shared.inner.lock(), client).is_some()
+                    {
+                        shared.publish_background_command_error(client, context, &error, true);
+                    } else {
+                        let _ = outbound.enqueue_reliable(&ProtocolMessage::CommandResponse(
+                            CommandResponse::Error {
+                                request_id: 0,
+                                error: daemon_server_error(error),
+                                output: RawText::default(),
+                            },
+                        ));
+                    }
                 }
                 self.input_wait = item.command_item.as_ref().and_then(|item| {
                     item.lock()
@@ -1185,4 +1196,13 @@ fn inline_task_or_query(
 ) -> bool {
     command.result == PreparedCommandResult::Ready
         && (task || ctrl::control_query_can_defer_wakeup(&shared.inner.lock(), context, command))
+}
+
+fn binding_error_is_a_status_message(error: &DaemonError) -> bool {
+    !matches!(
+        error,
+        DaemonError::CommandExit { .. }
+            | DaemonError::ReportedCommandExit { .. }
+            | DaemonError::Server(ServerError::PaneExited(_) | ServerError::PaneNotAttached(_))
+    )
 }

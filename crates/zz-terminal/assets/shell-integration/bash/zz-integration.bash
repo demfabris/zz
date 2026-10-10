@@ -63,6 +63,9 @@ __zz_write_working_directory() {
   builtin printf '\e]7;file://%s%s\a' "${HOSTNAME-}" "$__zz_value"
 }
 
+# The idle title goes first in PROMPT_COMMAND, so a title the shell's own
+# prompt sets (Arch's /etc/bash.bashrc sends OSC 0 for TERM=tmux*) lands after
+# it and is the one the pane keeps, the way it is under tmux.
 __zz_prompt_begin() {
   builtin local __zz_status=$?
   __zz_prompt_ready=0
@@ -71,6 +74,7 @@ __zz_prompt_begin() {
   fi
   __zz_command_running=0
   __zz_prompt_status=$__zz_status
+  __zz_write_title "${BASH##*/}"
   builtin return "$__zz_status"
 }
 
@@ -89,7 +93,6 @@ __zz_prompt_debug() {
 
 __zz_title_precmd() {
   __zz_write_working_directory
-  __zz_write_title "${BASH##*/}"
   # DECSCUSR default: the prompt restores the configured cursor style instead of
   # imposing one, so a program that exits without resetting cannot keep its shape.
   builtin printf '\e[0 q'

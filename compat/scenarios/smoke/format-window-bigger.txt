@@ -8,6 +8,7 @@ corpus: none
 # offsets; the d77c9dc6 pin built it with a null client and answered null.
 stage: fixtures/format-window-bigger.sh ~/format-window-bigger.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu FORMAT_WINDOW_BIGGER
 run-shell 'sh ~/format-window-bigger.sh'
 out: show-environment -g FORMAT_WINDOW_BIGGER

@@ -8,6 +8,7 @@ corpus: none
 # an attached client resolves them.
 stage: fixtures/display-menu-mouse.sh ~/display-menu-mouse.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_MENU_MOUSE
 run-shell 'sh ~/display-menu-mouse.sh'
 out: show-environment -g DISPLAY_MENU_MOUSE

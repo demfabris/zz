@@ -43,23 +43,25 @@ out: display-message -p [#{window_name}]
 
 # These five command arguments use the resolved target's format context. Build
 # every target before switching the implicit context away, then keep each
-# lookup exact so prefix targeting cannot supply a false pass.
-new-session -d -s rs-c -n rs-window
+# lookup exact so prefix targeting cannot supply a false pass. Titled panes run
+# cat: a shell prompt that sends OSC 0 (Arch's /etc/bash.bashrc, zz's shell
+# integration) would race select-pane -T.
+new-session -d -s rs-c -n rs-window cat
 select-pane -t =rs-c:0.0 -T rs-pane
 new-session -d -s rs-a
 new-session -d -s rs-p
 new-session -d -s rw -n rw-c
 new-window -d -t =rw:1 -n rw-a
 new-window -d -t =rw:2 -n rw-p
-new-session -d -s so -n so-window
+new-session -d -s so -n so-window cat
 select-pane -t =so:0.0 -T so-pane
 set-option -t =so:0.0 @so-so-window-so-pane-show-options so-target
-new-session -d -s swo -n swo-window
+new-session -d -s swo -n swo-window cat
 select-pane -t =swo:0.0 -T swo-pane
 set-window-option -t =swo:0 @swo-swo-window-swo-pane-show-window-options swo-target
-new-session -d -s sp -n sp-window
+new-session -d -s sp -n sp-window cat
 select-pane -t =sp:0.0 -T sp-origin
-split-window -d -h -t =sp:0.0
+split-window -d -h -t =sp:0.0 cat
 select-pane -t =sp:0.1 -T sp-destination
 new-session -d -s argfmt-current -n current
 
@@ -126,7 +128,7 @@ new -d -s name-window-unicode -n 'janela-日本語-#{command}'
 out: display-message -p -t =name-window-unicode:0 [#{window_name}]
 new-s -d -s name-window-empty -n '#{missing_name}'
 out: display-message -p -t =name-window-empty:0 [#{window_name}]
-new-session -d -s new-window-name-target -n new-window-name-origin
+new-session -d -s new-window-name-target -n new-window-name-origin cat
 select-pane -t =new-window-name-target:0.0 -T new-window-name-pane
 new-session -d -s new-window-name-current
 neww -d -t =new-window-name-target:5 -n 'janela-日本語\#{command}-#{session_name}-#{window_name}-#{pane_title}'

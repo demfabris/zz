@@ -10,6 +10,7 @@ corpus: none
 # removal.
 stage: fixtures/hooks-pane-focus.sh ~/hooks-pane-focus.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 run-shell 'sh ~/hooks-pane-focus.sh'
 out: show-environment -g HOOKS_PANE_FOCUS_OFF
 out: show-environment -g HOOKS_PANE_FOCUS_ON

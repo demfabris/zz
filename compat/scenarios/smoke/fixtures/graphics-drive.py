@@ -24,6 +24,8 @@ import termios
 import threading
 import time
 
+from pty_queries import Answerer
+
 STEP_TIMEOUT = 120.0
 DIRECT_PROBE = 4294967295
 FILE_PROBE = 4294967294
@@ -110,6 +112,7 @@ def answer(master, pending):
 
 
 def drain(master, drawn, lock):
+    answerer = Answerer(master)
     pending = bytearray()
     while True:
         try:
@@ -120,6 +123,7 @@ def drain(master, drawn, lock):
             break
         with lock:
             drawn += chunk
+        answerer.feed(chunk)
         pending += chunk
         answer(master, bytes(pending))
         del pending[:]

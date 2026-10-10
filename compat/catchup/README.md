@@ -24,9 +24,10 @@ Every item is merged except the two fabrico deferred (`later.share`, `later.menu
 tag; floating panes ship in the mux, daemon, wire and all four clients; display-popup is master's modal pane by
 ruling. The closing full suite on `fe2812e60` plus `fix.close-out` left `run.sh --attached-client`, every
 `tui-*.sh` fixture, clippy and `just compat check` green. Three `cargo ci-test` failures are outside the campaign
-(two `zz` agent::view timeline tests and the signal-disposition race in `zz-daemon-client`). The desktop float
-screenshots in float.clients' clause 4 are still owed: alienware's NVIDIA GPU dropped off the bus, so headless
-gamescope could not start. To reopen, add items to `ledger.json` and follow the steps below.
+(two `zz` agent::view timeline tests and the signal-disposition race in `zz-daemon-client`). The desktop and web
+float screenshots in float.clients' clause 4 were taken on 2026-10-10 after an alienware reboot; the three client
+bugs they turned up are in float.clients' last note. To reopen, add items to `ledger.json` and follow the steps
+below.
 
 ## Resuming (any machine)
 

@@ -276,3 +276,6 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: a centred display-popup sits one row higher than 3.8's at an odd client
   height, because the modal pane is placed in window cells; recorded with the title column and the `O`
   flag as known drift under `display-popup.modal-pane` (fabrico's master-model ruling).
+- 2026-10-09 orchestrator: zz keeps tmux's option-name parsing (`set x[a]b] v` fails, as in tmux); a customize
+  rename to a key holding `]` is refused with "Bad array key" instead of loosening the parser to create the
+  key 3.8's customize can make. A tmux error stays an error rather than gaining a meaning in zz.

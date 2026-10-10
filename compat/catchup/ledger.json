@@ -915,7 +915,7 @@
       "id": "pin.customize-3-8",
       "track": "pin",
       "title": "3.8's rebuilt customize mode (window-customize.c)",
-      "status": "review",
+      "status": "active",
       "deps": [
         "float.keys",
         "pin.formats-options-2"
@@ -942,7 +942,11 @@
         "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs).",
         "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux).",
         "2026-10-09: Branched from catchup/float.keys 2a66f5a1f (it carries the customize e editor); merges to main after the float track, then merges main.",
-        "2026-10-09: Session 1 done at a854f793d: 3.8 customize tree (hook/environment sections, C, e on options/keys/environment, hook array edits, preview fire counts and monitors, SINGLE flag), pin.formats-options gap closed; tui-client-commands 556/556 (201 customize asserted), tui-mouse 81/81, tui-caps 410/410. Review 1 running."
+        "2026-10-09: Session 1 done at a854f793d: 3.8 customize tree (hook/environment sections, C, e on options/keys/environment, hook array edits, preview fire counts and monitors, SINGLE flag), pin.formats-options gap closed; tui-client-commands 556/556 (201 customize asserted), tui-mouse 81/81, tui-caps 410/410. Review 1 running.",
+        "2026-10-09: Codex review 1: 4 P1 (array-key rename loses the hook on a failed insert, numeric key canonicalization, monitor unset leaves the subscription, hook reset single-scope) + 2 P2; fix pass sent with a main merge.",
+        "2026-10-09: Fix pass 87195a51f + main merge dc17074e3: 6 findings fixed with tests; tui-client-commands 556/556, tui-mouse 81/81, tui-caps 410/410. Review 2 running; merges after the M1/M3 suite.",
+        "2026-10-09: Codex review 2: P1 rename with a literal 'a]b' key still unsets the original (send one stopping command list, quote the key), P2 -NAME keeps the hidden flag; final fix pass sent.",
+        "2026-10-09: Final pass 27c54517a: stop_on_error results, hidden flag kept on -NAME; orchestrator reverted the parser loosening for a]b keys (customize refuses them instead); short follow-up sent."
       ]
     },
     {

@@ -4783,9 +4783,15 @@ impl Window {
         }
 
         let opacity = self.element_opacity();
-        if !self.platform_window.supports_backdrop_sampling() {
+        let fill = if material.is_opaque_fill() && (shapes.len() == 1 || material.merge <= px(0.)) {
+            Some(material.tint.alpha(material.opacity))
+        } else if !self.platform_window.supports_backdrop_sampling() {
+            Some(material.fallback_fill())
+        } else {
+            None
+        };
+        if let Some(fill) = fill {
             // paint_quad applies the element's opacity itself.
-            let fill = material.fallback_fill();
             for shape in shapes {
                 self.paint_quad(PaintQuad {
                     bounds: shape.bounds,

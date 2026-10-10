@@ -356,6 +356,17 @@ impl GlassMaterial {
         self
     }
 
+    /// Whether the tint hides the backdrop and nothing draws over it, so the
+    /// surface looks exactly like a fill of the tint and is painted as one.
+    pub fn is_opaque_fill(&self) -> bool {
+        self.tint.a >= 1.
+            && self.specular == 0.
+            && self.fresnel == 0.
+            && (self.edge_shadow == 0. || self.edge_width <= px(0.))
+            && self.glow == 0.
+            && self.noise == 0.
+    }
+
     /// How far past its shape this material reads the backdrop: the blur's
     /// reach, plus the pull when it points outward.
     pub fn backdrop_reach(&self) -> Pixels {
@@ -1397,6 +1408,45 @@ pub fn check_glass_rendering(
         far.iter().zip(expected).all(|(a, b)| a.abs_diff(b) <= 2),
         "frost should leave flat color alone, got {far:?} for {expected:?}"
     );
+
+    let tint = hsla(0.1, 0.6, 0.4, 1.);
+    let opaque = GlassMaterial::regular()
+        .tint(tint)
+        .specular(0.)
+        .fresnel(0.)
+        .edge_shadow(0.);
+    anyhow::ensure!(
+        opaque.is_opaque_fill(),
+        "{opaque:?} should be an opaque fill"
+    );
+    let glass = render(&glass_test_scene(Some(opaque)))?;
+    let mut filled = glass_test_scene(None);
+    let shape = Bounds {
+        origin: point(ScaledPixels(8.), ScaledPixels(8.)),
+        size: size(ScaledPixels(48.), ScaledPixels(48.)),
+    };
+    filled.insert_primitive(crate::Quad {
+        bounds: shape,
+        content_mask: crate::ContentMask { bounds: shape },
+        background: tint.into(),
+        corner_radii: Corners::all(ScaledPixels(8.)),
+        corner_smoothing: 2.,
+        ..Default::default()
+    });
+    filled.finish();
+    let fill = render(&filled)?;
+    for (x, y, expected) in fill.enumerate_pixels() {
+        let actual = glass.get_pixel(x, y).0;
+        anyhow::ensure!(
+            expected
+                .0
+                .iter()
+                .zip(actual)
+                .all(|(a, b)| a.abs_diff(b) <= 2),
+            "opaque glass should draw a plain fill, ({x}, {y}) is {actual:?} for {:?}",
+            expected.0
+        );
+    }
     Ok(())
 }
 
@@ -1501,5 +1551,50 @@ mod tests {
         }
         assert!(rect.is_settled());
         assert_eq!(rect.bounds(), end);
+    }
+
+    struct Surface(GlassMaterial);
+
+    impl crate::Render for Surface {
+        fn render(
+            &mut self,
+            _: &mut crate::Window,
+            _: &mut crate::Context<Self>,
+        ) -> impl crate::IntoElement {
+            use crate::{ParentElement as _, Styled as _};
+            crate::div()
+                .size_full()
+                .child(crate::div().size(px(120.)).rounded(px(12.)).glass(self.0))
+        }
+    }
+
+    #[crate::test]
+    fn opaque_materials_paint_a_plain_fill(cx: &mut crate::TestAppContext) {
+        let tint = hsla(0.6, 0.2, 0.3, 1.);
+        let solid = GlassMaterial::clear()
+            .tint(tint)
+            .refraction(px(-60.))
+            .saturation(0.5)
+            .brightness(-0.3)
+            .specular(0.)
+            .fresnel(0.)
+            .edge_shadow(0.)
+            .noise(0.)
+            .glow(0.);
+        let painted = |material: GlassMaterial, cx: &mut crate::TestAppContext| {
+            let (_, cx) = cx.add_window_view(move |_, _| Surface(material));
+            cx.run_until_parked();
+            cx.update(|window, _| (window.painted_quads(), window.painted_glasses().len()))
+        };
+
+        let (quads, glasses) = painted(solid, cx);
+        assert_eq!(glasses, 0);
+        assert_eq!(quads.len(), 1);
+        assert_eq!(quads[0].background, tint.into());
+
+        let (_, glasses) = painted(solid.tint(tint.alpha(0.99)), cx);
+        assert_eq!(glasses, 1);
+        let (_, glasses) = painted(solid.specular(0.1), cx);
+        assert_eq!(glasses, 1);
     }
 }

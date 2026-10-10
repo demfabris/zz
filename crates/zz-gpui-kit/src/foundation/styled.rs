@@ -95,10 +95,10 @@ pub trait StyledExt: Styled + Sized {
     /// keeping its width; call this after setting the border.
     fn surface_fill(self, color: Hsla, cx: &App) -> Self {
         match cx.theme().glass {
-            Some(material) => self
+            Some(material) if !material.is_opaque_fill() => self
                 .glass(material.tint(color.alpha(material.tint.a)).fallback(color))
                 .border_color(cx.theme().transparent),
-            None => self.bg(color),
+            _ => self.bg(color),
         }
     }
 

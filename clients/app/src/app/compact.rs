@@ -85,7 +85,8 @@ impl CompactState {
         self.zoom_intent = None;
         self.last_current = None;
         self.previous = None;
-        self.bindings = std::env::var("ZZ_GPUI_BENCH").is_ok_and(|bench| bench.starts_with("sheet"));
+        self.bindings =
+            std::env::var("ZZ_GPUI_BENCH").is_ok_and(|bench| bench.starts_with("sheet"));
         self.sessions = false;
     }
 }

@@ -5053,6 +5053,14 @@ impl MuxEngine {
         Ok(())
     }
 
+    fn default_window_name(&self, pane: PaneId) -> String {
+        match self.state.pane(pane) {
+            Some(state) if !matches!(state.kind, PaneKind::Terminal) => state.title.clone(),
+            Some(_) => self.pane_command_fallback(pane),
+            None => String::new(),
+        }
+    }
+
     pub(crate) fn pane_command_fallback(&self, pane: PaneId) -> String {
         let command = self
             .pane_start_command(pane)
@@ -8213,11 +8221,13 @@ impl MuxEngine {
         let original_context = context.clone();
         let base_index = self.base_index_for_session(destination_session);
         let destroyed_source = self.destroyed_session_marker(source_session)?;
+        let default_name = self.default_window_name(source);
         let window = self.state.break_pane_with_base_index(
             source,
             destination_session,
             destination_index,
             name,
+            default_name,
             detached,
             base_index,
         )?;
@@ -8226,6 +8236,9 @@ impl MuxEngine {
                 .set_window_automatic_rename(window, Some(false))?;
         }
         self.record_destroyed_session(destroyed_source);
+        if window != source_window {
+            self.refresh_automatic_window_name_for_pane(source, hooks);
+        }
         if detached {
             if original_context.window == Some(source_window)
                 && original_context.pane == Some(source)
@@ -24904,6 +24917,89 @@ mod tests {
                 .unwrap(),
             Some(true)
         );
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
+    fn break_pane_without_a_name_names_the_window_from_the_command_not_the_title() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "w"]))
+            .unwrap();
+        let break_out = |engine: &mut MuxEngine, context: &mut ExecutionContext, index: &str| {
+            engine
+                .execute(context, &command("split-window", &["-t", "=w:0"]))
+                .unwrap();
+            let pane = context.pane.unwrap();
+            engine
+                .set_pane_shell(pane, "/usr/bin/bash".to_owned())
+                .unwrap();
+            engine
+                .state
+                .update_pane_title(pane, "user@host:/home/user")
+                .unwrap();
+            (pane, index.to_owned())
+        };
+
+        let (shell_pane, index) = break_out(&mut engine, &mut context, "=w:6");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &["-d", "-s", &shell_pane.to_string(), "-t", &index],
+                ),
+            )
+            .unwrap();
+        let shell_window = engine.state.window_for_pane(shell_pane).unwrap();
+        assert_eq!(engine.state.windows[&shell_window].name, "bash");
+        assert_eq!(
+            engine
+                .state
+                .window_automatic_rename_override(shell_window)
+                .unwrap(),
+            None
+        );
+
+        let (command_pane, index) = break_out(&mut engine, &mut context, "=w:7");
+        engine
+            .set_pane_start_command(
+                command_pane,
+                vec!["/usr/bin/vim".to_owned(), "notes.txt".to_owned()],
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &["-d", "-s", &command_pane.to_string(), "-t", &index],
+                ),
+            )
+            .unwrap();
+        let command_window = engine.state.window_for_pane(command_pane).unwrap();
+        assert_eq!(engine.state.windows[&command_window].name, "vim");
+
+        let (busy_pane, index) = break_out(&mut engine, &mut context, "=w:8");
+        engine.set_pane_runtime_facts(
+            busy_pane,
+            PaneRuntimeFacts {
+                current_command: "sleep".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &["-d", "-s", &busy_pane.to_string(), "-t", &index],
+                ),
+            )
+            .unwrap();
+        let busy_window = engine.state.window_for_pane(busy_pane).unwrap();
+        assert_eq!(engine.state.windows[&busy_window].name, "sleep");
         assert!(engine.state.validate().is_ok());
     }
 

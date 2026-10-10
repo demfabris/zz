@@ -4228,6 +4228,7 @@ impl MuxState {
             destination_session,
             destination_index,
             name,
+            String::new(),
             detached,
             0,
         )
@@ -4239,6 +4240,7 @@ impl MuxState {
         destination_session: SessionId,
         destination_index: Option<u32>,
         name: Option<String>,
+        default_name: String,
         detached: bool,
         base_index: u32,
     ) -> Result<WindowId, ServerError> {
@@ -4294,7 +4296,7 @@ impl MuxState {
                 .insert(&mut self.journal, source_window, source);
             None
         };
-        let window_name = name.unwrap_or_else(|| pane_state.title.clone());
+        let window_name = name.unwrap_or(default_name);
         self.windows.insert(
             &mut self.journal,
             window_id,

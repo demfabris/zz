@@ -1141,25 +1141,25 @@ run_binding_pass() {
   bound_message reload-config 'Reloaded zz configuration' reload-config
 
   bound_message agent-respond \
-    'agent-respond needs exactly one of --allow, --deny, or --option ID' agent-respond
+    'Agent-respond needs exactly one of --allow, --deny, or --option ID' agent-respond
   bound_message agent-send \
-    'agent-send needs text on the command line or on standard input' agent-send
-  bound_message capture-browser 'capture-browser needs an output path (-o)' capture-browser
+    'Agent-send needs text on the command line or on standard input' agent-send
+  bound_message capture-browser 'Capture-browser needs an output path (-o)' capture-browser
   bound_message copy-mode-search-prompt 'terminal search is unsupported here' \
     copy-mode-search-prompt -t "$pane"
   bound_message import-tmux-config 'No tmux configuration found' import-tmux-config
-  bound_message restart-agent-pane "pane $pane is not an agent" restart-agent-pane -t "$pane"
+  bound_message restart-agent-pane "Pane $pane is not an agent" restart-agent-pane -t "$pane"
   bound_message select-pane-kind \
-    'select-pane-kind requires exactly one of: terminal, browser, agent, editor' select-pane-kind
+    'Select-pane-kind requires exactly one of: terminal, browser, agent, editor' select-pane-kind
   bind_the_key send-last-output -t "$pane"
   message_row_is_truncated send-last-output zz "$(marks_message "$pane" send-last-output)"
   bind_the_key show-last-output -t "$pane"
   message_row_is_truncated show-last-output zz "$(marks_message "$pane" show-last-output)"
-  bound_message set-agent-provider 'set-agent-provider needs exactly one provider' set-agent-provider
-  bound_message set-browser-profile 'set-browser-profile needs exactly one profile name' set-browser-profile
-  bound_message set-browser-tabs 'set-browser-tabs needs at least one URL' set-browser-tabs
-  bound_message set-browser-url 'set-browser-url needs a URL' set-browser-url
-  bound_message set-editor-path "pane $pane is not an editor" \
+  bound_message set-agent-provider 'Set-agent-provider needs exactly one provider' set-agent-provider
+  bound_message set-browser-profile 'Set-browser-profile needs exactly one profile name' set-browser-profile
+  bound_message set-browser-tabs 'Set-browser-tabs needs at least one URL' set-browser-tabs
+  bound_message set-browser-url 'Set-browser-url needs a URL' set-browser-url
+  bound_message set-editor-path "Pane $pane is not an editor" \
     set-editor-path -t "$pane" /tmp/zz-superset-editor.txt
 
   bind_the_key send-text -t "$pane" BOUNDPASSTEXT

@@ -1009,7 +1009,7 @@
       "id": "fix.corpus-3-8",
       "track": "fix",
       "title": "Corpus rows red at the 3.8 pin in the M1/M3 full run",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "compat/scenarios",
@@ -1027,7 +1027,34 @@
       "branch": "catchup/fix.corpus-3-8",
       "sha": null,
       "notes": [
-        "2026-10-09: first full-corpus run at the 3.8 pin (main b260b7404, the float track merge); every row above failed its first pass and a solo retry. Log: ~/.cache/zz-catchup/logs/m3-run-sh.log on alienware. Known before the run: smoke/config-chain-parse-abort fails on the tmux side (filed under pin.hooks-events); smoke/display-menu-mouse's probe was written for the old pin and 3.8 fails its own checks (float.keys note)."
+        "2026-10-09: first full-corpus run at the 3.8 pin (main b260b7404, the float track merge); every row above failed its first pass and a solo retry. Log: ~/.cache/zz-catchup/logs/m3-run-sh.log on alienware. Known before the run: smoke/config-chain-parse-abort fails on the tmux side (filed under pin.hooks-events); smoke/display-menu-mouse's probe was written for the old pin and 3.8 fails its own checks (float.keys note).",
+        "2026-10-10: Lane done at aa6581482: all 16 rows clean vs 3.8 and attached-client PASS; causes: 3.8 drift fixed in zz (session alert flags, config error deferral, display-menu no longer blocks, ## trace), float-merge regressions (command-flag-errors totals, attached-client popup expectations under display-popup.modal-pane), old-pin probes, harness (pixel-size query, Arch prompt retitle, the suite's copied binary). Review 1 running."
+      ]
+    },
+    {
+      "id": "fix.followups-4",
+      "track": "fix",
+      "title": "Follow-ups, fourth batch (harness robustness at the 3.8 pin)",
+      "status": "todo",
+      "deps": [
+        "fix.corpus-3-8"
+      ],
+      "zones": [
+        "compat/scenarios/smoke/fixtures",
+        "compat/scenarios",
+        "crates/zz-terminal/src"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each line in the notes is fixed with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
+      ],
+      "branch": null,
+      "sha": null,
+      "notes": [
+        "(fix.corpus-3-8) chooser-drive.py, send-keys-attach.py, graphics-drive.py and bare-client.py do not answer 3.8's pixel-size query (CSI 14 t), so tmux holds a lone Escape 500 ms on their side; pty-drive.py now answers it. Share one answer path.",
+        "(fix.corpus-3-8) On Arch hosts /etc/bash.bashrc retitles the pane at every prompt, racing select-pane -T in scenarios that use a default-shell pane; make such scenarios run a fixed program (cat, sh) as the corpus lane did.",
+        "(fix.corpus-3-8) zz's bash shell integration retitles every default-shell pane to 'bash' even after the distro's OSC 0, so #{pane_title} differs from tmux on such hosts. Measure; decide whether zz's integration should stop overriding a title the shell already set, or record it native with the reason.",
+        "(fix.corpus-3-8) link-window and unlink-window (3.8 commands) are missing from compat/scenarios/smoke/fixtures/command-flag-errors.tsv."
       ]
     }
   ]

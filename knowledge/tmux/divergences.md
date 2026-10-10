@@ -558,11 +558,13 @@ tmux 3.8 (ad6832e6) made a menu window state: `menu_display` hangs the menu on t
 every client showing that window draws it, any of them can answer it, and a menu raised for a window
 the client is not showing waits there. zz keeps `display-menu` a per-client overlay: the menu
 session lives on the target client in `crates/zz-daemon/src/daemon.rs`, and the overlay
-exclusivity, key and mouse routing, command-client wait and the GUI's native menu all hang off that
-client. zz does place a menu against the window the way 3.8 does (`cmd_display_menu_get_menu_pos`),
-so a centred or pointer-placed menu lands on the same cells. What differs: a second client on the
-window does not see the menu, and a status-line window menu for a window the client is not showing
-opens over the current window. Registry: `menus.client-owned`.
+exclusivity, key and mouse routing and the GUI's native menu all hang off that client. zz does place
+a menu against the window the way 3.8 does (`cmd_display_menu_get_menu_pos`), so a centred or
+pointer-placed menu lands on the same cells, and like 3.8 `display-menu` returns as soon as the menu
+is up (cmd-display-menu.c:556) with the chosen row appended to the client's queue later; the
+command-client wait went on 2026-10-10. What differs: a second client on the window does not see
+the menu, and a status-line window menu for a window the client is not showing opens over the
+current window. Registry: `menus.client-owned`.
 
 ## `clear-on-attach` in the desktop client (2026-10-09)
 

@@ -42,33 +42,23 @@ fn task(
         false,
     )
     .unwrap();
-    assert!(matches!(task.run(true), wait_queue::Progress::Waiting));
-    assert!(!task.ready());
+    assert!(matches!(task.run(true), wait_queue::Progress::Done));
     (client, task)
 }
 
-fn continuation(shared: &Shared, target: ClientId) -> cmdq::WaitContinuation {
-    shared.inner.lock().clients[&target]
-        .menu
-        .as_ref()
-        .unwrap()
-        .waiter
-        .as_ref()
-        .unwrap()
-        .0
-        .continuation
-        .clone()
-}
-
-fn finish(task: &mut wait_queue::CommandTask) {
-    assert!(task.ready());
-    assert!(matches!(task.run(true), wait_queue::Progress::Done));
+fn menu_open(shared: &Shared, target: ClientId) -> bool {
+    shared
+        .inner
+        .lock()
+        .clients
+        .get(&target)
+        .is_some_and(|client| client.menu.is_some())
 }
 
 #[test]
-fn twenty_open_blocking_menus_add_zero_workers() {
+fn twenty_open_menus_return_at_once_and_add_zero_workers() {
     if !super::solo_tests::rerun_alone(
-        "daemon::menu_queue_e08_tests::twenty_open_blocking_menus_add_zero_workers",
+        "daemon::menu_queue_e08_tests::twenty_open_menus_return_at_once_and_add_zero_workers",
     ) {
         return;
     }
@@ -80,7 +70,7 @@ fn twenty_open_blocking_menus_add_zero_workers() {
     let before = zz_daemon_client::process_info::sample(std::process::id())
         .unwrap()
         .threads;
-    let mut tasks = (0..20)
+    let tasks = (0..20)
         .map(|index| task(&shared, &context, index, "display-message chosen").1)
         .collect::<Vec<_>>();
     assert_eq!(shared.connection_threads.worker_count(), 0);
@@ -90,29 +80,28 @@ fn twenty_open_blocking_menus_add_zero_workers() {
             .threads
             <= before
     );
-    for client in targets {
-        shared.input_menu(client, &context, MenuAction::Cancel);
-    }
-    for task in &mut tasks {
-        finish(task);
-    }
     for task in tasks {
         assert!(matches!(
             task.finish().0,
             CommandResponse::Success { exit_code: 0, .. }
         ));
     }
+    for client in targets {
+        assert!(menu_open(&shared, client));
+        shared.input_menu(client, &context, MenuAction::Cancel);
+        assert!(!menu_open(&shared, client));
+    }
     assert_eq!(shared.connection_threads.worker_count(), 0);
 }
 
 #[test]
-fn detach_and_disconnect_resume_a_menu_once() {
+fn detach_and_disconnect_close_the_menu() {
     for disconnect in [false, true] {
         let (shared, context) = workspace();
         let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
         let target = target(&shared, &context, 0);
-        let (_, mut task) = task(&shared, &context, 0, "display-message chosen");
-        let continuation = continuation(&shared, target);
+        let (_, task) = task(&shared, &context, 0, "display-message chosen");
+        assert!(menu_open(&shared, target));
         if disconnect {
             shared.unregister(target);
             shared.unregister(target);
@@ -120,8 +109,7 @@ fn detach_and_disconnect_resume_a_menu_once() {
             shared.detach(target);
             shared.detach(target);
         }
-        finish(&mut task);
-        assert!(!continuation.complete());
+        assert!(!menu_open(&shared, target));
         assert!(matches!(
             task.finish().0,
             CommandResponse::Success { exit_code: 0, .. }
@@ -130,22 +118,14 @@ fn detach_and_disconnect_resume_a_menu_once() {
 }
 
 #[test]
-fn issuing_client_disconnect_and_task_drop_resume_once() {
-    for cancel_task in [false, true] {
-        let (shared, context) = workspace();
-        let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
-        let target = target(&shared, &context, 0);
-        let (client, task) = task(&shared, &context, 0, "display-message chosen");
-        let continuation = continuation(&shared, target);
-        if cancel_task {
-            drop(task);
-        } else {
-            shared.unregister(client);
-            assert!(task.ready());
-        }
-        assert!(continuation.ready());
-        assert!(!continuation.complete());
-    }
+fn issuing_client_disconnect_leaves_the_menu_up() {
+    let (shared, context) = workspace();
+    let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
+    let target = target(&shared, &context, 0);
+    let (client, task) = task(&shared, &context, 0, "display-message chosen");
+    drop(task);
+    shared.unregister(client);
+    assert!(menu_open(&shared, target));
 }
 
 #[test]
@@ -153,20 +133,23 @@ fn selected_action_is_queued_after_close_against_the_saved_target() {
     let (shared, context) = workspace();
     let _event_loop = event_loop::EventLoop::empty(&shared).unwrap();
     let target = target(&shared, &context, 0);
-    let (_, mut task) = task(
+    let (_, task) = task(
         &shared,
         &context,
         0,
         "set-environment -g MENU_TARGET '#{pane_id}'",
     );
+    assert!(matches!(
+        task.finish().0,
+        CommandResponse::Success { exit_code: 0, .. }
+    ));
     let other = {
         let mut inner = shared.inner.lock();
         let (_, _, pane) = inner.engine.state.create_session("other").unwrap();
         ExecutionContext::for_pane(&inner.engine.state, pane).unwrap()
     };
     shared.input_menu(target, &other, MenuAction::Choose(0));
-    assert!(shared.inner.lock().clients[&target].menu.is_none());
-    assert!(task.ready());
+    assert!(!menu_open(&shared, target));
     let mut actions = std::mem::take(&mut *shared.pending_wait_queues.lock());
     assert_eq!(actions.len(), 1);
     for action in &mut actions {
@@ -184,11 +167,6 @@ fn selected_action_is_queued_after_close_against_the_saved_target() {
             .global_environment_variable("MENU_TARGET"),
         Some(context.pane.unwrap().to_string())
     );
-    finish(&mut task);
-    assert!(matches!(
-        task.finish().0,
-        CommandResponse::Success { exit_code: 0, .. }
-    ));
 }
 
 #[test]

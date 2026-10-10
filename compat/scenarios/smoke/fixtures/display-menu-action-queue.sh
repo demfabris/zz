@@ -115,8 +115,10 @@ if [ -z "$client" ]; then
 fi
 sleep 0.5
 
-# display-menu holds the command queue until the client leaves the menu, then
-# the chosen action runs and the rest of the chain follows it.
+# tmux 3.8 returns from display-menu once the menu is up
+# (cmd-display-menu.c:556), so the rest of the chain runs at once and only the
+# chosen action waits for the client. The d77c9dc6 pin returned CMD_RETURN_WAIT
+# and held MENU_AFTER at pending until the client left the menu.
 main_client set-environment -g MENU_ITEM pending
 main_client set-environment -g MENU_AFTER pending
 main_client display-menu -c "$client" -T '' \
@@ -124,7 +126,7 @@ main_client display-menu -c "$client" -T '' \
     set-environment -g MENU_AFTER after &
 menu_pid=$!
 sleep 1.0
-check_equal blocks-the-chain pending "$(value MENU_AFTER)"
+check_equal chain-does-not-wait after "$(value MENU_AFTER)"
 check_equal blocks-the-item pending "$(value MENU_ITEM)"
 drive "keys 71"
 sleep 1.2

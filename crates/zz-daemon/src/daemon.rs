@@ -5975,7 +5975,7 @@ impl Shared {
         terminate_shell_jobs: bool,
         destroy_sessions: bool,
     ) -> Vec<PendingHookEvent> {
-        let (events, terminals, wakes, pipes, shell_jobs, menu_waiters, confirm_waiters) = {
+        let (events, terminals, wakes, pipes, shell_jobs, confirm_waiters) = {
             let mut inner = self.inner.lock();
             let mut terminals = std::mem::take(&mut inner.terminals)
                 .values()
@@ -6062,12 +6062,9 @@ impl Shared {
             } else {
                 Vec::new()
             };
-            let menu_waiters = inner
-                .clients
-                .values_mut()
-                .filter_map(|c| c.menu.take())
-                .filter_map(|menu| menu.waiter)
-                .collect::<Vec<_>>();
+            for client in inner.clients.values_mut() {
+                client.menu.take();
+            }
             let confirm_waiters = inner
                 .clients
                 .values_mut()
@@ -6077,15 +6074,7 @@ impl Shared {
                     ConfirmExecution::Deferred { .. } | ConfirmExecution::Background { .. } => None,
                 })
                 .collect::<Vec<_>>();
-            (
-                events,
-                terminals,
-                wakes,
-                pipes,
-                shell_jobs,
-                menu_waiters,
-                confirm_waiters,
-            )
+            (events, terminals, wakes, pipes, shell_jobs, confirm_waiters)
         };
         for terminal in terminals {
             terminal.terminate();
@@ -6105,9 +6094,6 @@ impl Shared {
             }
             #[cfg(not(unix))]
             terminate_managed_process(&process);
-        }
-        for waiter in menu_waiters {
-            waiter.complete(false);
         }
         for waiter in confirm_waiters {
             waiter.complete(false);
@@ -6955,7 +6941,7 @@ impl Shared {
         self.enforce_destroy_unattached();
         self.fail_gui_requests_for(client);
         self.status.lock().forget(client);
-        let (terminals, command_output, menu_waiters, confirm_waiters, shutdown, wait_wakes) = {
+        let (terminals, command_output, confirm_waiters, shutdown, wait_wakes) = {
             let mut inner = self.inner.lock();
             let mut removed_client = inner.clients.remove(&client);
             let files = inner
@@ -6999,18 +6985,6 @@ impl Shared {
                 Some(client),
             ));
             pane_exit::cancel_client(&mut inner, client);
-            let menu_waiters = inner
-                .clients
-                .values_mut()
-                .filter_map(|c| c.menu.as_mut())
-                .filter_map(|menu| {
-                    menu.waiter
-                        .as_ref()
-                        .is_some_and(|waiter| waiter.0.client == client)
-                        .then(|| menu.waiter.take())
-                        .flatten()
-                })
-                .collect::<Vec<_>>();
             let confirm_waiters = inner
                 .clients
                 .values()
@@ -7051,7 +7025,6 @@ impl Shared {
                 removed_client
                     .as_mut()
                     .and_then(|c| c.command_output.take()),
-                menu_waiters,
                 confirm_waiters,
                 shutdown,
                 wait_wakes,
@@ -7067,9 +7040,6 @@ impl Shared {
         }
         for terminal in terminals {
             terminal.release_view(view);
-        }
-        for waiter in menu_waiters {
-            waiter.complete(false);
         }
         for waiter in confirm_waiters {
             waiter.complete(false);
@@ -8484,14 +8454,9 @@ impl Shared {
                         queue_execution,
                         format_facts_unread,
                     ),
-                    DaemonCommandDispatch::DisplayMenu => self.display_menu(
-                        client,
-                        kind,
-                        context,
-                        canonical,
-                        command,
-                        queue_execution,
-                    ),
+                    DaemonCommandDispatch::DisplayMenu => {
+                        self.display_menu(client, kind, context, canonical, command)
+                    }
                     DaemonCommandDispatch::ConfirmBefore => self.confirm_before(
                         client,
                         kind,
@@ -19317,7 +19282,6 @@ impl Shared {
         context: &ExecutionContext,
         command_name: &str,
         command: &CommandInvocation,
-        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_menu_args(&command.args)?;
         if kind == ClientKind::Control {
@@ -19539,13 +19503,11 @@ impl Shared {
                 commands,
             )
         };
-        let waiter = {
+        {
             let mut inner = self.inner.lock();
             if any_overlay_present(&inner, target_client) {
                 return Ok(Execution::default());
             }
-            let waiter = matches!(kind, ClientKind::Command | ClientKind::Control)
-                .then(|| self.register_overlay_wait(client, None, queue_execution));
             inner.client_entry(target_client).menu.replace(MenuSession {
                 state: state.clone(),
                 commands,
@@ -19556,17 +19518,9 @@ impl Shared {
                     selected_style: parsed.selected_style.clone(),
                     border_style: parsed.border_style.clone(),
                 },
-                waiter: self
-                    .command_item
-                    .as_ref()
-                    .and_then(|item| item.lock().raising_overlay.take()),
             });
-            waiter
-        };
-        self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
-        if let Some(waiter) = waiter {
-            self.finish_overlay_wait(&waiter, true);
         }
+        self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
         Ok(Execution::default())
     }
 
@@ -20932,10 +20886,7 @@ impl Shared {
         if let Some(command_output) = command_output {
             self.retire_command_output(client, command_output);
         }
-        if let Some(menu) = menu {
-            if let Some(waiter) = menu.waiter {
-                waiter.complete(false);
-            }
+        if menu.is_some() {
             self.publish_to_client(client, EventPayload::Menu { state: None });
         }
         if let Some(confirm) = confirm {
@@ -21775,7 +21726,6 @@ impl Shared {
                 commands: vec![None; state.items.len()],
                 target,
                 styles: OverlayStyleOverrides::default(),
-                waiter: None,
                 mode_tree: Some(ModeTreeMenu {
                     pane,
                     line: menu.line,
@@ -21813,9 +21763,6 @@ impl Shared {
                 .expect("menu was present")
         };
         self.publish_to_client(client, EventPayload::Menu { state: None });
-        if let Some(waiter) = session.waiter {
-            waiter.complete(false);
-        }
         let MenuAction::Choose(index) = action else {
             return;
         };
@@ -38115,7 +38062,6 @@ struct MenuSession {
     commands: Vec<Option<String>>,
     target: ExecutionContext,
     styles: OverlayStyleOverrides,
-    waiter: Option<OverlayWait>,
     mode_tree: Option<ModeTreeMenu>,
 }
 
@@ -38298,11 +38244,11 @@ fn dismiss_overlays(
         retired.push((client, output));
     }
     if raising != Some(Overlay::Menu)
-        && let Some(menu) = inner.client_mut(client).and_then(|c| c.menu.take())
+        && inner
+            .client_mut(client)
+            .and_then(|c| c.menu.take())
+            .is_some()
     {
-        if let Some(waiter) = menu.waiter {
-            waiter.complete(false);
-        }
         events.push(EventPayload::Menu { state: None });
     }
     if raising != Some(Overlay::Confirm)
@@ -103911,43 +103857,36 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn display_menu_blocking_cancel_returns_zero_and_disabled_stay_open_is_defensive() {
+    fn display_menu_returns_before_the_menu_closes_and_disabled_stay_open_is_defensive() {
         let (shared, interactive, _, context) = popup_test_workspace("desktop");
-        let sender = Arc::clone(&shared);
         let mut command_context = context.clone();
-        let (send, receive) = crossbeam_channel::bounded(1);
-        let worker = thread::spawn(move || {
-            let result = sender.execute(
-                ClientId(900),
-                ClientKind::Command,
-                &mut command_context,
-                &CommandInvocation::new(
-                    "display-menu",
-                    [
-                        "-c",
-                        "desktop",
-                        "-O",
-                        "--",
-                        "-Disabled",
-                        "d",
-                        "display-message nope",
-                    ],
-                ),
-            );
-            send.send(result).expect("return menu result");
-        });
-        wait_for_menu_state(&shared, interactive);
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(900),
+                    ClientKind::Command,
+                    &mut command_context,
+                    &CommandInvocation::new(
+                        "display-menu",
+                        [
+                            "-c",
+                            "desktop",
+                            "-O",
+                            "--",
+                            "-Disabled",
+                            "d",
+                            "display-message nope",
+                        ],
+                    ),
+                )
+                .expect("menu opens"),
+            Execution::default()
+        );
+        assert!(shared.read_client(interactive, |c| c.is_some_and(|c| c.menu.is_some())));
         shared.input_menu(interactive, &context, MenuAction::Choose(0));
         assert!(shared.read_client(interactive, |c| c.is_some_and(|c| c.menu.is_some())));
         shared.input_menu(interactive, &context, MenuAction::Cancel);
-        assert_eq!(
-            receive
-                .recv_timeout(Duration::from_secs(5))
-                .expect("menu cancel result")
-                .expect("menu cancel succeeds"),
-            Execution::default()
-        );
-        worker.join().expect("menu command worker");
+        assert!(shared.read_client(interactive, |c| c.is_none_or(|c| c.menu.is_none())));
     }
 
     #[test]

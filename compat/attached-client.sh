@@ -825,15 +825,50 @@ wait_for_current_marker() {
   fixture_failure "$side current screen did not show $marker within 10 seconds"
 }
 
+# tmux 3.8's popup_draw_cb starts the title one cell after the corner. zz runs
+# display-popup as a modal pane (display-popup.modal-pane, ruled 2026-10-09), so
+# the title sits in the pane's top border after the two-cell lead every pane
+# border title takes.
+popup_title_lead() {
+  if [ "$1" = zz ]; then
+    printf '──'
+  else
+    printf '─'
+  fi
+}
+
+# tmux 3.8's popup_key_cb swallows the terminal's focus reports while a popup
+# is up, and a dead close-on-any-key popup closes on the first of them. zz's
+# popup is a modal pane (display-popup.modal-pane): it is the active pane, so a
+# focus report reaches its application like any pane's, and its dead -k form
+# is remain-on-exit key, which a key closes and a focus report does not. The zz
+# side therefore sends no focus pair to a live popup and closes the dead one
+# with a key.
+send_popup_focus_pair() {
+  if [ "$1" = tmux ]; then
+    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$1" $'\033[O\033[I'
+  fi
+}
+
+close_dead_popup() {
+  if [ "$1" = tmux ]; then
+    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$1" $'\033[O\033[I'
+  else
+    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$1" x
+  fi
+}
+
 wait_for_current_popup_title() {
   local side="$1"
   local title="$2"
+  local lead
   local attempt
   local screen
 
+  lead="$(popup_title_lead "$side")"
   for ((attempt = 0; attempt < 200; attempt++)); do
     screen="$(capture_current_screen "$side" 2>/dev/null || true)"
-    if grep -Fq -- "┌─$title" <<<"$screen" || grep -Fq -- "lq$title" <<<"$screen"; then
+    if grep -Fq -- "┌$lead$title" <<<"$screen" || grep -Fq -- "lq$title" <<<"$screen"; then
       return 0
     fi
     sleep 0.05
@@ -1490,14 +1525,16 @@ finish_display_popup() {
 capture_popup_frame() {
   local side="$1"
   local title="$2"
+  local lead
   local attempt
   local screen
   local frame
 
+  lead="$(popup_title_lead "$side")"
   for ((attempt = 0; attempt < 200; attempt++)); do
     screen="$(capture_current_screen "$side" 2>/dev/null || true)"
-    if frame="$(awk -v title="$title" '
-      !inside && (index($0, "┌─" title) || index($0, "lq" title)) { inside = 1 }
+    if frame="$(awk -v title="$title" -v lead="$lead" '
+      !inside && (index($0, "┌" lead title) || index($0, "lq" title)) { inside = 1 }
       inside { printf "%d:%s\n", NR, $0 }
       inside && ((index($0, "└") && index($0, "┘")) ||
         (index($0, "mqq") && index($0, "j"))) { found = 1; exit }
@@ -1616,6 +1653,12 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
     -x 2 -y 18 -w 24 -h 6 -T "$updated_title" \
     /bin/bash -c 'printf "POPUP_A_REPLACEMENT_WRONG\n"' ||
     fixture_failure "$side could not modify its live popup"
+  # tmux 3.8's popup_modify retitles the live popup in place. zz's popup is
+  # master's modal pane (display-popup.modal-pane), and a display-popup on a
+  # window that already has one leaves it alone, title included.
+  if [ "$side" = zz ]; then
+    updated_title="$title"
+  fi
   wait_for_current_popup_title "$side" "$updated_title"
   wait_for_current_marker "$side" "POPUP_A_BODY_$side"
   wait_for_current_marker_absent "$side" POPUP_A_REPLACEMENT_WRONG
@@ -1626,7 +1669,7 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
     fixture_failure "$side changed its live popup frame"
   fi
 
-  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" $'\033[O\033[I'
+  send_popup_focus_pair "$side"
   wait_for_current_marker "$side" "$updated_title"
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
@@ -1658,7 +1701,7 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   popup_column=$((cursor_column + 3))
   popup_row=$((cursor_row + 2))
 
-  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" $'\033[O\033[I'
+  send_popup_focus_pair "$side"
   wait_for_current_marker "$side" "$title"
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" \
@@ -1687,11 +1730,15 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   wait_for_popup_underlay_focus "$side" OUT 3
   wait_for_current_popup_title "$side" "$title"
   wait_for_current_marker "$side" "POPUP_C_DEAD_$side"
-  if ! kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
+  # tmux 3.8 holds the display-popup command until the dead popup closes. zz's
+  # modal pane answers a waiting command client with the command's exit status
+  # as soon as the command exits, while the dead pane stays up for its key
+  # (display-popup.modal-pane).
+  if [ "$side" = tmux ] && ! kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
     fixture_failure "$side did not retain its dead popup command"
   fi
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
-  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" $'\033[O\033[I'
+  close_dead_popup "$side"
   wait_for_current_marker_absent "$side" "$title"
   finish_display_popup "$side"
   wait_for_popup_underlay_focus "$side" IN 3

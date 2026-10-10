@@ -559,6 +559,10 @@ impl PlatformWindow for IosWindow {
         false
     }
 
+    fn supports_backdrop_sampling(&self) -> bool {
+        self.0.borrow().renderer.supports_backdrop_sampling()
+    }
+
     fn update_ime_position(&self, _bounds: Bounds<Pixels>) {}
 
     fn gpu_specs(&self) -> Option<zz_gpui::GpuSpecs> {

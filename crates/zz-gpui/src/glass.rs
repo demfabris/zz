@@ -83,6 +83,10 @@ pub struct GlassMaterial {
     pub merge: Pixels,
     /// Fades the whole surface, backdrop included.
     pub opacity: f32,
+    /// What renderers that cannot read back the frame paint in its place.
+    /// Unset, they paint a translucent fill derived from the tint.
+    #[serde(default)]
+    pub fallback: Option<Hsla>,
 }
 
 impl Default for GlassMaterial {
@@ -92,6 +96,23 @@ impl Default for GlassMaterial {
 }
 
 impl GlassMaterial {
+    /// Every preset by name, as settings and URLs spell them.
+    pub const PRESETS: &[(&str, fn() -> Self)] = &[
+        ("regular", Self::regular),
+        ("clear", Self::clear),
+        ("frosted", Self::frosted),
+        ("bubble", Self::bubble),
+        ("smoked", Self::smoked),
+    ];
+
+    /// The preset called `name` in [`Self::PRESETS`].
+    pub fn preset(name: &str) -> Option<Self> {
+        Self::PRESETS
+            .iter()
+            .find(|(preset, _)| *preset == name)
+            .map(|(_, material)| material())
+    }
+
     /// The everyday material: strong lensing at the rim, barely frosted.
     pub fn regular() -> Self {
         Self {
@@ -115,6 +136,7 @@ impl GlassMaterial {
             glow_center: point(0.5, 0.5),
             merge: px(20.),
             opacity: 1.0,
+            fallback: None,
         }
     }
 
@@ -328,6 +350,12 @@ impl GlassMaterial {
         self
     }
 
+    /// Sets [`Self::fallback`].
+    pub fn fallback(mut self, fill: impl Into<Hsla>) -> Self {
+        self.fallback = Some(fill.into());
+        self
+    }
+
     /// How far past its shape this material reads the backdrop: the blur's
     /// reach, plus the pull when it points outward.
     pub fn backdrop_reach(&self) -> Pixels {
@@ -340,6 +368,12 @@ impl GlassMaterial {
     /// back the frame.
     /// It fades with the material, so [`Self::vanished`] paints nothing.
     pub fn fallback_fill(&self) -> Hsla {
+        if let Some(fill) = self.fallback {
+            return Hsla {
+                a: fill.a * self.opacity,
+                ..fill
+            };
+        }
         let tint = self.tint;
         let lensing = (self.refraction.as_f32().abs() / 20.
             + self.blur.as_f32() / 4.
@@ -393,6 +427,16 @@ impl Interpolate for GlassMaterial {
             ),
             merge: length(from.merge, to.merge),
             opacity: lerp(from.opacity, to.opacity),
+            fallback: match (from.fallback, to.fallback) {
+                (Some(from), Some(to)) => Some(Hsla::interpolate(from, to, phase)),
+                (from, to) => {
+                    if phase < 0.5 {
+                        from
+                    } else {
+                        to
+                    }
+                }
+            },
         }
     }
 }
@@ -1149,6 +1193,104 @@ pub fn glass_test_scene(material: Option<GlassMaterial>) -> crate::Scene {
     }
     scene.finish();
     scene
+}
+
+/// Times the glass cases every renderer is benchmarked on, at `width` by
+/// `height` device pixels over 24 colored stripes, and prints one line per
+/// case. `time` draws a scene repeatedly and returns its milliseconds per
+/// frame; each case keeps its best of five.
+#[cfg(any(test, feature = "test-support", feature = "bench-support"))]
+pub fn bench_glass_rendering(
+    width: f32,
+    height: f32,
+    mut time: impl FnMut(&crate::Scene) -> anyhow::Result<f64>,
+) -> anyhow::Result<()> {
+    use crate::{ContentMask, Quad, Scene};
+    let rect = |x: f32, y: f32, w: f32, h: f32| Bounds {
+        origin: point(ScaledPixels(x), ScaledPixels(y)),
+        size: size(ScaledPixels(w), ScaledPixels(h)),
+    };
+    let viewport = rect(0., 0., width, height);
+    let scene = |glasses: &[(Bounds<ScaledPixels>, f32, GlassMaterial)]| {
+        let mut scene = Scene::default();
+        let stripes = 24;
+        let stripe = width / stripes as f32;
+        for index in 0..stripes {
+            let bounds = rect(index as f32 * stripe, 0., stripe, height);
+            scene.insert_primitive(Quad {
+                bounds,
+                content_mask: ContentMask { bounds },
+                background: hsla(index as f32 / stripes as f32, 0.8, 0.5, 1.).into(),
+                ..Default::default()
+            });
+        }
+        for (bounds, radius, material) in glasses {
+            let mut shapes: [(Bounds<ScaledPixels>, Corners<ScaledPixels>); GLASS_MAX_SHAPES] =
+                Default::default();
+            shapes[0] = (*bounds, Corners::all(ScaledPixels(*radius)));
+            scene.insert_primitive(Glass {
+                order: 0,
+                bounds: bounds.dilate(ScaledPixels(3.)),
+                backdrop_bounds: bounds.dilate(ScaledPixels(material.backdrop_reach().as_f32())),
+                content_mask: ContentMask { bounds: viewport },
+                shapes,
+                shape_count: 1,
+                corner_smoothing: 2.,
+                material: *material,
+            });
+        }
+        scene.finish();
+        scene
+    };
+    // Lengths are device pixels, as the scene holds them: a 2x display
+    // doubles the logical values.
+    let regular = GlassMaterial::regular().scale(2.);
+    let frosted = GlassMaterial::frosted().scale(2.);
+    let clear = GlassMaterial::clear().scale(2.);
+    let buttons: Vec<_> = (0..10)
+        .map(|index| {
+            (
+                rect(200. + index as f32 * 140., 200., 100., 100.),
+                50.,
+                regular,
+            )
+        })
+        .collect();
+    let mut toolbar = vec![(rect(150., 170., 1450., 160.), 80., regular)];
+    toolbar.extend(buttons.iter().copied());
+    let cases = [
+        ("one 100x100 button", vec![buttons[0]]),
+        ("ten buttons in a row", buttons.clone()),
+        ("toolbar under its buttons", toolbar),
+        (
+            "frosted sidebar 640x2800",
+            vec![(rect(60., 80., 640., 2800.), 56., frosted)],
+        ),
+        (
+            "clear glass over the whole window",
+            vec![(viewport, 0., clear)],
+        ),
+        (
+            "frosted glass over the whole window",
+            vec![(viewport, 0., frosted)],
+        ),
+    ];
+    let mut best = |glasses: &[(Bounds<ScaledPixels>, f32, GlassMaterial)]| {
+        let scene = scene(glasses);
+        (0..5).try_fold(f64::MAX, |fastest, _| {
+            Ok::<_, anyhow::Error>(fastest.min(time(&scene)?))
+        })
+    };
+    let base = best(&[])?;
+    println!("glass {width}x{height} background only: {base:.3} ms/frame");
+    for (name, glasses) in &cases {
+        let ms = best(glasses)?;
+        println!(
+            "glass {width}x{height} {name}: {ms:.3} ms/frame (+{:.3})",
+            ms - base
+        );
+    }
+    Ok(())
 }
 
 /// What a renderer must draw for [`glass_test_scene`]; `render` draws a

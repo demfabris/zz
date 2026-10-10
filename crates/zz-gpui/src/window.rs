@@ -4734,6 +4734,12 @@ impl Window {
         self.paint_glass_with_smoothing(bounds, corner_radii, material, None);
     }
 
+    /// Whether this window's renderer can read back the frame, which glass
+    /// needs. Without it, glass paints [`GlassMaterial::fallback_fill`].
+    pub fn supports_backdrop_sampling(&self) -> bool {
+        self.platform_window.supports_backdrop_sampling()
+    }
+
     /// [`Self::paint_glass`] with corners smoothed by `corner_smoothing`
     /// instead of the window's default, to match an element that sets its
     /// own.

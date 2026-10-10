@@ -471,6 +471,7 @@ pub struct WgpuRenderer {
     compositor_gpu: Option<CompositorGpuHint>,
     state: RendererState,
     surface_config: wgpu::SurfaceConfiguration,
+    backdrop_sampling: bool,
     atlas: Arc<WgpuAtlas>,
     transparent_alpha_mode: wgpu::CompositeAlphaMode,
     opaque_alpha_mode: wgpu::CompositeAlphaMode,
@@ -650,16 +651,13 @@ impl WgpuRenderer {
 
         // Glass reads back what the frame holds so far by copying out of it.
         // wgpu reports only RENDER_ATTACHMENT for a browser canvas, but WebGPU
-        // canvases accept any usage.
-        let copyable = surface_caps.usages.contains(wgpu::TextureUsages::COPY_SRC)
+        // canvases accept any usage. The surface asks for copies only once a
+        // frame paints glass: copyable frames lose display optimizations
+        // (framebufferOnly on Metal, compression on some Vulkan drivers).
+        let backdrop_sampling = surface_caps.usages.contains(wgpu::TextureUsages::COPY_SRC)
             || context.adapter.get_info().backend == wgpu::Backend::BrowserWebGpu;
-        let usage = if copyable {
-            wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC
-        } else {
-            wgpu::TextureUsages::RENDER_ATTACHMENT
-        };
         let surface_config = wgpu::SurfaceConfiguration {
-            usage,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format: surface_format,
             width: clamped_width.max(1),
             height: clamped_height.max(1),
@@ -683,6 +681,7 @@ impl WgpuRenderer {
             compositor_gpu,
             state: RendererState::Ready { surface, core },
             surface_config,
+            backdrop_sampling,
             atlas,
             transparent_alpha_mode,
             opaque_alpha_mode,
@@ -1281,9 +1280,7 @@ impl WgpuRenderer {
 
     /// Whether frames can be read back mid-frame, which glass needs.
     pub fn supports_backdrop_sampling(&self) -> bool {
-        self.surface_config
-            .usage
-            .contains(wgpu::TextureUsages::COPY_SRC)
+        self.backdrop_sampling
     }
 
     pub fn supports_dual_source_blending(&self) -> bool {
@@ -1358,6 +1355,17 @@ impl WgpuRenderer {
             }
         } else {
             self.failed_frame_count = 0;
+        }
+
+        if self.backdrop_sampling
+            && !self
+                .surface_config
+                .usage
+                .contains(wgpu::TextureUsages::COPY_SRC)
+            && glass_count(scene) > 0
+        {
+            self.surface_config.usage |= wgpu::TextureUsages::COPY_SRC;
+            surface.configure(&core.resources.device, &self.surface_config);
         }
 
         let frame = match surface.get_current_texture() {
@@ -4100,6 +4108,29 @@ fn main(@location(0) position: vec2<f32>) -> @location(0) vec4<f32> {
                     height: DevicePixels(64),
                 },
             )
+        })
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    #[ignore = "benchmark: cargo test -p zz-gpui-platform --release bench_glass -- --ignored --nocapture"]
+    fn bench_glass() -> anyhow::Result<()> {
+        use zz_gpui::PlatformHeadlessRenderer;
+        let mut renderer = WgpuHeadlessRenderer::new()?;
+        let (width, height) = (5344.0, 2964.0);
+        let target = Size {
+            width: DevicePixels(width as i32),
+            height: DevicePixels(height as i32),
+        };
+        zz_gpui::bench_glass_rendering(width, height, |scene| {
+            renderer.render_scene_to_image(scene, target)?;
+            let frames = 120;
+            let start = std::time::Instant::now();
+            for _ in 0..frames {
+                renderer.render_scene(scene, target)?;
+            }
+            renderer.render_scene_to_image(scene, target)?;
+            Ok(start.elapsed().as_secs_f64() * 1000.0 / f64::from(frames + 1))
         })
     }
 

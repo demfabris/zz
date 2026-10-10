@@ -2542,135 +2542,23 @@ fn main(@location(0) position: vec2<f32>) -> @location(0) vec4<f32> {
         Ok(())
     }
 
-    fn glass_bench_scene(
-        width: f32,
-        height: f32,
-        glasses: &[(Bounds<f32>, f32, zz_gpui::GlassMaterial)],
-    ) -> Scene {
-        let mut scene = Scene::default();
-        let stripes = 24;
-        for index in 0..stripes {
-            let stripe_width = width / stripes as f32;
-            let bounds = Bounds::new(
-                point(px(index as f32 * stripe_width), px(0.0)),
-                size(px(stripe_width), px(height)),
-            )
-            .scale(1.0);
-            scene.insert_primitive(solid_quad(
-                bounds,
-                hsla(index as f32 / stripes as f32, 0.8, 0.5, 1.0),
-            ));
-        }
-        for (rect, radius, material) in glasses {
-            let bounds = Bounds::new(
-                point(ScaledPixels(rect.origin.x), ScaledPixels(rect.origin.y)),
-                size(
-                    ScaledPixels(rect.size.width),
-                    ScaledPixels(rect.size.height),
-                ),
-            );
-            let mut shapes: [(Bounds<ScaledPixels>, zz_gpui::Corners<ScaledPixels>);
-                zz_gpui::GLASS_MAX_SHAPES] = Default::default();
-            shapes[0] = (bounds, zz_gpui::Corners::all(ScaledPixels(*radius)));
-            scene.insert_primitive(zz_gpui::Glass {
-                order: 0,
-                bounds: bounds.dilate(ScaledPixels(3.0)),
-                backdrop_bounds: bounds.dilate(ScaledPixels(material.backdrop_reach().as_f32())),
-                content_mask: ContentMask {
-                    bounds: Bounds::new(point(px(0.0), px(0.0)), size(px(width), px(height)))
-                        .scale(1.0),
-                },
-                shapes,
-                shape_count: 1,
-                corner_smoothing: 2.0,
-                material: *material,
-            });
-        }
-        scene.finish();
-        scene
-    }
-
     #[test]
-    #[ignore = "benchmark: cargo test -p zz_gpui-apple --release bench_glass -- --ignored --nocapture"]
+    #[ignore = "benchmark: cargo test -p zz-gpui-platform --release bench_glass -- --ignored --nocapture"]
     fn bench_glass() -> Result<()> {
-        use zz_gpui::GlassMaterial;
         let mut renderer =
             MetalRenderer::new_headless(Arc::new(Mutex::new(InstanceBufferPool::default())));
         let (width, height) = (5344.0, 2964.0);
         let target = size((width as i32).into(), (height as i32).into());
-        let mut time = |glasses: &[(Bounds<f32>, f32, GlassMaterial)]| -> Result<f64> {
-            let scene = glass_bench_scene(width, height, glasses);
-            renderer.render_scene_to_image(&scene, target)?;
+        zz_gpui::bench_glass_rendering(width, height, |scene| {
+            renderer.render_scene_to_image(scene, target)?;
             let frames = 120;
             let start = std::time::Instant::now();
             for _ in 0..frames {
-                renderer.render_scene(&scene, target)?;
+                renderer.render_scene(scene, target)?;
             }
-            renderer.render_scene_to_image(&scene, target)?;
+            renderer.render_scene_to_image(scene, target)?;
             Ok(start.elapsed().as_secs_f64() * 1000.0 / f64::from(frames + 1))
-        };
-        let rect = |x: f32, y: f32, w: f32, h: f32| Bounds::new(point(x, y), size(w, h));
-        // Lengths below are device pixels, as the scene holds them: a 2x
-        // display doubles the logical values.
-        let scale = |material: GlassMaterial| GlassMaterial {
-            blur: material.blur * 2.0,
-            bezel: material.bezel * 2.0,
-            refraction: material.refraction * 2.0,
-            glint_width: material.glint_width * 2.0,
-            edge_width: material.edge_width * 2.0,
-            merge: material.merge * 2.0,
-            ..material
-        };
-        let regular = scale(GlassMaterial::regular());
-        let frosted = scale(GlassMaterial::frosted());
-        let clear = scale(GlassMaterial::clear());
-        let buttons: Vec<_> = (0..10)
-            .map(|index| {
-                (
-                    rect(200.0 + index as f32 * 140.0, 200.0, 100.0, 100.0),
-                    50.0,
-                    regular,
-                )
-            })
-            .collect();
-        let cases: Vec<(&str, Vec<(Bounds<f32>, f32, GlassMaterial)>)> = vec![
-            ("background only", vec![]),
-            ("one 100x100 button", vec![buttons[0]]),
-            ("ten buttons in a row", buttons.clone()),
-            ("toolbar under its buttons", {
-                let mut glasses = vec![(rect(150.0, 170.0, 1450.0, 160.0), 80.0, regular)];
-                glasses.extend(buttons.clone());
-                glasses
-            }),
-            (
-                "frosted sidebar 640x2800",
-                vec![(rect(60.0, 80.0, 640.0, 2800.0), 56.0, frosted)],
-            ),
-            (
-                "clear glass over the whole window",
-                vec![(rect(0.0, 0.0, width, height), 0.0, clear)],
-            ),
-            (
-                "frosted glass over the whole window",
-                vec![(rect(0.0, 0.0, width, height), 0.0, frosted)],
-            ),
-        ];
-        let mut best = |glasses: &[(Bounds<f32>, f32, GlassMaterial)]| -> Result<f64> {
-            let mut fastest = f64::MAX;
-            for _ in 0..5 {
-                fastest = fastest.min(time(glasses)?);
-            }
-            Ok(fastest)
-        };
-        let base = best(&[])?;
-        for (name, glasses) in &cases {
-            let ms = best(glasses)?;
-            println!(
-                "glass {width}x{height} {name}: {ms:.3} ms/frame (+{:.3})",
-                ms - base
-            );
-        }
-        Ok(())
+        })
     }
 
     #[test]

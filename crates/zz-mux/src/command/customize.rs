@@ -787,23 +787,7 @@ impl MuxEngine {
                 .copied()
                 .find(|target| self.hook_array(*target, name).is_some())
                 .unwrap_or(last);
-            let entries = self
-                .hook_array(owner, name)
-                .map(|hook| {
-                    hook.iter()
-                        .map(|(key, commands)| {
-                            (
-                                key.display(),
-                                commands
-                                    .iter()
-                                    .map(format_command)
-                                    .collect::<Vec<_>>()
-                                    .join(" ; "),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
+            let entries = self.customize_array_entries(owner, name);
             let value = entries
                 .iter()
                 .map(|(_, value)| value.as_str())
@@ -837,10 +821,7 @@ impl MuxEngine {
         }
         let array = metadata.is_some_and(|option| option.is_array);
         let entries = if array {
-            self.customize_array_values(owner, name)
-                .into_iter()
-                .map(|(key, value)| (key.display(), value))
-                .collect::<Vec<_>>()
+            self.customize_array_entries(owner, name)
         } else {
             Vec::new()
         };
@@ -875,6 +856,36 @@ impl MuxEngine {
         self.format_monitors
             .iter()
             .find(|monitor| monitor.target == target && monitor.name == name)
+    }
+
+    fn customize_array_entries(
+        &self,
+        target: TmuxOptionTarget,
+        name: &str,
+    ) -> Vec<(String, String)> {
+        if tmux_option_is_hook(name) {
+            return self
+                .hook_array(target, name)
+                .map(|hook| {
+                    hook.iter()
+                        .map(|(key, commands)| {
+                            (
+                                key.display(),
+                                commands
+                                    .iter()
+                                    .map(format_command)
+                                    .collect::<Vec<_>>()
+                                    .join(" ; "),
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        self.customize_array_values(target, name)
+            .into_iter()
+            .map(|(key, value)| (key.display(), value))
+            .collect()
     }
 
     fn customize_environment_entries(
@@ -2571,27 +2582,12 @@ impl MuxEngine {
                 let Some(value) = value.filter(|value| !value.is_empty()) else {
                     return CustomizeResult::stay();
                 };
-                let full = if tmux_options().any(|option| option.name == name && option.is_array) {
-                    let key = if let Some(key) = array_key {
-                        key
-                    } else {
-                        let values = self.customize_array_values(target, &name);
-                        let Ok(index) = first_free_array_index(values.keys()) else {
-                            return CustomizeResult::stay();
-                        };
-                        index.to_string()
-                    };
-                    format!("{name}[{key}]")
-                } else {
-                    name
+                let Some(command) =
+                    self.customize_option_set_command(&name, array_key.as_deref(), target, &value)
+                else {
+                    return CustomizeResult::stay();
                 };
-                self.customize_commands(
-                    pane,
-                    mode,
-                    vec![customize_set_command(&full, target, &value)],
-                    tag,
-                    expand,
-                )
+                self.customize_commands(pane, mode, vec![command], tag, expand)
             }
             PromptPurpose::ArrayKey {
                 name,
@@ -2601,13 +2597,13 @@ impl MuxEngine {
                 let Some(new_key) = value.filter(|value| !value.is_empty()) else {
                     return CustomizeResult::stay();
                 };
-                let values = self.customize_array_values(target, &name);
-                if values.keys().any(|key| key.display() == new_key) {
+                let values = self.customize_array_entries(target, &name);
+                if values.iter().any(|(key, _)| *key == new_key) {
                     return CustomizeResult::stay();
                 }
                 let Some(entry) = values
                     .iter()
-                    .find(|(key, _)| key.display() == array_key)
+                    .find(|(key, _)| *key == array_key)
                     .map(|(_, entry)| entry.clone())
                 else {
                     return CustomizeResult::stay();
@@ -3422,6 +3418,299 @@ mod tests {
                 .all(
                     |row| matches!(row.item, Item::Option { hook: true, .. }) && row.text.is_none()
                 )
+        );
+    }
+
+    fn preview_text(engine: &MuxEngine, pane: PaneId, mode: &CustomizeMode) -> String {
+        let mut expand = customize_expand;
+        let (_, presentation, _) = engine.customize_presentation(pane, mode, &mut expand);
+        match presentation.preview {
+            Some(ChooserPreview::Markup { lines }) => lines.join("\n"),
+            _ => String::new(),
+        }
+    }
+
+    fn run(engine: &mut MuxEngine, context: &mut ExecutionContext, name: &str, args: &[&str]) {
+        engine
+            .execute(context, &CommandInvocation::new(name, args.iter().copied()))
+            .unwrap();
+    }
+
+    fn output(
+        engine: &mut MuxEngine,
+        context: &mut ExecutionContext,
+        name: &str,
+        args: &[&str],
+    ) -> String {
+        engine
+            .execute(context, &CommandInvocation::new(name, args.iter().copied()))
+            .unwrap()
+            .output
+            .to_string()
+    }
+
+    #[test]
+    fn customize_edits_hook_arrays_and_counts_their_fires_in_the_preview() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        let mut mode = CustomizeMode::default();
+        mode.expanded.insert("options:3".to_owned());
+        select(&engine, pane, &mut mode, "after-new-window");
+        let preview = preview_text(&engine, pane, &mode);
+        assert!(preview.contains("This is a session hook."), "{preview}");
+        assert!(preview.contains("This is an array hook."), "{preview}");
+        assert!(
+            preview.contains("This hook has been fired 0 times."),
+            "{preview}"
+        );
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            mode.prompt
+                .as_ref()
+                .map(|(prompt, _)| prompt.label.as_str()),
+            Some("(after-new-window[+], global) ")
+        );
+        type_text(
+            &mut engine,
+            &mut context,
+            pane,
+            &mut mode,
+            "set-option -g @fired yes",
+        );
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-hooks",
+                &["-g", "after-new-window"]
+            ),
+            "after-new-window[0] set-option -g @fired yes"
+        );
+        assert_eq!(current_row(&engine, pane, &mode).name, "after-new-window");
+        press(&mut engine, &mut context, pane, &mut mode, "Right");
+        press(&mut engine, &mut context, pane, &mut mode, "Down");
+        assert_eq!(
+            current_row(&engine, pane, &mode).name,
+            "after-new-window[0]"
+        );
+        let preview = preview_text(&engine, pane, &mode);
+        assert!(
+            preview.contains("Hook command: #[fg=themelightgrey]set-option -g @fired yes"),
+            "{preview}"
+        );
+        engine.count_hook_fire(
+            Some(TmuxOptionTarget::GlobalSession),
+            "after-new-window",
+            unix_seconds(),
+        );
+        let preview = preview_text(&engine, pane, &mode);
+        assert!(
+            preview.contains("This hook has been fired 1 times, last "),
+            "{preview}"
+        );
+        press(&mut engine, &mut context, pane, &mut mode, "a");
+        press(&mut engine, &mut context, pane, &mut mode, "C-u");
+        type_text(&mut engine, &mut context, pane, &mut mode, "5");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-hooks",
+                &["-g", "after-new-window"]
+            ),
+            "after-new-window[5] set-option -g @fired yes"
+        );
+        select(&engine, pane, &mut mode, "after-new-window[5]");
+        press(&mut engine, &mut context, pane, &mut mode, "u");
+        assert_eq!(
+            mode.prompt
+                .as_ref()
+                .map(|(prompt, _)| prompt.label.as_str()),
+            Some("Unset after-new-window[5]? ")
+        );
+        assert_eq!(mode.prompt_kind(), ("command", &["SINGLE", "NOFORMAT"][..]));
+        press(&mut engine, &mut context, pane, &mut mode, "y");
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-hooks",
+                &["-g", "after-new-window"]
+            ),
+            "after-new-window"
+        );
+    }
+
+    #[test]
+    fn customize_environment_rows_resolve_the_3_8_context_formats() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-environment",
+            &["-g", "ZZTEST_A", "one"],
+        );
+        run(
+            &mut engine,
+            &mut context,
+            "set-environment",
+            &["-g", "-r", "ZZTEST_R"],
+        );
+        run(
+            &mut engine,
+            &mut context,
+            "set-environment",
+            &["-h", "ZZTEST_H", "secret"],
+        );
+        let mut mode = CustomizeMode {
+            filter: Some("#{&&:#{is_environment},#{m:ZZTEST*,#{environment_name}}}".to_owned()),
+            format: Some(
+                "#{environment_name}=#{environment_value}/#{environment_is_global}/#{environment_hidden}/#{environment_removed}/#{environment_scope}/#{is_option}#{is_key}".to_owned(),
+            ),
+            ..CustomizeMode::default()
+        };
+        mode.expanded.insert("environment:global".to_owned());
+        mode.expanded.insert("environment:session".to_owned());
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let environment = rows
+            .iter()
+            .filter(|row| matches!(row.item, Item::Environment { .. }))
+            .map(|row| (row.name.as_str(), row.text.as_deref()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            environment,
+            [
+                ("ZZTEST_A", Some("ZZTEST_A=one/1/0/0//00")),
+                ("-ZZTEST_R", None),
+                (
+                    "ZZTEST_H",
+                    Some("ZZTEST_H=secret/0/1/0/session customize/00")
+                ),
+            ]
+        );
+        mode.filter = None;
+        mode.format = None;
+        select(&engine, pane, &mut mode, "ZZTEST_H");
+        let preview = preview_text(&engine, pane, &mode);
+        assert!(
+            preview.contains("This is a session environment variable."),
+            "{preview}"
+        );
+        assert!(preview.contains("This variable is hidden."), "{preview}");
+        assert!(
+            preview.contains("Variable value: #[fg=themelightgrey]secret"),
+            "{preview}"
+        );
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            mode.prompt
+                .as_ref()
+                .map(|(prompt, _)| prompt.label.as_str()),
+            Some("(ZZTEST_H, for session customize) ")
+        );
+        press(&mut engine, &mut context, pane, &mut mode, "C-u");
+        type_text(&mut engine, &mut context, pane, &mut mode, "changed");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-environment",
+                &["-h", "ZZTEST_H"]
+            ),
+            "ZZTEST_H=changed"
+        );
+        select(&engine, pane, &mut mode, "Global Environment");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            mode.prompt
+                .as_ref()
+                .map(|(prompt, _)| prompt.label.as_str()),
+            Some("New environment: ")
+        );
+        type_text(
+            &mut engine,
+            &mut context,
+            pane,
+            &mut mode,
+            "ZZTEST_NEW=fresh",
+        );
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-environment",
+                &["-g", "ZZTEST_NEW"]
+            ),
+            "ZZTEST_NEW=fresh"
+        );
+    }
+
+    #[test]
+    fn customize_hook_and_monitor_rows_resolve_the_3_8_context_formats() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &["-g", "-B", "@mon:%*:#{pane_id}"],
+        );
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &["-g", "@event", "display-message hi"],
+        );
+        let mut mode = CustomizeMode {
+            filter: Some("#{||:#{option_is_hook},#{option_is_monitor}}".to_owned()),
+            format: Some(
+                "#{option_name}:#{option_is_hook}:#{option_is_monitor}:#{option_monitor}:#{is_environment}".to_owned(),
+            ),
+            ..CustomizeMode::default()
+        };
+        for section in 0..5 {
+            mode.expanded.insert(format!("options:{section}"));
+        }
+        let mut expand = customize_expand;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let texts = rows
+            .iter()
+            .filter(|row| matches!(row.item, Item::Option { .. }))
+            .filter_map(|row| row.text.as_deref())
+            .collect::<Vec<_>>();
+        assert!(
+            texts.contains(&"@mon:0:1:@mon:%*:#{pane_id}:0"),
+            "{texts:?}"
+        );
+        assert!(
+            rows.iter()
+                .any(|row| row.name == "after-new-session" && row.text.is_none())
+        );
+        assert!(!rows.iter().any(|row| row.name == "@event"));
+        mode.filter = None;
+        let rows = engine.customize_rows(pane, &mode, &mut expand);
+        let event = rows.iter().find(|row| row.name == "@event").unwrap();
+        assert_eq!(event.text.as_deref(), Some("@event:0:0::0"));
+        let in_hooks = |name: &str| {
+            let row = rows.iter().find(|row| row.name == name).unwrap();
+            rows[row.parent.unwrap()].name.clone()
+        };
+        assert_eq!(in_hooks("@mon"), "Session Hooks");
+        assert_eq!(in_hooks("@event"), "Session Hooks");
+        mode.format = None;
+        select(&engine, pane, &mut mode, "@mon");
+        let preview = preview_text(&engine, pane, &mode);
+        assert!(
+            preview.contains("This hook runs when a monitor changes."),
+            "{preview}"
+        );
+        assert!(preview.contains("This is a monitor hook."), "{preview}");
+        assert!(
+            preview.contains("Monitor: #[fg=themelightgrey]@mon:%*:##{pane_id}"),
+            "{preview}"
         );
     }
 

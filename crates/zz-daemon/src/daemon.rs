@@ -21701,10 +21701,30 @@ impl Shared {
             let Ok(defaults) = inner.engine.menu_options_for_window(window) else {
                 return;
             };
-            let left = u16::try_from(x.saturating_sub(usize::from(width) / 2)).unwrap_or(u16::MAX);
-            let top = u16::try_from(y).unwrap_or(u16::MAX);
-            let left = overlay_origin_for_viewport(left, width, geometry.columns);
-            let top = overlay_origin_for_viewport(top, height, geometry.rows);
+            let Some(target) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
+                return;
+            };
+            let frame = menu_window_frame(&inner.engine, &target, geometry.columns, geometry.rows);
+            let (xoff, yoff) = inner.engine.pane_origin(pane).unwrap_or((0, 0));
+            let place = |origin: usize, offset: i32, extent: u16, available: u16| {
+                let origin = i64::try_from(origin)
+                    .unwrap_or(i64::MAX)
+                    .saturating_add(i64::from(offset))
+                    .max(0);
+                let origin = u16::try_from(origin).unwrap_or(u16::MAX);
+                if extent >= available {
+                    0
+                } else {
+                    overlay_origin_for_viewport(origin, extent, available)
+                }
+            };
+            let left = place(
+                x.saturating_sub(usize::from(width) / 2),
+                xoff,
+                width,
+                frame.columns,
+            );
+            let top = place(y, yoff, height, frame.rows).saturating_add(frame.top);
             MenuState {
                 left,
                 top,

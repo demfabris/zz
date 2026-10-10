@@ -521,7 +521,7 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
     (
         "window-customize.c",
         "window_customize_build",
-        &["is_key", "is_option"],
+        &["is_environment", "is_key", "is_option"],
     ),
     (
         "window-customize.c",
@@ -530,8 +530,23 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
     ),
     (
         "window-customize.c",
+        "window_customize_build_environment",
+        &[
+            "environment_hidden",
+            "environment_is_global",
+            "environment_name",
+            "environment_removed",
+            "environment_scope",
+            "environment_value",
+            "is_environment",
+            "is_key",
+            "is_option",
+        ],
+    ),
+    (
+        "window-customize.c",
         "window_customize_build_keys",
-        &["is_key", "is_option", "key", "key_note"],
+        &["is_environment", "is_key", "is_option", "key", "key_note"],
     ),
     (
         "window-customize.c",
@@ -539,6 +554,9 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         &[
             "option_is_array",
             "option_is_global",
+            "option_is_hook",
+            "option_is_monitor",
+            "option_monitor",
             "option_name",
             "option_scope",
             "option_unit",
@@ -575,38 +593,7 @@ const SHOW_HOOKS_MONITOR_CONTEXT_FORMATS: &[&str] = &[
     "option_value",
     "option_value_only",
 ];
-const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
-    (
-        "window-customize.c",
-        "window_customize_build",
-        &["is_environment"],
-    ),
-    (
-        "window-customize.c",
-        "window_customize_build_environment",
-        &[
-            "environment_hidden",
-            "environment_is_global",
-            "environment_name",
-            "environment_removed",
-            "environment_scope",
-            "environment_value",
-            "is_environment",
-            "is_key",
-            "is_option",
-        ],
-    ),
-    (
-        "window-customize.c",
-        "window_customize_build_keys",
-        &["is_environment"],
-    ),
-    (
-        "window-customize.c",
-        "window_customize_build_option",
-        &["option_is_hook", "option_is_monitor", "option_monitor"],
-    ),
-];
+const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[];
 const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[];
 
 #[doc(hidden)]
@@ -10135,6 +10122,17 @@ impl MuxEngine {
             .windows
             .get(&window)?
             .displayed_pane_geometry_with_border(pane, status)
+    }
+
+    #[must_use]
+    pub fn pane_origin(&self, pane: PaneId) -> Option<(i32, i32)> {
+        let window = self.state.window_for_pane(pane)?;
+        let status = self.displayed_pane_border_status(window);
+        self.state
+            .windows
+            .get(&window)?
+            .displayed_pane_cell(pane, status)
+            .map(|cell| (cell.xoff, cell.yoff))
     }
 
     #[must_use]

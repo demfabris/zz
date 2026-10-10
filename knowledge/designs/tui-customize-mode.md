@@ -118,7 +118,8 @@ three `KEYC_VI` word motions, and the daemon sends `message-command-style` in
 Customize prompts share the server's prompt history since 2026-10-10 (`fix.followups-3`):
 `Up`/`C-p` and `Down`/`C-n` walk the command list, or the search list for the search and
 filter prompts (mode-tree.c raises those as `PROMPT_TYPE_SEARCH`), and Enter adds a typed
-non-empty answer to it; a single-key prompt adds nothing. An answer the mode refuses, or a
+non-empty answer to it; a single-key prompt adds nothing. The choosers' filter prompts and
+the window tree's `:` prompt (`ChooserPrompt` in the daemon) walk and feed the same lists. An answer the mode refuses, or a
 command it runs that fails, is a status message for `display-time` with no command behind it,
 so no `after-display-message` hook sees it.
 

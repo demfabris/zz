@@ -816,7 +816,9 @@ tall_case() {
 # box title then carries `(filter: active)`. `c` is the pin's undo for it
 # (mode-tree.c, case 'c'): mode_tree_clear_prompt then mode_tree_clear_filter,
 # which rebuilds the tree from every row again and drops `(filter: active)`
-# from the title while mode_tree_set_current keeps the selected row.
+# from the title while mode_tree_set_current keeps the selected row. The prompt
+# is a server prompt of PROMPT_TYPE_SEARCH, so Up brings back the filter Enter
+# just added to the search history and Down walks back to an empty line.
 FILTER_FORMAT='#{==:#{window_name},two}'
 filter_case() {
   CASE_LABEL=filter
@@ -830,6 +832,12 @@ filter_case() {
   verdict filter-applied same
   step '0: win' c
   verdict filter-cleared same
+  step "(filter) $FILTER_FORMAT" f Up
+  verdict filter-history-up same
+  step '(filter) ' Down
+  verdict filter-history-down same
+  step '0: win' C-c
+  verdict filter-history-cancelled same
   step 'MARK-filter' q
   verdict filter-closed same
 }

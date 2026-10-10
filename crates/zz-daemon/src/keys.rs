@@ -97,6 +97,8 @@ pub(crate) enum ChooserPromptEdit {
     Backspace,
     Accept,
     Cancel,
+    HistoryUp,
+    HistoryDown,
 }
 
 pub(crate) fn chooser_prompt_edit(input: &KeyInput) -> Option<ChooserPromptEdit> {
@@ -104,6 +106,8 @@ pub(crate) fn chooser_prompt_edit(input: &KeyInput) -> Option<ChooserPromptEdit>
         "Escape" | "C-g" | "C-c" | "C-[" => return Some(ChooserPromptEdit::Cancel),
         "Enter" => return Some(ChooserPromptEdit::Accept),
         "BSpace" => return Some(ChooserPromptEdit::Backspace),
+        "Up" | "C-p" => return Some(ChooserPromptEdit::HistoryUp),
+        "Down" | "C-n" => return Some(ChooserPromptEdit::HistoryDown),
         _ => {}
     }
     input_typed_text(input).map(|text| ChooserPromptEdit::Append(text.to_owned()))

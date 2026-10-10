@@ -493,6 +493,14 @@ panes_float_edge_cases() {
   COMPARE_FACTS=0
   verdict panes-float-unzoomed-odd
   COMPARE_FACTS=1
+  CASE_LABEL=panes-float-unzoomed-host
+  attach_both
+  run_on_both split-window -h "$INNER_SHELL"
+  new_float_on_both FLOAT-H -x 30 -y 8 -X 10 -Y 3
+  PANES_HOST=2 panes_mode_display -Z -d 0
+  COMPARE_FACTS=0
+  verdict panes-float-unzoomed-host
+  COMPARE_FACTS=1
 }
 
 titled_case() {

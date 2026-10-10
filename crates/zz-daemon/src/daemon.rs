@@ -24014,6 +24014,10 @@ impl Shared {
             }
             action => action,
         };
+        if matches!(action, ChooseTreeAction::Key(_)) {
+            self.ensure_prompt_history();
+        }
+        let mut remembered = None;
         let (result, state, delta, command, runs) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.client_mut(client).and_then(|c| c.choose_tree.take())
@@ -24058,7 +24062,17 @@ impl Shared {
             let result = if let Some(step) = prompt_step {
                 match step {
                     ChooserPromptStep::Single(answer) => chooser.answer_kill_prompt(answer),
-                    ChooserPromptStep::Edit(edit) => chooser.edit_command_prompt(edit),
+                    ChooserPromptStep::Edit(edit) => {
+                        let prompt_type = chooser
+                            .prompt
+                            .as_ref()
+                            .map_or(CommandPromptType::Command, ChooserPrompt::history_type);
+                        if matches!(edit, ChooserPromptEdit::Accept) {
+                            remembered =
+                                chooser.prompt.as_ref().and_then(ChooserPrompt::remembered);
+                        }
+                        chooser.edit_command_prompt(edit, prompt_history(&inner, prompt_type))
+                    }
                 }
             } else if dismissed_help && matches!(action, ChooseTreeAction::Key(_)) {
                 ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
@@ -24171,6 +24185,9 @@ impl Shared {
             }
             (result, state, delta, command, runs)
         };
+        if let Some((prompt_type, input)) = remembered {
+            self.record_prompt_history(prompt_type, &input);
+        }
 
         match result {
             ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full) => {
@@ -24378,6 +24395,10 @@ impl Shared {
             action => action,
         };
 
+        if matches!(action, ChooseBufferAction::Key(_)) {
+            self.ensure_prompt_history();
+        }
+        let mut remembered = None;
         let (outcome, deleted) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner
@@ -24467,7 +24488,14 @@ impl Shared {
                 let result = if swallowed_help {
                     ChooseBufferResult::Rebuild
                 } else if let Some(edit) = prompt_edit {
-                    chooser.edit_prompt(edit)
+                    if matches!(edit, ChooserPromptEdit::Accept) {
+                        remembered = chooser.prompt.as_ref().and_then(ChooserPrompt::remembered);
+                    }
+                    let prompt_type = chooser
+                        .prompt
+                        .as_ref()
+                        .map_or(CommandPromptType::Search, ChooserPrompt::history_type);
+                    chooser.edit_prompt(edit, prompt_history(&inner, prompt_type))
                 } else {
                     match chooser.apply(action, &inner.paste_buffers) {
                         Ok(result) => result,
@@ -24551,6 +24579,9 @@ impl Shared {
                 (outcome, deleted)
             }
         };
+        if let Some((prompt_type, input)) = remembered {
+            self.record_prompt_history(prompt_type, &input);
+        }
 
         if !deleted.is_empty() {
             self.run_event_hooks(
@@ -36340,11 +36371,13 @@ impl ChooseBufferSession {
         );
     }
 
-    fn edit_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseBufferResult {
+    fn edit_prompt(&mut self, edit: ChooserPromptEdit, history: &[String]) -> ChooseBufferResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseBufferResult::Updated;
         };
         match edit {
+            ChooserPromptEdit::HistoryUp => prompt.walk_history(history, true),
+            ChooserPromptEdit::HistoryDown => prompt.walk_history(history, false),
             ChooserPromptEdit::Append(text) => {
                 if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
                     prompt.input.push_str(&text);
@@ -36506,6 +36539,7 @@ impl ChooseBufferSession {
                     text: "(filter) ".to_owned(),
                     input: self.filter.clone().unwrap_or_default(),
                     targets: Vec::new(),
+                    history_index: 0,
                 });
                 return Ok(ChooseBufferResult::Rebuild);
             }
@@ -36875,9 +36909,45 @@ struct ChooserPrompt {
     text: String,
     input: String,
     targets: Vec<ChooseTreeTarget>,
+    history_index: usize,
 }
 
 impl ChooserPrompt {
+    /// mode-tree.c raises the filter prompt as `PROMPT_TYPE_SEARCH` and
+    /// window-tree.c the `:` prompt as `PROMPT_TYPE_COMMAND`.
+    const fn history_type(&self) -> CommandPromptType {
+        match self.kind {
+            ChooserPromptKind::Filter => CommandPromptType::Search,
+            ChooserPromptKind::Kill | ChooserPromptKind::Command => CommandPromptType::Command,
+        }
+    }
+
+    /// `prompt_up_history` and `prompt_down_history`: newest first from an
+    /// index the prompt owns, and back past the newest line is an empty one.
+    fn walk_history(&mut self, history: &[String], up: bool) {
+        if up {
+            if history.is_empty() || self.history_index >= history.len() {
+                return;
+            }
+            self.history_index += 1;
+        } else if history.is_empty() || self.history_index == 0 {
+            self.input.clear();
+            return;
+        } else {
+            self.history_index -= 1;
+        }
+        self.input = if self.history_index == 0 {
+            String::new()
+        } else {
+            history[history.len() - self.history_index].clone()
+        };
+    }
+
+    /// `prompt_add_history` on Enter for a non-empty line.
+    fn remembered(&self) -> Option<(CommandPromptType, String)> {
+        (!self.input.is_empty()).then(|| (self.history_type(), self.input.clone()))
+    }
+
     /// What the mode's screen shows: the prompt string with the line typed so
     /// far after it, which is empty for a `PROMPT_SINGLE` answer.
     fn line(&self) -> String {
@@ -37811,6 +37881,7 @@ impl ChooseTreeSession {
                     text: "(filter) ".to_owned(),
                     input: self.filter.clone().unwrap_or_default(),
                     targets: Vec::new(),
+                    history_index: 0,
                 };
                 self.rendered.prompt = prompt.line();
                 self.prompt = Some(prompt);
@@ -37872,6 +37943,7 @@ impl ChooseTreeSession {
                     text,
                     input: String::new(),
                     targets,
+                    history_index: 0,
                 });
                 self.rendered.prompt = self
                     .prompt
@@ -37986,6 +38058,7 @@ impl ChooseTreeSession {
             text,
             input: String::new(),
             targets,
+            history_index: 0,
         });
         ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
     }
@@ -37993,11 +38066,17 @@ impl ChooseTreeSession {
     /// `prompt_key` on the `:` prompt, which is an ordinary edited line:
     /// `window_tree_command_callback` runs it once per tagged row and an empty
     /// line runs nothing at all.
-    fn edit_command_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseTreeResult {
+    fn edit_command_prompt(
+        &mut self,
+        edit: ChooserPromptEdit,
+        history: &[String],
+    ) -> ChooseTreeResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta);
         };
         match edit {
+            ChooserPromptEdit::HistoryUp => prompt.walk_history(history, true),
+            ChooserPromptEdit::HistoryDown => prompt.walk_history(history, false),
             ChooserPromptEdit::Append(text) => {
                 if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
                     prompt.input.push_str(&text);

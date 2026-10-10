@@ -1040,7 +1040,7 @@
       "id": "fix.followups-4",
       "track": "fix",
       "title": "Follow-ups, fourth batch (harness robustness at the 3.8 pin)",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "fix.corpus-3-8"
       ],
@@ -1054,7 +1054,7 @@
         "Each line in the notes is fixed with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
       ],
       "branch": "catchup/fix.followups-4",
-      "sha": null,
+      "sha": "1c3dc7d4d",
       "notes": [
         "(fix.corpus-3-8) chooser-drive.py, send-keys-attach.py, graphics-drive.py and bare-client.py do not answer 3.8's pixel-size query (CSI 14 t), so tmux holds a lone Escape 500 ms on their side; pty-drive.py now answers it. Share one answer path.",
         "(fix.corpus-3-8) On Arch hosts /etc/bash.bashrc retitles the pane at every prompt, racing select-pane -T in scenarios that use a default-shell pane; make such scenarios run a fixed program (cat, sh) as the corpus lane did.",
@@ -1066,7 +1066,8 @@
         "(fix.followups-3) chooser prompts have no cursor editing (Left/Right, C-a, C-u...), only history.",
         "2026-10-10: Lane done at 6787854ee: 7 of 8 notes fixed (shared CSI 14 t answerer for all pty drivers, Arch title race in 3 scenarios, link/unlink-window probes 565 clean, tui-mouse drag sabotage caught, needle polls fire no hooks, timed uppercased binding errors (now also shown on the desktop), chooser prompt editing via ModePrompt; wire append prompt_column under 108). Note 3 (zz's bash integration overriding the distro title) waits on fabrico. Review 1 running.",
         "2026-10-10: fabrico ruled note 3: zz's bash integration yields to a title the shell set at that prompt (idle panes read user@host:dir like tmux). Goes into the fix pass with review 1's findings.",
-        "2026-10-10: Codex review 1: 2 P1 (binding errors freeze desktop repaint under display-time 0, chooser prompt cursor clamped instead of scrolling) + P2 (search prompt editing); final pass sent with the bash title ruling."
+        "2026-10-10: Codex review 1: 2 P1 (binding errors freeze desktop repaint under display-time 0, chooser prompt cursor clamped instead of scrolling) + P2 (search prompt editing); final pass sent with the bash title ruling.",
+        "2026-10-10: Merged after the final pass (d8e6a1ef4: desktop keeps painting through binding errors, long prompts scroll, search prompt editing, bash/zsh integration yields to the prompt's title per fabrico); merge checks green (clippy 8 crates incl. zz and zz-app, zz-protocol 296, zz-client 225, zz-cli, zz-terminal 458, zz-tui 267, zz-daemon 1599, zz-mux 731, compat check)."
       ]
     }
   ]

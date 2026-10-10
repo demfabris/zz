@@ -818,7 +818,8 @@ tall_case() {
 # which rebuilds the tree from every row again and drops `(filter: active)`
 # from the title while mode_tree_set_current keeps the selected row. The prompt
 # is a server prompt of PROMPT_TYPE_SEARCH, so Up brings back the filter Enter
-# just added to the search history and Down walks back to an empty line.
+# just added to the search history and Down walks back to an empty line; the
+# search prompt is one too, so a search answer is what Up brings back next.
 FILTER_FORMAT='#{==:#{window_name},two}'
 filter_case() {
   CASE_LABEL=filter
@@ -838,6 +839,14 @@ filter_case() {
   verdict filter-history-down same
   step '0: win' C-c
   verdict filter-history-cancelled same
+  step '(search) two' / t w o
+  verdict search-typed same
+  step '0: win' Enter
+  verdict search-applied same
+  step '(filter) two' f Up
+  verdict filter-history-search same
+  step '0: win' C-c
+  verdict filter-history-search-cancelled same
   step 'MARK-filter' q
   verdict filter-closed same
 }

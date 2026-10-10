@@ -363,7 +363,8 @@ impl ModePrompt {
             ModeKey::End | ModeKey::Ctrl('e') => self.index = size,
             ModeKey::Char('\t') => {}
             ModeKey::Up | ModeKey::Ctrl('p') => {
-                if history.is_empty() || self.history_index >= history.len() {
+                self.history_index = self.history_index.min(history.len());
+                if history.is_empty() || self.history_index == history.len() {
                     return PromptOutcome::Handled;
                 }
                 self.history_index += 1;
@@ -371,6 +372,7 @@ impl ModePrompt {
                 return self.changed(prefix);
             }
             ModeKey::Down | ModeKey::Ctrl('n') => {
+                self.history_index = self.history_index.min(history.len());
                 if history.is_empty() || self.history_index == 0 {
                     self.replace_buffer("");
                 } else {
@@ -905,6 +907,36 @@ mod tests {
             "",
             "prompt_down_history answers an empty line"
         );
+    }
+
+    #[test]
+    fn a_history_that_shrank_under_the_prompt_clamps_the_walk() {
+        let full = ["one".to_owned(), "two".to_owned(), "three".to_owned()];
+        let mut prompt = ModePrompt::new("(x) ", "", "");
+        for _ in 0..3 {
+            prompt.key_with_history(ModeKey::Up, &full);
+        }
+        assert_eq!(prompt.input(), "one");
+        let shrunk = ["new".to_owned()];
+        prompt.key_with_history(ModeKey::Down, &shrunk);
+        assert_eq!(
+            prompt.input(),
+            "",
+            "down from the clamped end is the empty line"
+        );
+        prompt.key_with_history(ModeKey::Up, &shrunk);
+        assert_eq!(prompt.input(), "new");
+        for _ in 0..3 {
+            prompt.key_with_history(ModeKey::Up, &full);
+        }
+        prompt.key_with_history(ModeKey::Up, &shrunk);
+        assert_eq!(
+            prompt.input(),
+            "one",
+            "up past the shrunk end changes nothing"
+        );
+        prompt.key_with_history(ModeKey::Down, &[]);
+        assert_eq!(prompt.input(), "");
     }
 
     #[test]

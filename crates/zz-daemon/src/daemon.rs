@@ -24104,6 +24104,13 @@ impl Shared {
                     }
                     action => action,
                 };
+                if matches!(action, ChooseTreeAction::SearchAccept) {
+                    remembered = chooser
+                        .search
+                        .as_ref()
+                        .filter(|search| !search.query.is_empty())
+                        .map(|search| (CommandPromptType::Search, search.query.clone()));
+                }
                 match chooser.apply(action, &inner.engine, attached_session, &facts) {
                     Ok(result) => result,
                     Err(error) => {
@@ -24497,6 +24504,13 @@ impl Shared {
                         .map_or(CommandPromptType::Search, ChooserPrompt::history_type);
                     chooser.edit_prompt(edit, prompt_history(&inner, prompt_type))
                 } else {
+                    if matches!(action, ChooseBufferAction::SearchAccept) {
+                        remembered = chooser
+                            .search
+                            .as_ref()
+                            .filter(|search| !search.query.is_empty())
+                            .map(|search| (CommandPromptType::Search, search.query.clone()));
+                    }
                     match chooser.apply(action, &inner.paste_buffers) {
                         Ok(result) => result,
                         Err(error) => {
@@ -36925,8 +36939,9 @@ impl ChooserPrompt {
     /// `prompt_up_history` and `prompt_down_history`: newest first from an
     /// index the prompt owns, and back past the newest line is an empty one.
     fn walk_history(&mut self, history: &[String], up: bool) {
+        self.history_index = self.history_index.min(history.len());
         if up {
-            if history.is_empty() || self.history_index >= history.len() {
+            if history.is_empty() || self.history_index == history.len() {
                 return;
             }
             self.history_index += 1;

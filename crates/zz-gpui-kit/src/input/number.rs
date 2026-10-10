@@ -197,7 +197,9 @@ impl RenderOnce for NumberInput {
             .w_full()
             .items_center()
             .when(self.appearance, |this| {
-                this.bg(cx.theme().background.raised(1))
+                this.bg(cx
+                    .theme()
+                    .control_background(cx.theme().background.raised(1)))
                     .rounded(cx.theme().control_radius())
                     .control_surface(cx)
                     .border_1()

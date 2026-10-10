@@ -44,7 +44,9 @@ impl RenderOnce for DiscreteSlider {
         let focused = focus.is_focused(window);
         let foreground = cx.theme().foreground;
         let accent = cx.theme().accent;
-        let track = cx.theme().background.raised(3);
+        let track = cx
+            .theme()
+            .control_background(cx.theme().background.raised(3));
         let value = self.labels.get(selected).cloned().unwrap_or_default();
         let mut pills = h_flex()
             .flex_1()

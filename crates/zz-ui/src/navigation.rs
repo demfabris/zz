@@ -261,7 +261,7 @@ pub fn workspace_sidebar_titlebar_with_inset(
 
 /// Ink for the seam between the sidebar and the content column.
 pub fn workspace_sidebar_divider(cx: &App) -> Hsla {
-    cx.theme().border().raised(2)
+    cx.theme().border().raised(2).opacity(cx.theme().divider)
 }
 
 /// The fill that says "this one" in the workspace tree: a row under the
@@ -433,7 +433,7 @@ fn workspace_tree_row_height(cx: &App) -> f32 {
     if CoarsePointer::get(cx) {
         TOUCH_TARGET
     } else {
-        WORKSPACE_TREE_ROW_HEIGHT
+        cx.theme().dense(px(WORKSPACE_TREE_ROW_HEIGHT)).as_f32()
     }
 }
 

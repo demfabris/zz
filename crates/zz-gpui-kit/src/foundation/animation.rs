@@ -3,9 +3,11 @@
 use std::time::Duration;
 
 use zz_gpui::{
-    Animation, AnimationElement, AnimationExt as _, ElementId, IntoElement, Pixels, Styled,
+    Animation, AnimationElement, AnimationExt as _, App, ElementId, IntoElement, Pixels, Styled,
     ease_out_quint, px,
 };
+
+use super::ActiveTheme as _;
 
 pub const SURFACE_ENTER_DURATION: Duration = Duration::from_millis(160);
 
@@ -13,10 +15,11 @@ pub fn surface_enter<E: IntoElement + Styled + 'static>(
     surface: E,
     id: impl Into<ElementId>,
     resting_top: Pixels,
+    cx: &App,
 ) -> AnimationElement<E> {
     surface.with_animation(
         id,
-        Animation::new(SURFACE_ENTER_DURATION).with_easing(ease_out_quint()),
+        Animation::new(cx.theme().duration(SURFACE_ENTER_DURATION)).with_easing(ease_out_quint()),
         move |surface, delta| {
             surface
                 .top(resting_top + px(6.0 * (1.0 - delta)))

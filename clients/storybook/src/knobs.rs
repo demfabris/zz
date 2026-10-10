@@ -7,7 +7,10 @@ use zz_ui::{
 
 const ADAPTIVE_CORNER_FRACTION: f32 = 0.45;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// The interface font the storybook loads and falls back to.
+pub const UI_FONT: &str = "Inter Variable";
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Knobs {
     pub theme: Option<ThemeMode>,
     pub style: InterfaceStyle,
@@ -48,6 +51,18 @@ pub const LOOK_KNOBS: &[Knob<Look>] = &[
         |l, v| l.outline_width = v,
     ),
     ("row-inset", |l| l.row_inset, |l, v| l.row_inset = v),
+    ("density", |l| l.density, |l, v| l.density = v),
+    (
+        "control-fill",
+        |l| l.control_fill,
+        |l, v| l.control_fill = v,
+    ),
+    ("divider", |l| l.divider, |l, v| l.divider = v),
+    (
+        "animation-speed",
+        |l| l.animation_speed,
+        |l, v| l.animation_speed = v,
+    ),
 ];
 
 pub const GLASS_KNOBS: &[Knob<GlassMaterial>] = &[
@@ -164,6 +179,10 @@ impl Knobs {
                         _ => return Err(format!("selection must be accent or wash, not {value}")),
                     }
                 }
+                "font" => {
+                    let family = decode(value);
+                    knobs.look.font = (!family.is_empty()).then(|| family.into());
+                }
                 "contrast" => knobs.contrast = number(key, value)?,
                 "zoom" => knobs.zoom = number(key, value)?,
                 "preset" => {
@@ -220,12 +239,15 @@ impl Knobs {
         cx.set_reduce_motion(!self.motion);
         let theme = Theme::global_mut(cx);
         self.look.apply(theme);
+        if self.look.font.is_none() {
+            theme.font_family = UI_FONT.into();
+        }
         theme.colors = inherited_chrome_colors(self.preset, mode);
         theme.pane_background_opacity = self.pane_opacity;
         theme.pane_glow_strength = self.pane_glow;
         theme.set_contrast(self.contrast);
         cx.set_global(UiZoom(self.zoom));
-        let knobs = *self;
+        let knobs = self.clone();
         for window in cx.windows() {
             window
                 .update(cx, |_, window, _| {
@@ -237,6 +259,56 @@ impl Knobs {
                 .ok();
         }
     }
+}
+
+/// The knob values that reproduce `look`, by knob name, for the page to
+/// load: every look knob, the selection, the font and the glass.
+pub fn look_knobs(look: &Look) -> serde_json::Map<String, serde_json::Value> {
+    let mut knobs = LOOK_KNOBS
+        .iter()
+        .map(|(name, get, _)| ((*name).to_owned(), serde_json::json!(get(look))))
+        .collect::<serde_json::Map<_, _>>();
+    knobs.insert("selection".to_owned(), serde_json::json!(look.selection));
+    knobs.insert(
+        "font".to_owned(),
+        serde_json::json!(look.font.as_ref().map_or("", |font| font.as_ref())),
+    );
+    match look.glass {
+        None => {
+            knobs.insert("glass".to_owned(), serde_json::json!("off"));
+        }
+        Some(material) => {
+            knobs.insert("glass".to_owned(), serde_json::json!("regular"));
+            for (name, get, _) in GLASS_KNOBS {
+                knobs.insert((*name).to_owned(), serde_json::json!(get(&material)));
+            }
+        }
+    }
+    knobs
+}
+
+fn decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => decoded.push(b' '),
+            b'%' if index + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).unwrap_or("");
+                match u8::from_str_radix(hex, 16) {
+                    Ok(byte) => {
+                        decoded.push(byte);
+                        index += 2;
+                    }
+                    Err(_) => decoded.push(b'%'),
+                }
+            }
+            byte => decoded.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 fn number(key: &str, value: &str) -> Result<f32, String> {
@@ -299,5 +371,47 @@ mod tests {
         assert_eq!(blurred.blur, px(30.0));
         assert!(Knobs::parse("style=round").is_err());
         assert!(Knobs::parse("selection=loud").is_err());
+    }
+
+    #[test]
+    fn a_look_survives_the_trip_through_its_knobs() {
+        for style in InterfaceStyle::ALL {
+            let look = Look {
+                density: 0.85,
+                divider: 0.4,
+                font: Some("Inter Display".into()),
+                ..interface_style::look(style)
+            };
+            let query = look_knobs(&look)
+                .iter()
+                .map(|(name, value)| {
+                    let value = value
+                        .as_str()
+                        .map_or_else(|| value.to_string(), |text| text.replace(' ', "+"));
+                    format!("{name}={value}")
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+            let parsed = Knobs::parse(&format!("style={}&{query}", style.as_str()))
+                .unwrap()
+                .look;
+            assert_eq!(
+                Look {
+                    glass: None,
+                    ..parsed.clone()
+                },
+                Look {
+                    glass: None,
+                    ..look.clone()
+                }
+            );
+            assert_eq!(parsed.glass.is_some(), look.glass.is_some());
+            if let (Some(parsed), Some(look)) = (parsed.glass, look.glass) {
+                for (name, get, _) in GLASS_KNOBS {
+                    assert!((get(&parsed) - get(&look)).abs() < 1e-3, "{name}");
+                }
+            }
+        }
+        assert_eq!(decode("Fira%20Sans+Mono%"), "Fira Sans Mono%");
     }
 }

@@ -16,9 +16,9 @@ use zz_protocol::{
 };
 
 use super::{
-    COMMAND_PALETTE_ROW_HEIGHT, CommandPaletteSurface, PaletteHint, PaletteRow, command_kind_badge,
-    command_palette_empty, command_palette_input, command_palette_row, command_palette_section,
-    command_palette_tree_entry,
+    CommandPaletteSurface, PaletteHint, PaletteRow, command_kind_badge, command_palette_empty,
+    command_palette_input, command_palette_row, command_palette_row_height,
+    command_palette_section, command_palette_tree_entry,
     palette_model::{
         PaletteAction, PaletteEntry, PaletteHostId, PaletteMode, PaletteSettings, PaletteTarget,
         PaletteTree, UnifiedPalette, needs_arguments, target_kind,
@@ -879,7 +879,7 @@ impl CommandPaletteView {
         let available = (f32::from(window.viewport_size().height) * 0.88
             - if usage.is_some() { 175.0 } else { 140.0 })
         .max(40.0);
-        let list_height = (entries.len() as f32 * COMMAND_PALETTE_ROW_HEIGHT)
+        let list_height = (entries.len() as f32 * command_palette_row_height(cx))
             .min(440.0)
             .min(available);
         let rows = uniform_list(
@@ -890,7 +890,7 @@ impl CommandPaletteView {
                     .filter_map(|index| {
                         entries.get(index).map(|entry| {
                             if entry.action.is_none() {
-                                return div().h(px(COMMAND_PALETTE_ROW_HEIGHT)).child(
+                                return div().h(px(command_palette_row_height(cx))).child(
                                     command_palette_section(
                                         entry.row.label.clone(),
                                         entry.hint,
@@ -902,7 +902,7 @@ impl CommandPaletteView {
                             let click_palette = rows_palette.clone();
                             let toggle_palette = rows_palette.clone();
                             let expanded = entry.row.expanded;
-                            div().h(px(COMMAND_PALETTE_ROW_HEIGHT)).child(
+                            div().h(px(command_palette_row_height(cx))).child(
                                 command_palette_tree_entry(
                                     ("unified-palette-row", index),
                                     &entry.row,
@@ -1443,7 +1443,7 @@ impl CommandPaletteView {
             });
             cx.stop_propagation();
         })
-        .map(|row| div().h(px(COMMAND_PALETTE_ROW_HEIGHT)).child(row))
+        .map(|row| div().h(px(command_palette_row_height(cx))).child(row))
     }
 }
 
@@ -1487,7 +1487,7 @@ impl Render for CommandPaletteView {
                     .collect::<Vec<_>>()
             }),
         )
-        .h(px(COMMAND_PALETTE_ROW_HEIGHT * row_count))
+        .h(px(command_palette_row_height(cx) * row_count))
         .track_scroll(&self.scroll_handle);
 
         let input = command_palette_input(

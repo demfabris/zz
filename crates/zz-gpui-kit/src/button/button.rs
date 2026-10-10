@@ -558,7 +558,7 @@ impl RenderOnce for Button {
                 |this| this.shadow(control_shadow(cx)),
             )
             .when(!style.no_padding(), |this| {
-                let height = self.size.control_h();
+                let height = self.size.control_h(cx.theme().density);
                 if self.label.is_none() && self.children.is_empty() {
                     this.size(height)
                 } else {
@@ -746,7 +746,9 @@ impl ButtonVariant {
 
     fn outline_background(&self, state: ButtonStyleState, cx: &mut App) -> Hsla {
         match (self, state) {
-            (Self::Default, ButtonStyleState::Normal) => cx.theme().background.raised(1).into(),
+            (Self::Default, ButtonStyleState::Normal) => cx
+                .theme()
+                .control_background(cx.theme().background.raised(1)),
             (Self::Default, ButtonStyleState::Hovered) => cx
                 .theme()
                 .border()
@@ -793,9 +795,13 @@ impl ButtonVariant {
         }
 
         match self {
-            Self::Default => cx.theme().background.raised(1).into(),
+            Self::Default => cx
+                .theme()
+                .control_background(cx.theme().background.raised(1)),
             Self::Primary | Self::Accent => self.solid(cx).into(),
-            Self::Secondary => cx.theme().background.raised(2).into(),
+            Self::Secondary => cx
+                .theme()
+                .control_background(cx.theme().background.raised(2)),
             Self::Danger => cx.theme().danger.fill().into(),
             Self::Warning => cx.theme().warning.fill().into(),
             Self::Success => cx.theme().success.fill().into(),

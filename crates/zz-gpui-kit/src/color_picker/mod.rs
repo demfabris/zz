@@ -237,7 +237,7 @@ impl ColorPicker {
         let clear = state.clone();
         let close = state.clone();
         let dismiss = state.clone();
-        let field = Size::Small.control_h();
+        let field = Size::Small.control_h(cx.theme().density);
         floating_sheet(
             bottom_sheet(
                 ("zz-color-picker-sheet", self.state.entity_id()),

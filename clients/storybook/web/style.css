@@ -1,11 +1,14 @@
 :root {
     --zz-background: #0a0a0a;
     --zz-raised: #171717;
+    --zz-raised2: #262626;
+    --zz-raised3: #333333;
     --zz-foreground: #fafafa;
     --zz-muted: #a3a3a3;
     --zz-border: #262626;
     --zz-accent: #60a5fa;
     --zz-radius: 6px;
+    --bar: 56px;
     color-scheme: light dark;
 }
 
@@ -29,10 +32,31 @@ body {
 
 body {
     display: grid;
-    grid-template-columns: 232px minmax(0, 1fr) 248px;
+    grid-template-columns: 232px minmax(0, 1fr) 300px;
     font: 14px/1.6 "Inter", system-ui, sans-serif;
     color: var(--zz-foreground);
     background: var(--zz-background);
+}
+
+svg {
+    width: 18px;
+    height: 18px;
+    flex: none;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+button {
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+}
+
+#bar {
+    display: none;
 }
 
 nav,
@@ -57,8 +81,7 @@ nav h1 {
     font-weight: 600;
 }
 
-nav h2,
-aside h2 {
+nav h2 {
     margin: 18px 8px 6px;
     font-size: 11px;
     font-weight: 500;
@@ -153,91 +176,320 @@ main > section h2 {
     color: var(--zz-muted);
 }
 
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+body.creator {
+    grid-template-columns: minmax(0, 1fr) 340px;
+    grid-template-rows: var(--bar) minmax(0, 1fr);
+}
+
+body.creator nav {
+    display: none;
+}
+
+body.creator #bar {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px 0 16px;
+    border-bottom: 1px solid var(--zz-border);
+    background: var(--zz-background);
+}
+
+body.creator main {
+    height: calc(100vh - var(--bar));
+    padding: 0;
+}
+
+body.creator aside {
+    height: calc(100vh - var(--bar));
+    padding: 16px;
+}
+
+body.creator .mount.canvas {
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+}
+
+#bar .back {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 8px 6px 4px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--zz-muted);
+    text-decoration: none;
+}
+
+#bar .back:hover {
+    color: var(--zz-foreground);
+    background: var(--zz-raised);
+}
+
+#bar strong {
+    font-size: 14px;
+    font-weight: 600;
+}
+
+#bar .spacer {
+    flex: 1;
+}
+
+#bar .tools {
+    display: flex;
+    gap: 2px;
+    margin-right: 8px;
+}
+
+#bar .tools button {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+}
+
+#bar .tools button:hover:not(:disabled) {
+    background: var(--zz-raised);
+}
+
+#bar .tools button:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+:root[data-mode="dark"] #bar .moon,
+:root:not([data-mode="dark"]) #bar .sun {
+    display: none;
+}
+
+.pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 36px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    font-weight: 500;
+    background: var(--zz-raised);
+}
+
+.pill:hover {
+    background: var(--zz-raised2);
+}
+
+.pill.primary,
+dialog button.primary {
+    color: var(--zz-background);
+    background: var(--zz-foreground);
+}
+
+.pill.primary:hover,
+dialog button.primary:hover {
+    opacity: 0.9;
+}
+
 form {
     display: grid;
-    gap: 14px;
-    padding: 0 8px;
+    gap: 22px;
 }
 
-form label {
+form section {
     display: grid;
     gap: 6px;
-    font-size: 12px;
 }
 
-form label span {
-    display: flex;
-    justify-content: space-between;
+form h3 {
+    margin: 0 4px 2px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--zz-muted);
 }
 
 form fieldset {
     display: grid;
-    gap: 14px;
+    gap: 6px;
     margin: 0;
-    padding: 0 0 0 10px;
+    padding: 0;
     border: 0;
-    border-left: 1px solid var(--zz-border);
 }
 
 form fieldset[hidden] {
     display: none;
 }
 
-form h3 {
-    margin: 10px 0 -4px;
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-    text-transform: uppercase;
+.row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 40px;
+    padding: 0 14px;
+    border-radius: 12px;
+    font-size: 13px;
+    background: var(--zz-raised);
+    overflow: hidden;
+}
+
+.row > span {
+    white-space: nowrap;
+}
+
+.row output {
     color: var(--zz-muted);
+    font-variant-numeric: tabular-nums;
+    text-overflow: ellipsis;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.row.slider {
+    cursor: ew-resize;
+    background: linear-gradient(
+        to right,
+        var(--zz-raised3) var(--fill, 50%),
+        var(--zz-raised) var(--fill, 50%)
+    );
+}
+
+.row.slider > span,
+.row.slider > output {
+    position: relative;
+    pointer-events: none;
+}
+
+.row.slider input[type="range"] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: ew-resize;
+}
+
+.row:focus-within {
+    outline: 2px solid var(--zz-accent);
+    outline-offset: -2px;
+}
+
+.row select {
+    min-width: 0;
+    max-width: 60%;
+    padding: 0 18px 0 0;
+    border: 0;
+    font: inherit;
+    text-align: right;
+    color: var(--zz-muted);
+    background: transparent
+        url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6l6 -6'/%3E%3C/svg%3E")
+        right center / 14px no-repeat;
+    appearance: none;
+    cursor: pointer;
+    outline: none;
+}
+
+.row.file {
+    cursor: pointer;
+}
+
+.row.file input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.row.check input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--zz-foreground);
+}
+
+.segmented {
+    display: grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--zz-raised);
+}
+
+.segmented label {
+    position: relative;
+    display: grid;
+    place-items: center;
+    height: 32px;
+    border-radius: 9px;
+    font-size: 13px;
+    color: var(--zz-muted);
+    cursor: pointer;
+}
+
+.segmented input {
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+}
+
+.segmented label:has(input:checked) {
+    color: var(--zz-foreground);
+    background: var(--zz-background);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.18);
+}
+
+.segmented label:has(input:focus-visible) {
+    outline: 2px solid var(--zz-accent);
+    outline-offset: -2px;
 }
 
 .export {
-    display: grid;
-    gap: 8px;
+    grid-template-columns: 1fr 1fr;
 }
 
-.export textarea {
-    width: 100%;
-    font: 11px/1.4 "Lilex", ui-monospace, monospace;
-    color: inherit;
+.export button {
+    min-height: 40px;
+    padding: 0 12px;
+    border: 0;
+    border-radius: 12px;
+    font-size: 13px;
     background: var(--zz-raised);
-    border: 1px solid var(--zz-border);
-    border-radius: var(--zz-radius);
-    padding: 6px 8px;
-    resize: vertical;
 }
 
-.export textarea[hidden] {
-    display: none;
+.export button:first-child {
+    grid-column: 1 / -1;
+    color: var(--zz-background);
+    background: var(--zz-foreground);
 }
 
-form label.check {
-    display: flex;
-    align-items: center;
-    gap: 8px;
+.export button:hover {
+    background: var(--zz-raised2);
 }
 
-form output {
-    color: var(--zz-muted);
-}
-
-form select,
-form button {
-    font: inherit;
-    color: inherit;
-    background: var(--zz-raised);
-    border: 1px solid var(--zz-border);
-    border-radius: var(--zz-radius);
-    padding: 4px 8px;
-}
-
-form input[type="range"] {
-    accent-color: var(--zz-accent);
+.export button:first-child:hover {
+    opacity: 0.9;
+    background: var(--zz-foreground);
 }
 
 .hint {
-    margin: 24px 8px 0;
+    margin: 24px 4px 0;
     font-size: 12px;
     color: var(--zz-muted);
 }
@@ -247,19 +499,109 @@ code {
     font-size: 0.92em;
 }
 
+dialog {
+    width: min(560px, calc(100vw - 32px));
+    padding: 20px;
+    border: 1px solid var(--zz-border);
+    border-radius: 16px;
+    color: var(--zz-foreground);
+    background: var(--zz-background);
+}
+
+dialog::backdrop {
+    background: rgb(0 0 0 / 0.45);
+}
+
+dialog h2 {
+    margin: 0 0 4px;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+dialog p {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: var(--zz-muted);
+}
+
+dialog textarea {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--zz-border);
+    border-radius: 10px;
+    font: 12px/1.5 "Lilex", ui-monospace, monospace;
+    color: inherit;
+    background: var(--zz-raised);
+    resize: vertical;
+}
+
+dialog output {
+    display: block;
+    min-height: 1.4em;
+    font-size: 12px;
+    color: #ef4444;
+}
+
+dialog menu {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin: 8px 0 0;
+    padding: 0;
+}
+
+dialog button {
+    height: 36px;
+    padding: 0 16px;
+    border: 0;
+    border-radius: 999px;
+    font-weight: 500;
+    background: var(--zz-raised);
+}
+
+#toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    padding: 8px 16px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--zz-background);
+    background: var(--zz-foreground);
+    transform: translateX(-50%);
+    box-shadow: 0 8px 24px rgb(0 0 0 / 0.25);
+}
+
+#toast[hidden] {
+    display: none;
+}
+
 @media (max-width: 900px) {
-    body {
+    body,
+    body.creator {
         grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto;
     }
 
     nav,
-    aside {
+    aside,
+    body.creator aside {
         height: auto;
         border: 0;
     }
 
-    main {
+    main,
+    body.creator main {
         height: auto;
         padding: 24px 16px 80px;
+    }
+
+    body.creator main {
+        padding: 0;
+    }
+
+    #bar .back span,
+    #bar strong {
+        display: none;
     }
 }

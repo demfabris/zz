@@ -143,8 +143,8 @@ impl Input {
         self
     }
 
-    fn sized<E: Styled>(element: E, size: Size) -> E {
-        let element = element.px(size.input_px()).py(size.input_py());
+    fn sized<E: Styled>(element: E, size: Size, density: f32) -> E {
+        let element = element.px(size.input_px()).py(size.input_py(density));
         match size {
             Size::XSmall => element.text_xs(),
             Size::Small => element.text_size(crate::rems_from_px(SMALL_TEXT_SIZE)),
@@ -154,18 +154,23 @@ impl Input {
         }
     }
 
-    fn height<E: Styled>(element: E, size: Size) -> E {
-        element.h(size.control_h())
+    fn height<E: Styled>(element: E, size: Size, density: f32) -> E {
+        element.h(size.control_h(density))
     }
 
     fn colors(disabled: bool, cx: &App) -> (Hsla, Hsla) {
         if disabled {
             (
-                cx.theme().background.raised(1).opacity(0.5),
+                cx.theme()
+                    .control_background(cx.theme().background.raised(1).opacity(0.5)),
                 cx.theme().foreground.muted(),
             )
         } else {
-            (cx.theme().background.raised(1), cx.theme().foreground)
+            (
+                cx.theme()
+                    .control_background(cx.theme().background.raised(1)),
+                cx.theme().foreground,
+            )
         }
     }
 
@@ -264,9 +269,9 @@ impl RenderOnce for Input {
             .text_color(foreground)
             .when(editable, zz_gpui::Styled::cursor_text);
 
-        element = Self::sized(element, self.size);
+        element = Self::sized(element, self.size, cx.theme().density);
         if !multi_line {
-            element = Self::height(element, self.size);
+            element = Self::height(element, self.size, cx.theme().density);
         }
 
         element

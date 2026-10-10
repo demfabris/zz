@@ -147,12 +147,19 @@ stored page favicons, with a globe fallback.
 
 Menus, select dropdowns, command palettes, and file/history/tree pickers share
 `StyledExt::popover_style`: an opaque `background.raised(2)` surface, the shared half-pixel edge,
-and a soft outer shadow scaled by the shadow-strength setting. Menus use 4px gutters, 26px
-rows (20px for Small menus), 12px text, and half-pixel separators inset from the surface edge.
-At a 0 radius (`Theme::inset_rows` is false) the gutters, the gaps between rows, and the separator
-inset go away, and rows become full-width bands; the workspace tree and command palette follow the
-same rule. `Theme.border` off drops the half-pixel edge from `control_surface`, tooltips,
-notifications and dialogs.
+and a soft outer shadow scaled by the shadow-strength setting and `Theme.elevation`. Menus use
+`Theme.row_inset` gutters (4px by default), 26px rows (20px for Small menus), 12px text, and
+half-pixel separators inset from the surface edge. At a 0 row inset (`Theme::inset_rows` is false)
+the gutters, the gaps between rows, and the separator inset go away, and rows become full-width
+bands; the workspace tree and command palette follow the same rule. `Theme.outline` scales the
+hairline of `control_surface`, tooltips, notifications and dialogs (0 drops it) and
+`Theme.outline_width` sets its width.
+
+The rest of a look reaches widgets through `Theme` helpers, so new widgets should use them rather
+than literals: `dense(px)` for row and control heights (`Size::control_h` and `input_py` take the
+density too), `control_background(color)` for the fill of a field, stepper, slider track or
+default button, `divider_color()` (or `divider` as an alpha factor) for rules between things, and
+`duration(base)` for transitions, timers that wait for one included.
 Picker search fields use the shared Input surface. Command palettes embed a bare shared Input
 inside their raised container, with inline mode, host, and command Tag pills. They use 8px list
 gutters; the container radius adds that inset to the theme radius. Rows retain the inset menu
@@ -256,13 +263,15 @@ detach action, not to color anything). `apply_zz_overrides` layers these values 
 - the preset selected for the effective mode, when one is;
 - the three optional `chrome-*` palette roots from `zz/config`, written over the preset so every
   elevation, hover, and focus ring derived from them at paint time follows the user's roots;
-- `font_family` from `ui-font-family`, with the system UI font as the default;
+- every value the `interface-style` decides, as one `zz_ui::interface_style::Look`
+  (`look(style).apply(theme)`): radius and corner smoothing, shadow strength and elevation, outline
+  strength and width, divider strength, density, row inset, control fill, selection fill, animation
+  speed, the interface font and the glass of floating surfaces; then `theme.radius` from
+  `widget-corner-radius` and `shadow_strength` from `shadow-strength` when those are set, so one
+  radius reaches every widget and survives a light/dark switch;
+- `font_family` from `ui-font-family` when set, else the look's font, else the system UI font;
 - `mono_font_family` from the terminal's resolved primary family, so Agent Markdown and code blocks
   match the terminal typeface;
-- `theme.radius`, `shadow`, `shadow_strength`, `border` and `glass` from `interface-style`
-  (`zz_ui::interface_style::apply`), then `theme.radius` from `widget-corner-radius` and
-  `shadow_strength` from `shadow-strength` when those are set, so one radius reaches every widget
-  and survives a light/dark switch;
 - `theme.contrast` from `chrome-contrast`, preserved across the same refreshes.
 
 `chrome-contrast` defaults to 1.0 and accepts 0.5–2.0; other values are reported like any numeric

@@ -8,7 +8,7 @@ mod display;
 mod icons;
 mod inputs;
 mod markdown;
-mod menus;
+pub(super) mod menus;
 mod notifications;
 mod scrollbars;
 mod selection;

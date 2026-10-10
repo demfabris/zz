@@ -3,6 +3,7 @@
 use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
+    time::Duration,
 };
 
 use zz_gpui::{
@@ -110,6 +111,16 @@ pub struct Theme {
     pub selection: SelectionStyle,
     /// The default corner smoothing windows draw with.
     pub corner_smoothing: f32,
+    /// Scales the height of controls and list rows: 1 is the usual size,
+    /// less packs them tighter.
+    pub density: f32,
+    /// How much of a control's fill covers what is behind it: 1 is solid,
+    /// less lets glass and backdrops show through.
+    pub control_fill: f32,
+    /// How strongly dividers draw: 1 is the usual rule, 0 none.
+    pub divider: f32,
+    /// How fast transitions play: 1 is the usual pace, 2 twice as fast.
+    pub animation_speed: f32,
     /// Floating surfaces (popovers, menus, tooltips, notifications, dialogs,
     /// sheets) become this glass when set. Each surface tints it with its own
     /// color; the material's tint alpha says how much of that color covers
@@ -186,6 +197,26 @@ impl Theme {
     /// Whether controls and floating surfaces draw an outline at all.
     pub fn outlined(&self) -> bool {
         self.outline > 0.0 && self.outline_width > px(0.0)
+    }
+
+    /// `length` at the theme's density.
+    pub fn dense(&self, length: Pixels) -> Pixels {
+        (length * self.density).round()
+    }
+
+    /// `color` as the fill of a control, at the theme's control fill.
+    pub fn control_background(&self, color: Hsla) -> Hsla {
+        color.opacity(self.control_fill)
+    }
+
+    /// The color of a divider rule.
+    pub fn divider_color(&self) -> Hsla {
+        self.border().opacity(self.divider)
+    }
+
+    /// `base` at the theme's animation speed.
+    pub fn duration(&self, base: Duration) -> Duration {
+        base.div_f32(self.animation_speed.clamp(0.1, 10.0))
     }
 
     /// The radius of a surface whose content sits `inset` inside it, so the
@@ -297,6 +328,10 @@ impl From<&ThemeColor> for Theme {
             row_inset: px(4.0),
             selection: SelectionStyle::Accent,
             corner_smoothing: 4.0,
+            density: 1.0,
+            control_fill: 1.0,
+            divider: 1.0,
+            animation_speed: 1.0,
             glass: None,
             pane_background_opacity: 0.5,
             pane_glow_strength: 1.0,

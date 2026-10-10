@@ -11,8 +11,8 @@ use zz_protocol::{GitMark, PathEntry, PathKind, PathListRoot};
 use crate::{
     ActiveTheme as _, Colorize as _, IconName,
     command::{
-        COMMAND_PALETTE_MAX_WIDTH, COMMAND_PALETTE_ROW_HEIGHT, CommandPaletteSurface, PaletteHint,
-        PaletteRow, command_palette_entry, command_palette_input,
+        COMMAND_PALETTE_MAX_WIDTH, CommandPaletteSurface, PaletteHint, PaletteRow,
+        command_palette_entry, command_palette_input, command_palette_row_height,
     },
     input::{Backspace, Enter, Escape, IndentInline, InputEvent, InputState, MoveDown, MoveUp},
 };
@@ -636,7 +636,7 @@ impl PathPickerView {
             click.update(cx, |picker, cx| picker.insert(index, false, cx));
             cx.stop_propagation();
         })
-        .map(|row| div().h(px(COMMAND_PALETTE_ROW_HEIGHT)).child(row))
+        .map(|row| div().h(px(command_palette_row_height(cx))).child(row))
     }
 }
 
@@ -665,7 +665,7 @@ impl Render for PathPickerView {
                     .collect::<Vec<_>>()
             }),
         )
-        .h(px(COMMAND_PALETTE_ROW_HEIGHT * visible))
+        .h(px(command_palette_row_height(cx) * visible))
         .track_scroll(&self.scroll_handle);
         let input = command_palette_input(
             &self.input,

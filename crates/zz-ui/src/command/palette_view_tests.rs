@@ -445,7 +445,7 @@ fn palette_navigation_scrolls_at_most_one_row_per_step(cx: &mut TestAppContext) 
                 }
                 let delta = (offset - previous_offset).abs();
                 assert!(
-                    delta <= px(COMMAND_PALETTE_ROW_HEIGHT + 0.01),
+                    delta <= px(crate::command::COMMAND_PALETTE_ROW_HEIGHT + 0.01),
                     "unified={unified}, direction={direction}, selected={selected}, delta={delta:?}"
                 );
                 scrolled |= delta > px(0.0);

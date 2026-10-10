@@ -33,7 +33,7 @@ pub fn permissions(_: &mut Window, cx: &mut App) -> AnyView {
     stateless(render_permissions, cx)
 }
 
-fn permission(
+pub(crate) fn permission(
     id: &str,
     title: &str,
     counter: Option<&str>,
@@ -79,7 +79,7 @@ fn permission(
     .into_any_element()
 }
 
-const COMMAND: [(&str, Option<bool>); 3] = [
+pub(crate) const COMMAND: [(&str, Option<bool>); 3] = [
     ("Allow", Some(true)),
     ("Always allow this session", Some(true)),
     ("Reject", Some(false)),

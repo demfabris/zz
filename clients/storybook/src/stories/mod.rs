@@ -9,10 +9,9 @@ mod kit;
 mod style_creator;
 mod workspace;
 
-pub use style_creator::{ID as STYLE_CREATOR, source as style_creator_source};
-
 pub static STORIES: LazyLock<Vec<&'static Story>> = LazyLock::new(|| {
-    let stories = [
+    [
+        &[style_creator::STORY][..],
         foundation::STORIES,
         agent::STORIES,
         workspace::STORIES,
@@ -21,10 +20,7 @@ pub static STORIES: LazyLock<Vec<&'static Story>> = LazyLock::new(|| {
     ]
     .into_iter()
     .flatten()
-    .collect::<Vec<_>>();
-    std::iter::once(style_creator::story(&stories))
-        .chain(stories)
-        .collect()
+    .collect()
 });
 
 #[cfg(test)]
@@ -32,10 +28,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_style_creator_finds_every_section_it_gathers() {
-        let creator = STORIES[0];
-        assert_eq!(creator.id, STYLE_CREATOR);
-        assert_eq!(creator.sections.len(), 12);
+    fn the_style_creator_comes_first() {
+        assert_eq!(STORIES[0].id, style_creator::ID);
     }
 
     #[test]

@@ -1,12 +1,12 @@
 use crate::story::Story;
 
 mod browser;
-mod fixtures;
+pub(super) mod fixtures;
 mod navigation;
 mod panes;
 mod settings;
-mod shell;
-mod status_bar;
+pub(super) mod shell;
+pub(super) mod status_bar;
 mod tree;
 
 pub const STORIES: &[Story] = &[

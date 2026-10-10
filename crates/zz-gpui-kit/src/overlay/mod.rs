@@ -14,8 +14,8 @@ mod root;
 mod window_ext;
 
 pub use crate::text::ROOT_KEY_CONTEXT;
-pub use dialog::dialog_description;
 pub use dialog::{AlertDialog, Dialog, DialogButtonProps};
+pub use dialog::{dialog_description, dialog_footer, dialog_gutter, dialog_surface, dialog_title};
 pub use notification::Notification;
 pub use root::Root;
 pub use window_ext::WindowExt;

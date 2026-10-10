@@ -44,7 +44,7 @@ pub fn picker_modal_sized(
         .overflow_hidden()
         .popover_style(cx)
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation());
-    zz_gpui_kit::foundation::surface_enter(surface, (id, "picker-open"), px(0.0))
+    zz_gpui_kit::foundation::surface_enter(surface, (id, "picker-open"), px(0.0), cx)
 }
 
 pub fn picker_header(cx: &App) -> Div {

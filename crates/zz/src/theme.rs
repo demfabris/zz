@@ -109,10 +109,12 @@ fn apply_zz_overrides(cx: &mut App) {
         .as_deref()
         .map(crate::terminal::view::terminal_font)
         .map(|font| font.family);
+    let look = zz_ui::interface_style::look(config::resolved_config(cx).interface_style.value);
     let ui_font_family = config::ui_font_family(cx)
         .value
-        .map_or_else(|| zz_gpui::Font::default().family, SharedString::from);
-    let interface_style = config::resolved_config(cx).interface_style.value;
+        .map(SharedString::from)
+        .or_else(|| look.font.clone())
+        .unwrap_or_else(|| zz_gpui::Font::default().family);
     let widget_corner_radius = config::widget_corner_radius(cx);
     let chrome_contrast = config::chrome_contrast(cx);
     let shadow_strength = config::shadow_strength(cx);
@@ -123,12 +125,12 @@ fn apply_zz_overrides(cx: &mut App) {
     let theme = Theme::global_mut(cx);
 
     theme.colors = resolved_chrome_colors(chrome_preset, theme.mode, chrome);
+    look.apply(theme);
     theme.font_family = ui_font_family;
     if let Some(font_family) = terminal_mono_font_family {
         theme.mono_font_family = font_family;
     }
 
-    zz_ui::interface_style::look(interface_style).apply(theme);
     theme.radius = widget_corner_radius;
     theme.set_contrast(chrome_contrast);
     theme.shadow = shadow_strength > 0.0;

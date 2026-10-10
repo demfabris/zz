@@ -887,8 +887,8 @@ impl PopupMenu {
 
         let item_height = match self.size {
             _ if crate::touch::CoarsePointer::get(cx) => px(crate::touch::TOUCH_TARGET),
-            Size::Small => px(20.),
-            _ => px(26.),
+            Size::Small => cx.theme().dense(px(20.)),
+            _ => cx.theme().dense(px(26.)),
         };
 
         let coarse = crate::touch::CoarsePointer::get(cx);
@@ -929,7 +929,7 @@ impl PopupMenu {
                 .rounded(px(0.0))
                 .border_0()
                 .border_b(px(0.5))
-                .border_color(cx.theme().foreground.opacity(0.1))
+                .border_color(cx.theme().foreground.opacity(0.1 * cx.theme().divider))
                 .disabled(true),
             PopupMenuItem::Label(label) => this
                 .disabled(true)
@@ -970,7 +970,7 @@ impl PopupMenu {
                             this.adjust_stepper(action, window, cx);
                         }))
                 };
-                this.h(item_height.max(px(26.0)))
+                this.h(item_height.max(cx.theme().dense(px(26.0))))
                     .aria_label(format!(
                         "{label}: {value}; Left and Right adjust, Enter resets"
                     ))
@@ -987,7 +987,9 @@ impl PopupMenu {
                         h_flex()
                             .flex_none()
                             .rounded(cx.theme().control_radius())
-                            .bg(cx.theme().background.raised(2).opaque())
+                            .bg(cx
+                                .theme()
+                                .control_background(cx.theme().background.raised(2).opaque()))
                             .control_surface(cx)
                             .child(
                                 button("menu-step-down", StepperAction::Decrement)
@@ -1224,7 +1226,7 @@ impl Render for PopupMenu {
                 // TODO: When the menu is limited by `overflow_y_scroll`, the sub-menu will cannot be displayed.
                 this.vertical_scrollbar(&self.scroll_handle)
             });
-        crate::foundation::surface_enter(surface, "menu-open", px(0.0))
+        crate::foundation::surface_enter(surface, "menu-open", px(0.0), cx)
     }
 }
 

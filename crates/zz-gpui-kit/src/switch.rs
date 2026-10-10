@@ -143,10 +143,11 @@ fn thumb(
                 return this.left(x).into_any_element();
             }
 
+            let duration = cx.theme().duration(TOGGLE_ANIMATION);
             cx.spawn({
                 let toggle_state = toggle_state.clone();
                 async move |cx| {
-                    cx.background_executor().timer(TOGGLE_ANIMATION).await;
+                    cx.background_executor().timer(duration).await;
                     let () = toggle_state.update(cx, |this, _| *this = checked);
                 }
             })
@@ -154,7 +155,7 @@ fn thumb(
 
             this.with_animation(
                 ElementId::NamedInteger("move".into(), u64::from(checked)),
-                Animation::new(TOGGLE_ANIMATION),
+                Animation::new(duration),
                 move |this, delta| {
                     let x = if checked {
                         travel * delta
@@ -179,7 +180,9 @@ impl RenderOnce for Switch {
         let base_track: Background = if checked {
             cx.theme().accent.into()
         } else {
-            cx.theme().background.raised(3).into()
+            cx.theme()
+                .control_background(cx.theme().background.raised(3))
+                .into()
         };
         let base_thumb: Background = cx.theme().foreground.into();
         let (track, thumb_fill) = if self.disabled {

@@ -3,7 +3,7 @@ use crate::story::Story;
 mod chooser;
 mod dialogs;
 mod menus;
-mod palette;
+pub(super) mod palette;
 mod path_picker;
 mod phone;
 mod terminal;

@@ -3,7 +3,7 @@
 //! looks instead of a pile of knobs.
 
 use serde::{Deserialize, Serialize};
-use zz_gpui::{GlassMaterial, px};
+use zz_gpui::{GlassMaterial, SharedString, px};
 
 pub use zz_client::chrome_palette::InterfaceStyle;
 
@@ -11,7 +11,7 @@ use crate::{SelectionStyle, Theme};
 
 /// Every theme value a style decides, in logical pixels where it is a
 /// length. The storybook's style creator edits one and exports it as JSON.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "kebab-case")]
 pub struct Look {
     pub radius: f32,
@@ -22,6 +22,12 @@ pub struct Look {
     pub outline_width: f32,
     pub row_inset: f32,
     pub selection: SelectionStyle,
+    pub density: f32,
+    pub control_fill: f32,
+    pub divider: f32,
+    pub animation_speed: f32,
+    /// The interface font family; `None` keeps the platform's.
+    pub font: Option<SharedString>,
     /// What floating surfaces become; `None` fills them plainly.
     pub glass: Option<GlassMaterial>,
 }
@@ -43,6 +49,13 @@ impl Look {
         theme.outline_width = px(self.outline_width);
         theme.row_inset = px(self.row_inset);
         theme.selection = self.selection;
+        theme.density = self.density;
+        theme.control_fill = self.control_fill;
+        theme.divider = self.divider;
+        theme.animation_speed = self.animation_speed;
+        if let Some(font) = &self.font {
+            theme.font_family = font.clone();
+        }
         theme.glass = self.glass;
     }
 }
@@ -58,6 +71,11 @@ pub fn look(style: InterfaceStyle) -> Look {
         outline_width: 0.5,
         row_inset: 4.0,
         selection: SelectionStyle::Accent,
+        density: 1.0,
+        control_fill: 1.0,
+        divider: 1.0,
+        animation_speed: 1.0,
+        font: None,
         glass: None,
     };
     let material = GlassMaterial::regular();
@@ -65,7 +83,7 @@ pub fn look(style: InterfaceStyle) -> Look {
         InterfaceStyle::Flat => Look {
             outline: 0.0,
             row_inset: 0.0,
-            ..base
+            ..base.clone()
         },
         InterfaceStyle::Modern => Look {
             glass: Some(
@@ -82,7 +100,7 @@ pub fn look(style: InterfaceStyle) -> Look {
                     .edge_shadow(0.3)
                     .noise(0.),
             ),
-            ..base
+            ..base.clone()
         },
         InterfaceStyle::Full => Look {
             glass: Some(
@@ -120,11 +138,11 @@ mod tests {
             assert_eq!(
                 Look {
                     glass: None,
-                    ..once
+                    ..once.clone()
                 },
                 Look {
                     glass: None,
-                    ..look
+                    ..look.clone()
                 }
             );
             if let (Some(before), Some(after)) = (look.glass, once.glass) {

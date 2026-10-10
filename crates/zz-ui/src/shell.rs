@@ -178,7 +178,7 @@ pub fn workspace_status_bar(
                     .flex_none()
                     .w(px(1.0))
                     .h(px(16.0))
-                    .bg(cx.theme().border()),
+                    .bg(cx.theme().divider_color()),
             )
             .into_any_element()
     });
@@ -201,7 +201,7 @@ pub fn workspace_status_bar(
         .overflow_hidden()
         .text_color(cx.theme().foreground)
         .when(!gaps, |bar| {
-            bar.border_b_1().border_color(cx.theme().border())
+            bar.border_b_1().border_color(cx.theme().divider_color())
         })
         .child(leading)
         .children(titlebar_controls)

@@ -183,10 +183,6 @@ const FLOATING: &[&str] = &[
 ];
 
 pub fn floats(story: &str, section: &str) -> bool {
-    if story == crate::stories::STYLE_CREATOR {
-        return crate::stories::style_creator_source(section)
-            .is_some_and(|source| floats(source, section));
-    }
     FLOATING.iter().any(|entry| match entry.split_once('/') {
         Some((entry_story, entry_section)) => entry_story == story && entry_section == section,
         None => *entry == story,

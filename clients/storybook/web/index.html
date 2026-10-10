@@ -8,184 +8,281 @@
         <script type="module" src="main.js"></script>
     </head>
     <body>
+        <header id="bar" aria-label="Style creator">
+            <a class="back" href="#/colors" title="Back to the storybook">
+                <svg viewBox="0 0 24 24"><path d="M15 6l-6 6l6 6" /></svg>
+                <span>Storybook</span>
+            </a>
+            <strong>Style creator</strong>
+            <div class="spacer"></div>
+            <div class="tools">
+                <button type="button" data-action="undo" title="Undo">
+                    <svg viewBox="0 0 24 24"><path d="M9 14l-4 -4l4 -4" /><path d="M5 10h11a4 4 0 1 1 0 8h-1" /></svg>
+                </button>
+                <button type="button" data-action="redo" title="Redo">
+                    <svg viewBox="0 0 24 24"><path d="M15 14l4 -4l-4 -4" /><path d="M19 10h-11a4 4 0 1 0 0 8h1" /></svg>
+                </button>
+                <button type="button" data-action="reset" title="Reset to the style">
+                    <svg viewBox="0 0 24 24"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></svg>
+                </button>
+                <button type="button" data-action="shuffle" title="Shuffle the look">
+                    <svg viewBox="0 0 24 24"><path d="M18 4l3 3l-3 3" /><path d="M18 20l3 -3l-3 -3" /><path d="M3 7h3a5 5 0 0 1 5 5a5 5 0 0 0 5 5h5" /><path d="M21 7h-5a4.978 4.978 0 0 0 -3 1m-4 8a4.984 4.984 0 0 1 -3 1h-3" /></svg>
+                </button>
+                <button type="button" data-action="mode" title="Light or dark">
+                    <svg class="moon" viewBox="0 0 24 24"><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454l0 .008" /></svg>
+                    <svg class="sun" viewBox="0 0 24 24"><path d="M8 12a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" /><path d="M3 12h1m8 -9v1m8 8h1m-9 8v1m-6.4 -15.4l.7 .7m12.1 -.7l-.7 .7m0 11.4l.7 .7m-12.1 -.7l-.7 .7" /></svg>
+                </button>
+            </div>
+            <button type="button" data-action="import" class="pill">Import</button>
+            <button type="button" data-action="copy" class="pill primary">
+                <svg viewBox="0 0 24 24"><path d="M7 9.667a2.667 2.667 0 0 1 2.667 -2.667h8.666a2.667 2.667 0 0 1 2.667 2.667v8.666a2.667 2.667 0 0 1 -2.667 2.667h-8.666a2.667 2.667 0 0 1 -2.667 -2.667l0 -8.666" /><path d="M4.012 16.737a2.005 2.005 0 0 1 -1.012 -1.737v-10c0 -1.1 .9 -2 2 -2h10c.75 0 1.158 .385 1.5 1" /></svg>
+                <span>Copy JSON</span>
+            </button>
+        </header>
         <nav id="nav" aria-label="Stories"></nav>
         <main id="story" aria-live="polite">
             <p class="loading">Starting zz…</p>
         </main>
         <aside id="knobs" aria-label="Knobs">
-            <h2>Knobs</h2>
             <form id="knob-form">
-                <label>
-                    <span>Theme</span>
-                    <select name="theme">
-                        <option value="system">System</option>
-                        <option value="light">Light</option>
-                        <option value="dark">Dark</option>
-                    </select>
-                </label>
-                <label>
-                    <span>Palette</span>
-                    <select name="preset">
-                        <option value="default">zz default</option>
-                    </select>
-                </label>
-                <label>
-                    <span>Contrast <output name="contrast-value"></output></span>
-                    <input type="range" name="contrast" min="0.5" max="2" step="0.05" value="1" />
-                </label>
-                <label>
-                    <span>Zoom <output name="zoom-value"></output></span>
-                    <input type="range" name="zoom" min="0.75" max="1.5" step="0.05" value="1" />
-                </label>
-                <label>
-                    <span>Pane opacity <output name="pane-opacity-value"></output></span>
-                    <input type="range" name="pane-opacity" min="0" max="1" step="0.05" value="0.5" />
-                </label>
-                <label>
-                    <span>Pane glow <output name="pane-glow-value"></output></span>
-                    <input type="range" name="pane-glow" min="0" max="2" step="0.1" value="1" />
-                </label>
-                <label>
-                    <span>Backdrop under floating surfaces</span>
-                    <select name="backdrop">
-                        <option value="plain">Plain</option>
-                        <option value="code">Terminal output</option>
-                        <option value="color">Color and stripes</option>
-                    </select>
-                </label>
-                <label class="check">
-                    <input type="checkbox" name="motion" checked />
-                    <span>Animations</span>
-                </label>
+                <section>
+                    <h3>Style</h3>
+                    <div class="segmented" role="radiogroup" aria-label="Start from">
+                        <label><input type="radio" name="style" value="flat" /><span>Flat</span></label>
+                        <label><input type="radio" name="style" value="modern" checked /><span>Modern</span></label>
+                        <label><input type="radio" name="style" value="full" /><span>Full</span></label>
+                    </div>
+                </section>
 
-                <h3>Style</h3>
-                <label>
-                    <span>Start from</span>
-                    <select name="style">
-                        <option value="flat">Flat</option>
-                        <option value="modern" selected>Modern</option>
-                        <option value="full">Full</option>
-                    </select>
-                </label>
-                <label>
-                    <span>Corner radius <output name="radius-value"></output></span>
-                    <input type="range" name="radius" min="0" max="25" step="1" value="24" />
-                </label>
-                <label>
-                    <span>Corner smoothing <output name="smoothing-value"></output></span>
-                    <input type="range" name="smoothing" min="2" max="6" step="0.5" value="4" />
-                </label>
-                <label>
-                    <span>Row inset <output name="row-inset-value"></output></span>
-                    <input type="range" name="row-inset" min="0" max="12" step="1" value="4" />
-                </label>
-                <label>
-                    <span>Selection</span>
-                    <select name="selection">
-                        <option value="accent">Accent</option>
-                        <option value="wash">Neutral wash</option>
-                    </select>
-                </label>
-                <label>
-                    <span>Outline <output name="outline-value"></output></span>
-                    <input type="range" name="outline" min="0" max="3" step="0.05" value="1" />
-                </label>
-                <label>
-                    <span>Outline width <output name="outline-width-value"></output></span>
-                    <input type="range" name="outline-width" min="0" max="3" step="0.25" value="0.5" />
-                </label>
-                <label>
-                    <span>Shadow <output name="shadow-value"></output></span>
-                    <input type="range" name="shadow" min="0" max="1" step="0.05" value="1" />
-                </label>
-                <label>
-                    <span>Elevation <output name="elevation-value"></output></span>
-                    <input type="range" name="elevation" min="0" max="3" step="0.1" value="1" />
-                </label>
-                <label>
-                    <span>Glass</span>
-                    <select name="glass">
-                        <option value="style">The style's</option>
-                        <option value="off">Off</option>
-                        <option value="regular">Regular</option>
-                        <option value="clear">Clear</option>
-                        <option value="frosted">Frosted</option>
-                        <option value="smoked">Smoked</option>
-                        <option value="bubble">Bubble</option>
-                    </select>
-                </label>
-                <fieldset id="glass-knobs" hidden>
-                    <label>
-                        <span>Blur <output name="glass-blur-value"></output></span>
-                        <input type="range" name="glass-blur" min="0" max="40" step="0.05" />
+                <section>
+                    <h3>Theme</h3>
+                    <div class="segmented" role="radiogroup" aria-label="Theme">
+                        <label><input type="radio" name="theme" value="system" checked /><span>System</span></label>
+                        <label><input type="radio" name="theme" value="light" /><span>Light</span></label>
+                        <label><input type="radio" name="theme" value="dark" /><span>Dark</span></label>
+                    </div>
+                    <label class="row">
+                        <span>Palette</span>
+                        <select name="preset">
+                            <option value="default">zz default</option>
+                        </select>
                     </label>
-                    <label>
-                        <span>Surface tint <output name="glass-tint-value"></output></span>
-                        <input type="range" name="glass-tint" min="0" max="1" step="0.01" />
+                    <label class="row slider">
+                        <span>Contrast</span><output name="contrast-value"></output>
+                        <input type="range" name="contrast" min="0.5" max="2" step="0.05" value="1" />
                     </label>
-                    <label>
-                        <span>Refraction <output name="glass-refraction-value"></output></span>
-                        <input type="range" name="glass-refraction" min="-60" max="150" step="1" />
+                </section>
+
+                <section>
+                    <h3>Corners</h3>
+                    <label class="row slider">
+                        <span>Radius</span><output name="radius-value"></output>
+                        <input type="range" name="radius" min="0" max="25" step="1" value="24" />
                     </label>
-                    <label>
-                        <span>Bezel <output name="glass-bezel-value"></output></span>
-                        <input type="range" name="glass-bezel" min="0" max="60" step="1" />
+                    <label class="row slider">
+                        <span>Smoothing</span><output name="smoothing-value"></output>
+                        <input type="range" name="smoothing" min="2" max="6" step="0.5" value="4" />
                     </label>
-                    <label>
-                        <span>Dispersion <output name="glass-dispersion-value"></output></span>
-                        <input type="range" name="glass-dispersion" min="0" max="0.6" step="0.01" />
+                </section>
+
+                <section>
+                    <h3>Lines</h3>
+                    <label class="row slider">
+                        <span>Outline</span><output name="outline-value"></output>
+                        <input type="range" name="outline" min="0" max="3" step="0.05" value="1" />
                     </label>
-                    <label>
-                        <span>Saturation <output name="glass-saturation-value"></output></span>
-                        <input type="range" name="glass-saturation" min="0.5" max="2.5" step="0.05" />
+                    <label class="row slider">
+                        <span>Outline width</span><output name="outline-width-value"></output>
+                        <input type="range" name="outline-width" min="0" max="3" step="0.25" value="0.5" />
                     </label>
-                    <label>
-                        <span>Brightness <output name="glass-brightness-value"></output></span>
-                        <input type="range" name="glass-brightness" min="-0.3" max="0.3" step="0.01" />
+                    <label class="row slider">
+                        <span>Dividers</span><output name="divider-value"></output>
+                        <input type="range" name="divider" min="0" max="1" step="0.05" value="1" />
                     </label>
-                    <label>
-                        <span>Contrast <output name="glass-contrast-value"></output></span>
-                        <input type="range" name="glass-contrast" min="0.5" max="2" step="0.05" />
+                </section>
+
+                <section>
+                    <h3>Depth</h3>
+                    <label class="row slider">
+                        <span>Shadow</span><output name="shadow-value"></output>
+                        <input type="range" name="shadow" min="0" max="1" step="0.05" value="1" />
                     </label>
-                    <label>
-                        <span>Glint <output name="glass-specular-value"></output></span>
-                        <input type="range" name="glass-specular" min="0" max="1.5" step="0.05" />
+                    <label class="row slider">
+                        <span>Elevation</span><output name="elevation-value"></output>
+                        <input type="range" name="elevation" min="0" max="3" step="0.1" value="1" />
                     </label>
-                    <label>
-                        <span>Glint width <output name="glass-glint-width-value"></output></span>
-                        <input type="range" name="glass-glint-width" min="0" max="6" step="0.1" />
+                </section>
+
+                <section>
+                    <h3>Density</h3>
+                    <label class="row slider">
+                        <span>Density</span><output name="density-value"></output>
+                        <input type="range" name="density" min="0.75" max="1.5" step="0.05" value="1" />
                     </label>
-                    <label>
-                        <span>Light angle <output name="glass-light-value"></output></span>
-                        <input type="range" name="glass-light" min="-180" max="180" step="5" />
+                    <label class="row slider">
+                        <span>Row inset</span><output name="row-inset-value"></output>
+                        <input type="range" name="row-inset" min="0" max="12" step="1" value="4" />
                     </label>
-                    <label>
-                        <span>Rim glow <output name="glass-fresnel-value"></output></span>
-                        <input type="range" name="glass-fresnel" min="0" max="0.5" step="0.01" />
+                    <label class="row slider">
+                        <span>Control fill</span><output name="control-fill-value"></output>
+                        <input type="range" name="control-fill" min="0" max="1" step="0.05" value="1" />
                     </label>
-                    <label>
-                        <span>Edge shadow <output name="glass-edge-value"></output></span>
-                        <input type="range" name="glass-edge" min="0" max="1" step="0.05" />
+                    <div class="segmented" role="radiogroup" aria-label="Selection">
+                        <label><input type="radio" name="selection" value="accent" checked /><span>Accent rows</span></label>
+                        <label><input type="radio" name="selection" value="wash" /><span>Neutral rows</span></label>
+                    </div>
+                </section>
+
+                <section>
+                    <h3>Typography</h3>
+                    <label class="row">
+                        <span>Font</span>
+                        <select name="font">
+                            <option value="">Inter</option>
+                            <option value="Lilex">Lilex</option>
+                        </select>
                     </label>
-                    <label>
-                        <span>Edge shadow width <output name="glass-edge-width-value"></output></span>
-                        <input type="range" name="glass-edge-width" min="0" max="4" step="0.05" />
+                    <label class="row file">
+                        <span>Load a font file</span>
+                        <input type="file" id="font-file" accept=".ttf,.otf,font/ttf,font/otf" />
+                        <output id="font-status"></output>
                     </label>
-                    <label>
-                        <span>Grain <output name="glass-noise-value"></output></span>
-                        <input type="range" name="glass-noise" min="0" max="0.1" step="0.005" />
+                    <label class="row slider">
+                        <span>Zoom</span><output name="zoom-value"></output>
+                        <input type="range" name="zoom" min="0.75" max="1.5" step="0.05" value="1" />
                     </label>
-                </fieldset>
-                <div class="export">
-                    <button type="button" id="export-look">Copy look as JSON</button>
-                    <textarea id="look-json" readonly rows="12" hidden aria-label="Look as JSON"></textarea>
-                </div>
-                <button type="reset">Reset</button>
+                </section>
+
+                <section>
+                    <h3>Motion</h3>
+                    <label class="row slider">
+                        <span>Animation speed</span><output name="animation-speed-value"></output>
+                        <input type="range" name="animation-speed" min="0.25" max="3" step="0.05" value="1" />
+                    </label>
+                    <label class="row check">
+                        <span>Animations</span>
+                        <input type="checkbox" name="motion" checked />
+                    </label>
+                </section>
+
+                <section>
+                    <h3>Glass</h3>
+                    <label class="row">
+                        <span>Material</span>
+                        <select name="glass">
+                            <option value="style">The style's</option>
+                            <option value="off">Off</option>
+                            <option value="regular">Regular</option>
+                            <option value="clear">Clear</option>
+                            <option value="frosted">Frosted</option>
+                            <option value="smoked">Smoked</option>
+                            <option value="bubble">Bubble</option>
+                        </select>
+                    </label>
+                    <fieldset id="glass-knobs" hidden>
+                        <label class="row slider">
+                            <span>Blur</span><output name="glass-blur-value"></output>
+                            <input type="range" name="glass-blur" min="0" max="40" step="0.05" />
+                        </label>
+                        <label class="row slider">
+                            <span>Surface tint</span><output name="glass-tint-value"></output>
+                            <input type="range" name="glass-tint" min="0" max="1" step="0.01" />
+                        </label>
+                        <label class="row slider">
+                            <span>Refraction</span><output name="glass-refraction-value"></output>
+                            <input type="range" name="glass-refraction" min="-60" max="150" step="1" />
+                        </label>
+                        <label class="row slider">
+                            <span>Bezel</span><output name="glass-bezel-value"></output>
+                            <input type="range" name="glass-bezel" min="0" max="60" step="1" />
+                        </label>
+                        <label class="row slider">
+                            <span>Dispersion</span><output name="glass-dispersion-value"></output>
+                            <input type="range" name="glass-dispersion" min="0" max="0.6" step="0.01" />
+                        </label>
+                        <label class="row slider">
+                            <span>Saturation</span><output name="glass-saturation-value"></output>
+                            <input type="range" name="glass-saturation" min="0.5" max="2.5" step="0.05" />
+                        </label>
+                        <label class="row slider">
+                            <span>Brightness</span><output name="glass-brightness-value"></output>
+                            <input type="range" name="glass-brightness" min="-0.3" max="0.3" step="0.01" />
+                        </label>
+                        <label class="row slider">
+                            <span>Contrast</span><output name="glass-contrast-value"></output>
+                            <input type="range" name="glass-contrast" min="0.5" max="2" step="0.05" />
+                        </label>
+                        <label class="row slider">
+                            <span>Glint</span><output name="glass-specular-value"></output>
+                            <input type="range" name="glass-specular" min="0" max="1.5" step="0.05" />
+                        </label>
+                        <label class="row slider">
+                            <span>Glint width</span><output name="glass-glint-width-value"></output>
+                            <input type="range" name="glass-glint-width" min="0" max="6" step="0.1" />
+                        </label>
+                        <label class="row slider">
+                            <span>Light angle</span><output name="glass-light-value"></output>
+                            <input type="range" name="glass-light" min="-180" max="180" step="5" />
+                        </label>
+                        <label class="row slider">
+                            <span>Rim glow</span><output name="glass-fresnel-value"></output>
+                            <input type="range" name="glass-fresnel" min="0" max="0.5" step="0.01" />
+                        </label>
+                        <label class="row slider">
+                            <span>Edge shadow</span><output name="glass-edge-value"></output>
+                            <input type="range" name="glass-edge" min="0" max="1" step="0.05" />
+                        </label>
+                        <label class="row slider">
+                            <span>Edge shadow width</span><output name="glass-edge-width-value"></output>
+                            <input type="range" name="glass-edge-width" min="0" max="4" step="0.05" />
+                        </label>
+                        <label class="row slider">
+                            <span>Grain</span><output name="glass-noise-value"></output>
+                            <input type="range" name="glass-noise" min="0" max="0.1" step="0.005" />
+                        </label>
+                    </fieldset>
+                </section>
+
+                <section>
+                    <h3>Preview</h3>
+                    <div class="segmented" role="radiogroup" aria-label="Backdrop under floating surfaces">
+                        <label><input type="radio" name="backdrop" value="plain" checked /><span>Plain</span></label>
+                        <label><input type="radio" name="backdrop" value="code" /><span>Terminal</span></label>
+                        <label><input type="radio" name="backdrop" value="color" /><span>Color</span></label>
+                    </div>
+                    <label class="row slider">
+                        <span>Pane opacity</span><output name="pane-opacity-value"></output>
+                        <input type="range" name="pane-opacity" min="0" max="1" step="0.05" value="0.5" />
+                    </label>
+                    <label class="row slider">
+                        <span>Pane glow</span><output name="pane-glow-value"></output>
+                        <input type="range" name="pane-glow" min="0" max="2" step="0.1" value="1" />
+                    </label>
+                </section>
+
+                <section class="export">
+                    <button type="button" data-action="copy">Copy look as JSON</button>
+                    <button type="button" data-action="import">Import a look</button>
+                    <button type="reset">Reset</button>
+                </section>
             </form>
             <p class="hint">
                 Agents: <code>storybook.show(id)</code>, <code>storybook.setKnobs({ theme: "dark" })</code>,
                 and <code>zzGpui.find</code> / <code>zzGpui.click</code> / <code>zzGpui.capture</code> for the live UI.
             </p>
         </aside>
+        <dialog id="import-dialog">
+            <form method="dialog">
+                <h2>Import a look</h2>
+                <p>Paste a look's JSON. Keys it leaves out keep the style's value.</p>
+                <textarea id="import-json" rows="14" spellcheck="false" aria-label="Look JSON"></textarea>
+                <output id="import-error"></output>
+                <menu>
+                    <button value="cancel">Cancel</button>
+                    <button value="apply" class="primary">Apply</button>
+                </menu>
+            </form>
+        </dialog>
+        <div id="toast" role="status" hidden></div>
     </body>
 </html>

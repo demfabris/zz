@@ -322,27 +322,27 @@ impl Size {
         }
     }
 
-    /// Vertical padding for input-shaped controls.
-    pub fn input_py(&self) -> DefiniteLength {
+    /// Vertical padding for input-shaped controls at `density`.
+    pub fn input_py(&self, density: f32) -> DefiniteLength {
         match self {
-            Size::Large => rems_from_px(10.).into(),
-            Size::Medium => rems_from_px(8.).into(),
-            Size::Small => rems_from_px(2.).into(),
+            Size::Large => rems_from_px(10. * density).into(),
+            Size::Medium => rems_from_px(8. * density).into(),
+            Size::Small => rems_from_px(2. * density).into(),
             Size::XSmall => rems_from_px(0.).into(),
             Size::Size(_) => px(2.).into(),
         }
     }
 
-    /// Height of every control that sits on a form row: text fields, selects,
-    /// and the square of an icon-only button. `Size::Size` stays the caller's
-    /// literal pixels.
-    pub fn control_h(&self) -> DefiniteLength {
+    /// Height of every control that sits on a form row at `density`: text
+    /// fields, selects, and the square of an icon-only button. `Size::Size`
+    /// stays the caller's literal pixels.
+    pub fn control_h(&self, density: f32) -> DefiniteLength {
         match self {
             Size::Size(value) => (*value).into(),
-            Size::XSmall => rems_from_px(24.).into(),
-            Size::Small => rems_from_px(28.).into(),
-            Size::Medium => rems_from_px(36.).into(),
-            Size::Large => rems_from_px(40.).into(),
+            Size::XSmall => rems_from_px((24. * density).round()).into(),
+            Size::Small => rems_from_px((28. * density).round()).into(),
+            Size::Medium => rems_from_px((36. * density).round()).into(),
+            Size::Large => rems_from_px((40. * density).round()).into(),
         }
     }
 }
@@ -389,74 +389,6 @@ pub trait Sizable: Sized {
     #[inline(always)]
     fn large(self) -> Self {
         self.with_size(Size::Large)
-    }
-}
-
-/// Apply a [`Size`] to an element's own metrics, rather than to a child widget.
-pub trait StyleSized<T: Styled> {
-    fn input_text_size(self, size: Size) -> Self;
-    fn input_size(self, size: Size) -> Self;
-    fn input_px(self, size: Size) -> Self;
-    fn input_py(self, size: Size) -> Self;
-    fn input_h(self, size: Size) -> Self;
-    fn list_size(self, size: Size) -> Self;
-    fn list_px(self, size: Size) -> Self;
-    fn list_py(self, size: Size) -> Self;
-}
-
-impl<T: Styled> StyleSized<T> for T {
-    #[inline]
-    fn input_text_size(self, size: Size) -> Self {
-        match size {
-            Size::XSmall => self.text_xs(),
-            Size::Small => self.text_sm(),
-            Size::Medium => self.text_sm(),
-            Size::Large => self.text_base(),
-            Size::Size(size) => self.text_size(size * 0.875),
-        }
-    }
-
-    #[inline]
-    fn input_size(self, size: Size) -> Self {
-        self.input_px(size).input_py(size).input_h(size)
-    }
-
-    #[inline]
-    fn input_px(self, size: Size) -> Self {
-        self.px(size.input_px())
-    }
-
-    #[inline]
-    fn input_py(self, size: Size) -> Self {
-        self.py(size.input_py())
-    }
-
-    #[inline]
-    fn input_h(self, size: Size) -> Self {
-        self.h(size.control_h())
-    }
-
-    #[inline]
-    fn list_size(self, size: Size) -> Self {
-        self.list_px(size).list_py(size).input_text_size(size)
-    }
-
-    #[inline]
-    fn list_px(self, size: Size) -> Self {
-        match size {
-            Size::Small => self.px_2(),
-            _ => self.px_3(),
-        }
-    }
-
-    #[inline]
-    fn list_py(self, size: Size) -> Self {
-        match size {
-            Size::Large => self.py_2(),
-            Size::Medium => self.py_1(),
-            Size::Small => self.py_0p5(),
-            _ => self.py_1(),
-        }
     }
 }
 

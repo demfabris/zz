@@ -303,6 +303,7 @@ impl RenderOnce for BottomSheet {
             )
         };
         let theme = cx.theme();
+        let enter = theme.duration(ENTER);
         let corner = px(CORNER);
         let on_dismiss = self.on_dismiss;
         let scrim = div()
@@ -315,7 +316,7 @@ impl RenderOnce for BottomSheet {
             .on_click(move |_, window, cx| on_dismiss(window, cx))
             .with_animation(
                 "bottom-sheet-scrim-enter",
-                Animation::new(ENTER).with_easing(ease_out_quint()),
+                Animation::new(enter).with_easing(ease_out_quint()),
                 move |scrim, delta| scrim.opacity(delta * fade),
             );
         let listener = canvas(
@@ -418,7 +419,7 @@ impl RenderOnce for BottomSheet {
             )
             .with_animation(
                 "bottom-sheet-panel-enter",
-                Animation::new(ENTER).with_easing(ease_out_quint()),
+                Animation::new(enter).with_easing(ease_out_quint()),
                 |panel, delta| panel.bottom(relative(-RISE * (1.0 - delta))),
             );
         div()

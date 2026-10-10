@@ -12,7 +12,7 @@ use crate::{
     tag::Tag,
 };
 
-use super::COMMAND_PALETTE_ROW_HEIGHT;
+use super::command_palette_row_height;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PaletteStatus {
@@ -178,9 +178,9 @@ pub(super) fn palette_entry(
     ListItem::new(id)
         .w_full()
         .h(px(if cx.theme().inset_rows() {
-            COMMAND_PALETTE_ROW_HEIGHT - 2.0
+            command_palette_row_height(cx) - 2.0
         } else {
-            COMMAND_PALETTE_ROW_HEIGHT
+            command_palette_row_height(cx)
         }))
         .pl(px(12.0 + row.indent))
         .pr(px(12.0))
@@ -327,7 +327,7 @@ pub fn command_palette_section(
     cx: &App,
 ) -> Div {
     div()
-        .h(px(COMMAND_PALETTE_ROW_HEIGHT))
+        .h(px(command_palette_row_height(cx)))
         .flex()
         .items_center()
         .justify_between()

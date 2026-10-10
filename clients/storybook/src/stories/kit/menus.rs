@@ -26,7 +26,7 @@ thread_local! {
     static BOUND: Cell<bool> = const { Cell::new(false) };
 }
 
-fn bind_keys(cx: &mut App) {
+pub(crate) fn bind_keys(cx: &mut App) {
     if BOUND.with(|bound| bound.replace(true)) {
         return;
     }
@@ -91,7 +91,11 @@ enum Highlight {
     Submenu,
 }
 
-fn pane_menu(menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>) -> PopupMenu {
+pub(crate) fn pane_menu(
+    menu: PopupMenu,
+    window: &mut Window,
+    cx: &mut Context<PopupMenu>,
+) -> PopupMenu {
     menu.label("Pane")
         .item(
             PopupMenuItem::new("New tab")
@@ -138,7 +142,7 @@ fn pane_menu(menu: PopupMenu, window: &mut Window, cx: &mut Context<PopupMenu>) 
         )
 }
 
-fn view_menu(menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>) -> PopupMenu {
+pub(crate) fn view_menu(menu: PopupMenu, _: &mut Window, _: &mut Context<PopupMenu>) -> PopupMenu {
     menu.label("View")
         .item(PopupMenuItem::stepper(
             "Zoom",

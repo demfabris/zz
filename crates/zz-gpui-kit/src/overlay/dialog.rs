@@ -355,22 +355,16 @@ impl RenderOnce for Dialog {
         let top_room = (view_size.height / 10. - EDGE_MARGIN).max(px(0.));
         let max_height = (view_size.height - EDGE_MARGIN * 2. - layer_offset).max(px(0.));
 
-        let animation = Animation::new(ANIMATION_DURATION).with_easing(ease_out_quint());
-        let shadow_color = cx.theme().scrim;
+        let animation =
+            Animation::new(cx.theme().duration(ANIMATION_DURATION)).with_easing(ease_out_quint());
         let scrim = cx.theme().scrim;
 
-        let body = v_flex()
+        let body = dialog_surface(cx)
             .id(layer_ix)
             .debug_selector(move || format!("dialog-{layer_ix}"))
             .role(self.a11y_role)
             .track_focus(&self.focus_handle)
-            .surface_outline(cx.theme().border(), cx)
-            .surface_fill(cx.theme().background.opaque(), cx)
-            .rounded(cx.theme().radius)
             .min_h(MIN_HEIGHT)
-            .pt(CONTENT_PADDING)
-            .pb(CONTENT_PADDING)
-            .gap(CONTENT_PADDING)
             .refine_style(&self.style)
             .px_0()
             .key_context(CONTEXT)
@@ -411,10 +405,10 @@ impl RenderOnce for Dialog {
                     .overflow_hidden()
                     .gap_y_2()
                     .when_some(self.header, |this, header| {
-                        this.child(gutter().child(header))
+                        this.child(dialog_gutter().child(header))
                     })
                     .when_some(self.title, |this, title| {
-                        this.child(gutter().child(dialog_title().child(title)))
+                        this.child(dialog_gutter().child(dialog_title().child(title)))
                     })
                     .when(!self.children.is_empty(), |this| {
                         this.child(
@@ -430,11 +424,11 @@ impl RenderOnce for Dialog {
                     }),
             )
             .when_some(self.footer, |this, footer| {
-                this.child(gutter().child(footer))
+                this.child(dialog_gutter().child(footer))
             })
             .when(show_default_footer, |this| {
                 this.child(
-                    gutter().child(
+                    dialog_gutter().child(
                         dialog_footer(cx)
                             .when(button_props.show_cancel, |this| {
                                 this.child(button_props.render_cancel())
@@ -458,27 +452,8 @@ impl RenderOnce for Dialog {
                         on_cancel(&ClickEvent::default(), window, cx);
                         on_close(&ClickEvent::default(), window, cx);
                     })
-            }))
-            .when(cx.theme().shadow, |this| {
-                let elevation = cx.theme().elevation;
-                this.shadow(vec![
-                    BoxShadow {
-                        color: shadow_color,
-                        offset: point(px(0.), px(20. * elevation)),
-                        blur_radius: px(25. * elevation),
-                        spread_radius: px(-5. * elevation),
-                        inset: false,
-                    },
-                    BoxShadow {
-                        color: shadow_color,
-                        offset: point(px(0.), px(8. * elevation)),
-                        blur_radius: px(10. * elevation),
-                        spread_radius: px(-6. * elevation),
-                        inset: false,
-                    },
-                ])
-            });
-        let body = surface_enter(body, "dialog-open", px(0.));
+            }));
+        let body = surface_enter(body, "dialog-open", px(0.), cx);
 
         anchored()
             .position(point(paddings.left, paddings.top))
@@ -523,11 +498,44 @@ impl RenderOnce for Dialog {
     }
 }
 
-fn gutter() -> Div {
+/// A dialog's floating surface: its outline, fill, corners, vertical padding
+/// and shadow. Content sits in [`dialog_gutter`]s inside it.
+pub fn dialog_surface(cx: &App) -> Div {
+    let shadow_color = cx.theme().scrim;
+    v_flex()
+        .surface_outline(cx.theme().border(), cx)
+        .surface_fill(cx.theme().background.opaque(), cx)
+        .rounded(cx.theme().radius)
+        .pt(CONTENT_PADDING)
+        .pb(CONTENT_PADDING)
+        .gap(CONTENT_PADDING)
+        .when(cx.theme().shadow, |this| {
+            let elevation = cx.theme().elevation;
+            this.shadow(vec![
+                BoxShadow {
+                    color: shadow_color,
+                    offset: point(px(0.), px(20. * elevation)),
+                    blur_radius: px(25. * elevation),
+                    spread_radius: px(-5. * elevation),
+                    inset: false,
+                },
+                BoxShadow {
+                    color: shadow_color,
+                    offset: point(px(0.), px(8. * elevation)),
+                    blur_radius: px(10. * elevation),
+                    spread_radius: px(-6. * elevation),
+                    inset: false,
+                },
+            ])
+        })
+}
+
+/// The horizontal inset of a dialog's title, body and footer.
+pub fn dialog_gutter() -> Div {
     div().pl(CONTENT_PADDING).pr(CONTENT_PADDING)
 }
 
-fn dialog_title() -> Div {
+pub fn dialog_title() -> Div {
     div()
         .text_size(TITLE_TEXT_SIZE)
         .font_semibold()
@@ -540,7 +548,7 @@ pub fn dialog_description(cx: &App) -> Div {
         .text_color(cx.theme().foreground.muted())
 }
 
-fn dialog_footer(cx: &App) -> Div {
+pub fn dialog_footer(cx: &App) -> Div {
     h_flex()
         .gap_2()
         .justify_end()

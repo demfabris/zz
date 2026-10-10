@@ -1,6 +1,6 @@
 use crate::story::{Section, Story};
 
-mod cards;
+pub(super) mod cards;
 mod chrome;
 mod composer;
 mod fixtures;

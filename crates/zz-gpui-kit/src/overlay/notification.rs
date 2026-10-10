@@ -52,6 +52,7 @@ pub struct Notification {
     message: Option<SharedString>,
     content_builder: Option<ContentBuilder>,
     autohide: Option<Duration>,
+    width: Pixels,
     closing: bool,
 }
 
@@ -67,6 +68,7 @@ impl Notification {
             message: None,
             content_builder: None,
             autohide: Some(AUTOHIDE_DELAY),
+            width: DEFAULT_WIDTH,
             closing: false,
         }
     }
@@ -125,6 +127,13 @@ impl Notification {
     #[must_use]
     pub fn autohide(mut self, autohide: bool) -> Self {
         self.autohide = autohide.then_some(AUTOHIDE_DELAY);
+        self
+    }
+
+    /// How wide the toast is; 400px unless set.
+    #[must_use]
+    pub fn width(mut self, width: Pixels) -> Self {
+        self.width = width;
         self
     }
 
@@ -191,7 +200,7 @@ impl Render for Notification {
             .group("")
             .occlude()
             .relative()
-            .w(DEFAULT_WIDTH)
+            .w(self.width)
             .max_w((window.fully_visible_bounds().size.width - px(32.)).max(px(1.)))
             .items_center()
             .surface_outline(cx.theme().border(), cx)
@@ -265,7 +274,8 @@ impl Render for Notification {
             }))
             .with_animation(
                 ElementId::NamedInteger("slide".into(), u64::from(closing)),
-                Animation::new(SLIDE_ANIMATION).with_easing(cubic_ease(0., 1.)),
+                Animation::new(cx.theme().duration(SLIDE_ANIMATION))
+                    .with_easing(cubic_ease(0., 1.)),
                 move |this, delta| slide(this, placement, closing, delta),
             )
     }

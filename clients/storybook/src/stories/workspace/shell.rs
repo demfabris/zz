@@ -44,13 +44,13 @@ pub const STORY: Story = Story {
     ],
 };
 
-struct Shell {
+pub(crate) struct Shell {
     scrolls: [UniformListScrollHandle; 2],
     addresses: [Entity<InputState>; 2],
 }
 
 impl Shell {
-    fn new(window: &mut Window, cx: &mut App) -> Self {
+    pub(crate) fn new(window: &mut Window, cx: &mut App) -> Self {
         Self {
             scrolls: std::array::from_fn(|_| UniformListScrollHandle::new()),
             addresses: std::array::from_fn(|_| {
@@ -140,7 +140,7 @@ fn window_frame(id: &'static str, height: f32, shell: impl IntoElement, cx: &App
         .into_any_element()
 }
 
-fn with_sidebar(gaps: bool, state: &Shell, index: usize, cx: &App) -> AnyElement {
+pub(crate) fn with_sidebar(gaps: bool, state: &Shell, index: usize, cx: &App) -> AnyElement {
     let sidebar = sidebar(
         tree_list(
             workspace_tree(),

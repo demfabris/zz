@@ -1074,7 +1074,7 @@
       "id": "fix.close-out",
       "track": "fix",
       "title": "Reds in the closing full suite",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "crates/zz-mux/src",
@@ -1091,7 +1091,8 @@
       "branch": "catchup/fix.close-out",
       "sha": null,
       "notes": [
-        "2026-10-10: closing full suite on fe2812e60 (log ~/.cache/zz-catchup/logs/close/). Everything else green except the three ci-test failures outside the campaign (two zz agent::view tests, the signal-disposition race)."
+        "2026-10-10: closing full suite on fe2812e60 (log ~/.cache/zz-catchup/logs/close/). Everything else green except the three ci-test failures outside the campaign (two zz agent::view tests, the signal-disposition race).",
+        "2026-10-10: Lane done at 5ff922c70: break-pane names the window like tmux's default_window_name (not the pane title), tui-superset expects the uppercased timed messages, clock-mode-open confirmed a minute-boundary flake; hooks-events-structure 88 clean, tui-superset 186/186, tui-client-commands 567/567 alone, zz-mux and zz-daemon packages pass."
       ]
     }
   ]

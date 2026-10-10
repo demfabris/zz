@@ -259,6 +259,8 @@ pub struct StatusValues {
     pub session_attached: usize,
     pub session_attached_list: String,
     pub session_bell: bool,
+    pub session_activity_flag: bool,
+    pub session_silence_flag: bool,
     pub session_activity: Option<i64>,
     pub session_created: Option<i64>,
     pub session_id: String,
@@ -550,6 +552,8 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         }
         FormatBacking::SessionAttachedList => value.clone_into(&mut values.session_attached_list),
         FormatBacking::SessionBell => values.session_bell = value == "1",
+        FormatBacking::SessionActivityFlag => values.session_activity_flag = value == "1",
+        FormatBacking::SessionSilenceFlag => values.session_silence_flag = value == "1",
         FormatBacking::SessionActivity => values.session_activity = value.parse().ok(),
         FormatBacking::SessionActive => {
             values.session_active = (!value.is_empty()).then_some(value == "1");
@@ -1068,6 +1072,8 @@ enum FormatBacking {
     SessionAttached,
     SessionAttachedList,
     SessionBell,
+    SessionActivityFlag,
+    SessionSilenceFlag,
     SessionActivity,
     SessionActive,
     SessionCreated,
@@ -1296,7 +1302,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("server_sessions", Server, ServerSessions),
     variable!("session_active", Session, SessionActive),
     variable!("session_activity", Session, Time, SessionActivity),
-    variable!("session_activity_flag", Session, WindowActivityFlag),
+    variable!("session_activity_flag", Session, SessionActivityFlag),
     variable!("session_alert", Session, SessionAlert),
     variable!("session_alerts", Session, SessionAlerts),
     variable!("session_attached", Session, SessionAttached),
@@ -1317,7 +1323,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("session_marked", Session, SessionMarked),
     variable!("session_name", Session, SessionName),
     variable!("session_path", Session, SessionPath),
-    variable!("session_silence_flag", Session, WindowSilenceFlag),
+    variable!("session_silence_flag", Session, SessionSilenceFlag),
     variable!("session_stack", Session, SessionStack),
     variable!("session_windows", Session, SessionWindows),
     variable!("sixel_support", Server, Zero),
@@ -1492,6 +1498,12 @@ impl StatusValues {
                 Cow::Borrowed(self.session_attached_list.as_str())
             }
             FormatBacking::SessionBell => Cow::Borrowed(bool_string(self.session_bell)),
+            FormatBacking::SessionActivityFlag => {
+                Cow::Borrowed(bool_string(self.session_activity_flag))
+            }
+            FormatBacking::SessionSilenceFlag => {
+                Cow::Borrowed(bool_string(self.session_silence_flag))
+            }
             FormatBacking::SessionActivity => optional_display(self.session_activity),
             FormatBacking::SessionActive => optional_bool(self.session_active),
             FormatBacking::SessionCreated => optional_display(self.session_created),
@@ -3195,11 +3207,9 @@ impl MuxEngine {
             })
             .collect::<Vec<_>>();
         alert_windows.sort_unstable_by_key(|(index, ..)| *index);
-        context.session_bell = session
-            .windows
-            .first()
-            .and_then(|window| self.state.windows.get(window))
-            .is_some_and(|window| window.panes.values().any(|pane| pane.bell));
+        context.session_activity_flag = alert_windows.iter().any(|(_, activity, ..)| *activity);
+        context.session_bell = alert_windows.iter().any(|(_, _, bell, _)| *bell);
+        context.session_silence_flag = alert_windows.iter().any(|(.., silence)| *silence);
         for (_, activity, bell, silence) in &alert_windows {
             if *activity && !context.session_alert.contains('#') {
                 context.session_alert.push('#');
@@ -3814,9 +3824,13 @@ const LISTING_NEVER_ANSWERED: [&str; 14] = [
 ];
 
 /// `format_cb_session_attached_list` and `format_cb_window_active_clients_list`
-/// build an evbuffer and return NULL when nothing went into it.
-const LISTING_EMPTY_LIST_DECLINES: [&str; 2] =
-    ["session_attached_list", "window_active_clients_list"];
+/// build an evbuffer and return NULL when nothing went into it, and
+/// `format_cb_window_modal_pane` returns NULL for a window with no modal pane.
+const LISTING_EMPTY_LIST_DECLINES: [&str; 3] = [
+    "session_attached_list",
+    "window_active_clients_list",
+    "window_modal_pane",
+];
 
 /// `format_each` prints a `FORMAT_TABLE_TIME` entry as `tv->tv_sec`, so a zero
 /// time is `0` in the listing where `format_find` turns the same entry into
@@ -4390,7 +4404,11 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             };
             let after_next = next_index + next.len_utf8();
             match next {
-                '#' | '}' | ',' => {
+                '#' => {
+                    literal.push(next);
+                    index = after_next;
+                }
+                '}' | ',' => {
                     if self.tracing() {
                         self.log(depth + 1, &format!("found #{next}"));
                     }

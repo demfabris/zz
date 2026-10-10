@@ -152,11 +152,18 @@ impl FormatTree<'_> {
                     .map(|window| window.session)
                     == self.session,
             ),
-            FormatBacking::SessionBell => boolean(
+            FormatBacking::SessionBell
+            | FormatBacking::SessionActivityFlag
+            | FormatBacking::SessionSilenceFlag => boolean(
                 session
-                    .and_then(|session| session.windows.first())
-                    .and_then(|id| state.windows.get(id))
-                    .is_some_and(|window| window.panes.values().any(|pane| pane.bell)),
+                    .into_iter()
+                    .flat_map(|session| &session.windows)
+                    .filter_map(|id| state.windows.get(id))
+                    .any(|window| match backing {
+                        FormatBacking::SessionActivityFlag => window.activity_flag,
+                        FormatBacking::SessionSilenceFlag => window.silence_flag,
+                        _ => window.panes.values().any(|pane| pane.bell),
+                    }),
             ),
             FormatBacking::SessionAlert | FormatBacking::SessionAlerts => {
                 let mut windows = session

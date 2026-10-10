@@ -1011,7 +1011,7 @@
       "id": "fix.corpus-3-8",
       "track": "fix",
       "title": "Corpus rows red at the 3.8 pin in the M1/M3 full run",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "compat/scenarios",
@@ -1027,11 +1027,12 @@
         "Each row's cause is named in the lane report: a probe written for the d77c9dc6 pin (update it to 3.8 and keep the old pin's answer as a comment), 3.8 drift in zz (fix), a regression from a catch-up merge (fix, naming the merge), or harness/infra."
       ],
       "branch": "catchup/fix.corpus-3-8",
-      "sha": null,
+      "sha": "8c50f9429",
       "notes": [
         "2026-10-09: first full-corpus run at the 3.8 pin (main b260b7404, the float track merge); every row above failed its first pass and a solo retry. Log: ~/.cache/zz-catchup/logs/m3-run-sh.log on alienware. Known before the run: smoke/config-chain-parse-abort fails on the tmux side (filed under pin.hooks-events); smoke/display-menu-mouse's probe was written for the old pin and 3.8 fails its own checks (float.keys note).",
         "2026-10-10: Lane done at aa6581482: all 16 rows clean vs 3.8 and attached-client PASS; causes: 3.8 drift fixed in zz (session alert flags, config error deferral, display-menu no longer blocks, ## trace), float-merge regressions (command-flag-errors totals, attached-client popup expectations under display-popup.modal-pane), old-pin probes, harness (pixel-size query, Arch prompt retitle, the suite's copied binary). Review 1 running.",
-        "2026-10-10: Codex review 1: 2 P2 (zz-side popup probe in attached-client.sh skips focus handling and process-exit release); final pass sent."
+        "2026-10-10: Codex review 1: 2 P2 (zz-side popup probe in attached-client.sh skips focus handling and process-exit release); final pass sent.",
+        "2026-10-10: Merged after the final pass (efa77927e: attached-client asserts zz's modal focus handling and process-exit release); merge checks green (clippy, zz-cli 127+149, zz-client 225, zz-daemon 1590, zz-mux 722, compat check)."
       ]
     },
     {

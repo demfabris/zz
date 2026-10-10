@@ -984,7 +984,7 @@
       "id": "fix.followups-3",
       "track": "fix",
       "title": "Follow-ups, third batch",
-      "status": "active",
+      "status": "review",
       "deps": [],
       "zones": [
         "compat/tui-mouse.sh",
@@ -1002,14 +1002,15 @@
         "(pin.customize-3-8) tui-mouse.sh --self-check times out at 'zz's context click aimed one cell further along': the border-binding sabotage before it leaves zz in copy mode and a '(jump to forward)' prompt eats the typed marker; the 6 customize sabotages after it never run. Same on the float.keys base.",
         "(pin.customize-3-8) apply_customize_result drops the error of a failed customize command; tmux shows it as a status message. Mode prompts have no shared prompt history (Up does nothing).",
         "(pin.customize-3-8) customize add-prompt errors go out as display-message -l, which fires after-display-message hooks; tmux's own error path does not.",
-        "(float.keys final pass) display-panes: a float pushed past the window's left or top edge leaves tile content under it (3.8 blanks the area; needs a wire change); pane-border-status line rules for floats; display-panes -Z does not blank a float's inside before its label."
+        "(float.keys final pass) display-panes: a float pushed past the window's left or top edge leaves tile content under it (3.8 blanks the area; needs a wire change); pane-border-status line rules for floats; display-panes -Z does not blank a float's inside before its label.",
+        "2026-10-10: Lane done at 1663d7a8f: tui-mouse self-check race fixed (all sabotages caught, 81/81), customize errors as timed status messages, prompt history in customize and choosers, display-panes float clears (wire append under 108) and edge-cell status lines; tui-floating 44/44, tui-choosers 107/107. Review 1 running."
       ]
     },
     {
       "id": "fix.corpus-3-8",
       "track": "fix",
       "title": "Corpus rows red at the 3.8 pin in the M1/M3 full run",
-      "status": "review",
+      "status": "active",
       "deps": [],
       "zones": [
         "compat/scenarios",
@@ -1028,7 +1029,8 @@
       "sha": null,
       "notes": [
         "2026-10-09: first full-corpus run at the 3.8 pin (main b260b7404, the float track merge); every row above failed its first pass and a solo retry. Log: ~/.cache/zz-catchup/logs/m3-run-sh.log on alienware. Known before the run: smoke/config-chain-parse-abort fails on the tmux side (filed under pin.hooks-events); smoke/display-menu-mouse's probe was written for the old pin and 3.8 fails its own checks (float.keys note).",
-        "2026-10-10: Lane done at aa6581482: all 16 rows clean vs 3.8 and attached-client PASS; causes: 3.8 drift fixed in zz (session alert flags, config error deferral, display-menu no longer blocks, ## trace), float-merge regressions (command-flag-errors totals, attached-client popup expectations under display-popup.modal-pane), old-pin probes, harness (pixel-size query, Arch prompt retitle, the suite's copied binary). Review 1 running."
+        "2026-10-10: Lane done at aa6581482: all 16 rows clean vs 3.8 and attached-client PASS; causes: 3.8 drift fixed in zz (session alert flags, config error deferral, display-menu no longer blocks, ## trace), float-merge regressions (command-flag-errors totals, attached-client popup expectations under display-popup.modal-pane), old-pin probes, harness (pixel-size query, Arch prompt retitle, the suite's copied binary). Review 1 running.",
+        "2026-10-10: Codex review 1: 2 P2 (zz-side popup probe in attached-client.sh skips focus handling and process-exit release); final pass sent."
       ]
     },
     {
@@ -1054,7 +1056,11 @@
         "(fix.corpus-3-8) chooser-drive.py, send-keys-attach.py, graphics-drive.py and bare-client.py do not answer 3.8's pixel-size query (CSI 14 t), so tmux holds a lone Escape 500 ms on their side; pty-drive.py now answers it. Share one answer path.",
         "(fix.corpus-3-8) On Arch hosts /etc/bash.bashrc retitles the pane at every prompt, racing select-pane -T in scenarios that use a default-shell pane; make such scenarios run a fixed program (cat, sh) as the corpus lane did.",
         "(fix.corpus-3-8) zz's bash shell integration retitles every default-shell pane to 'bash' even after the distro's OSC 0, so #{pane_title} differs from tmux on such hosts. Measure; decide whether zz's integration should stop overriding a title the shell already set, or record it native with the reason.",
-        "(fix.corpus-3-8) link-window and unlink-window (3.8 commands) are missing from compat/scenarios/smoke/fixtures/command-flag-errors.tsv."
+        "(fix.corpus-3-8) link-window and unlink-window (3.8 commands) are missing from compat/scenarios/smoke/fixtures/command-flag-errors.tsv.",
+        "(fix.followups-3) tui-mouse --self-check 'zz's tree menu drag released on the press cell' is not caught by its own check; it only fails through a later 'Display all N possibilities' screen from tmux's shell.",
+        "(fix.followups-3) tui-client-commands CASE_NEEDLE_MODE runs display-message -p on the tmux side only, so cases that set after-display-message hooks get a skewed result.",
+        "(fix.followups-3) key-binding and choose-tree errors (publish_background_command_error) use an untimed message the raw TUI keeps; tmux clears it after display-time or on a key (customize errors now use the timed path).",
+        "(fix.followups-3) chooser prompts have no cursor editing (Left/Right, C-a, C-u...), only history."
       ]
     }
   ]

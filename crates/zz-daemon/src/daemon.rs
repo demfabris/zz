@@ -28180,6 +28180,12 @@ impl Shared {
             changed
                 .then(|| PendingHookEvent::live_pane("pane-title-changed", pane, &inner.engine))
                 .flatten()
+                .map(|mut event| {
+                    event
+                        .variables
+                        .insert("hook_new_title".to_owned(), title.to_owned());
+                    event
+                })
         };
         if let Some(event) = event {
             self.request_publish(timers::PublishReason::Tree);
@@ -114059,7 +114065,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ),
             (
                 "pane-title-changed",
-                "display-message 'title=#{hook_pane}:#{hook_window}'",
+                "display-message 'title=#{hook_pane}:#{hook_window}:#{hook_new_title}'",
             ),
             (
                 "alert-bell",
@@ -114136,7 +114142,7 @@ bind - split-window -v -c "#{pane_current_path}"
             [
                 "renamed=fish",
                 "renamed=manual",
-                &format!("title={pane}:{window}"),
+                &format!("title={pane}:{window}:osc-title"),
                 &format!("bell={window}/"),
                 &format!("bell={window}/"),
             ]

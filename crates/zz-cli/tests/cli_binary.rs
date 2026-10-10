@@ -598,11 +598,18 @@ mod daemon_autostart {
             let created = fixture.run(&["new-session", "-d", "-s", name]);
             assert_eq!(created.status.code(), Some(0));
         }
-        let session = fixture.run(&["display-message", "-p", "-t", "mine", "#{session_id}"]);
-        let session = String::from_utf8(session.stdout).expect("session id");
+        let ids = fixture.run(&[
+            "display-message",
+            "-p",
+            "-t",
+            "mine",
+            "#{session_id} #{pane_id}",
+        ]);
+        let ids = String::from_utf8(ids.stdout).expect("session and pane ids");
+        let (session, pane) = ids.trim().split_once(' ').expect("session and pane ids");
         let mut child = fixture
             .command()
-            .args(["events", "-t", session.trim()])
+            .args(["events", "-t", session])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -647,10 +654,12 @@ mod daemon_autostart {
                 if event.get("hook_session").is_some() {
                     return Err(format!("pane event kept hook_session: {event}"));
                 }
-                return match event["hook_new_title"].as_str() {
-                    Some("title-mine") => Ok(()),
-                    _ => Err(format!("event from another session passed: {event}")),
-                };
+                if event["hook_pane"] != pane {
+                    return Err(format!("event from another session passed: {event}"));
+                }
+                if event["hook_new_title"] == "title-mine" {
+                    return Ok(());
+                }
             }
             Err("no pane-title-changed in 20 lines".to_owned())
         })();

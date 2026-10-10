@@ -912,7 +912,7 @@
       "id": "pin.customize-3-8",
       "track": "pin",
       "title": "3.8's rebuilt customize mode (window-customize.c)",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "float.keys",
         "pin.formats-options-2"
@@ -933,11 +933,12 @@
         "semantic:customize-mode-3-8 (3.8's rebuilt customize tree, 132 recorded tui-client-commands cases) and semantic:terminal-features-3-8 (the DECRQM ?2026 Sync query and the show-messages Sync line) close, flipping their recorded TUI fixture cases to asserted.",
         "The customize-mode context formats (is_environment, environment_*, option_is_hook, option_is_monitor, option_monitor) resolve as 3.8."
       ],
-      "branch": null,
+      "branch": "catchup/pin.customize-3-8",
       "sha": null,
       "notes": [
         "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs).",
-        "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux)."
+        "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux).",
+        "2026-10-09: Branched from catchup/float.keys 2a66f5a1f (it carries the customize e editor); merges to main after the float track, then merges main."
       ]
     },
     {

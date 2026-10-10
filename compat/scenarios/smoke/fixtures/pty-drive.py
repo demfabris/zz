@@ -65,13 +65,26 @@ def resize(master, columns, rows):
     )
 
 
+WINDOW_PIXELS_QUERY = b"\x1b[14t"
+
+
 def drain(master):
+    # tmux 3.8 asks for the window size in pixels when the pty reports none
+    # (tty.c tty_resize) and holds every lone Escape for 500 ms until the
+    # answer arrives (tty-keys.c:1003), so answer it the way a terminal with
+    # no pixel size would.
+    tail = b""
     while True:
         try:
-            if not os.read(master, 4096):
-                break
+            data = os.read(master, 4096)
         except OSError:
             break
+        if not data:
+            break
+        seen = tail + data
+        for _ in range(seen.count(WINDOW_PIXELS_QUERY)):
+            os.write(master, b"\x1b[4;0;0t")
+        tail = seen[-(len(WINDOW_PIXELS_QUERY) - 1):]
 
 
 def wait_for(path):

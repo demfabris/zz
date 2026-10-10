@@ -8830,7 +8830,7 @@ tmux set-option -g @plugin loaded
         }
 
         #[test]
-        fn refresh_client_c_sizes_a_control_target_for_menu_gating() {
+        fn refresh_client_c_sizes_a_control_target_and_display_menu_returns_at_once() {
             let fixture = Fixture::new();
             if !local_socket_bind_available(&fixture.socket) {
                 return;
@@ -8875,27 +8875,12 @@ tmux set-option -g @plugin loaded
                 thread::sleep(Duration::from_millis(10));
             }
 
-            let mut menu = fixture
-                .command()
-                .args(menu_args)
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .expect("spawn sized menu");
-            let hold_deadline = Instant::now() + Duration::from_millis(300);
-            while Instant::now() < hold_deadline {
-                assert!(
-                    menu.try_wait().expect("poll sized menu").is_none(),
-                    "sized menu silently no-op'd"
-                );
-                thread::sleep(Duration::from_millis(10));
-            }
+            let sized = fixture.run(&menu_args);
+            assert_eq!(sized.status.code(), Some(0));
             stdin.write_all(b"\n").expect("detach sized control");
             drop(stdin);
             let control_output = control.wait_with_output().expect("wait for control client");
             assert_eq!(control_output.status.code(), Some(0));
-            let menu_output = menu.wait_with_output().expect("wait for sized menu");
-            assert_eq!(menu_output.status.code(), Some(0));
         }
 
         #[test]

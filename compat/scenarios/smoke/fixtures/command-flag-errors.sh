@@ -168,12 +168,12 @@ if ! cmp -s "$work/pane.before" "$work/pane.after" ||
     failed=1
 fi
 
-if [ "$canonical_count" -ne 89 ] || [ "$alias_count" -ne 75 ] ||
-    [ "$required_count" -ne 85 ] || [ "$failure_probe_count" -ne 544 ] ||
-    [ "$success_probe_count" -ne 3 ] || [ "$probe_count" -ne 547 ]; then
+if [ "$canonical_count" -ne 90 ] || [ "$alias_count" -ne 76 ] ||
+    [ "$required_count" -ne 86 ] || [ "$failure_probe_count" -ne 550 ] ||
+    [ "$success_probe_count" -ne 3 ] || [ "$probe_count" -ne 553 ]; then
     failed=1
 fi
 
 if [ "$failed" -eq 0 ]; then
-    main_client set-environment -g COMMAND_FLAG_ERRORS clean:547
+    main_client set-environment -g COMMAND_FLAG_ERRORS clean:553
 fi

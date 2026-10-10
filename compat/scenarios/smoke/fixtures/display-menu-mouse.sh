@@ -21,8 +21,9 @@ main_client() {
 session=display-menu-mouse
 work="$HOME/display-menu-mouse-work-$side"
 steps="$work/steps"
+snaps="$work/snaps"
 rm -rf "$work"
-mkdir -p "$steps"
+mkdir -p "$steps" "$snaps"
 : >"$work/failures"
 failed=0
 check_count=0
@@ -105,21 +106,37 @@ open_menu() {
     sleep 1.0
 }
 
-drop_menu() {
-    if [ -n "$menu_pid" ]; then
-        if kill -0 "$menu_pid" 2>/dev/null; then
-            keys "$(printf '\033')"
-        fi
-        wait "$menu_pid" >/dev/null 2>&1 || true
-        menu_pid=""
+# tmux 3.8 returns from display-menu as soon as the menu is up
+# (cmd-display-menu.c:556), so whether the menu is still there is read off the
+# client: a full redraw draws the menu's rows only while it is up. The d77c9dc6
+# pin held the display-menu command until the menu closed, and this fixture
+# used to ask whether that command was still running.
+probe_menu() {
+    drive "snap flush-$step"
+    main_client refresh-client -t "$client"
+    sleep 0.6
+    probe="probe-$step"
+    drive "snap $probe"
+    if grep -q alpha "$snaps/$probe" 2>/dev/null; then
+        menu_state=alive
+    else
+        menu_state=gone
     fi
 }
 
-menu_alive() {
-    if [ -n "$menu_pid" ] && kill -0 "$menu_pid" 2>/dev/null; then
-        printf alive
-    else
-        printf gone
+check_menu() {
+    probe_menu
+    check_equal "$1" "$2" "$menu_state"
+}
+
+drop_menu() {
+    probe_menu
+    if [ "$menu_state" = alive ]; then
+        keys "$(printf '\033')"
+    fi
+    if [ -n "$menu_pid" ]; then
+        wait "$menu_pid" >/dev/null 2>&1 || true
+        menu_pid=""
     fi
 }
 
@@ -137,7 +154,7 @@ main_client set-option -g mouse off
 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
     -u TERM_PROGRAM -u TERM_PROGRAM_VERSION \
     TERM=xterm-256color \
-    python3 "$HOME/pty-drive.py" "$steps" 79 24 \
+    python3 "$HOME/chooser-drive.py" "$steps" "$snaps" 79 24 \
     "$binary" $prefix_args attach-session -t "=$session" \
     >"$work/attach.out" 2>&1 &
 attach_pid=$!
@@ -170,7 +187,7 @@ sleep 0.8
 # marks it MENU_NOMOUSE: it ignores button 1 whole and leaves on anything else.
 open_menu ''
 pointer 0 8 3
-check_equal nomouse-ignores-button-one alive "$(menu_alive)"
+check_menu nomouse-ignores-button-one alive
 check_equal nomouse-button-one-runs-nothing 'DISPLAY_MENU_MOUSE_ROW=pending' "$(chosen)"
 keys "$(printf '\r')"
 sleep 0.8
@@ -180,20 +197,20 @@ drop_menu
 open_menu ''
 pointer_release 8 3
 sleep 0.5
-check_equal nomouse-release-leaves gone "$(menu_alive)"
+check_menu nomouse-release-leaves gone
 check_equal nomouse-release-runs-nothing 'DISPLAY_MENU_MOUSE_ROW=pending' "$(chosen)"
 drop_menu
 
 open_menu ''
 pointer 35 8 3
 sleep 0.5
-check_equal nomouse-motion-leaves gone "$(menu_alive)"
+check_menu nomouse-motion-leaves gone
 drop_menu
 
 open_menu ''
 pointer 2 8 3
 sleep 0.5
-check_equal nomouse-button-three-leaves gone "$(menu_alive)"
+check_menu nomouse-button-three-leaves gone
 drop_menu
 
 # -M gives the menu the full mouse policy, and menu_prepare then leaves
@@ -202,28 +219,28 @@ open_menu -M
 keys "$(printf '\r')"
 sleep 0.8
 check_equal mouse-menu-starts-with-no-highlight 'DISPLAY_MENU_MOUSE_ROW=pending' "$(chosen)"
-check_equal enter-with-no-highlight-closes gone "$(menu_alive)"
+check_menu enter-with-no-highlight-closes gone
 drop_menu
 
 # menu_key_cb reaches `chosen` before it rewrites md->choice from the pointer
 # row, so a release runs the row the press left the highlight on.
 open_menu -M
 pointer 0 8 4
-check_equal press-does-not-choose alive "$(menu_alive)"
+check_menu press-does-not-choose alive
 check_equal press-runs-nothing 'DISPLAY_MENU_MOUSE_ROW=pending' "$(chosen)"
 pointer_release 8 3
 sleep 0.8
-check_equal release-closes-the-menu gone "$(menu_alive)"
+check_menu release-closes-the-menu gone
 check_equal release-runs-the-highlighted-row 'DISPLAY_MENU_MOUSE_ROW=bravo' "$(chosen)"
 drop_menu
 
 # Outside the box a press is not a release, so it only clears the highlight.
 open_menu -M
 pointer 0 41 21
-check_equal outside-press-leaves-the-menu-up alive "$(menu_alive)"
+check_menu outside-press-leaves-the-menu-up alive
 pointer_release 41 21
 sleep 0.8
-check_equal outside-release-closes-the-menu gone "$(menu_alive)"
+check_menu outside-release-closes-the-menu gone
 check_equal outside-release-runs-nothing 'DISPLAY_MENU_MOUSE_ROW=pending' "$(chosen)"
 drop_menu
 
@@ -231,7 +248,7 @@ drop_menu
 # but it does move the highlight Enter then runs.
 open_menu -M
 pointer 35 8 4
-check_equal motion-leaves-the-menu-up alive "$(menu_alive)"
+check_menu motion-leaves-the-menu-up alive
 check_equal motion-runs-nothing 'DISPLAY_MENU_MOUSE_ROW=pending' "$(chosen)"
 keys "$(printf '\r')"
 sleep 0.8
@@ -243,7 +260,7 @@ drop_menu
 open_menu -M
 pointer 35 8 4
 pointer 35 41 21
-check_equal outside-motion-leaves-the-menu-up alive "$(menu_alive)"
+check_menu outside-motion-leaves-the-menu-up alive
 keys "$(printf '\r')"
 sleep 0.8
 check_equal outside-motion-cleared-the-highlight 'DISPLAY_MENU_MOUSE_ROW=pending' "$(chosen)"

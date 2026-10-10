@@ -25658,7 +25658,7 @@ mod tests {
     }
 
     #[test]
-    fn session_alert_flag_formats_follow_the_resolved_window() {
+    fn session_alert_flag_formats_check_every_window() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -25695,7 +25695,7 @@ mod tests {
                 )
                 .expect("list sessions")
                 .output,
-            "0|1"
+            "1|1"
         );
         assert_eq!(
             engine
@@ -25711,7 +25711,22 @@ mod tests {
                 )
                 .expect("list windows")
                 .output,
-            "0|1|0\n1|0|1"
+            "0|1|1\n1|1|1"
+        );
+        let bell_pane = engine.state.windows[&second].active_pane;
+        engine.state.set_pane_bell(bell_pane, true);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "-t", "work:0", "#{session_bell_flag}"],
+                    ),
+                )
+                .expect("display bell flag")
+                .output,
+            "1"
         );
     }
 

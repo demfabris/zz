@@ -1,8 +1,10 @@
 corpus: none
 # format_log1 writes the pin's ordered parse and replacement trace to the
 # command's stdout ahead of the result, one line per message, each `#` then
-# `es->loop` spaces taken from a ten-space literal.
-new-session -d -s tv -n first
+# `es->loop` spaces taken from a ten-space literal. The pane runs cat so no
+# shell prompt retitles it after select-pane -T (a host bashrc that sends OSC 0,
+# or zz's shell integration, would race the title every probe reads).
+new-session -d -s tv -n first cat
 select-pane -t tv:0.0 -T macbook
 set-option -g @c red
 set-option -g @three 3

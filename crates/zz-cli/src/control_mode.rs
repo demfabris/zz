@@ -2288,6 +2288,7 @@ struct ControlWriter<W: Write> {
     block_open: bool,
     open_frame: Option<Frame>,
     deferred: VecDeque<DeferredOutput>,
+    trailing_causes: Vec<String>,
     exit_draining: bool,
     notifications_closed: bool,
     exit_requested: bool,
@@ -2305,6 +2306,7 @@ impl<W: Write> ControlWriter<W> {
             block_open: false,
             open_frame: None,
             deferred: VecDeque::new(),
+            trailing_causes: Vec::new(),
             exit_draining: false,
             notifications_closed: false,
             exit_requested: false,
@@ -2354,12 +2356,14 @@ impl<W: Write> ControlWriter<W> {
     }
 
     fn startup_config_causes(&mut self, causes: &[String]) -> io::Result<()> {
-        for cause in causes {
-            self.output.write_all(b"%config-error ")?;
-            self.output.write_all(cause.as_bytes())?;
-            self.output.write_all(b"\n")?;
+        if self.block_open {
+            self.trailing_causes.extend_from_slice(causes);
+            return Ok(());
         }
-        self.output.flush()
+        for cause in causes {
+            self.notify(format!("%config-error {cause}").as_bytes())?;
+        }
+        Ok(())
     }
 
     fn flush_deferred(&mut self) -> io::Result<()> {
@@ -2388,6 +2392,11 @@ impl<W: Write> ControlWriter<W> {
                 }
                 DeferredOutput::ControlCommandOutput(output) => self.payload(output.as_bytes())?,
             }
+        }
+        for cause in std::mem::take(&mut self.trailing_causes) {
+            self.output.write_all(b"%config-error ")?;
+            self.output.write_all(cause.as_bytes())?;
+            self.output.write_all(b"\n")?;
         }
         if let Some(reason) = exit {
             if self.exit_held {
@@ -5134,7 +5143,7 @@ mod tests {
     }
 
     #[test]
-    fn startup_config_causes_are_immediate_and_prefix_each_element_once() {
+    fn startup_config_causes_wait_for_the_open_block_and_prefix_each_element_once() {
         let mut writer = ControlWriter::new(Vec::new(), false);
         let mut state = ControlState::default();
         let event = |sequence, causes| {
@@ -5164,6 +5173,7 @@ mod tests {
             .unwrap(),
             ExitSignal::None
         );
+        writer.notify(b"%session-changed $0 s").unwrap();
         writer
             .response(
                 &frame,
@@ -5180,8 +5190,8 @@ mod tests {
         assert_eq!(
             writer.output,
             b"%config-error first\ncontinued\n%config-error second\n\
-              %begin 21 1 1\n%config-error inside\nstill inside\nbody\n\
-              %end 21 1 1\n%window-add @3\n"
+              %begin 21 1 1\nbody\n%end 21 1 1\n%window-add @3\n\
+              %session-changed $0 s\n%config-error inside\nstill inside\n"
         );
     }
 

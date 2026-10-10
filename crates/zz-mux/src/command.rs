@@ -14046,11 +14046,16 @@ impl MuxEngine {
             if options.has("-u") {
                 environment.remove(name);
             } else {
+                let hidden = if options.has("-r") {
+                    environment.get(name).is_some_and(|entry| entry.hidden)
+                } else {
+                    options.has("-h")
+                };
                 environment.insert(
                     name.clone(),
                     EnvironmentEntry {
                         value: value.clone(),
-                        hidden: options.has("-h") && !options.has("-r"),
+                        hidden,
                     },
                 );
             }

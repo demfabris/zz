@@ -23222,7 +23222,13 @@ impl Shared {
             }
         }
         for command in &result.commands {
-            let _ = self.execute(client, ClientKind::Interactive, context, command);
+            if self
+                .execute(client, ClientKind::Interactive, context, command)
+                .is_err()
+                && result.stop_on_error
+            {
+                break;
+            }
         }
         {
             let mut inner = self.inner.lock();
@@ -54265,11 +54271,77 @@ mod tests {
                 commands: Vec::new(),
                 menu: None,
                 edit: None,
+                stop_on_error: false,
             },
         );
         let inner = shared.inner.lock();
         assert!(!inner.pane_modes.contains_key(&pane));
         assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn customize_stop_on_error_results_skip_the_commands_after_a_failure() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-chain", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-new-window", "display-message kept"],
+            ),
+            CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+        ] {
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("setup");
+        }
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        let commands = vec![
+            CommandInvocation::new("set-option", ["-g", "after-new-window[4294967296]", "x"]),
+            CommandInvocation::new("set-option", ["-u", "-g", "after-new-window[0]"]),
+        ];
+        for (stop_on_error, kept) in [(true, true), (false, false)] {
+            shared.apply_customize_result(
+                client,
+                &mut context,
+                pane,
+                mode.clone(),
+                &CustomizeResult {
+                    close: false,
+                    commands: commands.clone(),
+                    menu: None,
+                    edit: None,
+                    stop_on_error,
+                },
+            );
+            let output = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("show-hooks", ["-g", "after-new-window"]),
+                )
+                .expect("show-hooks");
+            assert_eq!(
+                output.output == "after-new-window[0] display-message kept",
+                kept,
+                "{}",
+                output.output
+            );
+        }
     }
 
     #[test]

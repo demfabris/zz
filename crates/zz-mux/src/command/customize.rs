@@ -203,6 +203,7 @@ pub struct CustomizeResult {
     pub commands: Vec<CommandInvocation>,
     pub menu: Option<CustomizeMenu>,
     pub edit: Option<CustomizeEdit>,
+    pub stop_on_error: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -340,6 +341,7 @@ impl CustomizeResult {
             commands: Vec::new(),
             menu: None,
             edit: None,
+            stop_on_error: false,
         }
     }
 }
@@ -1658,6 +1660,7 @@ impl MuxEngine {
                 commands: Vec::new(),
                 menu: None,
                 edit: None,
+                stop_on_error: false,
             };
         };
         if let Some((prompt, _)) = &mut mode.prompt {
@@ -1721,6 +1724,7 @@ impl MuxEngine {
                 commands: Vec::new(),
                 menu: None,
                 edit: None,
+                stop_on_error: false,
             };
         };
         let columns = self.customize_screen_columns(pane);
@@ -1789,6 +1793,7 @@ impl MuxEngine {
                 commands: Vec::new(),
                 menu: None,
                 edit: None,
+                stop_on_error: false,
             };
         };
         if line >= size {
@@ -1821,6 +1826,7 @@ impl MuxEngine {
                 name,
             }),
             edit: None,
+            stop_on_error: false,
         }
     }
 
@@ -1840,6 +1846,7 @@ impl MuxEngine {
                 commands: Vec::new(),
                 menu: None,
                 edit: None,
+                stop_on_error: false,
             };
         }
         let mut key = key;
@@ -1861,6 +1868,7 @@ impl MuxEngine {
                     commands: Vec::new(),
                     menu: None,
                     edit: None,
+                    stop_on_error: false,
                 };
             }
             ModeKey::Char('e') => {
@@ -2207,6 +2215,7 @@ impl MuxEngine {
             commands,
             menu: None,
             edit: None,
+            stop_on_error: false,
         }
     }
 
@@ -2677,7 +2686,7 @@ impl MuxEngine {
                 else {
                     return CustomizeResult::stay();
                 };
-                self.customize_commands(
+                let mut result = self.customize_commands(
                     pane,
                     mode,
                     vec![
@@ -2686,7 +2695,9 @@ impl MuxEngine {
                     ],
                     tag,
                     expand,
-                )
+                );
+                result.stop_on_error = true;
+                result
             }
             PromptPurpose::Environment {
                 name,
@@ -3645,7 +3656,9 @@ mod tests {
         let mut expand = customize_expand;
         let result = engine.customize_key(pane, mode, key, &mut expand);
         for command in &result.commands {
-            let _ = engine.execute(context, command);
+            if engine.execute(context, command).is_err() && result.stop_on_error {
+                break;
+            }
         }
         engine.customize_finish(pane, mode, &mut expand);
         result.commands
@@ -3699,6 +3712,77 @@ mod tests {
         assert!(commands.is_empty(), "{commands:?}");
         let (hooks, _) = rename_hook_key("007");
         assert_eq!(hooks, "after-new-window[7] display-message kept");
+    }
+
+    #[test]
+    fn customize_array_key_rename_takes_a_literal_key_and_stops_on_error() {
+        let (hooks, commands) = rename_hook_key("a]b");
+        assert_eq!(hooks, "after-new-window[a]b] display-message kept");
+        assert_eq!(commands.len(), 2);
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-hook",
+            &["-g", "after-new-window", "display-message kept"],
+        );
+        let mut mode = CustomizeMode::default();
+        engine.customize_height(pane, &mut mode);
+        let mut expand = customize_expand;
+        let result = engine.customize_answer(
+            pane,
+            &mut mode,
+            PromptPurpose::ArrayKey {
+                name: "after-new-window".to_owned(),
+                array_key: "0".to_owned(),
+                target: TmuxOptionTarget::GlobalSession,
+            },
+            Some("1".to_owned()),
+            &mut expand,
+        );
+        assert!(result.stop_on_error);
+        assert_eq!(
+            result.commands,
+            [
+                customize_set_command(
+                    "after-new-window[1]",
+                    TmuxOptionTarget::GlobalSession,
+                    "display-message kept"
+                ),
+                customize_unset_command("after-new-window[0]", TmuxOptionTarget::GlobalSession),
+            ]
+        );
+    }
+
+    #[test]
+    fn customize_clearing_a_hidden_variable_keeps_it_hidden() {
+        let (mut engine, mut context, pane) = engine_with_session();
+        run(
+            &mut engine,
+            &mut context,
+            "set-environment",
+            &["-h", "SECRET", "one"],
+        );
+        let mut mode = CustomizeMode::default();
+        mode.expanded.insert("environment:session".to_owned());
+        select(&engine, pane, &mut mode, "Session Environment");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        type_text(&mut engine, &mut context, pane, &mut mode, "-SECRET");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        select(&engine, pane, &mut mode, "-SECRET");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        type_text(&mut engine, &mut context, pane, &mut mode, "two");
+        press(&mut engine, &mut context, pane, &mut mode, "Enter");
+        assert_eq!(
+            output(
+                &mut engine,
+                &mut context,
+                "show-environment",
+                &["-h", "SECRET"]
+            ),
+            "SECRET=two"
+        );
+        assert!(!output(&mut engine, &mut context, "show-environment", &[]).contains("SECRET"));
     }
 
     #[test]

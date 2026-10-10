@@ -3,7 +3,11 @@
 # key=value lines the moment it arrives, -F keeps the waiter until its format
 # is true over the payload, -l and -w list and wake waiters. pane-exited and pane-died carry the exit keys and
 # client-session-changed the old and new session; polled from a fixture since
-# they land asynchronously.
+# they land asynchronously. The last rows print 3.8's payload keys for
+# window-renamed (no session or pane), pane-exited and pane-title-changed (pane
+# and window only), window-linked (with window_index), session-window-changed
+# (new and old window) and window-pane-changed (new and old pane). pane-bell
+# reaches the sink with no hook set, as on 3.8.
 shim:
 stage: fixtures/hooks-events-sink.sh ~/hooks-events-sink.sh
 out: set-environment -gu HOOKS_EVENTS_SINK

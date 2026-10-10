@@ -915,7 +915,7 @@
       "id": "pin.customize-3-8",
       "track": "pin",
       "title": "3.8's rebuilt customize mode (window-customize.c)",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "float.keys",
         "pin.formats-options-2"
@@ -937,7 +937,7 @@
         "The customize-mode context formats (is_environment, environment_*, option_is_hook, option_is_monitor, option_monitor) resolve as 3.8."
       ],
       "branch": "catchup/pin.customize-3-8",
-      "sha": null,
+      "sha": "f8733aa89",
       "notes": [
         "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs).",
         "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux).",
@@ -946,7 +946,8 @@
         "2026-10-09: Codex review 1: 4 P1 (array-key rename loses the hook on a failed insert, numeric key canonicalization, monitor unset leaves the subscription, hook reset single-scope) + 2 P2; fix pass sent with a main merge.",
         "2026-10-09: Fix pass 87195a51f + main merge dc17074e3: 6 findings fixed with tests; tui-client-commands 556/556, tui-mouse 81/81, tui-caps 410/410. Review 2 running; merges after the M1/M3 suite.",
         "2026-10-09: Codex review 2: P1 rename with a literal 'a]b' key still unsets the original (send one stopping command list, quote the key), P2 -NAME keeps the hidden flag; final fix pass sent.",
-        "2026-10-09: Final pass 27c54517a: stop_on_error results, hidden flag kept on -NAME; orchestrator reverted the parser loosening for a]b keys (customize refuses them instead); short follow-up sent."
+        "2026-10-09: Final pass 27c54517a: stop_on_error results, hidden flag kept on -NAME; orchestrator reverted the parser loosening for a]b keys (customize refuses them instead); short follow-up sent.",
+        "2026-10-09: Merged after the final pass (9c04072f3); merge checks green (clippy, zz-client 225, zz-cli 127+149, zz-tui 267, zz-daemon 1590, zz-mux 722, compat check). Every pin.* item is merged: M2 reached; its full suite is the M1/M3 run on b260b7404 plus this merge's checks, with corpus rows in fix.corpus-3-8."
       ]
     },
     {
@@ -983,7 +984,7 @@
       "id": "fix.followups-3",
       "track": "fix",
       "title": "Follow-ups, third batch",
-      "status": "todo",
+      "status": "active",
       "deps": [],
       "zones": [
         "compat/tui-mouse.sh",
@@ -995,13 +996,38 @@
       "accept": [
         "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
       ],
-      "branch": null,
+      "branch": "catchup/fix.followups-3",
       "sha": null,
       "notes": [
         "(pin.customize-3-8) tui-mouse.sh --self-check times out at 'zz's context click aimed one cell further along': the border-binding sabotage before it leaves zz in copy mode and a '(jump to forward)' prompt eats the typed marker; the 6 customize sabotages after it never run. Same on the float.keys base.",
         "(pin.customize-3-8) apply_customize_result drops the error of a failed customize command; tmux shows it as a status message. Mode prompts have no shared prompt history (Up does nothing).",
         "(pin.customize-3-8) customize add-prompt errors go out as display-message -l, which fires after-display-message hooks; tmux's own error path does not.",
         "(float.keys final pass) display-panes: a float pushed past the window's left or top edge leaves tile content under it (3.8 blanks the area; needs a wire change); pane-border-status line rules for floats; display-panes -Z does not blank a float's inside before its label."
+      ]
+    },
+    {
+      "id": "fix.corpus-3-8",
+      "track": "fix",
+      "title": "Corpus rows red at the 3.8 pin in the M1/M3 full run",
+      "status": "active",
+      "deps": [],
+      "zones": [
+        "compat/scenarios",
+        "compat/attached-client.sh",
+        "crates/zz-daemon/src",
+        "crates/zz-mux/src",
+        "crates/zz-cli/src"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each scenario below is clean against tmux 3.8 under compat/run.sh --strict-geometry, or its remaining difference is registered (known differential or gap) with the 3.8 source line or ruling behind it: alerts, known/known-main-preset-two-panes, smoke/command-flag-errors, smoke/command-prompt-chain, smoke/command-prompt-editing, smoke/config-chain-parse-abort, smoke/config-discovery-launcher, smoke/copy-mode-refresh, smoke/display-menu-action-queue, smoke/display-menu-mouse, smoke/display-menu-paste, smoke/format-listing, smoke/format-trace, smoke/launcher-installed-layout, smoke/pane-tmux-path, smoke/plugin-runtime-resurrect-restore.",
+        "compat/attached-client.sh passes against tmux 3.8.",
+        "Each row's cause is named in the lane report: a probe written for the d77c9dc6 pin (update it to 3.8 and keep the old pin's answer as a comment), 3.8 drift in zz (fix), a regression from a catch-up merge (fix, naming the merge), or harness/infra."
+      ],
+      "branch": "catchup/fix.corpus-3-8",
+      "sha": null,
+      "notes": [
+        "2026-10-09: first full-corpus run at the 3.8 pin (main b260b7404, the float track merge); every row above failed its first pass and a solo retry. Log: ~/.cache/zz-catchup/logs/m3-run-sh.log on alienware. Known before the run: smoke/config-chain-parse-abort fails on the tmux side (filed under pin.hooks-events); smoke/display-menu-mouse's probe was written for the old pin and 3.8 fails its own checks (float.keys note)."
       ]
     }
   ]

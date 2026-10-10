@@ -1506,6 +1506,24 @@ customize_screen_cases() {
   customize_screen_case pane-array-escape Escape
   restore_case customize-pane-array-closed
   run_both set-option -pu -t PANE pane-colours
+
+  customize_screen_open changed
+  customize_screen_case changed-only C
+  customize_screen_case changed-window / automatic-rename Enter
+  customize_screen_case changed-all C
+  customize_screen_case hooks-search / after-new-window Enter
+  customize_screen_case hook-prompt Enter
+  customize_screen_case hook-accept 'display-message hooked' Enter
+  case_run customize-hook-values same '' -- show-hooks -g after-new-window
+  customize_screen_case hook-child Right Down
+  customize_screen_case hook-key-prompt a
+  customize_screen_case hook-key-accept C-u 4 Enter
+  case_run customize-hook-key-values same '' -- show-hooks -g after-new-window
+  customize_screen_case hook-unset u y
+  customize_screen_case section-add g Enter
+  customize_screen_case section-add-escape Escape
+  restore_case customize-changed-closed
+  run_on_both set-hook -gu after-new-window
   CASE_GRID_CELLS=0
 }
 

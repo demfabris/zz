@@ -156,7 +156,10 @@ Each rule cost a campaign real time. The source is in brackets
 
 ## Full suite: milestones only
 
-At M1, M2 and M3 (and before any release), the orchestrator runs once, on `main`, detached:
+At M1, M2 and M3 (and before any release), the orchestrator runs once, on `main`, detached, with
+`setsid nohup compat/catchup/full-suite.sh ~/.cache/zz-catchup/logs/<milestone> &`. It runs every step below in
+order and writes one line per step to `<dir>/summary.txt`, ending with `SUITE-DONE`; each step's log sits next to it.
+The harness binary must be named `zz_cli`: the launcher scenarios look for it by name.
 
 - `compat/catchup/cargo.sh test --workspace --all-features` (`timeout 9000`)
 - both CI clippy commands from AGENTS.md

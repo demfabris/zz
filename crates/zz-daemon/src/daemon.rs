@@ -21718,10 +21718,30 @@ impl Shared {
             let Ok(defaults) = inner.engine.menu_options_for_window(window) else {
                 return;
             };
-            let left = u16::try_from(x.saturating_sub(usize::from(width) / 2)).unwrap_or(u16::MAX);
-            let top = u16::try_from(y).unwrap_or(u16::MAX);
-            let left = overlay_origin_for_viewport(left, width, geometry.columns);
-            let top = overlay_origin_for_viewport(top, height, geometry.rows);
+            let Some(target) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
+                return;
+            };
+            let frame = menu_window_frame(&inner.engine, &target, geometry.columns, geometry.rows);
+            let (xoff, yoff) = inner.engine.pane_origin(pane).unwrap_or((0, 0));
+            let place = |origin: usize, offset: i32, extent: u16, available: u16| {
+                let origin = i64::try_from(origin)
+                    .unwrap_or(i64::MAX)
+                    .saturating_add(i64::from(offset))
+                    .max(0);
+                let origin = u16::try_from(origin).unwrap_or(u16::MAX);
+                if extent >= available {
+                    0
+                } else {
+                    overlay_origin_for_viewport(origin, extent, available)
+                }
+            };
+            let left = place(
+                x.saturating_sub(usize::from(width) / 2),
+                xoff,
+                width,
+                frame.columns,
+            );
+            let top = place(y, yoff, height, frame.rows).saturating_add(frame.top);
             MenuState {
                 left,
                 top,
@@ -23202,7 +23222,13 @@ impl Shared {
             }
         }
         for command in &result.commands {
-            let _ = self.execute(client, ClientKind::Interactive, context, command);
+            if self
+                .execute(client, ClientKind::Interactive, context, command)
+                .is_err()
+                && result.stop_on_error
+            {
+                break;
+            }
         }
         {
             let mut inner = self.inner.lock();
@@ -44075,12 +44101,13 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::tree_selection_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
+                            let (prompt_type, prompt_flags) = mode.prompt_kind();
                             (presentation.prompt_style, presentation.prompt_cursor) =
                                 chooser_presentation::mode_prompt_look(
                                     inner,
                                     chooser_presentation::pane_session(inner, *pane),
-                                    "command",
-                                    &["NOFORMAT"],
+                                    prompt_type,
+                                    prompt_flags,
                                     &mode.prompt_input(),
                                     mode.prompt_command_mode(),
                                 );
@@ -54244,11 +54271,77 @@ mod tests {
                 commands: Vec::new(),
                 menu: None,
                 edit: None,
+                stop_on_error: false,
             },
         );
         let inner = shared.inner.lock();
         assert!(!inner.pane_modes.contains_key(&pane));
         assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn customize_stop_on_error_results_skip_the_commands_after_a_failure() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-chain", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-new-window", "display-message kept"],
+            ),
+            CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+        ] {
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("setup");
+        }
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        let commands = vec![
+            CommandInvocation::new("set-option", ["-g", "after-new-window[4294967296]", "x"]),
+            CommandInvocation::new("set-option", ["-u", "-g", "after-new-window[0]"]),
+        ];
+        for (stop_on_error, kept) in [(true, true), (false, false)] {
+            shared.apply_customize_result(
+                client,
+                &mut context,
+                pane,
+                mode.clone(),
+                &CustomizeResult {
+                    close: false,
+                    commands: commands.clone(),
+                    menu: None,
+                    edit: None,
+                    stop_on_error,
+                },
+            );
+            let output = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("show-hooks", ["-g", "after-new-window"]),
+                )
+                .expect("show-hooks");
+            assert_eq!(
+                output.output == "after-new-window[0] display-message kept",
+                kept,
+                "{}",
+                output.output
+            );
+        }
     }
 
     #[test]

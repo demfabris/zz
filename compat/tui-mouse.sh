@@ -462,9 +462,6 @@ case_owner() {
   status-clicks/*)
     printf 'gap:menus.client-owned'
     ;;
-  customize-mouse-*)
-    printf 'gap:pin.formats-options'
-    ;;
   esac
 }
 note_record() {
@@ -789,6 +786,7 @@ case_click_mouse_target() {
     mark_both mousetgt
     left="$(pane_field tmux "=$INNER_SESSION:0.1" 1)"
     top="$(pane_field tmux "=$INNER_SESSION:0.1" 2)"
+    outlast_the_pin_click_timeout
     click_both 0 "$((left + 3))" "$((top + 3))"
     wait_for "the pin resolved $spelling to the clicked pane" \
       pin_pane_option_set "=$INNER_SESSION:0.1" @mousetgt
@@ -2106,8 +2104,8 @@ RIGHT_CLICK_MODE=same
 RIGHT_CLICK_REASON=""
 MODE_POINTER_MODE=same
 MODE_POINTER_REASON=""
-CUSTOMIZE_POINTER_MODE=record
-CUSTOMIZE_POINTER_REASON='PIN 3.8, gap:pin.formats-options: 3.8 rebuilt the customize tree (window-customize.c: hooks and environment sections, and Edit and Changed Only in its pointer menu), so every screen of the tree and its menu differs while zz draws the d77c9dc6 tree'
+CUSTOMIZE_POINTER_MODE=same
+CUSTOMIZE_POINTER_REASON=""
 
 run_cases() {
   start_both

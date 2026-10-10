@@ -617,7 +617,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(accepted_native_literals.len(), 39);
+    assert_eq!(accepted_native_literals.len(), 53);
     assert!(accepted_native_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&accepted_native_literals));
 
@@ -630,7 +630,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
             );
         }
     }
-    assert_eq!(missing_literals.len(), 14);
+    assert_eq!(missing_literals.len(), 0);
     assert!(missing_literals.is_subset(&upstream_literals));
     assert!(mux_literals.is_disjoint(&missing_literals));
     assert!(accepted_native_literals.is_disjoint(&missing_literals));
@@ -811,24 +811,7 @@ fn scoped_format_contexts_and_modifiers_match_the_pinned_oracle() {
         Some(("native", "accepted")),
         "wrong manifest decision or status for {owner}"
     );
-    let missing_literal_items = BTreeMap::from([
-        (
-            ("window-customize.c", "window_customize_build"),
-            "semantic:mode-format-contexts-3-8",
-        ),
-        (
-            ("window-customize.c", "window_customize_build_environment"),
-            "semantic:mode-format-contexts-3-8",
-        ),
-        (
-            ("window-customize.c", "window_customize_build_keys"),
-            "semantic:mode-format-contexts-3-8",
-        ),
-        (
-            ("window-customize.c", "window_customize_build_option"),
-            "semantic:mode-format-contexts-3-8",
-        ),
-    ]);
+    let missing_literal_items = BTreeMap::<(&str, &str), &str>::new();
     assert_eq!(
         missing_literal_items
             .keys()

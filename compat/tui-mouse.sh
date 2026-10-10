@@ -786,6 +786,7 @@ case_click_mouse_target() {
     mark_both mousetgt
     left="$(pane_field tmux "=$INNER_SESSION:0.1" 1)"
     top="$(pane_field tmux "=$INNER_SESSION:0.1" 2)"
+    outlast_the_pin_click_timeout
     click_both 0 "$((left + 3))" "$((top + 3))"
     wait_for "the pin resolved $spelling to the clicked pane" \
       pin_pane_option_set "=$INNER_SESSION:0.1" @mousetgt

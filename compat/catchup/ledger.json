@@ -804,7 +804,8 @@
         "2026-10-09: Fix pass bb73f52f8: review 1's 4 P1 + 2 P2 fixed (editor write-back identity, top-status mouse rows, editor paste, submenu by mouse release via display-menu from a mouse binding, paste-buffer-changed, failed-edit proofs); tui-floating 29/29, tui-mouse 66/66. Integration step running: merge float.clients fd87e8eba + main, prove the merged tip; then the whole-track review.",
         "2026-10-09: Integration done at 97d98bb59: float.clients fd87e8eba + main (twice) merged; counts recomputed; display-panes code taught about floats; tui-floating 34/34, tui-mouse 67/67, tui-overlays 49, tui-client-commands 406, tui-caps 370, floating scenarios clean; 9 crates clippy. Whole-track Codex review running.",
         "2026-10-09: Whole-track Codex review (float.keys-2.md): 7 P1 (swap-pane -Z over-zoom target, desktop geometry while a float is zoomed, display-panes float z order, desktop float indicators, TUI pane-mode crop at right/bottom, modified clicks outside a modal, select-layout -o z order); final fix pass sent with a main merge (zz-gpui rename). Merges to main after it.",
-        "2026-10-09: PAUSED 2026-10-09 (usage limit): final fix pass for the whole-track review's 7 P1 (float.keys-2.md) plus a main merge (zz-gpui rename) was in progress in slot h; the lane was stopped mid-pass. Resume: relaunch on catchup/float.keys with 'continue from the branch and uncommitted changes in zz-cu-h', finish the 7 P1, rerun the integration proof list and zz-cli, then merge the float track to main and run the M3 full suite. Then pin.customize-3-8."
+        "2026-10-09: PAUSED 2026-10-09 (usage limit): final fix pass for the whole-track review's 7 P1 (float.keys-2.md) plus a main merge (zz-gpui rename) was in progress in slot h; the lane was stopped mid-pass. Resume: relaunch on catchup/float.keys with 'continue from the branch and uncommitted changes in zz-cu-h', finish the 7 P1, rerun the integration proof list and zz-cli, then merge the float track to main and run the M3 full suite. Then pin.customize-3-8.",
+        "2026-10-09: RESUMED 2026-10-09 evening: no unfinished merge; main integrated to 9c6ed3dc7 (417ab9603, recount 2a66f5a1f, pushed); final pass relaunched in slot h continuing from the uncommitted review fixes. Slot b removed (float.clients is merged into float.keys)."
       ]
     },
     {
@@ -911,7 +912,7 @@
       "id": "pin.customize-3-8",
       "track": "pin",
       "title": "3.8's rebuilt customize mode (window-customize.c)",
-      "status": "todo",
+      "status": "active",
       "deps": [
         "float.keys",
         "pin.formats-options-2"
@@ -932,11 +933,12 @@
         "semantic:customize-mode-3-8 (3.8's rebuilt customize tree, 132 recorded tui-client-commands cases) and semantic:terminal-features-3-8 (the DECRQM ?2026 Sync query and the show-messages Sync line) close, flipping their recorded TUI fixture cases to asserted.",
         "The customize-mode context formats (is_environment, environment_*, option_is_hook, option_is_monitor, option_monitor) resolve as 3.8."
       ],
-      "branch": null,
+      "branch": "catchup/pin.customize-3-8",
       "sha": null,
       "notes": [
         "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs).",
-        "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux)."
+        "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux).",
+        "2026-10-09: Branched from catchup/float.keys 2a66f5a1f (it carries the customize e editor); merges to main after the float track, then merges main."
       ]
     },
     {

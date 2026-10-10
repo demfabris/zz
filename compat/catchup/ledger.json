@@ -984,7 +984,7 @@
       "id": "fix.followups-3",
       "track": "fix",
       "title": "Follow-ups, third batch",
-      "status": "active",
+      "status": "merged",
       "deps": [],
       "zones": [
         "compat/tui-mouse.sh",
@@ -997,14 +997,15 @@
         "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
       ],
       "branch": "catchup/fix.followups-3",
-      "sha": null,
+      "sha": "5f0678e3b",
       "notes": [
         "(pin.customize-3-8) tui-mouse.sh --self-check times out at 'zz's context click aimed one cell further along': the border-binding sabotage before it leaves zz in copy mode and a '(jump to forward)' prompt eats the typed marker; the 6 customize sabotages after it never run. Same on the float.keys base.",
         "(pin.customize-3-8) apply_customize_result drops the error of a failed customize command; tmux shows it as a status message. Mode prompts have no shared prompt history (Up does nothing).",
         "(pin.customize-3-8) customize add-prompt errors go out as display-message -l, which fires after-display-message hooks; tmux's own error path does not.",
         "(float.keys final pass) display-panes: a float pushed past the window's left or top edge leaves tile content under it (3.8 blanks the area; needs a wire change); pane-border-status line rules for floats; display-panes -Z does not blank a float's inside before its label.",
         "2026-10-10: Lane done at 1663d7a8f: tui-mouse self-check race fixed (all sabotages caught, 81/81), customize errors as timed status messages, prompt history in customize and choosers, display-panes float clears (wire append under 108) and edge-cell status lines; tui-floating 44/44, tui-choosers 107/107. Review 1 running.",
-        "2026-10-10: Codex review 1: P1 history Down panics after another client shrinks the history, P2 chooser search answers not recorded in shared history; final pass sent."
+        "2026-10-10: Codex review 1: P1 history Down panics after another client shrinks the history, P2 chooser search answers not recorded in shared history; final pass sent.",
+        "2026-10-10: Merged after the final pass (8dc1f83b1); merge checks green (clippy 5 crates, zz-protocol 296, zz-client 225, zz-cli 127+149, zz-tui 267, zz-daemon 1594, zz-mux 731, compat check)."
       ]
     },
     {

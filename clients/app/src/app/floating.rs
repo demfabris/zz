@@ -2,7 +2,7 @@ use std::{cell::Cell, rc::Rc};
 
 use zz_client::{
     MenuBox, MenuKeyResult, MenuPointerKind,
-    floating::{FloatCells, float_pixels},
+    floating::{FloatCells, float_pixels, float_title},
     resolve_menu_mouse,
 };
 use zz_gpui::{
@@ -237,18 +237,16 @@ impl AppShell {
         window: &Window,
         cx: &mut Context<Self>,
     ) {
-        let bordered = state.border_lines != PopupBorderLines::None;
-        let hairline = px(if bordered { 1.0 } else { 0.0 });
-        let inset = u16::from(bordered);
+        let inset = u16::from(state.border_lines != PopupBorderLines::None);
         let column = menu_grid_cell(
-            position.x - content_bounds.origin.x + hairline,
+            position.x - content_bounds.origin.x,
             state.cell_width_px,
             window.scale_factor(),
             state.left.saturating_add(inset),
             u16::MAX,
         );
         let row = menu_grid_cell(
-            position.y - content_bounds.origin.y + hairline,
+            position.y - content_bounds.origin.y,
             state.cell_height_px,
             window.scale_factor(),
             state.top.saturating_add(inset),
@@ -343,7 +341,7 @@ impl AppShell {
                 .panes
                 .get(&float.pane)
                 .filter(|_| float.border_status.is_on())
-                .map(|pane| float_title(&pane.border_status_text))
+                .map(|pane| float_title(&pane.border_status_text).left)
                 .unwrap_or_default();
             let border_color = if active.active_pane == float.pane {
                 cx.theme().accent
@@ -382,16 +380,6 @@ impl AppShell {
                 .into_any_element()
         })
     }
-}
-
-fn float_title(border_status_text: &str) -> String {
-    zz_protocol::parse_styled_segments(border_status_text)
-        .into_iter()
-        .filter(|segment| segment.style.align != Some(zz_protocol::TmuxAlign::Right))
-        .map(|segment| segment.text)
-        .collect::<String>()
-        .trim_end()
-        .to_owned()
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -498,7 +486,7 @@ mod tests {
     use zz_gpui::{Bounds, point, px, size};
     use zz_protocol::{FloatingPaneSnapshot, PaneBorderLines, PaneBorderStatus, PaneId};
 
-    use super::{FloatPlacement, float_placement, float_title, native_panes_shown, pane_frame};
+    use super::{FloatPlacement, float_placement, native_panes_shown, pane_frame};
     use crate::preferences::Preferences;
 
     fn float(pane: u64, xoff: i32, yoff: i32, sx: u16, sy: u16) -> FloatingPaneSnapshot {
@@ -648,22 +636,5 @@ mod tests {
             native_panes_shown([left, right], &[behind], Some(PaneId(3))),
             [].into()
         );
-    }
-
-    #[test]
-    fn a_float_title_drops_tmux_markup_and_the_right_hand_controls() {
-        assert_eq!(
-            float_title(concat!(
-                "#[reverse]0#[default] \"zsh\"#[align=right]",
-                "#[range=control|7][t]#[norange]",
-                "#[range=control|8][z]#[norange]",
-                "#[range=control|9][x]#[norange]",
-            )),
-            "0 \"zsh\""
-        );
-        assert_eq!(float_title("1#[default] \"vim\""), "1 \"vim\"");
-        assert_eq!(float_title("#[fg=red]modal"), "modal");
-        assert_eq!(float_title("100##[x]"), "100#[x]");
-        assert_eq!(float_title(""), "");
     }
 }

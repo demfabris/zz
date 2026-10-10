@@ -4,7 +4,7 @@
 //! ordinary commands.
 
 use zz_protocol::{
-    CommandInvocation, FloatingPaneSnapshot, PaneBorderLines, PaneBorderStatus, PaneId,
+    CommandInvocation, FloatingPaneSnapshot, PaneBorderLines, PaneBorderStatus, PaneId, TmuxAlign,
 };
 
 /// A float's content box in window cells, borders outside it.
@@ -88,6 +88,27 @@ pub fn float_pixels(
         frame: frame.clipped(canvas.0, canvas.1)?,
         content: content.clipped(canvas.0, canvas.1),
     })
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FloatTitle {
+    pub left: String,
+    pub right: String,
+}
+
+#[must_use]
+pub fn float_title(border_status_text: &str) -> FloatTitle {
+    let mut title = FloatTitle::default();
+    for segment in zz_protocol::parse_styled_segments(border_status_text) {
+        if segment.style.align == Some(TmuxAlign::Right) {
+            title.right.push_str(&segment.text);
+        } else {
+            title.left.push_str(&segment.text);
+        }
+    }
+    title.left.truncate(title.left.trim_end().len());
+    title.right = title.right.trim().to_owned();
+    title
 }
 
 /// What a pointer drag on a float grabbed: its title bar, or any mix of its
@@ -496,5 +517,26 @@ mod tests {
         let target = float_drag_preview(FLOAT, grip("l"), (50, 0));
         assert_eq!(target.sx, 1);
         assert_eq!(target.xoff, FLOAT.xoff + i32::from(FLOAT.sx) - 1);
+    }
+
+    #[test]
+    fn a_float_title_drops_tmux_markup_and_sets_the_right_aligned_controls_apart() {
+        let title = |left: &str, right: &str| FloatTitle {
+            left: left.to_owned(),
+            right: right.to_owned(),
+        };
+        assert_eq!(
+            float_title(concat!(
+                "#[reverse]0#[default] \"zsh\"#[align=right]",
+                "#[range=control|7][t]#[norange]",
+                "#[range=control|8][z]#[norange]",
+                "#[range=control|9][x]#[norange]",
+            )),
+            title("0 \"zsh\"", "[t][z][x]")
+        );
+        assert_eq!(float_title("1#[default] \"vim\""), title("1 \"vim\"", ""));
+        assert_eq!(float_title("#[fg=red]modal"), title("modal", ""));
+        assert_eq!(float_title("100##[x]"), title("100#[x]", ""));
+        assert_eq!(float_title(""), title("", ""));
     }
 }

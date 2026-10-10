@@ -22,8 +22,6 @@ pub(crate) use zz_ui::command::floating::{
     RELEASE_BUTTONS, WHEEL_BUTTONS, menu_press_buttons as press_buttons,
 };
 
-const SURFACE_BORDER: Pixels = px(1.0);
-
 pub(crate) struct MenuView {
     focus_handle: FocusHandle,
     mux: Entity<MuxClient>,
@@ -116,22 +114,16 @@ impl MenuView {
     /// edge.
     fn cell_at(&self, position: Point<Pixels>, scale: f32) -> (u16, u16) {
         let bounds = self.content_bounds.get();
-        let bordered = self.state.border_lines != PopupBorderLines::None;
-        let hairline = if bordered {
-            SURFACE_BORDER
-        } else {
-            Pixels::ZERO
-        };
-        let inset = u16::from(bordered);
+        let inset = u16::from(self.state.border_lines != PopupBorderLines::None);
         let column = grid_cell(
-            position.x - bounds.origin.x + hairline,
+            position.x - bounds.origin.x,
             self.state.cell_width_px,
             scale,
             self.state.left.saturating_add(inset),
             u16::MAX,
         );
         let row = grid_cell(
-            position.y - bounds.origin.y + hairline,
+            position.y - bounds.origin.y,
             self.state.cell_height_px,
             scale,
             self.state.top.saturating_add(inset),

@@ -10,8 +10,8 @@ fn preferences_reject_invalid_colors_modes_and_numeric_values() {
         colors: [Some("invalid".into()), Some("#112233".into()), None],
         zoom: f32::NAN,
         contrast: f32::INFINITY,
-        radius: -20.0,
-        shadow_strength: 10.0,
+        radius: Some(-20.0),
+        shadow_strength: Some(10.0),
         terminal_font_family: Some(" ".into()),
         terminal_font_scale: f32::NAN,
         ..Preferences::default()
@@ -30,7 +30,7 @@ fn preferences_reject_invalid_colors_modes_and_numeric_values() {
             preferences.radius,
             preferences.shadow_strength
         ),
-        (1.0, 1.0, 0.0, 1.0)
+        (1.0, 1.0, Some(0.0), Some(1.0))
     );
     assert_eq!(preferences.terminal_font_family, None);
     assert_eq!(preferences.terminal_font_scale, 1.0);

@@ -8,7 +8,9 @@ use std::{
     time::SystemTime,
 };
 use zz_client::StatusBarSettings;
-use zz_client::chrome_palette::{AppIconSetting, ChromeColor, ChromePresetId, ThemeModeSetting};
+use zz_client::chrome_palette::{
+    AppIconSetting, ChromeColor, ChromePresetId, InterfaceStyle, ThemeModeSetting,
+};
 use zz_client::url_input::SearchProvider;
 pub use zz_daemon_client::{HostEntry, RejectedHost, configured_fleet_hosts, validate_fleet_host};
 use zz_protocol::{ConfigOverrideEntry, MAX_GUI_TEXT_BYTES, MuxOptionKey};
@@ -46,9 +48,8 @@ pub const MAX_PANE_INACTIVE_OPACITY: f32 = 1.0;
 pub const DEFAULT_PANE_CORNER_RADIUS: f32 = DEFAULT_WINDOW_CORNER_RADIUS;
 pub const DEFAULT_PANE_MARGIN: f32 = 6.0;
 pub const DEFAULT_PANE_BORDER_WIDTH: f32 = 0.5;
-// The zz-ui theme's own default radius, restated here because the theme now reads it from here.
-pub const DEFAULT_WIDGET_CORNER_RADIUS: f32 = 6.0;
-pub const DEFAULT_SHADOW_STRENGTH: f32 = 1.0;
+pub const DEFAULT_WIDGET_CORNER_RADIUS: f32 = InterfaceStyle::DEFAULT.widget_corner_radius();
+pub const DEFAULT_SHADOW_STRENGTH: f32 = InterfaceStyle::DEFAULT.shadow_strength();
 pub const DEFAULT_CHROME_CONTRAST: f32 = 1.0;
 pub const DEFAULT_USE_SYSTEM_TITLEBAR: bool = false;
 pub const DEFAULT_WINDOW_BACKGROUND_BLUR: bool = false;
@@ -144,6 +145,7 @@ pub enum ConfigKey {
     BrowserSearchProvider,
     BrowserEgress,
     ThemeMode,
+    InterfaceStyle,
     UiFontFamily,
     AppIcon,
     ChromePreset { dark: bool },
@@ -193,6 +195,7 @@ impl ConfigKey {
             Self::BrowserSearchProvider => "browser-search-provider",
             Self::BrowserEgress => "browser-egress",
             Self::ThemeMode => "theme-mode",
+            Self::InterfaceStyle => "interface-style",
             Self::UiFontFamily => "ui-font-family",
             Self::AppIcon => "app-icon",
             Self::ChromePreset { dark: false } => "chrome-preset-light",
@@ -243,6 +246,7 @@ impl ConfigKey {
             "browser-search-provider" => Some(Self::BrowserSearchProvider),
             "browser-egress" => Some(Self::BrowserEgress),
             "theme-mode" => Some(Self::ThemeMode),
+            "interface-style" => Some(Self::InterfaceStyle),
             "ui-font-family" => Some(Self::UiFontFamily),
             "app-icon" => Some(Self::AppIcon),
             "chrome-preset-light" => Some(Self::ChromePreset { dark: false }),
@@ -296,6 +300,7 @@ impl ConfigKey {
             | Self::BrowserSearchProvider
             | Self::BrowserEgress
             | Self::ThemeMode
+            | Self::InterfaceStyle
             | Self::UiFontFamily
             | Self::AppIcon
             | Self::ChromePreset { .. }
@@ -452,6 +457,7 @@ pub struct AppConfig {
     pub editor_vim_mode: ConfigValue<bool>,
     pub browser_egress: ConfigValue<bool>,
     pub theme_mode: ConfigValue<ThemeModeSetting>,
+    pub interface_style: ConfigValue<InterfaceStyle>,
     pub app_icon: ConfigValue<AppIconSetting>,
     pub chrome_preset_light: ConfigValue<Option<ChromePresetId>>,
     pub chrome_preset_dark: ConfigValue<Option<ChromePresetId>>,
@@ -503,6 +509,7 @@ impl Default for AppConfig {
             editor_vim_mode: ConfigValue::from_default(DEFAULT_EDITOR_VIM_MODE),
             browser_egress: ConfigValue::from_default(DEFAULT_BROWSER_EGRESS),
             theme_mode: ConfigValue::from_default(ThemeModeSetting::System),
+            interface_style: ConfigValue::from_default(InterfaceStyle::DEFAULT),
             app_icon: ConfigValue::from_default(AppIconSetting::Automatic),
             chrome_preset_light: ConfigValue::from_default(None),
             chrome_preset_dark: ConfigValue::from_default(None),
@@ -517,6 +524,16 @@ impl AppConfig {
             self.chrome_preset_dark
         } else {
             self.chrome_preset_light
+        }
+    }
+
+    fn apply_interface_style(&mut self) {
+        let style = self.interface_style.value;
+        if self.widget_corner_radius.provenance == ConfigProvenance::Default {
+            self.widget_corner_radius.value = style.widget_corner_radius();
+        }
+        if self.shadow_strength.provenance == ConfigProvenance::Default {
+            self.shadow_strength.value = style.shadow_strength();
         }
     }
 
@@ -562,6 +579,7 @@ impl AppConfig {
             | ConfigKey::BrowserRemoteDebuggingPort
             | ConfigKey::BrowserSearchProvider
             | ConfigKey::ThemeMode
+            | ConfigKey::InterfaceStyle
             | ConfigKey::UiFontFamily
             | ConfigKey::AppIcon
             | ConfigKey::ChromePreset { .. }
@@ -1062,6 +1080,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
         if matches!(
             key,
             ConfigKey::ThemeMode
+                | ConfigKey::InterfaceStyle
                 | ConfigKey::AppIcon
                 | ConfigKey::ChromePreset { .. }
                 | ConfigKey::Chrome(_)
@@ -1110,6 +1129,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
             | ConfigKey::StatusHost
             | ConfigKey::StatusUpdate
             | ConfigKey::ThemeMode
+            | ConfigKey::InterfaceStyle
             | ConfigKey::UiFontFamily
             | ConfigKey::AppIcon
             | ConfigKey::ChromePreset { .. }
@@ -1131,6 +1151,7 @@ pub fn parse_config(source: &str, system_font_family: &str) -> ParsedConfig {
         }
     }
 
+    parsed.config.apply_interface_style();
     parsed
 }
 
@@ -1217,6 +1238,16 @@ pub fn apply_theme_key(
                     return None;
                 }
                 None => "expected system, light or dark".to_owned(),
+            }
+        }
+        ConfigKey::InterfaceStyle => {
+            config.interface_style.provenance = ConfigProvenance::Override;
+            match InterfaceStyle::parse(value) {
+                Some(style) => {
+                    config.interface_style.value = style;
+                    return None;
+                }
+                None => "expected flat, modern or full".to_owned(),
             }
         }
         ConfigKey::AppIcon => {
@@ -1730,6 +1761,43 @@ pub fn write_chrome_preset_at(
     atomic_write(path, edited.as_bytes())
 }
 
+/// Selects `style` and drops the explicit settings it decides, so the style
+/// shows as designed.
+pub fn set_interface_style(style: InterfaceStyle) -> io::Result<()> {
+    let path = config_path_for_write()?;
+    write_interface_style_at(&path, style)
+}
+
+pub fn write_interface_style_at(path: &Path, style: InterfaceStyle) -> io::Result<()> {
+    let source = match read_config_source(path) {
+        Ok(source) => source,
+        Err(error) if error.kind() == ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(error),
+    };
+    let decided = [
+        ConfigKey::WidgetCornerRadius.as_str(),
+        ConfigKey::ShadowStrength.as_str(),
+    ];
+    let mut without_decided = String::with_capacity(source.len());
+    for line in source.split_inclusive('\n') {
+        if !config_key_for_line(line).is_some_and(|key| decided.contains(&key)) {
+            without_decided.push_str(line);
+        }
+    }
+    let edited = edit_config_source(
+        &without_decided,
+        ConfigKey::InterfaceStyle.as_str(),
+        Some(style.as_str()),
+    );
+    if edited.len() > MAX_CONFIG_BYTES {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("configuration edit exceeds the {MAX_CONFIG_BYTES}-byte limit"),
+        ));
+    }
+    atomic_write(path, edited.as_bytes())
+}
+
 pub fn set_config_key_name(key: &str, value: &str) -> io::Result<()> {
     if value.bytes().any(|byte| matches!(byte, b'\r' | b'\n')) {
         return Err(io::Error::new(
@@ -2188,6 +2256,40 @@ mod tests {
             parsed.diagnostics[0].message,
             "invalid `chrome-preset-dark`: unknown preset; pick one in Settings > Appearance",
         );
+    }
+
+    #[test]
+    fn interface_style_writer_drops_the_settings_the_style_decides() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join(CONFIG_FILE_NAME);
+        fs::write(
+            &path,
+            "widget-corner-radius = 25\nchrome-contrast = 1.2\nshadow-strength = 0.4\n",
+        )
+        .expect("write config");
+        let parsed = parse_config(&fs::read_to_string(&path).unwrap(), "monospace");
+        assert_eq!(
+            parsed.config.interface_style,
+            ConfigValue::from_default(InterfaceStyle::Modern)
+        );
+
+        write_interface_style_at(&path, InterfaceStyle::Flat).expect("write style");
+        let source = fs::read_to_string(&path).expect("read style");
+        let parsed = parse_config(&source, "monospace");
+        assert!(parsed.diagnostics.is_empty(), "{:?}", parsed.diagnostics);
+        assert_eq!(parsed.config.interface_style.value, InterfaceStyle::Flat);
+        assert_eq!(
+            parsed.config.widget_corner_radius,
+            ConfigValue::from_default(0.0)
+        );
+        assert_eq!(
+            parsed.config.shadow_strength,
+            ConfigValue::from_default(0.0)
+        );
+        assert_eq!(parsed.config.chrome_contrast.value, 1.2);
+
+        let parsed = parse_config("interface-style = round", "monospace");
+        assert_eq!(parsed.diagnostics.len(), 1);
     }
 
     #[test]

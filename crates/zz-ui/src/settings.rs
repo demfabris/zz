@@ -963,6 +963,39 @@ fn settings_group_header(
         })
 }
 
+/// A group heading that shows or hides the rows after it, as a standalone
+/// row in [`settings_virtual_column`].
+pub fn settings_list_disclosure_header(
+    id: &'static str,
+    title: &'static str,
+    description: Option<&'static str>,
+    expanded: bool,
+    cx: &App,
+) -> zz_gpui::Stateful<zz_gpui::Div> {
+    let muted = cx.theme().foreground.muted();
+    div()
+        .id(id)
+        .pt(px(10.0))
+        .flex()
+        .items_start()
+        .gap(px(2.0))
+        .cursor_pointer()
+        .child(
+            Icon::new(if expanded {
+                crate::IconName::ChevronDown
+            } else {
+                crate::IconName::ChevronRight
+            })
+            .size(px(14.0))
+            .text_color(muted),
+        )
+        .child(settings_group_header(
+            title.into(),
+            description.map(Into::into),
+            cx,
+        ))
+}
+
 /// Group heading used as a standalone row in [`settings_virtual_column`].
 pub fn settings_list_group_header(
     title: &'static str,

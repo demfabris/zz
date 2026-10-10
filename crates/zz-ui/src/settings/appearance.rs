@@ -46,6 +46,10 @@ pub enum AppearancePageItem<C> {
         description: Option<&'static str>,
     },
     ThemeMode,
+    InterfaceStyle,
+    Advanced {
+        expanded: bool,
+    },
     UiFontFamily,
     UiZoom,
     AppIcon,
@@ -64,14 +68,20 @@ pub enum AppearancePageItem<C> {
 
 impl<C: Copy> AppearancePageItem<C> {
     pub const fn is_entry(self) -> bool {
-        !matches!(self, Self::Description | Self::Group { .. })
+        !matches!(
+            self,
+            Self::Description | Self::Group { .. } | Self::Advanced { .. }
+        )
     }
 }
 
+/// The Interface page: theme, style and palettes up front, every other knob
+/// behind the Advanced heading, listed only while `advanced` is expanded.
 pub fn appearance_page_items<C>(
     colors: impl IntoIterator<Item = C>,
     macos: bool,
     has_window_blur: bool,
+    advanced: bool,
 ) -> Vec<AppearancePageItem<C>> {
     let mut items = vec![
         AppearancePageItem::Description,
@@ -80,30 +90,27 @@ pub fn appearance_page_items<C>(
             description: None,
         },
         AppearancePageItem::ThemeMode,
-        AppearancePageItem::UiFontFamily,
-        AppearancePageItem::UiZoom,
-    ];
-    if macos {
-        items.push(AppearancePageItem::AppIcon);
-    }
-    items.extend([
+        AppearancePageItem::InterfaceStyle,
         AppearancePageItem::Group {
             title: "Chroma Colors",
             description: Some(
-                "Pick a palette for each appearance, or set the base colors yourself. Edges \
-                 follow the background and foreground; status colors follow the palette.",
+                "Pick a palette for each appearance, or set the base colors under Advanced.",
             ),
         },
         AppearancePageItem::Preset(ThemeMode::Light),
         AppearancePageItem::Preset(ThemeMode::Dark),
-    ]);
+        AppearancePageItem::Advanced { expanded: advanced },
+    ];
+    if !advanced {
+        return items;
+    }
+    items.extend([AppearancePageItem::UiFontFamily, AppearancePageItem::UiZoom]);
+    if macos {
+        items.push(AppearancePageItem::AppIcon);
+    }
     items.extend(colors.into_iter().map(AppearancePageItem::ChromeColor));
-    items.push(AppearancePageItem::ChromeContrast);
     items.extend([
-        AppearancePageItem::Group {
-            title: "Tweaks",
-            description: None,
-        },
+        AppearancePageItem::ChromeContrast,
         AppearancePageItem::Animations,
         AppearancePageItem::WidgetCornerRadius,
         AppearancePageItem::ShadowStrength,
@@ -211,13 +218,13 @@ fn tile(
         .child(
             div()
                 .p(px(TILE_HALO_GAP))
-                .rounded(cx.theme().radius + px(TILE_FRAME + TILE_HALO))
+                .rounded(cx.theme().outer_radius(px(TILE_FRAME + TILE_HALO)))
                 .border_1()
                 .border_color(ring(focused))
                 .child(
                     div()
                         .p(px(TILE_FRAME_PADDING))
-                        .rounded(cx.theme().radius + px(TILE_FRAME))
+                        .rounded(cx.theme().outer_radius(px(TILE_FRAME)))
                         .border_1()
                         .border_color(ring(selected))
                         .child(preview),
@@ -421,6 +428,75 @@ pub fn theme_preview(
                 )
         }
     }
+}
+
+/// A small menu drawn the way `style` draws one, for the style tiles.
+pub fn interface_style_preview(
+    style: crate::interface_style::InterfaceStyle,
+    cx: &App,
+) -> zz_gpui::Div {
+    use crate::interface_style::InterfaceStyle;
+    let theme = cx.theme();
+    let (surface_radius, row_radius, inset) = match style {
+        InterfaceStyle::Flat => (0.0, 0.0, 0.0),
+        InterfaceStyle::Modern => (8.0, 4.0, 3.0),
+        InterfaceStyle::Full => (10.0, 5.0, 3.0),
+    };
+    let flat = style == InterfaceStyle::Flat;
+    let text = theme.foreground.muted();
+    let row = |width: f32, selected: bool| {
+        div()
+            .h(px(10.0))
+            .flex()
+            .items_center()
+            .px(px(5.0))
+            .rounded(px(row_radius))
+            .when(selected, |row| row.bg(theme.selection_background()))
+            .child(div().w(px(width)).h(px(3.0)).rounded_full().bg(text))
+    };
+    let surface = theme.background.raised(2).opaque();
+    let menu = div()
+        .relative()
+        .w(px(52.0))
+        .flex()
+        .flex_col()
+        .py(px(3.0))
+        .px(px(inset))
+        .when(!flat, |menu| menu.gap(px(1.0)))
+        .rounded(px(surface_radius))
+        .bg(if style == InterfaceStyle::Full {
+            surface.opacity(0.6)
+        } else {
+            surface
+        })
+        .when(!flat, |menu| {
+            menu.border(px(0.5))
+                .border_color(theme.foreground.opacity(0.15))
+                .shadow_md()
+        })
+        .children([row(30.0, false), row(22.0, true), row(26.0, false)]);
+    div()
+        .relative()
+        .w(px(THEME_PREVIEW_WIDTH))
+        .h(px(THEME_PREVIEW_HEIGHT))
+        .rounded(theme.radius)
+        .overflow_hidden()
+        .bg(theme.background)
+        .flex()
+        .items_center()
+        .justify_center()
+        .when(style == InterfaceStyle::Full, |preview| {
+            preview.child(
+                div()
+                    .absolute()
+                    .top(px(8.0))
+                    .left(px(46.0))
+                    .size(px(22.0))
+                    .rounded_full()
+                    .bg(theme.accent),
+            )
+        })
+        .child(menu)
 }
 
 /// The window mockup the theme and palette tiles share, painted from `colors`.

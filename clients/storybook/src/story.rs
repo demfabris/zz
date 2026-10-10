@@ -12,6 +12,7 @@ pub struct Story {
     pub sections: &'static [Section],
 }
 
+#[derive(Clone, Copy)]
 pub struct Section {
     pub id: &'static str,
     pub name: &'static str,

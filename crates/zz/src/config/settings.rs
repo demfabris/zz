@@ -34,7 +34,7 @@ use crate::{
     app_icon::AppIconSetting,
     config::{
         self, AppConfig, BrowserConfig, ConfigKey, ConfigProvenance, ConfigValue,
-        remove_config_key, set_chrome_preset, set_config_key,
+        remove_config_key, set_chrome_preset, set_config_key, set_interface_style,
     },
     diagnostics,
     mux::{
@@ -51,12 +51,15 @@ use zz_browser::SearchProvider;
 use zz_protocol::ConfigOverrideEntry;
 use zz_terminal::{TerminalColorScheme, discover_ghostty_config};
 use zz_ui::feedback::import_configuration_file_alert;
-use zz_ui::settings::appearance::{PickerStrip, palette_preview, picker_tile, ui_font_select};
+use zz_ui::interface_style::InterfaceStyle;
+use zz_ui::settings::appearance::{
+    PickerStrip, interface_style_preview, palette_preview, picker_tile, ui_font_select,
+};
 use zz_ui::settings::{
     SettingEntry, SettingsScrollColumn, SettingsSection, SettingsSelectItem, SettingsStack,
-    StackPosition, settings_control_fill, settings_list_group_header, settings_page_content,
-    settings_page_description, settings_provenance_badge, settings_reset_button,
-    settings_scroll_column,
+    StackPosition, settings_control_fill, settings_list_disclosure_header,
+    settings_list_group_header, settings_page_content, settings_page_description,
+    settings_provenance_badge, settings_reset_button, settings_scroll_column,
 };
 
 zz_gpui::actions!(zz, [OpenSettings]);
@@ -96,11 +99,12 @@ struct HostsSectionState {
 
 type AppearancePageItem = zz_ui::settings::appearance::AppearancePageItem<ChromeColor>;
 
-fn appearance_page_items(has_window_blur: bool) -> Vec<AppearancePageItem> {
+fn appearance_page_items(has_window_blur: bool, advanced: bool) -> Vec<AppearancePageItem> {
     zz_ui::settings::appearance::appearance_page_items(
         ChromeColor::ALL,
         cfg!(target_os = "macos"),
         has_window_blur,
+        advanced,
     )
 }
 
@@ -136,6 +140,7 @@ pub(crate) struct SettingsView {
     terminal_config_editor: Option<ConfigFileEditor>,
     terminal_preview: Option<Entity<terminal_preview::TerminalPreview>>,
     hosts_state: Option<HostsSectionState>,
+    appearance_advanced: bool,
     section: SettingsSection,
     focus_handle: FocusHandle,
     _subscriptions: Vec<Subscription>,
@@ -323,6 +328,7 @@ impl SettingsView {
             terminal_config_editor: None,
             terminal_preview: None,
             hosts_state: None,
+            appearance_advanced: false,
             section: SettingsSection::Appearance,
             focus_handle: cx.focus_handle(),
             _subscriptions: subscriptions,
@@ -838,7 +844,10 @@ impl SettingsView {
     }
 
     fn appearance_section(&self, resolved: &AppConfig, cx: &Context<Self>) -> AnyElement {
-        let items = appearance_page_items(crate::profile::profile(cx).has_window_blur);
+        let items = appearance_page_items(
+            crate::profile::profile(cx).has_window_blur,
+            self.appearance_advanced,
+        );
         let mode = cx.theme().mode;
         let inherited = inherited_chrome_colors(resolved.chrome_preset(mode.is_dark()).value, mode);
         let view = cx.entity();
@@ -867,14 +876,33 @@ impl SettingsView {
             AppearancePageItem::Group { title, description } => {
                 return settings_list_group_header(title, description, cx).into_any_element();
             }
+            AppearancePageItem::Advanced { expanded } => {
+                return settings_list_disclosure_header(
+                    "settings-appearance-advanced",
+                    "Advanced",
+                    Some(
+                        "Fonts, zoom, base colors, and the corner and shadow sizes the style sets.",
+                    ),
+                    expanded,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.appearance_advanced = !this.appearance_advanced;
+                    cx.notify();
+                }))
+                .into_any_element();
+            }
             _ => {}
         }
 
         let entry = match item {
-            AppearancePageItem::Description | AppearancePageItem::Group { .. } => {
+            AppearancePageItem::Description
+            | AppearancePageItem::Group { .. }
+            | AppearancePageItem::Advanced { .. } => {
                 unreachable!("returned above")
             }
             AppearancePageItem::ThemeMode => Self::theme_mode_setting(resolved, cx),
+            AppearancePageItem::InterfaceStyle => Self::interface_style_setting(resolved, cx),
             AppearancePageItem::UiFontFamily => self.ui_font_setting(cx),
             AppearancePageItem::UiZoom => self.ui_zoom_setting(cx),
             AppearancePageItem::AppIcon => Self::app_icon_setting(resolved, cx),
@@ -1000,6 +1028,36 @@ impl SettingsView {
                     })
                 }),
             ))
+    }
+
+    fn interface_style_setting(resolved: &AppConfig, cx: &Context<Self>) -> SettingEntry {
+        let setting = resolved.interface_style;
+        SettingEntry::new(
+            "Style",
+            "Corners, outlines, shadows, and how menus and dialogs float.",
+        )
+        .title_actions(key_annotations(
+            ConfigKey::InterfaceStyle,
+            setting.provenance,
+        ))
+        .control(div().flex().flex_none().gap(px(10.0)).children(
+            InterfaceStyle::ALL.into_iter().map(|style| {
+                picker_tile(
+                    format!("settings-interface-style-{}", style.as_str()).into(),
+                    style.title(),
+                    interface_style_preview(style, cx),
+                    style == setting.value,
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    if let Err(error) = set_interface_style(style) {
+                        report_write_error("set", ConfigKey::InterfaceStyle.as_str(), &error, cx);
+                        return;
+                    }
+                    refresh_settings_preview(ConfigKey::InterfaceStyle, cx);
+                })
+            }),
+        ))
     }
 
     fn app_icon_setting(resolved: &AppConfig, cx: &Context<Self>) -> SettingEntry {
@@ -2350,6 +2408,7 @@ fn refresh_settings_preview(key: ConfigKey, cx: &mut App) {
         && !matches!(
             key,
             ConfigKey::WidgetCornerRadius
+                | ConfigKey::InterfaceStyle
                 | ConfigKey::PaletteWindowLayout
                 | ConfigKey::PaletteHostPrefix
                 | ConfigKey::PaletteShowKeys
@@ -2493,6 +2552,7 @@ fn numeric_config_value(config: &AppConfig, key: ConfigKey) -> f32 {
         | ConfigKey::BrowserSearchProvider
         | ConfigKey::BrowserEgress
         | ConfigKey::ThemeMode
+        | ConfigKey::InterfaceStyle
         | ConfigKey::UiFontFamily
         | ConfigKey::AppIcon
         | ConfigKey::ChromePreset { .. }
@@ -2686,7 +2746,7 @@ mod tests {
             numeric_input_text(key, numeric_config_value(&AppConfig::default(), key)),
             "100"
         );
-        let items = appearance_page_items(true);
+        let items = appearance_page_items(true, true);
         let last_color = items
             .iter()
             .rposition(|item| matches!(item, AppearancePageItem::ChromeColor(_)))
@@ -2733,25 +2793,33 @@ mod tests {
     use zz_daemon_client::{DaemonError, Endpoint};
 
     #[test]
-    fn animations_are_the_first_interface_tweak() {
-        let items = appearance_page_items(true);
-        let tweaks = items
-            .iter()
-            .position(|item| {
-                matches!(
-                    item,
-                    AppearancePageItem::Group {
-                        title: "Tweaks",
-                        ..
-                    }
-                )
-            })
-            .expect("Tweaks group");
-
+    fn advanced_lists_the_other_knobs_only_while_expanded() {
+        let collapsed = appearance_page_items(true, false);
         assert!(matches!(
-            items.get(tweaks + 1),
-            Some(AppearancePageItem::Animations)
+            collapsed.last(),
+            Some(AppearancePageItem::Advanced { expanded: false })
         ));
+        assert!(
+            !collapsed
+                .iter()
+                .any(|item| matches!(item, AppearancePageItem::WidgetCornerRadius))
+        );
+
+        let expanded = appearance_page_items(true, true);
+        let advanced = expanded
+            .iter()
+            .position(|item| matches!(item, AppearancePageItem::Advanced { expanded: true }))
+            .expect("Advanced heading");
+        assert!(
+            expanded[..advanced]
+                .iter()
+                .any(|item| matches!(item, AppearancePageItem::InterfaceStyle))
+        );
+        assert!(
+            expanded[advanced..]
+                .iter()
+                .any(|item| matches!(item, AppearancePageItem::WidgetCornerRadius))
+        );
     }
 
     #[zz_gpui::test]

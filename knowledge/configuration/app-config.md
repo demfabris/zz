@@ -118,8 +118,9 @@ The client-local schema includes these scalar settings and chrome colors.
 | `pane-margin` | `6` | `0..=32` | Inset around each pane, on every platform; applies only with `pane-gaps` |
 | `pane-corner-radius` | `13.5` | `0..=32` | All four corners of every pane, on every platform; applies only with `pane-gaps` |
 | `pane-border-width` | `0.5` | `0..=8` | Border width while pane gaps are enabled; `0` disables the border |
-| `widget-corner-radius` | `6` | `0..=25` | Widget corners in pixels through 24; values above 24 enable Full mode for buttons, fields, navigation chips, and picker rows |
-| `shadow-strength` | `1` | `0..=1` | Multiplier for shadows around controls and gapped panes; `0` turns them off |
+| `interface-style` | `modern` | `flat`, `modern`, or `full` | The look of the chrome, set together: `flat` is square, unoutlined and shadowless with rows that touch; `modern` is 24px corners over an opaque surface with a lit glass edge; `full` is pill controls over frosted glass. It decides the two keys below unless they are set; picking a style in Settings removes them |
+| `widget-corner-radius` | from the style (`0`, `24`, `25`) | `0..=25` | Widget corners in pixels through 24; values above 24 enable Full mode for buttons, fields, navigation chips, and picker rows. At 0, menu and tree rows become full-width bands with no gaps |
+| `shadow-strength` | from the style (`0`, `1`, `1`) | `0..=1` | Multiplier for shadows around controls and gapped panes; `0` turns them and the control rings off |
 | `editor-font-size` | `13` | `8..=32` | Buffer text size in editor panes, in pixels |
 | `which-key-delay` | `400` | `0..=2000` | Milliseconds after the prefix, or inside a `switch-client -T` table, before the which-key sheet lists the next keys; `0` turns the sheet off. Read when the timer starts |
 | `editor-line-numbers` | `true` | `true` or `false` | Whether editor panes draw the line-number rail |
@@ -148,7 +149,7 @@ normal watched-config refresh. The clock never shows seconds. `AppShell` aligns 
 the next minute boundary, then requests one redraw per minute while the bar and clock are visible;
 `time-date` renders `%H:%M · %b %d`.
 
-`widget-corner-radius`, `chrome-contrast`, `shadow-strength`, `pane-background-opacity`, and the theme keys land on the **zz-ui theme** rather than being read
+`interface-style`, `widget-corner-radius`, `chrome-contrast`, `shadow-strength`, `pane-background-opacity`, and the theme keys land on the **zz-ui theme** rather than being read
 per-frame by a renderer: `zz::theme::apply_zz_overrides` pushes them onto the `Theme` global, and
 every widget already reads from there, so no component is plumbed individually. Because the preset
 and overrides are reapplied on every theme rebuild, they survive a light/dark switch, the same

@@ -32,7 +32,7 @@ pub const COMMAND_PALETTE_ROW_HEIGHT: f32 = 28.0;
 /// The palette surface's radius: the theme's, opened by
 /// [`COMMAND_PALETTE_INSET`] to stay concentric with the children's corners.
 pub fn command_palette_radius(cx: &App) -> Pixels {
-    cx.theme().radius + px(COMMAND_PALETTE_INSET)
+    cx.theme().outer_radius(px(COMMAND_PALETTE_INSET))
 }
 
 #[derive(Clone, Copy)]
@@ -175,7 +175,9 @@ impl RenderOnce for CommandPaletteSurface {
             }))
             .children(self.rows.map(|rows| {
                 div()
-                    .px(px(COMMAND_PALETTE_INSET))
+                    .when(cx.theme().inset_rows(), |this| {
+                        this.px(px(COMMAND_PALETTE_INSET))
+                    })
                     .pt(px(2.0))
                     .pb(px(COMMAND_PALETTE_INSET))
                     .child(rows)

@@ -147,7 +147,7 @@ impl RenderOnce for ChooserModal {
             .max_h((window.viewport_size().height - px(44.0)).max(px(0.0)))
             .overflow_hidden()
             .popover_style(cx)
-            .rounded(cx.theme().radius + px(8.0))
+            .rounded(cx.theme().outer_radius(px(8.0)))
             .on_mouse_down(zz_gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()

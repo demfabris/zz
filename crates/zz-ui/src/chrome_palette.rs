@@ -1,6 +1,7 @@
 use crate::{ThemeColor, ThemeMode};
 pub use zz_client::chrome_palette::{
-    CHROME_PRESETS, ChromeColor, ChromePreset, ChromePresetId, ThemeModeSetting, chrome_presets,
+    CHROME_PRESETS, ChromeColor, ChromePreset, ChromePresetId, InterfaceStyle, ThemeModeSetting,
+    chrome_presets,
 };
 use zz_gpui::Hsla;
 

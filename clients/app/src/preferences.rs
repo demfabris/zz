@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use zz_ui::{
     ThemeMode,
-    chrome_palette::{ChromeColor, ChromePresetId, ThemeModeSetting},
+    chrome_palette::{ChromeColor, ChromePresetId, InterfaceStyle, ThemeModeSetting},
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -13,12 +13,14 @@ pub struct Preferences {
     pub status_badges: bool,
     pub status_agents: bool,
     pub animations: bool,
-    pub shadow_strength: f32,
+    /// Overrides the style's shadow strength.
+    pub shadow_strength: Option<f32>,
     pub gaps: bool,
     pub agent_enabled: bool,
     pub dark: bool,
     #[serde(default)]
     pub mode: Option<String>,
+    pub style: Option<String>,
     pub preset_light: Option<String>,
     pub preset_dark: Option<String>,
     pub colors: [Option<String>; ChromeColor::ALL.len()],
@@ -26,7 +28,8 @@ pub struct Preferences {
     pub terminal_font_family: Option<String>,
     pub terminal_font_scale: f32,
     pub zoom: f32,
-    pub radius: f32,
+    /// Overrides the style's widget corner radius.
+    pub radius: Option<f32>,
     pub contrast: f32,
     pub pane_background_opacity: f32,
     pub pane_inactive_opacity: f32,
@@ -51,11 +54,12 @@ impl Default for Preferences {
             status_badges: true,
             status_agents: true,
             animations: true,
-            shadow_strength: 1.0,
+            shadow_strength: None,
             gaps: false,
             agent_enabled: true,
             dark: true,
             mode: Some("system".into()),
+            style: None,
             preset_light: None,
             preset_dark: None,
             colors: Default::default(),
@@ -63,7 +67,7 @@ impl Default for Preferences {
             terminal_font_family: None,
             terminal_font_scale: 1.0,
             zoom: 1.0,
-            radius: 6.0,
+            radius: None,
             contrast: 1.0,
             pane_background_opacity: 0.5,
             pane_inactive_opacity: 0.7,
@@ -90,10 +94,18 @@ impl Preferences {
             640.0,
             zz_ui::navigation::WORKSPACE_SIDEBAR_DEFAULT_WIDTH,
         );
-        self.shadow_strength = bounded(self.shadow_strength, 0.0, 1.0, 1.0);
+        self.style = self
+            .style
+            .filter(|style| InterfaceStyle::parse(style).is_some());
+        let style = self.interface_style();
+        self.shadow_strength = self
+            .shadow_strength
+            .map(|strength| bounded(strength, 0.0, 1.0, style.shadow_strength()));
         self.zoom = bounded(self.zoom, 0.5, 3.0, 1.0);
         self.terminal_font_scale = bounded(self.terminal_font_scale, 0.5, 3.0, 1.0);
-        self.radius = bounded(self.radius, 0.0, 25.0, 6.0);
+        self.radius = self
+            .radius
+            .map(|radius| bounded(radius, 0.0, 25.0, style.widget_corner_radius()));
         self.contrast = bounded(self.contrast, 0.5, 2.0, 1.0);
         for (value, min, max, fallback) in [
             (&mut self.pane_background_opacity, 0., 1., 0.5),
@@ -169,6 +181,34 @@ impl Preferences {
     }
 
     #[must_use]
+    pub fn interface_style(&self) -> InterfaceStyle {
+        self.style
+            .as_deref()
+            .and_then(InterfaceStyle::parse)
+            .unwrap_or_default()
+    }
+
+    /// Selects `style` and drops the radius and shadow overrides, so the
+    /// style shows as designed.
+    pub fn set_interface_style(&mut self, style: InterfaceStyle) {
+        self.style = Some(style.as_str().into());
+        self.radius = None;
+        self.shadow_strength = None;
+    }
+
+    #[must_use]
+    pub fn widget_corner_radius(&self) -> f32 {
+        self.radius
+            .unwrap_or_else(|| self.interface_style().widget_corner_radius())
+    }
+
+    #[must_use]
+    pub fn shadow(&self) -> f32 {
+        self.shadow_strength
+            .unwrap_or_else(|| self.interface_style().shadow_strength())
+    }
+
+    #[must_use]
     pub fn theme_mode(&self) -> ThemeModeSetting {
         self.mode.as_deref().map_or(
             if self.dark {
@@ -185,6 +225,12 @@ impl Preferences {
         let mut preferences: Self = serde_json::from_value(source.clone())?;
         if source.get("mode").is_none() && source.get("dark").is_none() {
             preferences.mode = Some("system".into());
+        }
+        if source.get("style").is_none() {
+            preferences.radius = preferences.radius.filter(|radius| *radius != 6.0);
+            preferences.shadow_strength = preferences
+                .shadow_strength
+                .filter(|strength| *strength != 1.0);
         }
         Ok(preferences.sanitized())
     }
@@ -267,7 +313,7 @@ fn bounded(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::Preferences;
-    use zz_ui::chrome_palette::ThemeModeSetting;
+    use zz_ui::chrome_palette::{InterfaceStyle, ThemeModeSetting};
 
     #[test]
     fn preferences_persist_and_missing_fields_keep_defaults() {
@@ -344,7 +390,7 @@ mod tests {
         let defaults = serde_json::from_str::<Preferences>(r#"{"sidebar":false}"#).unwrap();
         assert!(!defaults.sidebar);
         assert!(defaults.animations);
-        assert_eq!(defaults.shadow_strength, 1.0);
+        assert_eq!(defaults.shadow(), 1.0);
         assert_eq!(
             defaults.sidebar_width,
             zz_ui::navigation::WORKSPACE_SIDEBAR_DEFAULT_WIDTH
@@ -357,7 +403,7 @@ mod tests {
             status_badges: false,
             status_agents: false,
             animations: false,
-            shadow_strength: 0.35,
+            shadow_strength: Some(0.35),
             sidebar_width: 320.0,
             ..defaults
         };
@@ -370,7 +416,7 @@ mod tests {
             changed.status_bar_settings()
         );
         assert!(!restored.animations);
-        assert_eq!(restored.shadow_strength, 0.35);
+        assert_eq!(restored.shadow(), 0.35);
         assert_eq!(restored.sidebar_width, 320.0);
     }
 
@@ -392,20 +438,20 @@ mod tests {
         }
         let invalid = Preferences {
             sidebar_width: f32::NAN,
-            shadow_strength: f32::INFINITY,
+            shadow_strength: Some(f32::INFINITY),
             ..Preferences::default()
         }
         .sanitized();
         assert_eq!(invalid.sidebar_width, Preferences::default().sidebar_width);
-        assert_eq!(invalid.shadow_strength, 1.0);
+        assert_eq!(invalid.shadow(), 1.0);
         for (value, expected) in [(-0.1, 0.0), (1.5, 1.0), (0.4, 0.4)] {
             assert_eq!(
                 Preferences {
-                    shadow_strength: value,
+                    shadow_strength: Some(value),
                     ..Preferences::default()
                 }
                 .sanitized()
-                .shadow_strength,
+                .shadow(),
                 expected
             );
         }
@@ -435,14 +481,32 @@ mod tests {
     #[test]
     fn full_widget_radius_survives_saved_preferences() {
         let preferences = Preferences {
-            radius: 25.0,
+            radius: Some(25.0),
             ..Preferences::default()
         };
         let saved = serde_json::to_string(&preferences).unwrap();
         let loaded = serde_json::from_str::<Preferences>(&saved)
             .unwrap()
             .sanitized();
-        assert_eq!(loaded.radius, 25.0);
+        assert_eq!(loaded.widget_corner_radius(), 25.0);
+    }
+
+    #[test]
+    fn the_style_decides_radius_and_shadow_until_they_are_set() {
+        let older = Preferences::decode(r#"{"radius":6,"shadow_strength":1}"#).unwrap();
+        assert_eq!(older.interface_style(), InterfaceStyle::Modern);
+        assert_eq!((older.radius, older.shadow_strength), (None, None));
+        assert_eq!(older.widget_corner_radius(), 24.0);
+
+        let mut tuned = Preferences::decode(r#"{"radius":12}"#).unwrap();
+        assert_eq!(tuned.widget_corner_radius(), 12.0);
+        let saved = serde_json::to_string(&tuned).unwrap();
+        assert_eq!(Preferences::decode(&saved).unwrap().radius, Some(12.0));
+
+        tuned.set_interface_style(InterfaceStyle::Flat);
+        let flat = Preferences::decode(&serde_json::to_string(&tuned).unwrap()).unwrap();
+        assert_eq!(flat.interface_style(), InterfaceStyle::Flat);
+        assert_eq!((flat.widget_corner_radius(), flat.shadow()), (0.0, 0.0));
     }
 
     #[test]
@@ -451,7 +515,7 @@ mod tests {
             .unwrap()
             .sanitized();
         assert!(preferences.gaps);
-        assert_eq!(preferences.radius, 8.0);
+        assert_eq!(preferences.radius, Some(8.0));
         assert_eq!(preferences.pane_margin, 6.0);
         assert_eq!(preferences.pane_radius, 13.5);
         assert_eq!(preferences.pane_background_opacity, 0.5);

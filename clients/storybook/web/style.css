@@ -183,6 +183,35 @@ form fieldset[hidden] {
     display: none;
 }
 
+form h3 {
+    margin: 10px 0 -4px;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--zz-muted);
+}
+
+.export {
+    display: grid;
+    gap: 8px;
+}
+
+.export textarea {
+    width: 100%;
+    font: 11px/1.4 "Lilex", ui-monospace, monospace;
+    color: inherit;
+    background: var(--zz-raised);
+    border: 1px solid var(--zz-border);
+    border-radius: var(--zz-radius);
+    padding: 6px 8px;
+    resize: vertical;
+}
+
+.export textarea[hidden] {
+    display: none;
+}
+
 form label.check {
     display: flex;
     align-items: center;

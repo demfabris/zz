@@ -9,8 +9,8 @@ use zz_ui::{
     UiZoom,
     button::Button,
     chrome_palette::{
-        ChromeColor, ChromePresetId, ThemeModeSetting, chrome_presets, inherited_chrome_colors,
-        resolved_chrome_colors,
+        ChromeColor, ChromePresetId, InterfaceStyle, ThemeModeSetting, chrome_presets,
+        inherited_chrome_colors, resolved_chrome_colors,
     },
     color_picker::{ColorPicker, ColorPickerEvent, ColorPickerState},
     input::{InputEvent, InputState, NumberInput},
@@ -19,9 +19,10 @@ use zz_ui::{
         SettingEntry, SettingsSection, SettingsSelectItem, SettingsStack, StackPosition,
         appearance::{
             AppearancePageItem, PickerStrip, appearance_page, appearance_page_items,
-            palette_preview, picker_tile, theme_preview, ui_font_select,
+            interface_style_preview, palette_preview, picker_tile, theme_preview, ui_font_select,
         },
-        settings_control_fill, settings_reset_button, settings_scroll_column,
+        settings_control_fill, settings_list_disclosure_header, settings_reset_button,
+        settings_scroll_column,
     },
     switch::Switch,
 };
@@ -155,9 +156,11 @@ impl Preferences {
                 .clone()
                 .map(|color| color.and_then(|value| zz_ui::parse_hex(&value).ok())),
         );
-        Theme::global_mut(cx).radius = px(self.radius);
+        zz_ui::interface_style::look(self.interface_style()).apply(Theme::global_mut(cx));
+        Theme::global_mut(cx).radius = px(self.widget_corner_radius());
         Theme::global_mut(cx).set_contrast(contrast);
-        Theme::global_mut(cx).shadow_strength = self.shadow_strength;
+        Theme::global_mut(cx).shadow = self.shadow() > 0.0;
+        Theme::global_mut(cx).shadow_strength = self.shadow();
         Theme::global_mut(cx).pane_background_opacity = self.pane_background_opacity;
         Theme::global_mut(cx).pane_glow_strength = self.pane_glow_strength;
         let available_fonts = cx.text_system().all_font_names();
@@ -221,6 +224,8 @@ pub(super) struct Controls {
     terminal_scale: Entity<InputState>,
     palette_layout: Entity<SelectState<Vec<SettingsSelectItem>>>,
     host_prefix: Entity<SelectState<Vec<SettingsSelectItem>>>,
+    /// Whether the Interface page lists the knobs under Advanced.
+    advanced: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -241,7 +246,7 @@ impl Controls {
         let radius = cx.new(|cx| {
             InputState::new(window, cx)
                 .input_mode(TextInputMode::Decimal)
-                .default_value(format!("{:.0}", preferences.radius))
+                .default_value(format!("{:.0}", preferences.widget_corner_radius()))
                 .step(1.0)
                 .min(0.0)
                 .max(25.0)
@@ -257,7 +262,7 @@ impl Controls {
         let shadow_strength = cx.new(|cx| {
             InputState::new(window, cx)
                 .input_mode(TextInputMode::Decimal)
-                .default_value(number_text(preferences.shadow_strength * 100.0))
+                .default_value(number_text(preferences.shadow() * 100.0))
                 .step(5.0)
                 .min(0.0)
                 .max(100.0)
@@ -290,11 +295,11 @@ impl Controls {
                     let (min, max, previous) = match key {
                         "zoom" => (50.0, 300.0, this.preferences.zoom * 100.0),
                         "contrast" => (50.0, 200.0, this.preferences.contrast * 100.0),
-                        "shadow-strength" => (0.0, 100.0, this.preferences.shadow_strength * 100.0),
+                        "shadow-strength" => (0.0, 100.0, this.preferences.shadow() * 100.0),
                         "terminal-scale" => {
                             (50.0, 300.0, this.preferences.terminal_font_scale * 100.0)
                         }
-                        _ => (0.0, 25.0, this.preferences.radius),
+                        _ => (0.0, 25.0, this.preferences.widget_corner_radius()),
                     };
                     let parsed = input
                         .read(cx)
@@ -311,9 +316,14 @@ impl Controls {
                     match key {
                         "zoom" => this.preferences.zoom = value / 100.0,
                         "contrast" => this.preferences.contrast = value / 100.0,
-                        "shadow-strength" => this.preferences.shadow_strength = value / 100.0,
+                        "shadow-strength" if value / 100.0 != this.preferences.shadow() => {
+                            this.preferences.shadow_strength = Some(value / 100.0);
+                        }
                         "terminal-scale" => this.preferences.terminal_font_scale = value / 100.0,
-                        _ => this.preferences.radius = value,
+                        "radius" if value != this.preferences.widget_corner_radius() => {
+                            this.preferences.radius = Some(value);
+                        }
+                        _ => {}
                     }
                     if commit {
                         input.update(cx, |input, cx| {
@@ -495,8 +505,20 @@ impl Controls {
             terminal_scale,
             palette_layout,
             host_prefix,
+            advanced: false,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Shows the radius and shadow the preferences resolve to, after a style
+    /// change or a reset.
+    fn sync_style_inputs(&self, preferences: &Preferences, window: &mut Window, cx: &mut App) {
+        let radius = format!("{:.0}", preferences.widget_corner_radius());
+        self.radius
+            .update(cx, |input, cx| input.set_value(radius, window, cx));
+        let shadow = number_text(preferences.shadow() * 100.0);
+        self.shadow_strength
+            .update(cx, |input, cx| input.set_value(shadow, window, cx));
     }
 }
 
@@ -684,29 +706,36 @@ impl AppShell {
         let phone = phone();
         match section {
             SettingsSection::Appearance => {
-                let items = appearance_page_items(ChromeColor::ALL, false, false)
-                    .into_iter()
-                    .filter(|item| {
-                        matches!(
-                            item,
-                            AppearancePageItem::Description
-                                | AppearancePageItem::Group { .. }
-                                | AppearancePageItem::ThemeMode
-                                | AppearancePageItem::UiFontFamily
-                                | AppearancePageItem::UiZoom
-                                | AppearancePageItem::Preset(_)
-                                | AppearancePageItem::ChromeColor(_)
-                                | AppearancePageItem::ChromeContrast
-                                | AppearancePageItem::Animations
-                                | AppearancePageItem::WidgetCornerRadius
-                                | AppearancePageItem::ShadowStrength
-                        )
-                    })
-                    .filter(|item| {
-                        shown(Setting::UiZoom, phone) || !matches!(item, AppearancePageItem::UiZoom)
-                    })
-                    .filter(|item| !narrow || !matches!(item, AppearancePageItem::Description))
-                    .collect::<Vec<_>>();
+                let items = appearance_page_items(
+                    ChromeColor::ALL,
+                    false,
+                    false,
+                    self.settings_controls.advanced,
+                )
+                .into_iter()
+                .filter(|item| {
+                    matches!(
+                        item,
+                        AppearancePageItem::Description
+                            | AppearancePageItem::Group { .. }
+                            | AppearancePageItem::Advanced { .. }
+                            | AppearancePageItem::ThemeMode
+                            | AppearancePageItem::InterfaceStyle
+                            | AppearancePageItem::UiFontFamily
+                            | AppearancePageItem::UiZoom
+                            | AppearancePageItem::Preset(_)
+                            | AppearancePageItem::ChromeColor(_)
+                            | AppearancePageItem::ChromeContrast
+                            | AppearancePageItem::Animations
+                            | AppearancePageItem::WidgetCornerRadius
+                            | AppearancePageItem::ShadowStrength
+                    )
+                })
+                .filter(|item| {
+                    shown(Setting::UiZoom, phone) || !matches!(item, AppearancePageItem::UiZoom)
+                })
+                .filter(|item| !narrow || !matches!(item, AppearancePageItem::Description))
+                .collect::<Vec<_>>();
                 let focus = items
                     .iter()
                     .map(|item| self.appearance_focus(*item, cx))
@@ -1164,8 +1193,69 @@ impl AppShell {
                         this.preferences.apply(&this.connection, window, cx);
                     })),
             ),
+            AppearancePageItem::InterfaceStyle => {
+                let style = self.preferences.interface_style();
+                let tiles = div().flex().flex_none().flex_wrap().gap(px(8.0)).children(
+                    InterfaceStyle::ALL.map(|choice| {
+                        picker_tile(
+                            format!("settings-style-{}", choice.as_str()).into(),
+                            choice.title(),
+                            interface_style_preview(choice, cx),
+                            choice == style,
+                            cx,
+                        )
+                        .on_click(cx.listener(
+                            move |this, _, window, cx| {
+                                this.preferences.set_interface_style(choice);
+                                this.settings_controls.sync_style_inputs(
+                                    &this.preferences,
+                                    window,
+                                    cx,
+                                );
+                                this.preferences.save();
+                                this.preferences.apply(&this.connection, window, cx);
+                            },
+                        ))
+                    }),
+                );
+                with_control(
+                    SettingEntry::new(
+                        "Style",
+                        "Corners, outlines, shadows, and how menus and dialogs float.",
+                    )
+                    .title_actions(reset_button(
+                        "settings-style-reset",
+                        style != InterfaceStyle::DEFAULT,
+                        |this, window, cx| {
+                            this.preferences
+                                .set_interface_style(InterfaceStyle::DEFAULT);
+                            this.settings_controls
+                                .sync_style_inputs(&this.preferences, window, cx);
+                        },
+                        cx,
+                    )),
+                    tiles,
+                    narrow,
+                )
+            }
+            AppearancePageItem::Advanced { expanded } => {
+                return settings_list_disclosure_header(
+                    "settings-appearance-advanced",
+                    "Advanced",
+                    Some(
+                        "Fonts, zoom, base colors, and the corner and shadow sizes the style sets.",
+                    ),
+                    expanded,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.settings_controls.advanced = !this.settings_controls.advanced;
+                    cx.notify();
+                }))
+                .into_any_element();
+            }
             AppearancePageItem::WidgetCornerRadius => SettingEntry::new(
-                if self.preferences.radius > 24.0 {
+                if self.preferences.widget_corner_radius() > 24.0 {
                     "Widget corner radius (Full)"
                 } else {
                     "Widget corner radius"
@@ -1174,13 +1264,11 @@ impl AppShell {
             )
             .title_actions(reset_button(
                 "settings-radius-reset",
-                self.preferences.radius != Preferences::default().radius,
+                self.preferences.radius.is_some(),
                 |this, window, cx| {
-                    this.preferences.radius = Preferences::default().radius;
-                    let value = format!("{:.0}", this.preferences.radius);
+                    this.preferences.radius = None;
                     this.settings_controls
-                        .radius
-                        .update(cx, |input, cx| input.set_value(value, window, cx));
+                        .sync_style_inputs(&this.preferences, window, cx);
                 },
                 cx,
             ))
@@ -1192,14 +1280,13 @@ impl AppShell {
             .title_actions(
                 settings_reset_button(
                     "settings-shadow-reset",
-                    "Reset shadow strength to 100%",
-                    self.preferences.shadow_strength != 1.0,
+                    "Reset to the style's shadow strength",
+                    self.preferences.shadow_strength.is_some(),
                 )
                 .on_click(cx.listener(|this, _, window, cx| {
-                    this.preferences.shadow_strength = 1.0;
+                    this.preferences.shadow_strength = None;
                     this.settings_controls
-                        .shadow_strength
-                        .update(cx, |input, cx| input.set_value("100", window, cx));
+                        .sync_style_inputs(&this.preferences, window, cx);
                     this.preferences.save();
                     this.preferences.apply(&this.connection, window, cx);
                 })),

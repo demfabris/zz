@@ -121,6 +121,38 @@ pub fn glass_presets_json() -> String {
     .to_string()
 }
 
+pub fn interface_styles_json() -> String {
+    json!(
+        zz_ui::interface_style::InterfaceStyle::ALL
+            .into_iter()
+            .map(|style| {
+                let look = zz_ui::interface_style::look(style);
+                let mut values = knobs::LOOK_KNOBS
+                    .iter()
+                    .map(|(name, get, _)| ((*name).to_owned(), json!(get(&look))))
+                    .collect::<serde_json::Map<_, _>>();
+                values.insert("selection".to_owned(), json!(look.selection));
+                values.insert(
+                    "glass".to_owned(),
+                    json!(look.glass.map(|material| {
+                        knobs::GLASS_KNOBS
+                            .iter()
+                            .map(|(name, get, _)| ((*name).to_owned(), json!(get(&material))))
+                            .collect::<serde_json::Map<_, _>>()
+                    })),
+                );
+                (style.as_str().to_owned(), serde_json::Value::Object(values))
+            })
+            .collect::<serde_json::Map<_, _>>()
+    )
+    .to_string()
+}
+
+/// The look the knobs describe, as JSON a style preset can be built from.
+pub fn look_json() -> String {
+    serde_json::to_string_pretty(&knobs().look).unwrap_or_default()
+}
+
 pub fn mount_id(story: &Story, section: &Section) -> String {
     format!("section-{}-{}", story.id, section.id)
 }
@@ -144,7 +176,7 @@ pub fn show_story(story: &'static Story, cx: &mut App) -> Result<(), String> {
                 |window, cx| {
                     window.set_window_title(section.name);
                     window.set_zoom(knobs.zoom);
-                    window.set_default_corner_smoothing(knobs.smoothing);
+                    window.set_default_corner_smoothing(knobs.look.corner_smoothing);
                     window.set_adaptive_corner_fraction(Some(0.45));
                     let content = (section.build)(window, cx);
                     let floats = backdrop::floats(story.id, section.id);
@@ -234,6 +266,16 @@ mod web {
     #[wasm_bindgen]
     pub fn glass_presets() -> String {
         super::glass_presets_json()
+    }
+
+    #[wasm_bindgen]
+    pub fn interface_styles() -> String {
+        super::interface_styles_json()
+    }
+
+    #[wasm_bindgen]
+    pub fn look() -> String {
+        super::look_json()
     }
 
     #[wasm_bindgen]

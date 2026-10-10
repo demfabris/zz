@@ -544,6 +544,66 @@ impl AppIconSetting {
     }
 }
 
+/// What `interface-style` selects: the shape of the chrome. Explicit
+/// `widget-corner-radius` and `shadow-strength` lines override its values.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum InterfaceStyle {
+    /// Square corners, no outlines, no shadows, rows that touch.
+    Flat,
+    /// Rounded corners over an opaque surface with a lit glass edge.
+    Modern,
+    /// Pill controls over frosted glass.
+    Full,
+}
+
+impl Default for InterfaceStyle {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
+}
+
+impl InterfaceStyle {
+    pub const ALL: [Self; 3] = [Self::Flat, Self::Modern, Self::Full];
+    pub const DEFAULT: Self = Self::Modern;
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Flat => "flat",
+            Self::Modern => "modern",
+            Self::Full => "full",
+        }
+    }
+
+    pub const fn title(self) -> &'static str {
+        match self {
+            Self::Flat => "Flat",
+            Self::Modern => "Modern",
+            Self::Full => "Full",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|style| style.as_str() == value.trim())
+    }
+
+    pub const fn widget_corner_radius(self) -> f32 {
+        match self {
+            Self::Flat => 0.0,
+            Self::Modern => 24.0,
+            Self::Full => 25.0,
+        }
+    }
+
+    pub const fn shadow_strength(self) -> f32 {
+        match self {
+            Self::Flat => 0.0,
+            Self::Modern | Self::Full => 1.0,
+        }
+    }
+}
+
 pub fn parse_hex(value: &str) -> Result<[f32; 4], String> {
     let digits = value.trim().strip_prefix('#').unwrap_or(value.trim());
     if !digits.chars().all(|c| c.is_ascii_hexdigit()) {

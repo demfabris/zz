@@ -177,7 +177,11 @@ pub(super) fn palette_entry(
 
     ListItem::new(id)
         .w_full()
-        .h(px(COMMAND_PALETTE_ROW_HEIGHT - 2.0))
+        .h(px(if cx.theme().inset_rows() {
+            COMMAND_PALETTE_ROW_HEIGHT - 2.0
+        } else {
+            COMMAND_PALETTE_ROW_HEIGHT
+        }))
         .pl(px(12.0 + row.indent))
         .pr(px(12.0))
         .py(px(4.0))

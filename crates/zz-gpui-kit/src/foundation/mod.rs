@@ -25,7 +25,7 @@ pub use styled::{
     Disableable, SURFACE_RING_OUTSET, Selectable, Sizable, Size, StyleSized, StyledExt,
     control_shadow, h_flex, stacked_ring, surface_ring, v_flex,
 };
-pub use theme::{ActiveTheme, CHROME_GAP, ScrollbarShow, Theme, ThemeMode};
+pub use theme::{ActiveTheme, CHROME_GAP, ScrollbarShow, SelectionStyle, Theme, ThemeMode};
 pub use theme_color::ThemeColor;
 pub use units::{BASE_UI_FONT_SIZE, UiZoom, rems_from_px};
 pub use window_border::{window_border, window_paddings};

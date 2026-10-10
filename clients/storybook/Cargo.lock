@@ -8032,6 +8032,7 @@ dependencies = [
  "markdown",
  "merman",
  "parking_lot",
+ "serde",
  "serde_json",
  "smallvec",
  "url",

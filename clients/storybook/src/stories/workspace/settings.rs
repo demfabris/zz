@@ -11,19 +11,23 @@ use zz_ui::{
         ThemeModeSetting, chrome_presets, inherited_chrome_colors, pinned_theme_mode,
     },
     input::{InputState, NumberInput},
+    interface_style::InterfaceStyle,
     select::{Select, SelectState},
     settings::{
         SettingEntry, SettingsNavigationGroup, SettingsSection, SettingsSelectItem, SettingsStack,
         about::{
             ABOUT_LOGO_SIZE, about_build_stack, about_copy_button, about_hero, about_project_stack,
         },
-        appearance::{PickerStrip, palette_preview, picker_tile, theme_preview, ui_font_select},
+        appearance::{
+            PickerStrip, interface_style_preview, palette_preview, picker_tile, theme_preview,
+            ui_font_select,
+        },
         panes_page,
         panes_preview::PanesPreview,
-        settings_control_fill, settings_navigation_back_button, settings_navigation_back_row,
-        settings_navigation_button, settings_navigation_group_label, settings_page_description,
-        settings_provenance_badge, settings_reset_button, settings_scroll_column,
-        settings_section_index,
+        settings_control_fill, settings_list_disclosure_header, settings_navigation_back_button,
+        settings_navigation_back_row, settings_navigation_button, settings_navigation_group_label,
+        settings_page_description, settings_provenance_badge, settings_reset_button,
+        settings_scroll_column, settings_section_index,
         status_bar_preview::status_bar_page,
     },
     switch::Switch,
@@ -56,7 +60,7 @@ pub const STORY: Story = Story {
         Section {
             id: "appearance",
             name: "Appearance pickers",
-            summary: "Theme tiles, the per-mode palette strips that scroll sideways, and the UI font select from the Interface page.",
+            summary: "Theme and style tiles, the per-mode palette strips that scroll sideways, the UI font select and the Advanced heading from the Interface page.",
             build: |window, cx| stateful(window, cx, Controls::new, appearance),
         },
         Section {
@@ -349,6 +353,23 @@ fn appearance(controls: &Controls, _: &mut Window, cx: &mut App) -> AnyElement {
                         .control(tiles),
                 )
                 .child(
+                    SettingEntry::new(
+                        "Style",
+                        "Corners, outlines, shadows, and how menus and dialogs float.",
+                    )
+                    .control(div().flex().flex_none().gap(px(8.0)).children(
+                        InterfaceStyle::ALL.map(|style| {
+                            picker_tile(
+                                format!("style-{}", style.as_str()).into(),
+                                style.title(),
+                                interface_style_preview(style, cx),
+                                style == InterfaceStyle::DEFAULT,
+                                cx,
+                            )
+                        }),
+                    )),
+                )
+                .child(
                     SettingEntry::new("UI font", "Choose an available font for the interface.")
                         .control(
                             div().w(px(200.0)).flex_none().child(
@@ -378,6 +399,28 @@ fn appearance(controls: &Controls, _: &mut Window, cx: &mut App) -> AnyElement {
                         ))
                         .child(strip("strip-dark", ThemeMode::Dark, 3)),
                 ),
+        )
+        .state(
+            "advanced heading, collapsed and expanded",
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.0))
+                .children([false, true].map(|expanded| {
+                settings_list_disclosure_header(
+                    if expanded {
+                        "advanced-expanded"
+                    } else {
+                        "advanced-collapsed"
+                    },
+                    "Advanced",
+                    Some(
+                        "Fonts, zoom, base colors, and the corner and shadow sizes the style sets.",
+                    ),
+                    expanded,
+                    cx,
+                )
+            })),
         )
         .into_any_element()
 }

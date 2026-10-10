@@ -30,18 +30,6 @@
                     </select>
                 </label>
                 <label>
-                    <span>Radius <output name="radius-value"></output></span>
-                    <input type="range" name="radius" min="0" max="25" step="1" value="6" />
-                </label>
-                <label>
-                    <span>Corner smoothing <output name="smoothing-value"></output></span>
-                    <input type="range" name="smoothing" min="2" max="6" step="0.5" value="4" />
-                </label>
-                <label>
-                    <span>Shadow <output name="shadow-value"></output></span>
-                    <input type="range" name="shadow" min="0" max="1" step="0.05" value="1" />
-                </label>
-                <label>
                     <span>Contrast <output name="contrast-value"></output></span>
                     <input type="range" name="contrast" min="0.5" max="2" step="0.05" value="1" />
                 </label>
@@ -65,9 +53,59 @@
                         <option value="color">Color and stripes</option>
                     </select>
                 </label>
+                <label class="check">
+                    <input type="checkbox" name="motion" checked />
+                    <span>Animations</span>
+                </label>
+
+                <h3>Style</h3>
+                <label>
+                    <span>Start from</span>
+                    <select name="style">
+                        <option value="flat">Flat</option>
+                        <option value="modern" selected>Modern</option>
+                        <option value="full">Full</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Corner radius <output name="radius-value"></output></span>
+                    <input type="range" name="radius" min="0" max="25" step="1" value="24" />
+                </label>
+                <label>
+                    <span>Corner smoothing <output name="smoothing-value"></output></span>
+                    <input type="range" name="smoothing" min="2" max="6" step="0.5" value="4" />
+                </label>
+                <label>
+                    <span>Row inset <output name="row-inset-value"></output></span>
+                    <input type="range" name="row-inset" min="0" max="12" step="1" value="4" />
+                </label>
+                <label>
+                    <span>Selection</span>
+                    <select name="selection">
+                        <option value="accent">Accent</option>
+                        <option value="wash">Neutral wash</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Outline <output name="outline-value"></output></span>
+                    <input type="range" name="outline" min="0" max="3" step="0.05" value="1" />
+                </label>
+                <label>
+                    <span>Outline width <output name="outline-width-value"></output></span>
+                    <input type="range" name="outline-width" min="0" max="3" step="0.25" value="0.5" />
+                </label>
+                <label>
+                    <span>Shadow <output name="shadow-value"></output></span>
+                    <input type="range" name="shadow" min="0" max="1" step="0.05" value="1" />
+                </label>
+                <label>
+                    <span>Elevation <output name="elevation-value"></output></span>
+                    <input type="range" name="elevation" min="0" max="3" step="0.1" value="1" />
+                </label>
                 <label>
                     <span>Glass</span>
                     <select name="glass">
+                        <option value="style">The style's</option>
                         <option value="off">Off</option>
                         <option value="regular">Regular</option>
                         <option value="clear">Clear</option>
@@ -106,8 +144,20 @@
                         <input type="range" name="glass-brightness" min="-0.3" max="0.3" step="0.01" />
                     </label>
                     <label>
+                        <span>Contrast <output name="glass-contrast-value"></output></span>
+                        <input type="range" name="glass-contrast" min="0.5" max="2" step="0.05" />
+                    </label>
+                    <label>
                         <span>Glint <output name="glass-specular-value"></output></span>
                         <input type="range" name="glass-specular" min="0" max="1.5" step="0.05" />
+                    </label>
+                    <label>
+                        <span>Glint width <output name="glass-glint-width-value"></output></span>
+                        <input type="range" name="glass-glint-width" min="0" max="6" step="0.1" />
+                    </label>
+                    <label>
+                        <span>Light angle <output name="glass-light-value"></output></span>
+                        <input type="range" name="glass-light" min="-180" max="180" step="5" />
                     </label>
                     <label>
                         <span>Rim glow <output name="glass-fresnel-value"></output></span>
@@ -118,14 +168,18 @@
                         <input type="range" name="glass-edge" min="0" max="1" step="0.05" />
                     </label>
                     <label>
+                        <span>Edge shadow width <output name="glass-edge-width-value"></output></span>
+                        <input type="range" name="glass-edge-width" min="0" max="4" step="0.05" />
+                    </label>
+                    <label>
                         <span>Grain <output name="glass-noise-value"></output></span>
                         <input type="range" name="glass-noise" min="0" max="0.1" step="0.005" />
                     </label>
                 </fieldset>
-                <label class="check">
-                    <input type="checkbox" name="motion" checked />
-                    <span>Animations</span>
-                </label>
+                <div class="export">
+                    <button type="button" id="export-look">Copy look as JSON</button>
+                    <textarea id="look-json" readonly rows="12" hidden aria-label="Look as JSON"></textarea>
+                </div>
                 <button type="reset">Reset</button>
             </form>
             <p class="hint">

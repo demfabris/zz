@@ -65,11 +65,10 @@ impl Render for Tooltip {
                 .font_family(cx.theme().font_family.clone())
                 .text_xs()
                 .text_color(cx.theme().foreground)
-                .border_1()
-                .border_color(cx.theme().border())
+                .surface_outline(cx.theme().border(), cx)
                 .surface_fill(cx.theme().background.raised(1).opaque(), cx)
                 .rounded(cx.theme().radius)
-                .shadow_md()
+                .when(cx.theme().shadow, zz_gpui::Styled::shadow_md)
                 .refine_style(&self.style)
                 .child(div().child(self.text.clone()))
                 .when_some(key_binding, |this, kbd| {

@@ -364,8 +364,7 @@ impl RenderOnce for Dialog {
             .debug_selector(move || format!("dialog-{layer_ix}"))
             .role(self.a11y_role)
             .track_focus(&self.focus_handle)
-            .border_1()
-            .border_color(cx.theme().border())
+            .surface_outline(cx.theme().border(), cx)
             .surface_fill(cx.theme().background.opaque(), cx)
             .rounded(cx.theme().radius)
             .min_h(MIN_HEIGHT)
@@ -460,22 +459,25 @@ impl RenderOnce for Dialog {
                         on_close(&ClickEvent::default(), window, cx);
                     })
             }))
-            .shadow(vec![
-                BoxShadow {
-                    color: shadow_color,
-                    offset: point(px(0.), px(20.)),
-                    blur_radius: px(25.),
-                    spread_radius: px(-5.),
-                    inset: false,
-                },
-                BoxShadow {
-                    color: shadow_color,
-                    offset: point(px(0.), px(8.)),
-                    blur_radius: px(10.),
-                    spread_radius: px(-6.),
-                    inset: false,
-                },
-            ]);
+            .when(cx.theme().shadow, |this| {
+                let elevation = cx.theme().elevation;
+                this.shadow(vec![
+                    BoxShadow {
+                        color: shadow_color,
+                        offset: point(px(0.), px(20. * elevation)),
+                        blur_radius: px(25. * elevation),
+                        spread_radius: px(-5. * elevation),
+                        inset: false,
+                    },
+                    BoxShadow {
+                        color: shadow_color,
+                        offset: point(px(0.), px(8. * elevation)),
+                        blur_radius: px(10. * elevation),
+                        spread_radius: px(-6. * elevation),
+                        inset: false,
+                    },
+                ])
+            });
         let body = surface_enter(body, "dialog-open", px(0.));
 
         anchored()

@@ -194,11 +194,10 @@ impl Render for Notification {
             .w(DEFAULT_WIDTH)
             .max_w((window.fully_visible_bounds().size.width - px(32.)).max(px(1.)))
             .items_center()
-            .border_1()
-            .border_color(cx.theme().border())
+            .surface_outline(cx.theme().border(), cx)
             .surface_fill(cx.theme().background.raised(1).opaque(), cx)
             .rounded(cx.theme().radius)
-            .shadow_md()
+            .when(cx.theme().shadow, |this| this.shadow_md())
             .p(CONTENT_PADDING)
             .gap_2()
             .child(

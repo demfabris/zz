@@ -8,39 +8,50 @@ const GLASS_KNOBS = [
     "glass-dispersion",
     "glass-saturation",
     "glass-brightness",
+    "glass-contrast",
     "glass-specular",
+    "glass-glint-width",
+    "glass-light",
     "glass-fresnel",
     "glass-edge",
+    "glass-edge-width",
     "glass-noise",
+];
+const LOOK_KNOBS = [
+    "radius",
+    "smoothing",
+    "row-inset",
+    "selection",
+    "outline",
+    "outline-width",
+    "shadow",
+    "elevation",
 ];
 const KNOBS = [
     "theme",
     "preset",
-    "radius",
-    "smoothing",
-    "shadow",
     "contrast",
     "zoom",
     "pane-opacity",
     "pane-glow",
     "motion",
     "backdrop",
+    "style",
+    ...LOOK_KNOBS,
     "glass",
     ...GLASS_KNOBS,
 ];
 const DEFAULTS = {
     theme: "system",
     preset: "default",
-    radius: "6",
-    smoothing: "4",
-    shadow: "1",
+    style: "modern",
     contrast: "1",
     zoom: "1",
     "pane-opacity": "0.5",
     "pane-glow": "1",
     motion: "1",
     backdrop: "plain",
-    glass: "off",
+    glass: "style",
 };
 
 const nav = document.getElementById("nav");
@@ -49,6 +60,7 @@ const form = document.getElementById("knob-form");
 
 let stories = [];
 let glassPresets = {};
+let styles = {};
 let current = null;
 
 function parseHash() {
@@ -68,17 +80,23 @@ function setKnobValue(name, value) {
     else field.value = value;
 }
 
-function knobDefault(name, glass = knobValue("glass")) {
+function glassMaterial(glass = knobValue("glass"), style = knobValue("style")) {
+    return (glass === "style" ? styles[style]?.glass : glassPresets[glass]) ?? null;
+}
+
+function knobDefault(name, glass = knobValue("glass"), style = knobValue("style")) {
+    if (LOOK_KNOBS.includes(name)) return String(styles[style]?.[name]);
     if (!GLASS_KNOBS.includes(name)) return DEFAULTS[name];
-    const value = glassPresets[glass]?.[name];
+    const value = glassMaterial(glass, style)?.[name];
     return value === undefined ? undefined : String(value);
 }
 
 function isDefault(name) {
     const value = knobValue(name);
     const fallback = knobDefault(name);
-    if (!GLASS_KNOBS.includes(name)) return value === fallback;
-    if (knobValue("glass") === "off") return true;
+    const numeric = form.elements[name].type === "range";
+    if (!GLASS_KNOBS.includes(name) && !numeric) return value === fallback;
+    if (GLASS_KNOBS.includes(name) && glassMaterial() === null) return true;
     const step = Number(form.elements[name].step) || 0.01;
     return Math.abs(Number(value) - Number(fallback)) < step / 2;
 }
@@ -96,6 +114,17 @@ function resetGlassSliders() {
         const value = knobDefault(name);
         if (value !== undefined) setKnobValue(name, value);
     }
+}
+
+function resetStyleKnobs() {
+    for (const name of LOOK_KNOBS) setKnobValue(name, knobDefault(name));
+    setKnobValue("glass", "style");
+    resetGlassSliders();
+}
+
+function showLook() {
+    const output = document.getElementById("look-json");
+    if (!output.hidden) output.value = zz.look();
 }
 
 function writeHash(story, section) {
@@ -183,13 +212,14 @@ function show(storyId, sectionId) {
 }
 
 function applyKnobs() {
-    form.querySelector("#glass-knobs").hidden = knobValue("glass") === "off";
+    form.querySelector("#glass-knobs").hidden = glassMaterial() === null;
     for (const name of KNOBS) {
         const output = form.elements[`${name}-value`];
         if (output) output.value = knobValue(name);
     }
     zz.set_knobs(knobQuery());
     paintChrome();
+    showLook();
     const { story, section } = parseHash();
     writeHash(story || current, section);
 }
@@ -206,8 +236,9 @@ function paintChrome() {
 
 function loadKnobs(params) {
     const glass = params.get("glass") ?? DEFAULTS.glass;
+    const style = params.get("style") ?? DEFAULTS.style;
     for (const name of KNOBS) {
-        const value = params.get(name) ?? knobDefault(name, glass);
+        const value = params.get(name) ?? knobDefault(name, glass, style);
         if (value !== undefined) setKnobValue(name, value);
     }
 }
@@ -236,6 +267,7 @@ zz.run();
 await waitFor(zz.is_ready);
 stories = JSON.parse(zz.stories());
 glassPresets = JSON.parse(zz.glass_presets());
+styles = JSON.parse(zz.interface_styles());
 renderNav();
 renderPresets();
 const initial = parseHash();
@@ -244,11 +276,19 @@ applyKnobs();
 show(initial.story, initial.section);
 
 form.addEventListener("input", (event) => {
-    if (event.target.name === "glass") resetGlassSliders();
+    if (event.target.name === "style") resetStyleKnobs();
+    else if (event.target.name === "glass") resetGlassSliders();
     applyKnobs();
 });
+document.getElementById("export-look").addEventListener("click", () => {
+    const output = document.getElementById("look-json");
+    output.hidden = false;
+    output.value = zz.look();
+    output.select();
+    navigator.clipboard?.writeText(output.value).catch(() => {});
+});
 form.addEventListener("reset", () => setTimeout(() => {
-    resetGlassSliders();
+    resetStyleKnobs();
     applyKnobs();
 }));
 window.addEventListener("hashchange", () => {

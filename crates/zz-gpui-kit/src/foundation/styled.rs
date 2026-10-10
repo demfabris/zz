@@ -78,7 +78,7 @@ pub trait StyledExt: Styled + Sized {
     }
 
     fn control_highlight(self, cx: &App) -> Self {
-        let this = self.border_color(cx.theme().foreground.opacity(0.1));
+        let this = self.border_color(cx.theme().foreground.opacity(0.1 * cx.theme().outline));
         if cx.theme().shadow {
             this.shadow(control_shadow(cx))
         } else {
@@ -87,7 +87,22 @@ pub trait StyledExt: Styled + Sized {
     }
 
     fn control_surface(self, cx: &App) -> Self {
-        self.border(px(0.5)).control_highlight(cx)
+        if cx.theme().outlined() {
+            self.border(cx.theme().outline_width).control_highlight(cx)
+        } else {
+            self.control_highlight(cx)
+        }
+    }
+
+    /// The outline of a floating surface drawn in `color`, at the theme's
+    /// outline width and strength.
+    fn surface_outline(self, color: Hsla, cx: &App) -> Self {
+        let this = self.border_color(color.opacity(cx.theme().outline));
+        if cx.theme().outlined() {
+            this.border(cx.theme().outline_width)
+        } else {
+            this
+        }
     }
 
     /// Fills a floating surface with `color`, or with the theme's glass
@@ -134,12 +149,13 @@ pub trait StyledExt: Styled + Sized {
             .surface_fill(cx.theme().background.raised(2).opaque(), cx)
             .rounded(cx.theme().radius);
         if cx.theme().shadow && cx.theme().shadow_strength > 0.0 {
+            let elevation = cx.theme().elevation;
             let mut shadows = control_shadow(cx);
             shadows.push(BoxShadow {
                 color: cx.theme().scrim.opacity(cx.theme().shadow_strength),
-                offset: point(px(0.0), px(12.0)),
-                blur_radius: px(32.0),
-                spread_radius: px(-4.0),
+                offset: point(px(0.0), px(12.0 * elevation)),
+                blur_radius: px(32.0 * elevation),
+                spread_radius: px(-4.0 * elevation),
                 inset: false,
             });
             surface.shadow(shadows)

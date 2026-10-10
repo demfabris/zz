@@ -1,7 +1,8 @@
 use zz_gpui::{App, GlassMaterial, WindowAppearance, px};
 use zz_ui::{
-    Theme, ThemeMode, UiZoom,
+    SelectionStyle, Theme, ThemeMode, UiZoom,
     chrome_palette::{ChromePresetId, inherited_chrome_colors},
+    interface_style::{self, InterfaceStyle, Look},
 };
 
 const ADAPTIVE_CORNER_FRACTION: f32 = 0.45;
@@ -9,16 +10,14 @@ const ADAPTIVE_CORNER_FRACTION: f32 = 0.45;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Knobs {
     pub theme: Option<ThemeMode>,
-    pub radius: f32,
-    pub shadow: f32,
+    pub style: InterfaceStyle,
+    pub look: Look,
     pub contrast: f32,
     pub zoom: f32,
-    pub smoothing: f32,
     pub preset: Option<ChromePresetId>,
     pub pane_opacity: f32,
     pub pane_glow: f32,
     pub motion: bool,
-    pub glass: Option<GlassMaterial>,
     pub backdrop: Backdrop,
 }
 
@@ -30,7 +29,28 @@ pub enum Backdrop {
     Color,
 }
 
-pub const GLASS_KNOBS: &[(&str, fn(&GlassMaterial) -> f32, fn(&mut GlassMaterial, f32))] = &[
+type Knob<T> = (&'static str, fn(&T) -> f32, fn(&mut T, f32));
+
+/// The numeric parts of a [`Look`] other than its glass, by knob name.
+pub const LOOK_KNOBS: &[Knob<Look>] = &[
+    ("radius", |l| l.radius, |l, v| l.radius = v),
+    (
+        "smoothing",
+        |l| l.corner_smoothing,
+        |l, v| l.corner_smoothing = v,
+    ),
+    ("shadow", |l| l.shadow, |l, v| l.shadow = v),
+    ("elevation", |l| l.elevation, |l, v| l.elevation = v),
+    ("outline", |l| l.outline, |l, v| l.outline = v),
+    (
+        "outline-width",
+        |l| l.outline_width,
+        |l, v| l.outline_width = v,
+    ),
+    ("row-inset", |l| l.row_inset, |l, v| l.row_inset = v),
+];
+
+pub const GLASS_KNOBS: &[Knob<GlassMaterial>] = &[
     ("glass-blur", |m| m.blur.as_f32(), |m, v| m.blur = px(v)),
     ("glass-tint", |m| m.tint.a, |m, v| m.tint.a = v),
     (
@@ -54,9 +74,25 @@ pub const GLASS_KNOBS: &[(&str, fn(&GlassMaterial) -> f32, fn(&mut GlassMaterial
         |m| m.brightness,
         |m, v| m.brightness = v,
     ),
+    ("glass-contrast", |m| m.contrast, |m, v| m.contrast = v),
     ("glass-specular", |m| m.specular, |m, v| m.specular = v),
+    (
+        "glass-glint-width",
+        |m| m.glint_width.as_f32(),
+        |m, v| m.glint_width = px(v),
+    ),
+    (
+        "glass-light",
+        |m| m.light_angle.to_degrees(),
+        |m, v| m.light_angle = v.to_radians(),
+    ),
     ("glass-fresnel", |m| m.fresnel, |m, v| m.fresnel = v),
     ("glass-edge", |m| m.edge_shadow, |m, v| m.edge_shadow = v),
+    (
+        "glass-edge-width",
+        |m| m.edge_width.as_f32(),
+        |m, v| m.edge_width = px(v),
+    ),
     ("glass-noise", |m| m.noise, |m, v| m.noise = v),
 ];
 
@@ -64,34 +100,51 @@ impl Default for Knobs {
     fn default() -> Self {
         Self {
             theme: None,
-            radius: 6.0,
-            shadow: 1.0,
+            style: InterfaceStyle::DEFAULT,
+            look: Look::default(),
             contrast: 1.0,
             zoom: 1.0,
-            smoothing: 4.0,
             preset: None,
             pane_opacity: 0.5,
             pane_glow: 1.0,
             motion: true,
-            glass: None,
             backdrop: Backdrop::Plain,
         }
     }
 }
 
 impl Knobs {
+    /// Reads a knob query. The style comes first, wherever it sits in the
+    /// query, and every look knob then overrides what the style set.
     pub fn parse(query: &str) -> Result<Self, String> {
-        let mut knobs = Self::default();
-        let mut glass_overrides = Vec::new();
-        for pair in query
+        let pairs = query
             .trim_start_matches('?')
             .split('&')
             .filter(|pair| !pair.is_empty())
-        {
-            let (key, value) = pair
-                .split_once('=')
-                .ok_or_else(|| format!("expected key=value, not {pair}"))?;
+            .map(|pair| {
+                pair.split_once('=')
+                    .ok_or_else(|| format!("expected key=value, not {pair}"))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut knobs = Self::default();
+        if let Some((_, value)) = pairs.iter().find(|(key, _)| *key == "style") {
+            knobs.style = InterfaceStyle::parse(value)
+                .ok_or_else(|| format!("style must be flat, modern or full, not {value}"))?;
+        }
+        knobs.look = interface_style::look(knobs.style);
+        if let Some((_, value)) = pairs.iter().find(|(key, _)| *key == "glass") {
+            knobs.look.glass = match *value {
+                "" | "style" => knobs.look.glass,
+                "off" => None,
+                name => Some(
+                    GlassMaterial::preset(name)
+                        .ok_or_else(|| format!("no glass preset named {name}"))?,
+                ),
+            };
+        }
+        for (key, value) in pairs {
             match key {
+                "style" | "glass" => {}
                 "theme" => {
                     knobs.theme = match value {
                         "light" => Some(ThemeMode::Light),
@@ -104,11 +157,15 @@ impl Knobs {
                         }
                     }
                 }
-                "radius" => knobs.radius = number(key, value)?,
-                "shadow" => knobs.shadow = number(key, value)?,
+                "selection" => {
+                    knobs.look.selection = match value {
+                        "accent" => SelectionStyle::Accent,
+                        "wash" => SelectionStyle::Wash,
+                        _ => return Err(format!("selection must be accent or wash, not {value}")),
+                    }
+                }
                 "contrast" => knobs.contrast = number(key, value)?,
                 "zoom" => knobs.zoom = number(key, value)?,
-                "smoothing" => knobs.smoothing = number(key, value)?,
                 "preset" => {
                     knobs.preset = match value {
                         "" | "default" => None,
@@ -121,15 +178,6 @@ impl Knobs {
                 "pane-opacity" => knobs.pane_opacity = number(key, value)?,
                 "pane-glow" => knobs.pane_glow = number(key, value)?,
                 "motion" => knobs.motion = value != "0" && value != "off" && value != "false",
-                "glass" => {
-                    knobs.glass = match value {
-                        "" | "off" => None,
-                        name => Some(
-                            GlassMaterial::preset(name)
-                                .ok_or_else(|| format!("no glass preset named {name}"))?,
-                        ),
-                    }
-                }
                 "backdrop" => {
                     knobs.backdrop = match value {
                         "plain" => Backdrop::Plain,
@@ -143,16 +191,17 @@ impl Knobs {
                     }
                 }
                 _ => {
-                    if let Some((_, _, set)) = GLASS_KNOBS.iter().find(|(name, _, _)| *name == key)
+                    if let Some((_, _, set)) = LOOK_KNOBS.iter().find(|(name, ..)| *name == key) {
+                        set(&mut knobs.look, number(key, value)?);
+                    } else if let Some((_, _, set)) =
+                        GLASS_KNOBS.iter().find(|(name, ..)| *name == key)
                     {
-                        glass_overrides.push((*set, number(key, value)?));
+                        let value = number(key, value)?;
+                        if let Some(material) = knobs.look.glass.as_mut() {
+                            set(material, value);
+                        }
                     }
                 }
-            }
-        }
-        if let Some(material) = knobs.glass.as_mut() {
-            for (set, value) in glass_overrides {
-                set(material, value);
             }
         }
         Ok(knobs)
@@ -170,13 +219,10 @@ impl Knobs {
         Theme::change(mode, None, cx);
         cx.set_reduce_motion(!self.motion);
         let theme = Theme::global_mut(cx);
+        self.look.apply(theme);
         theme.colors = inherited_chrome_colors(self.preset, mode);
         theme.pane_background_opacity = self.pane_opacity;
         theme.pane_glow_strength = self.pane_glow;
-        theme.radius = px(self.radius);
-        theme.shadow = self.shadow > 0.0;
-        theme.shadow_strength = self.shadow;
-        theme.glass = self.glass;
         theme.set_contrast(self.contrast);
         cx.set_global(UiZoom(self.zoom));
         let knobs = *self;
@@ -184,7 +230,7 @@ impl Knobs {
             window
                 .update(cx, |_, window, _| {
                     window.set_zoom(knobs.zoom);
-                    window.set_default_corner_smoothing(knobs.smoothing);
+                    window.set_default_corner_smoothing(knobs.look.corner_smoothing);
                     window.set_adaptive_corner_fraction(Some(ADAPTIVE_CORNER_FRACTION));
                     window.refresh();
                 })
@@ -211,7 +257,7 @@ mod tests {
             Knobs::parse("?theme=dark&radius=12&zoom=1.25&story=agent&preset=nord&motion=0")
                 .unwrap();
         assert_eq!(knobs.theme, Some(ThemeMode::Dark));
-        assert_eq!(knobs.radius, 12.0);
+        assert_eq!(knobs.look.radius, 12.0);
         assert_eq!(knobs.zoom, 1.25);
         assert_eq!(knobs.preset, ChromePresetId::parse("nord"));
         assert!(!knobs.motion);
@@ -222,11 +268,36 @@ mod tests {
     #[test]
     fn glass_sliders_override_the_preset_in_any_order() {
         let knobs = Knobs::parse("glass-blur=30&glass=frosted&glass-tint=0.5").unwrap();
-        let glass = knobs.glass.unwrap();
+        let glass = knobs.look.glass.unwrap();
         assert_eq!(glass.blur, px(30.0));
         assert_eq!(glass.tint.a, 0.5);
         assert_eq!(glass.bezel, GlassMaterial::frosted().bezel);
-        assert_eq!(Knobs::parse("glass-blur=30").unwrap().glass, None);
+        assert_eq!(
+            Knobs::parse("glass=off&glass-blur=30").unwrap().look.glass,
+            None
+        );
         assert!(Knobs::parse("glass=lava").is_err());
+        let lit = Knobs::parse("glass-light=90&glass-glint-width=3").unwrap();
+        let glass = lit.look.glass.unwrap();
+        assert!((glass.light_angle - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        assert_eq!(glass.glint_width, px(3.0));
+    }
+
+    #[test]
+    fn the_style_sets_the_look_until_a_knob_says_otherwise() {
+        let flat = Knobs::parse("style=flat").unwrap();
+        assert_eq!(flat.look, interface_style::look(InterfaceStyle::Flat));
+        let full = Knobs::parse("radius=12&outline=0.3&selection=wash&style=full").unwrap();
+        assert_eq!(full.look.radius, 12.0);
+        assert_eq!(full.look.outline, 0.3);
+        assert_eq!(full.look.selection, SelectionStyle::Wash);
+        assert_eq!(
+            full.look.glass,
+            interface_style::look(InterfaceStyle::Full).glass
+        );
+        let blurred = Knobs::parse("glass-blur=30").unwrap().look.glass.unwrap();
+        assert_eq!(blurred.blur, px(30.0));
+        assert!(Knobs::parse("style=round").is_err());
+        assert!(Knobs::parse("selection=loud").is_err());
     }
 }

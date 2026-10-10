@@ -65,18 +65,17 @@ pub(crate) fn refresh_current_theme(cx: &mut App) {
         });
     Theme::change(mode, None, cx);
     apply_zz_overrides(cx);
+    let corner_smoothing = Theme::global(cx).corner_smoothing;
     for window in cx.windows() {
         window
             .update(cx, |_, window, _| {
-                window.set_default_corner_smoothing(CORNER_SMOOTHING);
+                window.set_default_corner_smoothing(corner_smoothing);
                 window.set_adaptive_corner_fraction(Some(ADAPTIVE_CORNER_FRACTION));
             })
             .ok();
     }
     cx.refresh_windows();
 }
-
-const CORNER_SMOOTHING: f32 = 4.0;
 
 const ADAPTIVE_CORNER_FRACTION: f32 = 0.45;
 
@@ -88,7 +87,10 @@ pub fn sync_system_appearance(mut window: Option<&mut Window>, cx: &mut App) {
         .into();
     cx.set_global(SystemThemeMode(system_mode));
     if let Some(window) = window.as_deref_mut() {
-        window.set_default_corner_smoothing(CORNER_SMOOTHING);
+        window.set_default_corner_smoothing(
+            zz_ui::interface_style::look(config::resolved_config(cx).interface_style.value)
+                .corner_smoothing,
+        );
         window.set_adaptive_corner_fraction(Some(ADAPTIVE_CORNER_FRACTION));
     }
     Theme::sync_system_appearance(window, cx);
@@ -110,6 +112,7 @@ fn apply_zz_overrides(cx: &mut App) {
     let ui_font_family = config::ui_font_family(cx)
         .value
         .map_or_else(|| zz_gpui::Font::default().family, SharedString::from);
+    let interface_style = config::resolved_config(cx).interface_style.value;
     let widget_corner_radius = config::widget_corner_radius(cx);
     let chrome_contrast = config::chrome_contrast(cx);
     let shadow_strength = config::shadow_strength(cx);
@@ -125,8 +128,10 @@ fn apply_zz_overrides(cx: &mut App) {
         theme.mono_font_family = font_family;
     }
 
+    zz_ui::interface_style::look(interface_style).apply(theme);
     theme.radius = widget_corner_radius;
     theme.set_contrast(chrome_contrast);
+    theme.shadow = shadow_strength > 0.0;
     theme.shadow_strength = shadow_strength;
     theme.pane_background_opacity = pane_background_opacity;
     theme.pane_glow_strength = pane_glow_strength;

@@ -149,6 +149,10 @@ Menus, select dropdowns, command palettes, and file/history/tree pickers share
 `StyledExt::popover_style`: an opaque `background.raised(2)` surface, the shared half-pixel edge,
 and a soft outer shadow scaled by the shadow-strength setting. Menus use 4px gutters, 26px
 rows (20px for Small menus), 12px text, and half-pixel separators inset from the surface edge.
+At a 0 radius (`Theme::inset_rows` is false) the gutters, the gaps between rows, and the separator
+inset go away, and rows become full-width bands; the workspace tree and command palette follow the
+same rule. `Theme.border` off drops the half-pixel edge from `control_surface`, tooltips,
+notifications and dialogs.
 Picker search fields use the shared Input surface. Command palettes embed a bare shared Input
 inside their raised container, with inline mode, host, and command Tag pills. They use 8px list
 gutters; the container radius adds that inset to the theme radius. Rows retain the inset menu
@@ -255,8 +259,10 @@ detach action, not to color anything). `apply_zz_overrides` layers these values 
 - `font_family` from `ui-font-family`, with the system UI font as the default;
 - `mono_font_family` from the terminal's resolved primary family, so Agent Markdown and code blocks
   match the terminal typeface;
-- `theme.radius` from `widget-corner-radius`, so one radius reaches every widget and survives a
-  light/dark switch;
+- `theme.radius`, `shadow`, `shadow_strength`, `border` and `glass` from `interface-style`
+  (`zz_ui::interface_style::apply`), then `theme.radius` from `widget-corner-radius` and
+  `shadow_strength` from `shadow-strength` when those are set, so one radius reaches every widget
+  and survives a light/dark switch;
 - `theme.contrast` from `chrome-contrast`, preserved across the same refreshes.
 
 `chrome-contrast` defaults to 1.0 and accepts 0.5–2.0; other values are reported like any numeric

@@ -10,6 +10,8 @@ use zz_gpui::{
     WindowAppearance, px,
 };
 
+use serde::{Deserialize, Serialize};
+
 use crate::{BASE_UI_FONT_SIZE, TITLE_BAR_HEIGHT, highlighter::HighlightTheme};
 
 use super::{Colorize as _, ThemeColor, color};
@@ -92,6 +94,22 @@ pub struct Theme {
     pub contrast: f32,
     pub shadow: bool,
     pub shadow_strength: f32,
+    /// Scales the drop shadows under floating surfaces: their offset and
+    /// blur.
+    pub elevation: f32,
+    /// How strongly controls and floating surfaces draw their hairline
+    /// outline: 1 is the usual hairline, 0 none, more is brighter.
+    pub outline: f32,
+    /// The width of that outline.
+    pub outline_width: Pixels,
+    /// How far selected and hovered list rows float in from the list's
+    /// edges, and whether they stand apart. Zero makes them full-width bands
+    /// that touch.
+    pub row_inset: Pixels,
+    /// What fills selected menu and list rows.
+    pub selection: SelectionStyle,
+    /// The default corner smoothing windows draw with.
+    pub corner_smoothing: f32,
     /// Floating surfaces (popovers, menus, tooltips, notifications, dialogs,
     /// sheets) become this glass when set. Each surface tints it with its own
     /// color; the material's tint alpha says how much of that color covers
@@ -109,6 +127,17 @@ impl Default for Theme {
     fn default() -> Self {
         Self::from(&*ThemeColor::light())
     }
+}
+
+/// What fills selected menu and list rows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SelectionStyle {
+    /// The accent color.
+    #[default]
+    Accent,
+    /// A neutral wash of the foreground.
+    Wash,
 }
 
 impl Deref for Theme {
@@ -137,11 +166,36 @@ impl Theme {
     }
 
     pub fn selection_background(&self) -> Hsla {
-        self.accent.opaque()
+        match self.selection {
+            SelectionStyle::Accent => self.accent.opaque(),
+            SelectionStyle::Wash => self.background.washed(3),
+        }
     }
 
     pub fn menu_radius(&self) -> Pixels {
         (self.radius - px(4.0)).max(px(0.0))
+    }
+
+    /// Whether list rows float as rounded highlights, inset from the list's
+    /// edges and apart from each other. Square corners make them full-width
+    /// bands that touch.
+    pub fn inset_rows(&self) -> bool {
+        self.row_inset > px(0.0)
+    }
+
+    /// Whether controls and floating surfaces draw an outline at all.
+    pub fn outlined(&self) -> bool {
+        self.outline > 0.0 && self.outline_width > px(0.0)
+    }
+
+    /// The radius of a surface whose content sits `inset` inside it, so the
+    /// two stay concentric. Square corners stay square.
+    pub fn outer_radius(&self, inset: Pixels) -> Pixels {
+        if self.radius > px(0.0) {
+            self.radius + inset
+        } else {
+            px(0.0)
+        }
     }
 
     pub fn set_contrast(&mut self, value: f32) {
@@ -237,6 +291,12 @@ impl From<&ThemeColor> for Theme {
             contrast: 1.0,
             shadow: true,
             shadow_strength: 1.0,
+            elevation: 1.0,
+            outline: 1.0,
+            outline_width: px(0.5),
+            row_inset: px(4.0),
+            selection: SelectionStyle::Accent,
+            corner_smoothing: 4.0,
             glass: None,
             pane_background_opacity: 0.5,
             pane_glow_strength: 1.0,

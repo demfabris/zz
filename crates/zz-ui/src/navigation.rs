@@ -22,7 +22,6 @@ pub const WORKSPACE_TREE_MARKER_SLOT_WIDTH: f32 = 18.0;
 /// Icon size for a tree row's node marker. Matches `Size::Small` in `icon/mod.rs`.
 pub const WORKSPACE_TREE_NODE_ICON_SIZE: f32 = 14.0;
 pub const WORKSPACE_TREE_MARKER_LABEL_GAP: f32 = 6.0;
-const WORKSPACE_TREE_FILL_INSET: f32 = 4.0;
 const TREE_TOUCH_SLOP: f32 = (TOUCH_TARGET - COMPACT_ICON_BUTTON_SIZE) / 2.0;
 const WORKSPACE_TREE_FILL_VERTICAL_INSET: f32 = 1.0;
 pub const WORKSPACE_SIDEBAR_DEFAULT_WIDTH: f32 = 256.0;
@@ -326,35 +325,29 @@ pub fn workspace_tree_row(
     actions: impl IntoElement,
     cx: &App,
 ) -> Stateful<zz_gpui::Div> {
-    let radius = cx.theme().radius;
-    let fill_inset = if radius > px(0.) {
-        px(WORKSPACE_TREE_FILL_INSET)
+    let fill_inset = cx.theme().row_inset;
+    let fill_vertical_inset = if cx.theme().inset_rows() {
+        px(WORKSPACE_TREE_FILL_VERTICAL_INSET)
     } else {
         px(0.)
     };
     let fill_color = workspace_row_highlight(cx);
     let fill = div()
         .absolute()
-        .top(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
-        .bottom(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
+        .top(fill_vertical_inset)
+        .bottom(fill_vertical_inset)
         .left(fill_inset)
         .right(fill_inset)
         .rounded(cx.theme().control_radius())
-        .when(cx.theme().shadow, |this| {
-            this.border(px(0.5))
+        .when(cx.theme().outlined(), |this| {
+            this.border(cx.theme().outline_width)
                 .border_color(zz_gpui::transparent_white())
         })
         .group_hover(row_group.clone(), |this| {
-            let this = this.bg(fill_color);
-            if cx.theme().shadow {
-                this.control_highlight(cx)
-            } else {
-                this
-            }
+            this.bg(fill_color).control_highlight(cx)
         })
         .when(selected || active && focused, |this| {
-            this.bg(fill_color)
-                .when(cx.theme().shadow, |this| this.control_highlight(cx))
+            this.bg(fill_color).control_highlight(cx)
         });
     let trailing = div()
         .h_full()
@@ -374,8 +367,8 @@ pub fn workspace_tree_row(
             cx.theme().foreground.opacity(0.1),
             cx.theme().control_radius(),
         )
-        .top(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
-        .bottom(px(WORKSPACE_TREE_FILL_VERTICAL_INSET))
+        .top(fill_vertical_inset)
+        .bottom(fill_vertical_inset)
         .left(fill_inset)
         .right(fill_inset)
     });

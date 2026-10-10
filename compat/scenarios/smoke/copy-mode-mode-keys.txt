@@ -8,6 +8,7 @@ corpus: none
 # so the reader treats the pair as one logical line.
 stage: fixtures/copy-mode-mode-keys.sh ~/copy-mode-mode-keys.sh
 stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu COPY_MODE_MODE_KEYS
 run-shell 'sh ~/copy-mode-mode-keys.sh'
 out: show-environment -g COPY_MODE_MODE_KEYS

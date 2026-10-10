@@ -10,6 +10,7 @@ corpus: none
 # escape, and its side asserts exactly that.
 stage: fixtures/display-popup-kitty-noresize.sh ~/display-popup-kitty-noresize.sh
 stage: fixtures/graphics-drive.py ~/graphics-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_KITTY_NORESIZE
 run-shell 'sh ~/display-popup-kitty-noresize.sh'
 out: show-environment -g DISPLAY_POPUP_KITTY_NORESIZE

@@ -8,5 +8,6 @@ corpus: none
 # the new one ahead of client-session-changed.
 stage: fixtures/hooks-pane-focus-clients.sh ~/hooks-pane-focus-clients.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 run-shell 'sh ~/hooks-pane-focus-clients.sh'
 out: show-environment -g HOOKS_PANE_FOCUS_CLIENTS

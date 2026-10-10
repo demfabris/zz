@@ -9,6 +9,7 @@ corpus: none
 stage: fixtures/client-resized-context.sh ~/client-resized-context.sh
 stage: fixtures/format-hook-log.sh ~/format-hook-log.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu CLIENT_RESIZED_CONTEXT
 run-shell 'sh ~/client-resized-context.sh'
 out: show-environment -g CLIENT_RESIZED_CONTEXT

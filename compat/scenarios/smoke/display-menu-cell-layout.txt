@@ -6,6 +6,7 @@ corpus: none
 # runs, so the probe compares behaviour rather than drawn cells.
 stage: fixtures/display-menu-cell-layout.sh ~/display-menu-cell-layout.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_MENU_CELL_LAYOUT
 run-shell 'sh ~/display-menu-cell-layout.sh'
 out: show-environment -g DISPLAY_MENU_CELL_LAYOUT

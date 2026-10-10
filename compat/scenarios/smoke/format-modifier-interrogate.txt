@@ -1,6 +1,7 @@
 corpus: none
 stage: fixtures/format-modifier-interrogate.sh ~/format-modifier-interrogate.sh
 stage: fixtures/send-keys-attach.py ~/send-keys-attach.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu FORMAT_MODIFIER_INTERROGATE
 run-shell 'sh ~/format-modifier-interrogate.sh'
 out: show-environment -g FORMAT_MODIFIER_INTERROGATE

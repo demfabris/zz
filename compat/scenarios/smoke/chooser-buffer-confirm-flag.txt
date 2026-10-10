@@ -6,6 +6,7 @@ corpus: none
 # the delete exactly where the no-flag control puts them.
 stage: fixtures/chooser-buffer-confirm-flag.sh ~/chooser-buffer-confirm-flag.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu CHOOSER_BUFFER_CONFIRM
 run-shell 'sh ~/chooser-buffer-confirm-flag.sh'
 out: show-environment -g CHOOSER_BUFFER_CONFIRM

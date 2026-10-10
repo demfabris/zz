@@ -11,6 +11,7 @@ corpus: none
 # instead of writing the prefix into the pane.
 stage: fixtures/chooser-prefix-keys.sh ~/chooser-prefix-keys.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu CHOOSER_PREFIX_KEYS
 run-shell 'sh ~/chooser-prefix-keys.sh'
 out: show-environment -g CHOOSER_PREFIX_KEYS

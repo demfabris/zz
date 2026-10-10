@@ -6,6 +6,7 @@ corpus: none
 # entries "%u" never reaches, and the live repaint every mutation triggers.
 stage: fixtures/pane-colours-palette.sh ~/pane-colours-palette.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu PANE_COLOURS_PALETTE
 run-shell 'sh ~/pane-colours-palette.sh'
 out: show-environment -g PANE_COLOURS_PALETTE

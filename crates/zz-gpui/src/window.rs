@@ -4813,8 +4813,12 @@ impl Window {
         let bounds = shape_bounds.dilate(ScaledPixels(material.edge_width.as_f32().max(0.) + 1.5));
         // The backdrop takes in what the glass draws too, its contour
         // included, so the glass orders after everything under any of it.
-        let reach = material.backdrop_reach().as_f32();
-        let backdrop_bounds = shape_bounds.dilate(ScaledPixels(reach)).union(&bounds);
+        let backdrop_bounds = if material.reads_backdrop() {
+            let reach = material.backdrop_reach().as_f32();
+            shape_bounds.dilate(ScaledPixels(reach)).union(&bounds)
+        } else {
+            bounds
+        };
         self.next_frame.scene.insert_primitive(Glass {
             order: 0,
             bounds,

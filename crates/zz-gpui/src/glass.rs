@@ -356,10 +356,16 @@ impl GlassMaterial {
         self
     }
 
+    /// Whether the glass shows any of what lies under it. A fully opaque tint
+    /// covers the backdrop, so renderers need not copy it out of the frame.
+    pub fn reads_backdrop(&self) -> bool {
+        self.tint.a < 1.
+    }
+
     /// Whether the tint hides the backdrop and nothing draws over it, so the
     /// surface looks exactly like a fill of the tint and is painted as one.
     pub fn is_opaque_fill(&self) -> bool {
-        self.tint.a >= 1.
+        !self.reads_backdrop()
             && self.specular == 0.
             && self.fresnel == 0.
             && (self.edge_shadow == 0. || self.edge_width <= px(0.))
@@ -633,9 +639,20 @@ pub struct Glass {
 }
 
 impl Glass {
-    /// The blur this glass asks for, given how deep the chain may go.
+    /// Whether drawing this glass reads the frame under it.
+    pub fn reads_backdrop(&self) -> bool {
+        self.material.reads_backdrop()
+    }
+
+    /// The blur this glass asks for, given how deep the chain may go. Glass
+    /// that does not read its backdrop blurs nothing.
     pub fn blur_plan(&self, max_levels: u32) -> GlassBlurPlan {
-        GlassBlurPlan::new(self.material.blur.as_f32(), max_levels)
+        let sigma = if self.reads_backdrop() {
+            self.material.blur.as_f32()
+        } else {
+            0.
+        };
+        GlassBlurPlan::new(sigma, max_levels)
     }
 
     /// The level 0 texels this glass reads, clipped to the viewport.
@@ -803,7 +820,8 @@ impl Glass {
 
 /// One run of a glass batch, worked out for a renderer to carry out in
 /// order: copy each frame rectangle into level 0 of the blur chain, run the
-/// blur passes, then draw each glass over the frame.
+/// blur passes, then draw each glass over the frame. A run whose glass reads
+/// no backdrop has no copies and no passes, and needs no chain.
 ///
 /// The chain is addressed in device pixels relative to [`Self::origin`],
 /// scaled down by `2^level`, so every region keeps its place at every level.
@@ -893,13 +911,12 @@ pub fn plan_glass(
         start = end;
 
         let align = 1 << GLASS_MAX_BLUR_LEVELS;
-        let low = run
-            .iter()
+        let reading = || run.iter().filter(|p| p.glass.reads_backdrop());
+        let low = reading()
             .map(|p| p.region.origin)
             .reduce(|a, b| point(a.x.min(b.x), a.y.min(b.y)))
             .unwrap_or_default();
-        let high = run
-            .iter()
+        let high = reading()
             .map(|p| p.region.origin + point(p.region.size.width, p.region.size.height))
             .reduce(|a, b| point(a.x.max(b.x), a.y.max(b.y)))
             .unwrap_or_default();
@@ -956,10 +973,9 @@ pub fn plan_glass(
 
         runs.push(GlassRun {
             origin,
-            extent: size(high.x - origin.x, high.y - origin.y),
+            extent: size((high.x - origin.x).max(0), (high.y - origin.y).max(0)),
             depth,
-            copies: run
-                .iter()
+            copies: reading()
                 .map(|p| (p.region, p.region.origin - origin))
                 .collect(),
             passes,
@@ -1447,6 +1463,65 @@ pub fn check_glass_rendering(
             expected.0
         );
     }
+
+    let close = |a: &image::RgbaImage, b: &image::RgbaImage, what: &str| {
+        for (x, y, expected) in a.enumerate_pixels() {
+            let actual = b.get_pixel(x, y).0;
+            anyhow::ensure!(
+                expected
+                    .0
+                    .iter()
+                    .zip(actual)
+                    .all(|(a, b)| a.abs_diff(b) <= 1),
+                "{what}, ({x}, {y}) is {actual:?} for {:?}",
+                expected.0
+            );
+        }
+        Ok(())
+    };
+    let lit = opaque.specular(0.6).fresnel(0.1).edge_shadow(0.4);
+    anyhow::ensure!(
+        !lit.reads_backdrop(),
+        "{lit:?} should not read its backdrop"
+    );
+    let in_place = render(&glass_test_scene(Some(lit)))?;
+    let copied = render(&glass_test_scene(Some(lit.tint(tint.alpha(0.9999)))))?;
+    close(
+        &copied,
+        &in_place,
+        "lit opaque glass should draw what the copying path draws",
+    )?;
+
+    let mut stacked = glass_test_scene(Some(lit));
+    let shape = Bounds {
+        origin: point(ScaledPixels(8.), ScaledPixels(8.)),
+        size: size(ScaledPixels(48.), ScaledPixels(48.)),
+    };
+    let mut shapes: [(Bounds<ScaledPixels>, Corners<ScaledPixels>); GLASS_MAX_SHAPES] =
+        Default::default();
+    shapes[0] = (shape, Corners::all(ScaledPixels(8.)));
+    let clear = GlassMaterial::regular().vanished();
+    stacked.insert_primitive(Glass {
+        order: 0,
+        bounds: shape.dilate(ScaledPixels(2.)),
+        backdrop_bounds: shape.dilate(ScaledPixels(clear.backdrop_reach().as_f32())),
+        content_mask: crate::ContentMask {
+            bounds: Bounds {
+                origin: point(ScaledPixels(0.), ScaledPixels(0.)),
+                size: size(ScaledPixels(64.), ScaledPixels(64.)),
+            },
+        },
+        shapes,
+        shape_count: 1,
+        corner_smoothing: 2.,
+        material: clear,
+    });
+    stacked.finish();
+    close(
+        &in_place,
+        &render(&stacked)?,
+        "glass over lit opaque glass should see it",
+    )?;
     Ok(())
 }
 

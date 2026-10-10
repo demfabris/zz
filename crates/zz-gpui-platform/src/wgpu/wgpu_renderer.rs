@@ -1,4 +1,4 @@
-use crate::wgpu::wgpu_glass::{GlassResources, glass_count};
+use crate::wgpu::wgpu_glass::{GlassResources, glass_count, scene_reads_backdrop};
 use crate::wgpu::{CompositorGpuHint, DeviceErrorState, WgpuAtlas, WgpuContext};
 use anyhow::{Context as _, Result};
 use bytemuck::{Pod, Zeroable};
@@ -1362,7 +1362,7 @@ impl WgpuRenderer {
                 .surface_config
                 .usage
                 .contains(wgpu::TextureUsages::COPY_SRC)
-            && glass_count(scene) > 0
+            && scene_reads_backdrop(scene)
         {
             self.surface_config.usage |= wgpu::TextureUsages::COPY_SRC;
             surface.configure(&core.resources.device, &self.surface_config);
@@ -1936,6 +1936,24 @@ impl WgpuRendererCore {
                     let Some(glass) = self.resources.glass.as_mut() else {
                         continue;
                     };
+                    let viewport = Size {
+                        width: size.width.0,
+                        height: size.height.0,
+                    };
+                    if !scene.glasses[range.clone()]
+                        .iter()
+                        .any(zz_gpui::Glass::reads_backdrop)
+                    {
+                        if let Some(pending) = glass.draw_in_place(
+                            &self.resources.device,
+                            &scene.glasses[range],
+                            viewport,
+                            scene.window_corner_mask,
+                        ) {
+                            glass.draw_pending(&mut pass, pending, viewport);
+                        }
+                        continue;
+                    }
                     if !frame.usage().contains(wgpu::TextureUsages::COPY_SRC) {
                         continue;
                     }
@@ -1955,14 +1973,7 @@ impl WgpuRendererCore {
                         "main_pass_continued",
                     );
                     if let (Some(pending), Some(glass)) = (pending, self.resources.glass.as_ref()) {
-                        glass.draw_pending(
-                            &mut pass,
-                            pending,
-                            Size {
-                                width: size.width.0,
-                                height: size.height.0,
-                            },
-                        );
+                        glass.draw_pending(&mut pass, pending, viewport);
                     }
                 }
             }

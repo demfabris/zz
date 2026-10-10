@@ -15,6 +15,8 @@ pub(crate) struct MetalGlass {
     up_pipeline: metal::RenderPipelineState,
     sampler: metal::SamplerState,
     levels: Vec<metal::Texture>,
+    /// Bound in place of the chain for glass that reads no backdrop.
+    placeholder: metal::Texture,
     /// The largest chain any run needed this frame, in level 0 texels.
     peak: Size<i32>,
 }
@@ -141,12 +143,20 @@ impl MetalGlass {
         sampler_descriptor.set_address_mode_s(metal::MTLSamplerAddressMode::ClampToEdge);
         sampler_descriptor.set_address_mode_t(metal::MTLSamplerAddressMode::ClampToEdge);
 
+        let placeholder = metal::TextureDescriptor::new();
+        placeholder.set_width(1);
+        placeholder.set_height(1);
+        placeholder.set_pixel_format(MTLPixelFormat::BGRA8Unorm);
+        placeholder.set_storage_mode(metal::MTLStorageMode::Private);
+        placeholder.set_usage(metal::MTLTextureUsage::ShaderRead);
+
         Ok(Self {
             glass_pipeline: pipeline("glass", "vs_glass", "fs_glass", true)?,
             down_pipeline: pipeline("glass_down", "vs_glass_blur", "fs_glass_down", false)?,
             up_pipeline: pipeline("glass_up", "vs_glass_blur", "fs_glass_up", false)?,
             sampler: device.new_sampler(&sampler_descriptor),
             levels: Vec::new(),
+            placeholder: device.new_texture(&placeholder),
             peak: Size::default(),
         })
     }
@@ -212,7 +222,9 @@ impl MetalGlass {
     /// first. Every run but the last draws in an encoder of its own; the last
     /// run's draws come back, for the caller to issue with
     /// [`Self::draw_pending`] in the encoder that resumes the scene, which
-    /// saves the tiled GPU a load and store of the whole target.
+    /// saves the tiled GPU a load and store of the whole target. A batch in
+    /// which no glass reads its backdrop needs none of this: issue
+    /// [`Self::draws_in_place`] in the scene's own encoder instead.
     pub(crate) fn draw(
         &mut self,
         device: &metal::DeviceRef,
@@ -231,6 +243,10 @@ impl MetalGlass {
                 let encoder = render_encoder(command_buffer, target, metal::MTLLoadAction::Load);
                 self.draw_pending(encoder, &pending, viewport);
                 encoder.end_encoding();
+            }
+            if run.copies.is_empty() {
+                pending = run.draws;
+                continue;
             }
             self.ensure_chain(device, run.extent, run.depth);
 
@@ -271,6 +287,19 @@ impl MetalGlass {
         pending
     }
 
+    /// The draws of a batch in which no glass reads its backdrop, in order,
+    /// for [`Self::draw_pending`] in the encoder already drawing the scene.
+    pub(crate) fn draws_in_place(
+        glasses: &[Glass],
+        viewport: Size<i32>,
+        window_mask: Option<WindowCornerMask>,
+    ) -> Vec<(GlassUniform, Bounds<i32>)> {
+        plan_glass(glasses, viewport, window_mask)
+            .into_iter()
+            .flat_map(|run| run.draws)
+            .collect()
+    }
+
     /// Issues a run's glass draws into `encoder`, an encoder over the
     /// target, and gives it back its full scissor.
     pub(crate) fn draw_pending(
@@ -284,8 +313,9 @@ impl MetalGlass {
         }
         encoder.set_render_pipeline_state(&self.glass_pipeline);
         encoder.set_fragment_sampler_state(0, Some(&self.sampler));
-        encoder.set_fragment_texture(0, Some(&self.levels[0]));
-        encoder.set_fragment_texture(1, Some(&self.levels[1]));
+        let level = |index: usize| self.levels.get(index).unwrap_or(&self.placeholder);
+        encoder.set_fragment_texture(0, Some(level(0)));
+        encoder.set_fragment_texture(1, Some(level(1)));
         for (uniform, scissor) in draws {
             let bytes = uniform.as_bytes();
             encoder.set_vertex_bytes(0, bytes.len() as u64, bytes.as_ptr() as *const c_void);

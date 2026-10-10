@@ -27,6 +27,9 @@ pub(crate) struct GlassResources {
     uniform_bytes: Vec<u8>,
     levels: Vec<Level>,
     glass_bind_group: Option<wgpu::BindGroup>,
+    /// Bound in place of the chain for glass that reads no backdrop.
+    placeholder: wgpu::TextureView,
+    placeholder_bind_group: Option<wgpu::BindGroup>,
     /// The largest chain any run needed this frame, in level 0 texels.
     peak: Size<i32>,
 }
@@ -165,6 +168,22 @@ impl GlassResources {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let placeholder = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("glass_placeholder"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&wgpu::TextureViewDescriptor::default());
         Self {
             glass_layout,
             blur_layout,
@@ -178,6 +197,8 @@ impl GlassResources {
             uniform_bytes: Vec::new(),
             levels: Vec::new(),
             glass_bind_group: None,
+            placeholder,
+            placeholder_bind_group: None,
             peak: Size::default(),
         }
     }
@@ -203,6 +224,7 @@ impl GlassResources {
         }));
         // Bind groups name the buffer they read.
         self.release_textures();
+        self.placeholder_bind_group = None;
     }
 
     /// Uploads the frame's uniform blocks, and frees a chain the frame did
@@ -225,6 +247,50 @@ impl GlassResources {
     pub(crate) fn release_textures(&mut self) {
         self.levels.clear();
         self.glass_bind_group = None;
+    }
+
+    fn glass_bind_group(
+        &self,
+        device: &wgpu::Device,
+        buffer: &wgpu::Buffer,
+        backdrop: &wgpu::TextureView,
+        blurred: &wgpu::TextureView,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("glass_backdrop"),
+            layout: &self.glass_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer,
+                        offset: 0,
+                        size: NonZeroU64::new(size_of::<GlassUniform>() as u64),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(backdrop),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(blurred),
+                },
+            ],
+        })
+    }
+
+    fn placeholder_bind_group(&mut self, device: &wgpu::Device) -> Option<wgpu::BindGroup> {
+        if self.placeholder_bind_group.is_none() {
+            let buffer = self.uniforms.clone()?;
+            self.placeholder_bind_group =
+                Some(self.glass_bind_group(device, &buffer, &self.placeholder, &self.placeholder));
+        }
+        self.placeholder_bind_group.clone()
     }
 
     fn push_uniform(&mut self, bytes: &[u8]) -> u32 {
@@ -314,32 +380,12 @@ impl GlassResources {
             });
         }
         if self.glass_bind_group.is_none() {
-            self.glass_bind_group = Some(device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("glass_backdrop"),
-                layout: &self.glass_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                            buffer: &buffer,
-                            offset: 0,
-                            size: NonZeroU64::new(size_of::<GlassUniform>() as u64),
-                        }),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&self.levels[0].view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
-                        resource: wgpu::BindingResource::TextureView(&self.levels[1].view),
-                    },
-                ],
-            }));
+            self.glass_bind_group = Some(self.glass_bind_group(
+                device,
+                &buffer,
+                &self.levels[0].view,
+                &self.levels[1].view,
+            ));
         }
     }
 
@@ -348,7 +394,9 @@ impl GlassResources {
     /// in a pass of its own; the last run's draws come back, for the caller
     /// to issue with [`Self::draw_pending`] at the start of the pass that
     /// resumes the scene, which saves a tiled GPU a load and store of the
-    /// whole target.
+    /// whole target. A batch in which no glass reads its backdrop needs none
+    /// of this, nor a copyable target: issue [`Self::draw_in_place`] in the
+    /// scene's own pass instead.
     pub(crate) fn draw(
         &mut self,
         device: &wgpu::Device,
@@ -380,9 +428,11 @@ impl GlassResources {
                 });
                 self.draw_pending(&mut pass, pending, viewport);
             }
-            self.ensure_chain(device, run.extent, run.depth);
-            let Some(bind_group) = self.glass_bind_group.clone() else {
-                return None;
+            let bind_group = if run.copies.is_empty() {
+                self.placeholder_bind_group(device)?
+            } else {
+                self.ensure_chain(device, run.extent, run.depth);
+                self.glass_bind_group.clone()?
             };
 
             for (region, destination) in &run.copies {
@@ -427,6 +477,24 @@ impl GlassResources {
             pending = Some(PendingGlass { bind_group, draws });
         }
         pending
+    }
+
+    /// The draws of a batch in which no glass reads its backdrop, in order,
+    /// for [`Self::draw_pending`] in the pass already drawing the scene.
+    pub(crate) fn draw_in_place(
+        &mut self,
+        device: &wgpu::Device,
+        glasses: &[Glass],
+        viewport: Size<i32>,
+        window_mask: Option<WindowCornerMask>,
+    ) -> Option<PendingGlass> {
+        let bind_group = self.placeholder_bind_group(device)?;
+        let draws = plan_glass(glasses, viewport, window_mask)
+            .into_iter()
+            .flat_map(|run| run.draws)
+            .map(|(uniform, scissor)| (self.push_uniform(uniform.as_bytes()), scissor))
+            .collect();
+        Some(PendingGlass { bind_group, draws })
     }
 
     /// Issues a run's glass draws into `pass`, a pass over the target, and
@@ -504,6 +572,16 @@ impl GlassResources {
             render_pass.draw(0..3, 0..1);
         }
     }
+}
+
+/// Whether any glass in a scene, its shader layers' included, reads the
+/// frame under it, which only a copyable frame allows.
+pub(crate) fn scene_reads_backdrop(scene: &zz_gpui::Scene) -> bool {
+    scene.glasses.iter().any(Glass::reads_backdrop)
+        || scene
+            .shader_layers
+            .iter()
+            .any(|layer| scene_reads_backdrop(&layer.scene))
 }
 
 /// How many glasses a scene paints, its shader layers' included.

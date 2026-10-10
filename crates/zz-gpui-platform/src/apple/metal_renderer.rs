@@ -883,6 +883,22 @@ impl MetalRenderer {
                     let Some(Ok(glass)) = &mut self.glass else {
                         continue;
                     };
+                    let viewport = Size {
+                        width: viewport_size.width.0,
+                        height: viewport_size.height.0,
+                    };
+                    if !scene.glasses[range.clone()]
+                        .iter()
+                        .any(zz_gpui::Glass::reads_backdrop)
+                    {
+                        let draws = MetalGlass::draws_in_place(
+                            &scene.glasses[range],
+                            viewport,
+                            scene.window_corner_mask,
+                        );
+                        glass.draw_pending(command_encoder, &draws, viewport);
+                        continue;
+                    }
                     command_encoder.end_encoding();
                     let pending = glass.draw(
                         &self.device,
@@ -897,14 +913,7 @@ impl MetalRenderer {
                         viewport_size,
                         None,
                     );
-                    glass.draw_pending(
-                        command_encoder,
-                        &pending,
-                        Size {
-                            width: viewport_size.width.0,
-                            height: viewport_size.height.0,
-                        },
-                    );
+                    glass.draw_pending(command_encoder, &pending, viewport);
                 }
                 PrimitiveBatch::SubpixelSprites { .. } => unreachable!(),
             }

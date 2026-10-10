@@ -258,15 +258,17 @@ fn fs_glass(@builtin(position) frag: vec4<f32>) -> @location(0) vec4<f32> {
     let pull = refraction * (1.0 - sqrt(max(1.0 - edge * edge, 0.0)));
     let offset = -normal * pull;
 
-    var color: vec4<f32>;
-    let dispersion = glass.optics.z * pull;
-    if (dispersion > 0.25) {
-        let red = backdrop(position + offset - normal * dispersion * 0.5);
-        let green = backdrop(position + offset);
-        let blue = backdrop(position + offset + normal * dispersion * 0.5);
-        color = vec4<f32>(red.r, green.g, blue.b, green.a);
-    } else {
-        color = backdrop(position + offset);
+    var color = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    if (glass.tint.a < 1.0) {
+        let dispersion = glass.optics.z * pull;
+        if (dispersion > 0.25) {
+            let red = backdrop(position + offset - normal * dispersion * 0.5);
+            let green = backdrop(position + offset);
+            let blue = backdrop(position + offset + normal * dispersion * 0.5);
+            color = vec4<f32>(red.r, green.g, blue.b, green.a);
+        } else {
+            color = backdrop(position + offset);
+        }
     }
 
     // Every renderer blends into its target the same way, leaving it

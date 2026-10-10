@@ -8236,6 +8236,9 @@ impl MuxEngine {
                 .set_window_automatic_rename(window, Some(false))?;
         }
         self.record_destroyed_session(destroyed_source);
+        if window != source_window {
+            self.refresh_automatic_window_name_for_pane(source, hooks);
+        }
         if detached {
             if original_context.window == Some(source_window)
                 && original_context.pane == Some(source)
@@ -24977,6 +24980,26 @@ mod tests {
             .unwrap();
         let command_window = engine.state.window_for_pane(command_pane).unwrap();
         assert_eq!(engine.state.windows[&command_window].name, "vim");
+
+        let (busy_pane, index) = break_out(&mut engine, &mut context, "=w:8");
+        engine.set_pane_runtime_facts(
+            busy_pane,
+            PaneRuntimeFacts {
+                current_command: "sleep".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &["-d", "-s", &busy_pane.to_string(), "-t", &index],
+                ),
+            )
+            .unwrap();
+        let busy_window = engine.state.window_for_pane(busy_pane).unwrap();
+        assert_eq!(engine.state.windows[&busy_window].name, "sleep");
         assert!(engine.state.validate().is_ok());
     }
 

@@ -6,7 +6,8 @@ use std::{
 };
 
 use zz_gpui::{
-    Anchor, App, Edges, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px,
+    Anchor, App, Edges, GlassMaterial, Global, Hsla, Pixels, SharedString, Window,
+    WindowAppearance, px,
 };
 
 use crate::{BASE_UI_FONT_SIZE, TITLE_BAR_HEIGHT, highlighter::HighlightTheme};
@@ -91,6 +92,11 @@ pub struct Theme {
     pub contrast: f32,
     pub shadow: bool,
     pub shadow_strength: f32,
+    /// Floating surfaces (popovers, menus, tooltips, notifications, dialogs,
+    /// sheets) become this glass when set. Each surface tints it with its own
+    /// color; the material's tint alpha says how much of that color covers
+    /// the glass.
+    pub glass: Option<GlassMaterial>,
     pub pane_background_opacity: f32,
     pub pane_glow_strength: f32,
     pub transparent: Hsla,
@@ -231,6 +237,7 @@ impl From<&ThemeColor> for Theme {
             contrast: 1.0,
             shadow: true,
             shadow_strength: 1.0,
+            glass: None,
             pane_background_opacity: 0.5,
             pane_glow_strength: 1.0,
             scrollbar_show: ScrollbarShow::default(),

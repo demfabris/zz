@@ -4,7 +4,7 @@
 use super::ActiveTheme;
 use super::Colorize as _;
 use zz_gpui::{
-    App, BoxShadow, Corners, DefiniteLength, Div, Edges, Pixels, Refineable, StyleRefinement,
+    App, BoxShadow, Corners, DefiniteLength, Div, Edges, Hsla, Pixels, Refineable, StyleRefinement,
     Styled, div, point, px,
 };
 
@@ -90,6 +90,18 @@ pub trait StyledExt: Styled + Sized {
         self.border(px(0.5)).control_highlight(cx)
     }
 
+    /// Fills a floating surface with `color`, or with the theme's glass
+    /// tinted by it. Glass draws its own edge, so it hides the hairline while
+    /// keeping its width; call this after setting the border.
+    fn surface_fill(self, color: Hsla, cx: &App) -> Self {
+        match cx.theme().glass {
+            Some(material) => self
+                .glass(material.tint(color.alpha(material.tint.a)).fallback(color))
+                .border_color(cx.theme().transparent),
+            None => self.bg(color),
+        }
+    }
+
     fn menu_item_corners(self, row_height: Pixels, cx: &App) -> Self {
         self.rounded(cx.theme().menu_radius().min(row_height * 0.40))
             .corner_radius_mode(zz_gpui::CornerRadiusMode::Fixed)
@@ -117,9 +129,9 @@ pub trait StyledExt: Styled + Sized {
     #[inline]
     fn popover_style(self, cx: &App) -> Self {
         let surface = self
-            .bg(cx.theme().background.raised(2).opaque())
             .text_color(cx.theme().foreground)
             .control_surface(cx)
+            .surface_fill(cx.theme().background.raised(2).opaque(), cx)
             .rounded(cx.theme().radius);
         if cx.theme().shadow && cx.theme().shadow_strength > 0.0 {
             let mut shadows = control_shadow(cx);

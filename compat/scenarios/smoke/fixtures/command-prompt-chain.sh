@@ -29,7 +29,10 @@ run() {
     binding="$2"
     answers="$3"
     rm -f "$inner_socket"
-    INNER new-session -d -s s -x 80 -y 24 >/dev/null 2>&1 || true
+    # The default shell's prompt retitles the pane on hosts whose bashrc sends
+    # OSC 0 (Arch's /etc/bash.bashrc for TERM=tmux*) and under zz's shell
+    # integration, racing the select-pane -T below; a plain sh does neither.
+    INNER new-session -d -s s -x 80 -y 24 sh >/dev/null 2>&1 || true
     INNER set -g status-keys emacs >/dev/null 2>&1 || true
     INNER select-pane -t s -T chain-title >/dev/null 2>&1 || true
     eval "INNER bind-key -n F1 $binding" >/dev/null 2>&1 || true

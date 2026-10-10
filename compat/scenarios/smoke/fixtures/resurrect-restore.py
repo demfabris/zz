@@ -53,6 +53,11 @@ def panes():
 
 try:
     tmux("set-option", "-g", "status", "off")
+    # restore.sh rebuilds panes on default-command and then select-pane -T;
+    # a default shell's prompt would retitle them on hosts whose bashrc sends
+    # OSC 0 (Arch's /etc/bash.bashrc for TERM=tmux*) and under zz's shell
+    # integration, so the rebuilt panes run a plain sh.
+    tmux("set-option", "-g", "default-command", "sh")
     tmux("set-option", "-g", "@resurrect-dir", str(saved))
     tmux("run-shell", str(plugin / "resurrect.tmux"))
     print("RESTORE_SAVE_SCRIPT=" + tmux("show-options", "-gqv",

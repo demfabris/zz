@@ -840,21 +840,59 @@ popup_title_lead() {
 # tmux 3.8's popup_key_cb swallows the terminal's focus reports while a popup
 # is up, and a dead close-on-any-key popup closes on the first of them. zz's
 # popup is a modal pane (display-popup.modal-pane): it is the active pane, so a
-# focus report reaches its application like any pane's, and its dead -k form
-# is remain-on-exit key, which a key closes and a focus report does not. The zz
-# side therefore sends no focus pair to a live popup and closes the dead one
-# with a key.
+# focus report reaches its application like any focus-events pane's, and its
+# dead -k form is remain-on-exit key, which a key closes and a focus report
+# does not.
 send_popup_focus_pair() {
-  if [ "$1" = tmux ]; then
-    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$1" $'\033[O\033[I'
+  tmux_outer_command send-keys -l -t "$OUTER_SESSION:$1" $'\033[O\033[I'
+}
+
+assert_current_marker_stays_absent() {
+  local side="$1"
+  local marker="$2"
+  local screen
+
+  sleep 0.5
+  screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+  if grep -Fq -- "$marker" <<<"$screen"; then
+    fixture_failure "$side current screen showed $marker"
   fi
 }
 
-close_dead_popup() {
-  if [ "$1" = tmux ]; then
-    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$1" $'\033[O\033[I'
-  else
-    tmux_outer_command send-keys -l -t "$OUTER_SESSION:$1" x
+assert_current_marker_stays() {
+  local side="$1"
+  local marker="$2"
+  local screen
+
+  sleep 0.5
+  screen="$(capture_current_screen "$side" 2>/dev/null || true)"
+  if ! grep -Fq -- "$marker" <<<"$screen"; then
+    fixture_failure "$side current screen lost $marker"
+  fi
+}
+
+wait_for_display_popup_exit() {
+  local side="$1"
+  local expected="$2"
+  local attempt
+  local status=0
+
+  if [ -z "$DISPLAY_POPUP_PID" ]; then
+    fixture_failure "$side display-popup command was not waiting"
+  fi
+  for ((attempt = 0; attempt < 200; attempt++)); do
+    if ! kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
+      break
+    fi
+    sleep 0.05
+  done
+  if kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
+    fixture_failure "$side display-popup command still waited 10 seconds after its command exited"
+  fi
+  wait "$DISPLAY_POPUP_PID" || status=$?
+  DISPLAY_POPUP_PID=""
+  if [ "$status" != "$expected" ]; then
+    fixture_failure "$side display-popup command exited $status, expected $expected"
   fi
 }
 
@@ -1505,7 +1543,10 @@ open_display_popup() {
   if [ -n "$DISPLAY_POPUP_PID" ]; then
     fixture_failure "$side display-popup command was already waiting"
   fi
-  side_command "$side" display-popup -c "$client_name" -T "$title" "$@" &
+  {
+    trap - ERR
+    side_command "$side" display-popup -c "$client_name" -T "$title" "$@"
+  } &
   DISPLAY_POPUP_PID=$!
   wait_for_current_marker "$side" "$title"
 }
@@ -1638,7 +1679,7 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   open_display_popup "$side" "$client_name" "$title" \
     -E -b single -x 9 -y 12 -w 38 -h 9 \
     /bin/bash -c \
-    'saved=$(stty -g); cleanup_popup() { printf "\033[?1004l"; stty "$saved"; }; trap cleanup_popup EXIT; stty raw -echo min 1 time 0; printf "\033[?1004hPOPUP_A_READY_%s\r\nPOPUP_A_BODY_%s\r\n" "$1" "$1"; key=$(dd bs=1 count=1 2>/dev/null); marker="POPUP_A_KEY_${1}_${key}"; printf "%s\r\n" "$marker"; printf "%s\n" "$marker" >"$2"' \
+    'saved=$(stty -g); cleanup_popup() { printf "\033[?1004l"; stty "$saved"; }; trap cleanup_popup EXIT; stty raw -echo min 1 time 0; printf "\033[?1004hPOPUP_A_READY_%s\r\nPOPUP_A_BODY_%s\r\n" "$1" "$1"; esc=$(printf "\033"); while :; do key=$(dd bs=1 count=1 2>/dev/null); if [ "$key" != "$esc" ]; then break; fi; report=$(dd bs=1 count=2 2>/dev/null); printf "POPUP_A_FOCUS_%s_%s\r\n" "$1" "${report:1:1}"; done; marker="POPUP_A_KEY_${1}_${key}"; printf "%s\r\n" "$marker"; printf "%s\n" "$marker" >"$2"' \
     popup-a "$side" "$key_file"
   wait_for_popup_underlay_focus "$side" OUT 1
   wait_for_current_marker "$side" "POPUP_A_READY_$side"
@@ -1671,6 +1712,12 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
 
   send_popup_focus_pair "$side"
   wait_for_current_marker "$side" "$updated_title"
+  if [ "$side" = zz ]; then
+    wait_for_current_marker zz POPUP_A_FOCUS_zz_O
+    wait_for_current_marker zz POPUP_A_FOCUS_zz_I
+  else
+    assert_current_marker_stays_absent tmux POPUP_A_FOCUS_tmux_
+  fi
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
   tmux_outer_command send-keys -t "$OUTER_SESSION:$side" q
   wait_for_current_marker_absent "$side" "$updated_title"
@@ -1701,7 +1748,11 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   popup_column=$((cursor_column + 3))
   popup_row=$((cursor_row + 2))
 
-  send_popup_focus_pair "$side"
+  # Popup B's application reads its paste first, so the focus pair, which
+  # popup A already proves on both sides, goes only to the pin here.
+  if [ "$side" = tmux ]; then
+    send_popup_focus_pair tmux
+  fi
   wait_for_current_marker "$side" "$title"
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
   tmux_outer_command send-keys -l -t "$OUTER_SESSION:$side" \
@@ -1726,21 +1777,31 @@ printf "ATTACHED_POPUP_UNDERLAY_%s\n" DRAINED
   title="POPUP_C_$side"
   open_display_popup "$side" "$client_name" "$title" \
     -k -b single -x 16 -y 14 -w 32 -h 7 \
-    /bin/bash -c 'printf "POPUP_C_DEAD_%s\n" "$1"' popup-c "$side"
+    /bin/bash -c 'printf "POPUP_C_DEAD_%s\n" "$1"; exit 3' popup-c "$side"
   wait_for_popup_underlay_focus "$side" OUT 3
   wait_for_current_popup_title "$side" "$title"
   wait_for_current_marker "$side" "POPUP_C_DEAD_$side"
-  # tmux 3.8 holds the display-popup command until the dead popup closes. zz's
-  # modal pane answers a waiting command client with the command's exit status
-  # as soon as the command exits, while the dead pane stays up for its key
-  # (display-popup.modal-pane).
-  if [ "$side" = tmux ] && ! kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
+  # tmux 3.8 holds the display-popup command until the dead popup closes and
+  # then exits with the command's status (popup.c:278). zz's modal pane
+  # answers the waiting command client with that status as soon as the command
+  # exits, while the dead pane stays up for its key (display-popup.modal-pane).
+  if [ "$side" = zz ]; then
+    wait_for_display_popup_exit zz 3
+    assert_current_marker_stays zz "$title"
+  elif ! kill -0 "$DISPLAY_POPUP_PID" 2>/dev/null; then
     fixture_failure "$side did not retain its dead popup command"
   fi
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
-  close_dead_popup "$side"
+  send_popup_focus_pair "$side"
+  if [ "$side" = zz ]; then
+    assert_current_marker_stays zz "$title"
+    assert_pane_marker_absent zz UNDERLAY_BYTE_
+    tmux_outer_command send-keys -l -t "$OUTER_SESSION:zz" x
+  fi
   wait_for_current_marker_absent "$side" "$title"
-  finish_display_popup "$side"
+  if [ "$side" = tmux ]; then
+    wait_for_display_popup_exit tmux 3
+  fi
   wait_for_popup_underlay_focus "$side" IN 3
   assert_pane_marker_absent "$side" UNDERLAY_BYTE_
 

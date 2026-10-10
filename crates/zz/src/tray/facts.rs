@@ -228,6 +228,10 @@ mod tests {
             pane_border_indicators: PaneBorderIndicators::default(),
             pane_order: vec![PaneId(1), PaneId(2), PaneId(3)],
             pane_z_order: vec![PaneId(1), PaneId(2), PaneId(3)],
+            floating: Vec::new(),
+            modal: None,
+            sx: 0,
+            sy: 0,
         };
         let mut snapshot = MuxSnapshot {
             generation: 1,

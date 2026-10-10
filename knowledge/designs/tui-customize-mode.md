@@ -2,7 +2,7 @@
 type: Design Plan
 title: Per-pane TUI customize mode
 description: Port mode-tree.c and window-customize.c onto the server pane mode stack, and share one prompt editor between customize-mode and switch-mode.
-status: Implemented for the tree keys, prompts, array items and previews on 2026-09-17 and the pointer menu on 2026-09-19; gate review pending.
+status: Implemented for the tree keys, prompts, array items and previews on 2026-09-17, the pointer menu on 2026-09-19, and tmux 3.8's rebuilt tree (hooks, environment, C, e) on 2026-10-09; gate review pending.
 resource: crates/zz-mux/src/command/customize.rs
 timestamp: 2026-09-17T00:00:00Z
 tags: [tui, tmux, options]
@@ -28,9 +28,14 @@ the daemon executes, and the build that follows them runs after they land.
 
 # Rows
 
-The tree follows `window_customize_build`: Server Options, Session Options and Window &
-Pane Options, then one Key Table root per non-empty table. Options sort by name with user
-options first. Array options have no text, and each index is a child named
+The tree follows 3.8's `window_customize_build`: Server Options, Session Options and
+Window & Pane Options, then Session Hooks and Window & Pane Hooks, then Global Environment
+and Session Environment, then one Key Table root per non-empty table. Options sort by name
+with user options first. The hook sections hold every hook array, user hooks `set-hook`
+registered (`hook_events`) and `set-hook -B` monitors; option sections hold the rest. An
+environment row is the variable's name, or `-NAME` with no text when it is removed. `C`
+keeps only rows whose value differs from the table default (a key whose binding differs
+from the default table), drops the environment sections and any section left empty. Array options have no text, and each index is a child named
 `name[key]` whose text is the same format expansion, so a pane-scope entry carries the
 `(pane N)` marker. A key row has Command, Note and Repeat children that draw their parent's
 preview. Text passes through `#[ignore]`, which `parse_styled_segments` now honours the way
@@ -39,7 +44,10 @@ preview. Text passes through `#[ignore]`, which `parse_styled_segments` now hono
 Previews are laid out on the daemon through a port of `screen_write_text`, including the
 description, scope, `This is an array option, key N.`, the value, `This expands to:`,
 choices, the `EXAMPLE` swatch for colour and style options, the default, and the window
-and global values. They reach the client as `ChooserPreview::Markup` lines, with the
+and global values; 3.8's labelled values (`Option value:`, `Repeat:`, `Command:` and the
+rest) draw their value in `themelightgrey`. A hook preview ends with `This hook has been
+fired N times[, last TIME].` from the owning entry's fire counter, a monitor's from the
+monitor, and an environment preview names the scope, the hidden flag and the global value. They reach the client as `ChooserPreview::Markup` lines, with the
 drawn-as-parent title in the selected item's `detail`.
 
 # Keys
@@ -49,9 +57,12 @@ without wrap, page keys, `g`/`G`, row shortcuts, Right expanding a collapsed row
 descending an expanded one, Left collapsing or moving to the parent or up a row, `M--`
 and `M-+` keeping the current line, the three-state `v` cycle, `t`/`T`/`C-t` tagging
 (keyboard `t` does not move), search with `n`/`N` over the whole tree, filter and `c`,
-`H`, help on `C-h`/`F1`, `s`/`w`/`S`/`W`/Enter scope selection with flag and choice
-cycling, `a` for array keys, and the `d`, `u`, `D`, `U` single-key confirmations
-(`-y` answers them at once).
+`H`, `C`, help on `C-h`/`F1`, `s`/`w`/`S`/`W`/Enter scope selection with flag and choice
+cycling, `a` for array and hook keys, `e` for an option value, a key's Command or Note or
+an environment value in the editor, Enter on a section root for the 3.8 new option, hook,
+environment or key prompt, and the `d`, `u`, `D`, `U` single-key confirmations (`-y`
+answers them at once; shown, they carry the `SINGLE` prompt flag). A rebuild keeps the
+scroll offset the way 3.8's `mode_tree_check_selected` does.
 
 # Prompts
 
@@ -104,10 +115,21 @@ puts the prompt in command mode with the cursor stepped back rather than cancell
 three `KEYC_VI` word motions, and the daemon sends `message-command-style` in
 `ChooserPresentation.prompt_style` while the prompt sits there.
 
+Customize prompts share the server's prompt history since 2026-10-10 (`fix.followups-3`):
+`Up`/`C-p` and `Down`/`C-n` walk the command list, or the search list for the search and
+filter prompts (mode-tree.c raises those as `PROMPT_TYPE_SEARCH`), and Enter adds a typed
+non-empty answer to it; a single-key prompt adds nothing. The choosers' filter prompts and
+the window tree's `:` prompt (`ChooserPrompt` in the daemon) walk and feed the same lists, and
+since `fix.followups-4` they edit through the same `ModePrompt` (cursor keys, C-a, C-e, C-k, C-u,
+C-w, and the vi table under `status-keys vi`), with the cursor column in
+`ChooserPresentation.prompt_column`. An answer the mode refuses, or a
+command it runs that fails, is a status message for `display-time` with no command behind it,
+so no `after-display-message` hook sees it.
+
 # Limits
 
-Not built: the key-binding reset for keys whose default command changed in place, prompt
-history (`Up`/`Down` in an edit prompt), `Tab` completion in a command prompt, and `C-y`
+Not built: the key-binding reset for keys whose default command changed in place,
+`Tab` completion in a command prompt, and `C-y`
 pasting the top buffer, which is also what vi `p` maps onto. Rows are rebuilt live, so an
 option changed from outside shows at once where the pin shows it after its next build.
 `mode_tree_display_menu` on `MouseDown3Pane` is built since 2026-09-19: the press selects

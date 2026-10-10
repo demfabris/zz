@@ -1,12 +1,15 @@
 # Pane-local spawn styles inherit from the window when omitted. Repeated
 # creation flags store their final raw value, and -T expands after spawn in
-# the original target pane's live active state.
+# the original target pane's live active state. The titled panes run cat: a
+# shell prompt that sends OSC 0 (Arch's /etc/bash.bashrc, zz's shell
+# integration) would race select-pane -T.
 set-window-option -t w:0 window-style fg=colour10
 set-window-option -t w:0 window-active-style fg=colour11
 set-window-option -t w:0 pane-border-style fg=colour12
 set-window-option -t w:0 pane-active-border-style fg=colour13
+respawn-pane -k -t w:0.0 cat
 select-pane -t w:0.0 -T source-zero
-split-window -d -h -t w:0.0
+split-window -d -h -t w:0.0 cat
 select-pane -t w:0.1 -T decoy-one
 out: show-options -pAv -t w:0.1 window-style
 out: show-options -pAv -t w:0.1 window-active-style

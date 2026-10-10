@@ -160,10 +160,11 @@ check_equal follow-stays-at-the-bottom 0 "$(value scroll_position)"
 main_client send-keys -t "$pane" -X refresh-off
 main_client send-keys -t "$pane" -X cancel
 
-# Both stock tables bind r to the pin's stored send-keys shape.
-check_equal emacs-r-binding 'send-keys -X refresh-toggle' \
+# Both stock tables bind r to the pin's stored send-keys shape: refresh-now in
+# tmux 3.8 (key-bindings.c:599 and 709), refresh-toggle at the d77c9dc6 pin.
+check_equal emacs-r-binding 'send-keys -X refresh-now' \
     "$(main_client list-keys -T copy-mode 2>/dev/null | sed -n 's/^bind-key  *-T copy-mode  *r  *//p' | head -n 1)"
-check_equal vi-r-binding 'send-keys -X refresh-toggle' \
+check_equal vi-r-binding 'send-keys -X refresh-now' \
     "$(main_client list-keys -T copy-mode-vi 2>/dev/null | sed -n 's/^bind-key  *-T copy-mode-vi  *r  *//p' | head -n 1)"
 
 if [ "$check_count" -ne 13 ]; then

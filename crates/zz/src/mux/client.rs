@@ -34,8 +34,8 @@ use zz_protocol::{
     DisplayPanesState, Event, EventPayload, GitMark, GuiResponse, InputMessage, KeyBindingSnapshot,
     KeyTableSnapshot, LayoutNode, MenuState, MuxOptionKey, MuxSnapshot,
     NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION, PaneId, PaneKindSnapshot, PastedImageFormat,
-    PathEntry, PathListRoot, PopupState, ProtocolError, ProtocolMessage, ServerError, ServerHello,
-    SessionId, TerminalUiCommand, WindowSnapshot,
+    PathEntry, PathListRoot, ProtocolError, ProtocolMessage, ServerError, ServerHello, SessionId,
+    TerminalUiCommand, WindowSnapshot,
 };
 use zz_terminal::{
     AppearanceProvenance, ClipboardTarget, IMAGE_PLACEHOLDER_SCHEME, PackedCell,
@@ -450,6 +450,7 @@ fn pane_path_and_index(
             *next_index += 1;
             (*pane == target).then(|| (path.clone(), index))
         }
+        LayoutNode::Empty => None,
         LayoutNode::Split { first, second, .. } => {
             path.push(false);
             let found = pane_path_and_index(first, target, path, next_index);
@@ -503,6 +504,7 @@ fn visit_browser_panes(
                 *best = Some(BrowserTarget { score, pane: *pane });
             }
         }
+        LayoutNode::Empty => {}
         LayoutNode::Split { first, second, .. } => {
             path.push(false);
             visit_browser_panes(
@@ -744,6 +746,7 @@ struct HostConnection {
     reconnect_attempt_in_flight: Option<u32>,
     reconnect_attach: Option<ReconnectAttachState>,
     in_flight_commands: RwLock<VecDeque<(u64, String)>>,
+    watched_commands: RwLock<VecDeque<(u64, bool)>>,
     ssh_auth_declined: bool,
     background_core: ClientCore,
 }
@@ -771,6 +774,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
+            watched_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         }
@@ -842,6 +846,7 @@ impl HostConnection {
             reconnect_attempt_in_flight: None,
             reconnect_attach: None,
             in_flight_commands: RwLock::new(VecDeque::new()),
+            watched_commands: RwLock::new(VecDeque::new()),
             ssh_auth_declined: false,
             background_core: ClientCore::new(),
         })
@@ -859,6 +864,23 @@ impl HostConnection {
         let mut in_flight = self.in_flight_commands.write();
         let index = in_flight.iter().position(|(id, _)| *id == request_id)?;
         in_flight.remove(index).map(|(_, name)| name)
+    }
+
+    fn watch_command(&self, request_id: u64) {
+        let mut watched = self.watched_commands.write();
+        while watched.len() >= MAX_TRACKED_COMMANDS {
+            watched.pop_front();
+        }
+        watched.push_back((request_id, false));
+    }
+
+    fn settle_command(&self, request_id: u64) -> bool {
+        let mut watched = self.watched_commands.write();
+        let Some((_, settled)) = watched.iter_mut().find(|(id, _)| *id == request_id) else {
+            return false;
+        };
+        *settled = true;
+        true
     }
 
     fn reroute(&self, host: HostId) {
@@ -969,10 +991,8 @@ pub struct MuxClient {
     choose_tree_closed_revision: u64,
     choose_buffer_revision: u64,
     display_panes_revision: u64,
-    popup_revision: u64,
     menu_revision: u64,
     confirm_revision: u64,
-    popup_pane: Option<PaneId>,
     next_prefix_cancel_request: u64,
     prefix_cancelled_request: Option<u64>,
     sidebar_focus_revision: u64,
@@ -1118,10 +1138,8 @@ impl MuxClient {
             choose_tree_closed_revision: 0,
             choose_buffer_revision: 0,
             display_panes_revision: 0,
-            popup_revision: 0,
             menu_revision: 0,
             confirm_revision: 0,
-            popup_pane: None,
             next_prefix_cancel_request: 0,
             prefix_cancelled_request: None,
             sidebar_focus_revision: 0,
@@ -2477,16 +2495,6 @@ impl MuxClient {
     }
 
     #[must_use]
-    pub(crate) fn popup(&self) -> Option<&PopupState> {
-        self.core.popup()
-    }
-
-    #[must_use]
-    pub(crate) fn popup_revision(&self) -> u64 {
-        self.popup_revision
-    }
-
-    #[must_use]
     pub(crate) fn menu(&self) -> Option<&MenuState> {
         self.core.menu()
     }
@@ -2537,6 +2545,11 @@ impl MuxClient {
             .iter()
             .find(|window| window.id == focused_window)
             .map(|window| window.active_pane)
+    }
+
+    #[must_use]
+    pub(crate) fn modal_capture(&self) -> Option<PaneId> {
+        self.core.modal_capture()
     }
 
     pub(crate) fn send_input(&self, input: InputMessage) -> bool {
@@ -2747,7 +2760,27 @@ impl MuxClient {
         self.execute_on_host(self.attached_host, command);
     }
 
-    pub fn execute_on_host(&self, host: HostId, command: CommandInvocation) {
+    pub fn execute_tracked(&self, command: CommandInvocation) -> Option<u64> {
+        let request_id = self.execute_on_host(self.attached_host, command)?;
+        self.attached_connection().watch_command(request_id);
+        Some(request_id)
+    }
+
+    #[must_use]
+    pub fn command_settled(&self, request_id: u64) -> bool {
+        self.attached_connection()
+            .watched_commands
+            .read()
+            .iter()
+            .any(|&(id, settled)| id == request_id && settled)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn watch_command_for_test(&self, request_id: u64) {
+        self.attached_connection().watch_command(request_id);
+    }
+
+    pub fn execute_on_host(&self, host: HostId, command: CommandInvocation) -> Option<u64> {
         let started = diagnostics::timer(DIAGNOSTIC_TARGET);
         log::trace!(
             target: "zz::diagnostics::mux",
@@ -2755,33 +2788,41 @@ impl MuxClient {
         );
         let Some(connection) = self.connections.get(&host) else {
             log::warn!("cannot send mux command to unknown fleet host {host:?}");
-            return;
+            return None;
         };
         let name = command.name.clone();
-        if let Some(client) = &connection.client {
-            match client.execute(command) {
-                Ok(request_id) => connection.track_command(request_id, name),
-                Err(error) => log::warn!("failed to send mux command: {error}"),
-            }
+        let sent = if let Some(client) = &connection.client {
+            client.execute(command)
         } else {
             #[cfg(test)]
             if let Some(client) = &connection.fake_client {
-                match client.execute(command) {
-                    Ok(request_id) => connection.track_command(request_id, name),
-                    Err(error) => log::warn!("failed to send mux command: {error}"),
+                let sent = client.execute(command);
+                if let Ok(request_id) = sent {
+                    connection.track_command(request_id, name);
                 }
-                return;
+                return sent.ok();
             }
             log::trace!(
                 target: "zz::diagnostics::mux",
                 "execute skipped: no client for host={host:?}",
             );
-        }
+            return None;
+        };
         log::trace!(
             target: "zz::diagnostics::mux",
             "execute end elapsed_us={}",
             diagnostics::elapsed_us(started)
         );
+        match sent {
+            Ok(request_id) => {
+                connection.track_command(request_id, name);
+                Some(request_id)
+            }
+            Err(error) => {
+                log::warn!("failed to send mux command: {error}");
+                None
+            }
+        }
     }
 
     pub fn new_session(&self, host: HostId) {
@@ -3048,8 +3089,6 @@ impl MuxClient {
         self.pending_commands_revision = self.pending_commands_revision.wrapping_add(1).max(1);
         self.command_output = None;
         self.command_output_diff.invalidate();
-        self.popup_pane = None;
-        self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
         self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
     }
@@ -3077,10 +3116,6 @@ impl MuxClient {
         self.choose_tree_closed_revision = self.choose_tree_revision;
         self.choose_buffer_revision = self.choose_buffer_revision.wrapping_add(1).max(1);
         self.display_panes_revision = self.display_panes_revision.wrapping_add(1).max(1);
-        if let Some(pane) = self.popup_pane.take() {
-            self.forget_pane(pane);
-        }
-        self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
         self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
         self.confirm_revision = self.confirm_revision.wrapping_add(1).max(1);
         self.clear_all_kitty_images();
@@ -3656,7 +3691,7 @@ impl MuxClient {
     }
 
     fn report_command_failure(
-        &self,
+        &mut self,
         host: HostId,
         request_id: u64,
         error: &ServerError,
@@ -3665,10 +3700,10 @@ impl MuxClient {
         if request_id == 0 {
             return false;
         }
-        let tracked = self
-            .connections
-            .get(&host)
-            .and_then(|connection| connection.take_command(request_id));
+        let tracked = self.connections.get(&host).and_then(|connection| {
+            connection.settle_command(request_id);
+            connection.take_command(request_id)
+        });
         match tracked {
             Some(name)
                 if matches!(
@@ -3832,6 +3867,7 @@ impl MuxClient {
                 }) => {
                     if let Some(connection) = self.connections.get(&host) {
                         connection.take_command(request_id);
+                        connection.settle_command(request_id);
                     }
                 }
                 _ => {}
@@ -3965,16 +4001,6 @@ impl MuxClient {
             }
             CoreEvent::DisplayPanesChanged => {
                 self.display_panes_revision = self.display_panes_revision.wrapping_add(1).max(1);
-            }
-            CoreEvent::PopupChanged => {
-                let next = self.core.popup().map(|popup| popup.pane);
-                if let Some(previous) = self.popup_pane
-                    && Some(previous) != next
-                {
-                    self.forget_pane(previous);
-                }
-                self.popup_pane = next;
-                self.popup_revision = self.popup_revision.wrapping_add(1).max(1);
             }
             CoreEvent::MenuChanged => {
                 self.menu_revision = self.menu_revision.wrapping_add(1).max(1);
@@ -4352,7 +4378,11 @@ impl MuxClient {
                 }
             }
             CommandResponse::Success { request_id, .. } => {
-                self.attached_connection().take_command(request_id);
+                let connection = self.attached_connection();
+                connection.take_command(request_id);
+                if connection.settle_command(request_id) {
+                    cx.notify();
+                }
                 self.error = None;
             }
         }
@@ -4417,17 +4447,14 @@ impl MuxClient {
         let connection = self.attached_connection_mut();
         connection.full_requests_pending.remove(&pane);
         connection.history.forget(pane);
-        if self.popup_pane != Some(pane) {
-            self.request_history_backfill(pane);
-        }
+        self.request_history_backfill(pane);
     }
 
     fn apply_terminal_patch(&mut self, pane: PaneId, patch: TerminalViewportPatch) {
         self.kitty_image_cache(pane);
         let retained = self.viewports.get(&pane).cloned();
-        let request_missing = retained.is_none()
-            && (snapshot_contains_pane(self.core.snapshot(), pane)
-                || self.popup_pane == Some(pane));
+        let request_missing =
+            retained.is_none() && snapshot_contains_pane(self.core.snapshot(), pane);
         let request_failed_patch = retained.is_some();
         let apply_result = if let Some(retained) = retained {
             let mut retained = retained.write();
@@ -4447,7 +4474,7 @@ impl MuxClient {
         };
         if apply_result.is_err() && (request_failed_patch || request_missing) {
             self.request_full_viewport(pane);
-        } else if apply_result.is_ok() && self.popup_pane != Some(pane) {
+        } else if apply_result.is_ok() {
             self.request_history_backfill(pane);
         }
     }
@@ -9213,6 +9240,10 @@ mod tests {
             pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
+            sx: 0,
+            sy: 0,
         }
     }
 

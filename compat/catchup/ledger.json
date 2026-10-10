@@ -673,7 +673,7 @@
       "id": "float.core",
       "track": "float",
       "title": "Floating panes in the mux and daemon",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "float.design",
         "pin.layout-v2",
@@ -707,7 +707,7 @@
         "choose-tree -O z lists panes in pane_z order; pane.floating-model turns adopted with each item closing as proved (option:editor in float.keys, nested-attach-in-popup keeps its fixture requirement); just compat check passes."
       ],
       "branch": "catchup/float.core",
-      "sha": null,
+      "sha": "b260b7404",
       "notes": [
         "2026-10-09: pin.move moved semantic:move-pane-tiled-extension into adopted pane.floating-model; decide whether it closes or goes back to native.",
         "2026-10-09: session 1 at b4d83d69a: step 1 done, step 2 half (floating-panes scenario 75 steps clean vs 3.8; 21 pane.floating-model items closed). Resume: resize-pane on floats, swap-pane modal/float errors and -U/-D skipping floats, missing scenario lines, directional select-pane/compass hit order for floats, then steps 3-6",
@@ -717,14 +717,15 @@
         "2026-10-09: Codex review 1 (float.core-1.md): 9 P1 + 1 P2 (preset split-id panic, popup retention before spawn, float split validates late, new-pane -I stdin, popup kill 129, resize/move on zoomed floats, after-split-window hook, border-status -y, new-pane -M closed early); sent to the session 3 lane.",
         "2026-10-09: Session 3 done at 8c786438c: review 1's 10 findings fixed (new-pane -M reopened into float.keys); display-popup.modal-pane gap + 9 known differentials (34cd5da4); floating-panes 182 + floating-zoom 55 + floating-events 39 steps clean vs 3.8; 5 crates' full tests, clippy, fmt, compat check. Review 2 running.",
         "2026-10-09: Codex review 2 (float.core-2.md): 5 P1 (float split -l parsed late, select active pane clears zoom, join-pane loses zoomed float z order, -P forward ignores hidden floats, float border title off with window status off: already fixed on float.clients) + 1 P2 (more layout round trips); final fix pass sent, no third review.",
-        "2026-10-09: Final fix pass done at ae87b1ec0 (review 2's findings 1-4 + P2; finding 5 lives on float.clients): floating-panes 211, floating-zoom 77, floating-events 39 steps clean vs 3.8; zz-mux 693. Done; merges to main with float.clients and float.keys as one unit."
+        "2026-10-09: Final fix pass done at ae87b1ec0 (review 2's findings 1-4 + P2; finding 5 lives on float.clients): floating-panes 211, floating-zoom 77, floating-events 39 steps clean vs 3.8; zz-mux 693. Done; merges to main with float.clients and float.keys as one unit.",
+        "2026-10-09: Merged to main as one unit with the float track (catchup/float.keys d46216ca2) after the whole-track review's final fix pass; M1/M3 full suite running on b260b7404."
       ]
     },
     {
       "id": "float.clients",
       "track": "float",
       "title": "Floating panes in the desktop, web/iOS and raw TUI clients",
-      "status": "review",
+      "status": "merged",
       "deps": [
         "float.core"
       ],
@@ -750,7 +751,7 @@
         "rg 'PopupState|PopupAction|EventPayload::Popup' finds nothing under crates/zz, crates/zz-tui, crates/zz-client or clients/."
       ],
       "branch": "catchup/float.clients",
-      "sha": null,
+      "sha": "b260b7404",
       "notes": [
         "2026-10-09: branches from catchup/float.core (not main): float.core alone on main would make popups invisible. The float track merges to main as one unit (core + clients + keys).",
         "PAUSED 2026-10-09: branch catchup/float.clients created from catchup/float.core in slot b; no lane launched yet.",
@@ -760,14 +761,16 @@
         "2026-10-09: Fix pass done at dcecfc5d3 (float.core ae87b1ec0 merged): review 1's 8 P1 fixed with tests, tui-floating 12/12 vs 3.8, drag commits as one command list (run-shell -C list); screenshots open (GPU down). Open: display-popup -T title missing when the popup's pane-border-style/window-style options are set (lane continuing). Review 2 running.",
         "2026-10-09: Codex review 2 (float.clients-2.md): 7 P1 (TUI crop rewrites rect: damage rows, kitty placements, pane-mode re-centre; mode cursor through floats; iOS browsers live under a modal scrim; no-op drag commit sticks; bottom-status resize uses canvas height) + 2 P2 (web title markup, screenshots); final fix pass queued after the -T title fix. A whole-track Codex review runs before the float track merges.",
         "2026-10-09: Final pass done at ca5ae494c: popup -T title (ctrl.rs client view), review 2's 7 P1 + web title markup; tui-floating 15/15 vs 3.8. Left: raw TUI ignores a float pane's window-style (popup-style background), tui-overlays popup cases need master-model known drift (title column, O flag), drag height in a window with no tiled pane needs the window height on the wire; screenshots (GPU). Short follow-up lane in slot b.",
-        "2026-10-09: Follow-up done at fd87e8eba: float window-style in the raw TUI (popup colours as 3.8), tui-overlays popup cases pass with 3 master-model drifts (title column, O flag, odd-height centring one row up: accepted by the orchestrator under display-popup.modal-pane), WindowSnapshot sx/sy appended under 108 for drags in float-only windows. Desktop/web still map theme colours to zz's palette. Screenshots open (GPU). Done; merges with the float track."
+        "2026-10-09: Follow-up done at fd87e8eba: float window-style in the raw TUI (popup colours as 3.8), tui-overlays popup cases pass with 3 master-model drifts (title column, O flag, odd-height centring one row up: accepted by the orchestrator under display-popup.modal-pane), WindowSnapshot sx/sy appended under 108 for drags in float-only windows. Desktop/web still map theme colours to zz's palette. Screenshots open (GPU). Done; merges with the float track.",
+        "2026-10-09: Merged to main as one unit with the float track (catchup/float.keys d46216ca2) after the whole-track review's final fix pass; M1/M3 full suite running on b260b7404.",
+        "2026-10-10: 2026-10-10: Screenshots taken at 203958e2b after the alienware reboot (kept on alienware in ~/.cache/zz-catchup/shots): desktop (headless gamescope) and web (headless Chrome on WebGL2) each show a float, a modal, an over-zoom float with the Unzoom pill, and a window with no tiled pane, all placed where list-panes puts them. Found: (1) desktop and web draw a float's row 0 blank once text reaches its last row, while capture-pane has it; a float with a spare row is fine; the raw TUI is not affected (tui-floating no-tiled passes). (2) Desktop float headers draw 3.8's [t][z][x] controls right after the title instead of at #[align=right]. (3) Under headless Chrome with WebGPU, the device was destroyed and the web renderer panicked in StagingBelt::write_buffer (getMappedRange) instead of recovering; WebGL2 works."
       ]
     },
     {
       "id": "float.keys",
       "track": "float",
       "title": "Move table, prefix * @ g, pane menu Float, mouse drag, editor",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "float.core",
         "pin.keys-copy"
@@ -795,7 +798,7 @@
         "keys.move-table closes; keys.default-prefix drops * @ g Tab BTab; option:editor closes."
       ],
       "branch": "catchup/float.keys",
-      "sha": null,
+      "sha": "b260b7404",
       "notes": [
         "2026-10-09: float.core deleted PopupPointerState; build drag on MouseKey.press (on the wire, ignored by the daemon until this item). Branch from the float.clients branch tip.",
         "2026-10-09: Branched from catchup/float.clients f61c2f2f1 (float track merges as one unit).",
@@ -805,7 +808,8 @@
         "2026-10-09: Integration done at 97d98bb59: float.clients fd87e8eba + main (twice) merged; counts recomputed; display-panes code taught about floats; tui-floating 34/34, tui-mouse 67/67, tui-overlays 49, tui-client-commands 406, tui-caps 370, floating scenarios clean; 9 crates clippy. Whole-track Codex review running.",
         "2026-10-09: Whole-track Codex review (float.keys-2.md): 7 P1 (swap-pane -Z over-zoom target, desktop geometry while a float is zoomed, display-panes float z order, desktop float indicators, TUI pane-mode crop at right/bottom, modified clicks outside a modal, select-layout -o z order); final fix pass sent with a main merge (zz-gpui rename). Merges to main after it.",
         "2026-10-09: PAUSED 2026-10-09 (usage limit): final fix pass for the whole-track review's 7 P1 (float.keys-2.md) plus a main merge (zz-gpui rename) was in progress in slot h; the lane was stopped mid-pass. Resume: relaunch on catchup/float.keys with 'continue from the branch and uncommitted changes in zz-cu-h', finish the 7 P1, rerun the integration proof list and zz-cli, then merge the float track to main and run the M3 full suite. Then pin.customize-3-8.",
-        "2026-10-09: RESUMED 2026-10-09 evening: no unfinished merge; main integrated to 9c6ed3dc7 (417ab9603, recount 2a66f5a1f, pushed); final pass relaunched in slot h continuing from the uncommitted review fixes. Slot b removed (float.clients is merged into float.keys)."
+        "2026-10-09: RESUMED 2026-10-09 evening: no unfinished merge; main integrated to 9c6ed3dc7 (417ab9603, recount 2a66f5a1f, pushed); final pass relaunched in slot h continuing from the uncommitted review fixes. Slot b removed (float.clients is merged into float.keys).",
+        "2026-10-09: Merged to main as one unit with the float track (catchup/float.keys d46216ca2) after the whole-track review's final fix pass; M1/M3 full suite running on b260b7404."
       ]
     },
     {
@@ -912,7 +916,7 @@
       "id": "pin.customize-3-8",
       "track": "pin",
       "title": "3.8's rebuilt customize mode (window-customize.c)",
-      "status": "active",
+      "status": "merged",
       "deps": [
         "float.keys",
         "pin.formats-options-2"
@@ -934,11 +938,17 @@
         "The customize-mode context formats (is_environment, environment_*, option_is_hook, option_is_monitor, option_monitor) resolve as 3.8."
       ],
       "branch": "catchup/pin.customize-3-8",
-      "sha": null,
+      "sha": "f8733aa89",
       "notes": [
         "2026-10-09: split from pin.formats-options-2 session 1 (959a3fa27); about 1,400 lines of window-customize.c: hook and environment sections, C for changed only, editable array keys, fire counts in the preview, 3.8 mode-tree prefix changes. Waits for the float track (float.keys adds the customize e editor in customize.rs and render.rs).",
         "2026-10-09 (fix.followups): customize prompts answered with a single key do not carry tmux's SINGLE prompt flag in mode style expansion (needs a small accessor on the customize prompt in zz-mux).",
-        "2026-10-09: Branched from catchup/float.keys 2a66f5a1f (it carries the customize e editor); merges to main after the float track, then merges main."
+        "2026-10-09: Branched from catchup/float.keys 2a66f5a1f (it carries the customize e editor); merges to main after the float track, then merges main.",
+        "2026-10-09: Session 1 done at a854f793d: 3.8 customize tree (hook/environment sections, C, e on options/keys/environment, hook array edits, preview fire counts and monitors, SINGLE flag), pin.formats-options gap closed; tui-client-commands 556/556 (201 customize asserted), tui-mouse 81/81, tui-caps 410/410. Review 1 running.",
+        "2026-10-09: Codex review 1: 4 P1 (array-key rename loses the hook on a failed insert, numeric key canonicalization, monitor unset leaves the subscription, hook reset single-scope) + 2 P2; fix pass sent with a main merge.",
+        "2026-10-09: Fix pass 87195a51f + main merge dc17074e3: 6 findings fixed with tests; tui-client-commands 556/556, tui-mouse 81/81, tui-caps 410/410. Review 2 running; merges after the M1/M3 suite.",
+        "2026-10-09: Codex review 2: P1 rename with a literal 'a]b' key still unsets the original (send one stopping command list, quote the key), P2 -NAME keeps the hidden flag; final fix pass sent.",
+        "2026-10-09: Final pass 27c54517a: stop_on_error results, hidden flag kept on -NAME; orchestrator reverted the parser loosening for a]b keys (customize refuses them instead); short follow-up sent.",
+        "2026-10-09: Merged after the final pass (9c04072f3); merge checks green (clippy, zz-client 225, zz-cli 127+149, zz-tui 267, zz-daemon 1590, zz-mux 722, compat check). Every pin.* item is merged: M2 reached; its full suite is the M1/M3 run on b260b7404 plus this merge's checks, with corpus rows in fix.corpus-3-8."
       ]
     },
     {
@@ -969,6 +979,122 @@
         "2026-10-09: Done at dfe9852ba: zz events session filter via zz_event_session (outside the 3.8 payload), pane events feed wait-for -E without a hook (pane_event_if_observed). Review 1 running.",
         "2026-10-09: Codex review 1: 2 P2 (display-panes-* option order, #{O:}/window-neighbour byte paths unmeasured); final fix pass sent.",
         "2026-10-09: Merged; checks green (clippy 6 crates, zz-cli 127+149, zz-terminal 457, zz-daemon 1593, zz-mux 690)."
+      ]
+    },
+    {
+      "id": "fix.followups-3",
+      "track": "fix",
+      "title": "Follow-ups, third batch",
+      "status": "merged",
+      "deps": [],
+      "zones": [
+        "compat/tui-mouse.sh",
+        "crates/zz-mux/src/command/customize.rs",
+        "crates/zz-daemon/src/daemon.rs",
+        "crates/zz-mux/src/command/panes_mode.rs"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each line in the notes is fixed against tmux 3.8 with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
+      ],
+      "branch": "catchup/fix.followups-3",
+      "sha": "5f0678e3b",
+      "notes": [
+        "(pin.customize-3-8) tui-mouse.sh --self-check times out at 'zz's context click aimed one cell further along': the border-binding sabotage before it leaves zz in copy mode and a '(jump to forward)' prompt eats the typed marker; the 6 customize sabotages after it never run. Same on the float.keys base.",
+        "(pin.customize-3-8) apply_customize_result drops the error of a failed customize command; tmux shows it as a status message. Mode prompts have no shared prompt history (Up does nothing).",
+        "(pin.customize-3-8) customize add-prompt errors go out as display-message -l, which fires after-display-message hooks; tmux's own error path does not.",
+        "(float.keys final pass) display-panes: a float pushed past the window's left or top edge leaves tile content under it (3.8 blanks the area; needs a wire change); pane-border-status line rules for floats; display-panes -Z does not blank a float's inside before its label.",
+        "2026-10-10: Lane done at 1663d7a8f: tui-mouse self-check race fixed (all sabotages caught, 81/81), customize errors as timed status messages, prompt history in customize and choosers, display-panes float clears (wire append under 108) and edge-cell status lines; tui-floating 44/44, tui-choosers 107/107. Review 1 running.",
+        "2026-10-10: Codex review 1: P1 history Down panics after another client shrinks the history, P2 chooser search answers not recorded in shared history; final pass sent.",
+        "2026-10-10: Merged after the final pass (8dc1f83b1); merge checks green (clippy 5 crates, zz-protocol 296, zz-client 225, zz-cli 127+149, zz-tui 267, zz-daemon 1594, zz-mux 731, compat check)."
+      ]
+    },
+    {
+      "id": "fix.corpus-3-8",
+      "track": "fix",
+      "title": "Corpus rows red at the 3.8 pin in the M1/M3 full run",
+      "status": "merged",
+      "deps": [],
+      "zones": [
+        "compat/scenarios",
+        "compat/attached-client.sh",
+        "crates/zz-daemon/src",
+        "crates/zz-mux/src",
+        "crates/zz-cli/src"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each scenario below is clean against tmux 3.8 under compat/run.sh --strict-geometry, or its remaining difference is registered (known differential or gap) with the 3.8 source line or ruling behind it: alerts, known/known-main-preset-two-panes, smoke/command-flag-errors, smoke/command-prompt-chain, smoke/command-prompt-editing, smoke/config-chain-parse-abort, smoke/config-discovery-launcher, smoke/copy-mode-refresh, smoke/display-menu-action-queue, smoke/display-menu-mouse, smoke/display-menu-paste, smoke/format-listing, smoke/format-trace, smoke/launcher-installed-layout, smoke/pane-tmux-path, smoke/plugin-runtime-resurrect-restore.",
+        "compat/attached-client.sh passes against tmux 3.8.",
+        "Each row's cause is named in the lane report: a probe written for the d77c9dc6 pin (update it to 3.8 and keep the old pin's answer as a comment), 3.8 drift in zz (fix), a regression from a catch-up merge (fix, naming the merge), or harness/infra."
+      ],
+      "branch": "catchup/fix.corpus-3-8",
+      "sha": "8c50f9429",
+      "notes": [
+        "2026-10-09: first full-corpus run at the 3.8 pin (main b260b7404, the float track merge); every row above failed its first pass and a solo retry. Log: ~/.cache/zz-catchup/logs/m3-run-sh.log on alienware. Known before the run: smoke/config-chain-parse-abort fails on the tmux side (filed under pin.hooks-events); smoke/display-menu-mouse's probe was written for the old pin and 3.8 fails its own checks (float.keys note).",
+        "2026-10-10: Lane done at aa6581482: all 16 rows clean vs 3.8 and attached-client PASS; causes: 3.8 drift fixed in zz (session alert flags, config error deferral, display-menu no longer blocks, ## trace), float-merge regressions (command-flag-errors totals, attached-client popup expectations under display-popup.modal-pane), old-pin probes, harness (pixel-size query, Arch prompt retitle, the suite's copied binary). Review 1 running.",
+        "2026-10-10: Codex review 1: 2 P2 (zz-side popup probe in attached-client.sh skips focus handling and process-exit release); final pass sent.",
+        "2026-10-10: Merged after the final pass (efa77927e: attached-client asserts zz's modal focus handling and process-exit release); merge checks green (clippy, zz-cli 127+149, zz-client 225, zz-daemon 1590, zz-mux 722, compat check)."
+      ]
+    },
+    {
+      "id": "fix.followups-4",
+      "track": "fix",
+      "title": "Follow-ups, fourth batch (harness robustness at the 3.8 pin)",
+      "status": "merged",
+      "deps": [
+        "fix.corpus-3-8"
+      ],
+      "zones": [
+        "compat/scenarios/smoke/fixtures",
+        "compat/scenarios",
+        "crates/zz-terminal/src"
+      ],
+      "gaps": [],
+      "accept": [
+        "Each line in the notes is fixed with a test or scenario line, or registered with a measured reason, or ruled out with a reason in the lane report."
+      ],
+      "branch": "catchup/fix.followups-4",
+      "sha": "1c3dc7d4d",
+      "notes": [
+        "(fix.corpus-3-8) chooser-drive.py, send-keys-attach.py, graphics-drive.py and bare-client.py do not answer 3.8's pixel-size query (CSI 14 t), so tmux holds a lone Escape 500 ms on their side; pty-drive.py now answers it. Share one answer path.",
+        "(fix.corpus-3-8) On Arch hosts /etc/bash.bashrc retitles the pane at every prompt, racing select-pane -T in scenarios that use a default-shell pane; make such scenarios run a fixed program (cat, sh) as the corpus lane did.",
+        "(fix.corpus-3-8) zz's bash shell integration retitles every default-shell pane to 'bash' even after the distro's OSC 0, so #{pane_title} differs from tmux on such hosts. Measure; decide whether zz's integration should stop overriding a title the shell already set, or record it native with the reason.",
+        "(fix.corpus-3-8) link-window and unlink-window (3.8 commands) are missing from compat/scenarios/smoke/fixtures/command-flag-errors.tsv.",
+        "(fix.followups-3) tui-mouse --self-check 'zz's tree menu drag released on the press cell' is not caught by its own check; it only fails through a later 'Display all N possibilities' screen from tmux's shell.",
+        "(fix.followups-3) tui-client-commands CASE_NEEDLE_MODE runs display-message -p on the tmux side only, so cases that set after-display-message hooks get a skewed result.",
+        "(fix.followups-3) key-binding and choose-tree errors (publish_background_command_error) use an untimed message the raw TUI keeps; tmux clears it after display-time or on a key (customize errors now use the timed path).",
+        "(fix.followups-3) chooser prompts have no cursor editing (Left/Right, C-a, C-u...), only history.",
+        "2026-10-10: Lane done at 6787854ee: 7 of 8 notes fixed (shared CSI 14 t answerer for all pty drivers, Arch title race in 3 scenarios, link/unlink-window probes 565 clean, tui-mouse drag sabotage caught, needle polls fire no hooks, timed uppercased binding errors (now also shown on the desktop), chooser prompt editing via ModePrompt; wire append prompt_column under 108). Note 3 (zz's bash integration overriding the distro title) waits on fabrico. Review 1 running.",
+        "2026-10-10: fabrico ruled note 3: zz's bash integration yields to a title the shell set at that prompt (idle panes read user@host:dir like tmux). Goes into the fix pass with review 1's findings.",
+        "2026-10-10: Codex review 1: 2 P1 (binding errors freeze desktop repaint under display-time 0, chooser prompt cursor clamped instead of scrolling) + P2 (search prompt editing); final pass sent with the bash title ruling.",
+        "2026-10-10: Merged after the final pass (d8e6a1ef4: desktop keeps painting through binding errors, long prompts scroll, search prompt editing, bash/zsh integration yields to the prompt's title per fabrico); merge checks green (clippy 8 crates incl. zz and zz-app, zz-protocol 296, zz-client 225, zz-cli, zz-terminal 458, zz-tui 267, zz-daemon 1599, zz-mux 731, compat check)."
+      ]
+    },
+    {
+      "id": "fix.close-out",
+      "track": "fix",
+      "title": "Reds in the closing full suite",
+      "status": "merged",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src",
+        "crates/zz-daemon/src",
+        "compat/tui-superset.sh",
+        "compat/scenarios/hooks-events-structure.txt"
+      ],
+      "gaps": [],
+      "accept": [
+        "hooks-events-structure is clean against tmux 3.8: after fabrico's title ruling the pane title is the distro's user@host:dir, and zz names a broken-out window from it (6:demfabris@alienware:... where tmux says 6:bash). Window names and #{pane_current_command} come from the foreground process, never from the pane title, as in tmux; find where zz falls back to the title (fix.small-semantics added a pane_current_command fallback) and fix it.",
+        "compat/tui-superset.sh passes: its 10 'bindings' cases expect the old lowercase error text; fix.followups-4 made binding errors timed status messages with the first letter uppercased as tmux's cmdq_error does. Update the expectations (and check the timing still lets the fixture see the row).",
+        "compat/tui-client-commands.sh clock-mode-open is confirmed a clock-tick flake (rerun alone) or fixed."
+      ],
+      "branch": "catchup/fix.close-out",
+      "sha": "bd65bd9a0",
+      "notes": [
+        "2026-10-10: closing full suite on fe2812e60 (log ~/.cache/zz-catchup/logs/close/). Everything else green except the three ci-test failures outside the campaign (two zz agent::view tests, the signal-disposition race).",
+        "2026-10-10: Lane done at 5ff922c70: break-pane names the window like tmux's default_window_name (not the pane title), tui-superset expects the uppercased timed messages, clock-mode-open confirmed a minute-boundary flake; hooks-events-structure 88 clean, tui-superset 186/186, tui-client-commands 567/567 alone, zz-mux and zz-daemon packages pass.",
+        "2026-10-10: Merged after the final fix (4bb6f68d9: automatic rename after break-pane); merge checks green (clippy, zz-mux 732+, zz-cli, zz-daemon 1599, compat check)."
       ]
     }
   ]

@@ -6,7 +6,8 @@ corpus: none
 # closes it without running a row, a row key runs that row, and the characters
 # after the close reach the pane as ordinary keys.
 stage: fixtures/display-menu-paste.sh ~/display-menu-paste.sh
-stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_MENU_PASTE
 run-shell 'sh ~/display-menu-paste.sh'
 out: show-environment -g DISPLAY_MENU_PASTE

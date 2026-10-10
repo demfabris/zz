@@ -462,9 +462,6 @@ case_owner() {
   status-clicks/*)
     printf 'gap:menus.client-owned'
     ;;
-  customize-mouse-*)
-    printf 'gap:pin.formats-options'
-    ;;
   esac
 }
 note_record() {
@@ -713,6 +710,7 @@ case_click_selects_pane() {
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.1" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.1" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 3))"
   wait_for 'the pin selected pane 1' active_pane_index_is tmux 1
   settle_both MARK-click 'the click on pane 1'
@@ -738,6 +736,7 @@ case_click_user_binding() {
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 4))" "$((top + 2))"
   wait_for 'the pin ran its own mouse binding' option_is tmux @mousekey \
     "$(binding_value_for tmux)"
@@ -751,6 +750,13 @@ case_click_user_binding() {
 # The event the binding was invoked FROM. `set-option -F` expands its value
 # through the command's own format tree, which is where format.c publishes
 # mouse_x, mouse_y and mouse_pane from the invoking mouse record.
+#
+# Every first click of a case waits out KEYC_CLICK_TIMEOUT first. A press on
+# the button, location and pane of a press inside its timeout is a SecondClick,
+# and a sabotage can aim one side's click at the pane the next case clicks in.
+# That side then takes the next case's click as a SecondClick no binding
+# claims, the DoubleClick its timer replays raises copy mode, and the copy mode
+# eats the next marker as a jump prompt, on a fast box only.
 outlast_the_pin_click_timeout() {
   sleep 0.35
 }
@@ -789,6 +795,7 @@ case_click_mouse_target() {
     mark_both mousetgt
     left="$(pane_field tmux "=$INNER_SESSION:0.1" 1)"
     top="$(pane_field tmux "=$INNER_SESSION:0.1" 2)"
+    outlast_the_pin_click_timeout
     click_both 0 "$((left + 3))" "$((top + 3))"
     wait_for "the pin resolved $spelling to the clicked pane" \
       pin_pane_option_set "=$INNER_SESSION:0.1" @mousetgt
@@ -847,6 +854,7 @@ case_border_user_binding() {
   mark_both borderbind
   right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((right + 2))" "$((top + 4))"
   wait_for 'the pin ran its own border binding' option_is tmux @borderkey \
     "$(binding_value_for tmux)"
@@ -944,6 +952,7 @@ case_multi_click() {
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   column="$((left + 8))"
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$((top + 1))"
   click_both 0 "$column" "$((top + 1))"
   wait_for 'the pin copied a word' pin_buffer_has alpha
@@ -951,6 +960,7 @@ case_multi_click() {
   check_value MULTI_CLICK multi-click/double-buffer \
     "$(buffer_sample zz)" "$(buffer_sample tmux)"
   delete_buffer_both
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$((top + 1))"
   click_both 0 "$column" "$((top + 1))"
   click_both 0 "$column" "$((top + 1))"
@@ -1165,6 +1175,7 @@ case_border_click() {
   local right top
   right="$(pane_field tmux "=$INNER_SESSION:0.0" 3)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((right + 2))" "$((top + 4))"
   if pin_border_click_clears_mark; then
     wait_for 'the pin cleared its mark on a border click' pin_marked_set_is 0
@@ -1208,6 +1219,7 @@ case_status_clicks() {
   row="$(status_row)"
   column="$(status_column_of second)"
   [ -n "$column" ] || die 'the second window is not on the status row'
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$row"
   wait_for 'the pin switched window on a status click' pin_window_is 1
   settle_both 'second' 'the status click'
@@ -1292,6 +1304,7 @@ case_app_mouse() {
   local left top
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 5))" "$((top + 3))"
   wait_for "the pin's program saw the click for $label" program_saw tmux APPMOUSE 'M'
   settle_both APPMOUSE "the click for $label"
@@ -1418,6 +1431,7 @@ case_app_mouse_double_click() {
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
   row="$((top + 3))"
   column="$((left + 5))"
+  outlast_the_pin_click_timeout
   click_both 0 "$column" "$row"
   click_both 0 "$column" "$row"
   wait_for "the pin's program saw both clicks" program_saw_reports tmux CLICKREPORT 4
@@ -1637,6 +1651,7 @@ case_customize_mouse_click() {
   customize_open_both
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 6))"
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-click/screen
@@ -1683,6 +1698,7 @@ case_customize_mouse_quiet() {
   check_value MODE_POINTER customize-mouse-wheel/pane-mode \
     "$(side_command zz display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')" \
     "$(side_command tmux display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}/#{pane_mode}')"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 18))"
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-preview/screen
@@ -1702,6 +1718,7 @@ case_customize_mouse_prompt() {
   settle_pointer
   send_to_pane_both "=$INNER_SESSION:0.0" a b c d e f
   settle_pointer
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 12))" "$((top + ROWS_UNDER_TEST - 1))"
   settle_pointer
   send_to_pane_both "=$INNER_SESSION:0.0" Z
@@ -1725,6 +1742,7 @@ case_switch_mouse() {
   settle_pointer
   left="$(pane_field tmux "=$INNER_SESSION:0.0" 1)"
   top="$(pane_field tmux "=$INNER_SESSION:0.0" 2)"
+  outlast_the_pin_click_timeout
   click_both 0 "$((left + 3))" "$((top + 2))"
   settle_pointer
   check_screen MODE_POINTER switch-mouse-click/screen
@@ -1754,6 +1772,12 @@ client_session() {
 client_session_is() {
   [ "$(client_session "$1")" = "$2" ]
 }
+# The tree menu opens with its top border on the press row, so its items start
+# one row lower: Select, Edit (3.8's window_customize_menu_items), Expand, a
+# separator, Tag, Tag All, Tag None, a separator, Changed Only, a separator and
+# Cancel. Tag is the press row plus five and Tag All plus six; a release on a
+# separator closes the menu as quietly as a release on the press cell, so the
+# drag sabotage could only be caught by a gesture aimed at a real item.
 MENU_RELEASE_SABOTAGE_SIDE=""
 MENU_DRAG_SABOTAGE=""
 MENU_TAGALL_SABOTAGE=""
@@ -1829,8 +1853,8 @@ case_customize_mouse_menu() {
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Tag All' 'the tree menu for Tag'
   settle_pointer
-  menu_drag_both "$column" "$row" "$((column - 1))" "$((row + 4))"
-  menu_drag_release_both "$column" "$row" "$((column - 1))" "$((row + 4))"
+  menu_drag_both "$column" "$row" "$((column - 1))" "$((row + 5))"
+  menu_drag_release_both "$column" "$row" "$((column - 1))" "$((row + 5))"
   both_screen_lacks 'Tag All' 'the tree menu after Tag'
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag/screen
@@ -1856,14 +1880,14 @@ case_customize_mouse_menu() {
   both_screen_has 'Tag All' 'the tree menu for Tag All'
   settle_pointer
   if [ -n "$MENU_TAGALL_SABOTAGE" ]; then
-    send_mouse zz 34 "$((column - 1))" "$((row + 4))" M
-    send_mouse zz 2 "$((column - 1))" "$((row + 4))" m
-  else
     send_mouse zz 34 "$((column - 1))" "$((row + 5))" M
     send_mouse zz 2 "$((column - 1))" "$((row + 5))" m
+  else
+    send_mouse zz 34 "$((column - 1))" "$((row + 6))" M
+    send_mouse zz 2 "$((column - 1))" "$((row + 6))" m
   fi
-  send_mouse tmux 34 "$((column - 1))" "$((row + 5))" M
-  send_mouse tmux 2 "$((column - 1))" "$((row + 5))" m
+  send_mouse tmux 34 "$((column - 1))" "$((row + 6))" M
+  send_mouse tmux 2 "$((column - 1))" "$((row + 6))" m
   both_screen_lacks 'Tag All' 'the tree menu after Tag All'
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag-all/screen
@@ -1915,6 +1939,160 @@ case_customize_mouse_menu_outside() {
   check_screen MODE_POINTER customize-mouse-menu-outside-cancel/screen
 }
 
+# Floating panes under the pointer, tmux 3.8's bound drags: `C-MouseDrag1Pane`
+# and `C-MouseDrag1Empty` run `new-pane -M`, which creates a float spanning the
+# press to the pointer (`cmd_split_window_mouse_resize`); `M-MouseDrag1Pane`
+# runs `move-pane -M`; `MouseDrag1Border` on a float resizes it from the edge
+# or corner the press grabbed and moves it from the top border
+# (`cmd_resize_pane_mouse_resize_move_floating`). Each command arms
+# `c->tty.mouse_drag_update`, so every later report of the gesture drives the
+# same float until the release, whatever key it would name: each gesture's
+# last motion drops its modifier and runs over the float it drives. Channel:
+# every floating pane's size and position, and the active pane's id.
+# FLOAT_SABOTAGE_COLUMN moves zz's last motion of each gesture.
+FLOAT_SABOTAGE_COLUMN=""
+FLOAT_ROW_OFFSET=0
+FLOAT_PREFIX=""
+float_geometry() {
+  side_command "$1" list-panes -t "=$INNER_SESSION" \
+    -F '#{pane_floating_flag} #{pane_index} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}' 2>/dev/null |
+    awk '$1 == 1 { printf "%s:%s@%s;", $2, $3, $4 }'
+}
+float_active() {
+  side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active} #{pane_index}:#{pane_floating_flag}' 2>/dev/null |
+    awk '$1 == 1 { print $2; exit }'
+}
+float_count_is() {
+  [ "$(side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_floating_flag}' 2>/dev/null | grep -c 1)" = "$2" ]
+}
+float_geometry_settled() {
+  local first second
+  first="$(float_geometry "$1")"
+  sleep 0.2
+  second="$(float_geometry "$1")"
+  [ -n "$first" ] && [ "$first" = "$second" ]
+}
+float_gesture() {
+  local press="$1" motion="$2" release_button="$3"
+  shift 3
+  local cells=("$@") index last side column
+  last=$((${#cells[@]} - 2))
+  for ((index = 1; index < ${#cells[@]}; index += 2)); do
+    cells[index]=$((cells[index] + FLOAT_ROW_OFFSET))
+  done
+  for side in zz tmux; do
+    send_mouse "$side" "$press" "${cells[0]}" "${cells[1]}" M
+    for ((index = 2; index <= last; index += 2)); do
+      column="${cells[index]}"
+      if [ "$side" = zz ] && [ "$index" -eq "$last" ] && [ -n "$FLOAT_SABOTAGE_COLUMN" ]; then
+        column=$((column + FLOAT_SABOTAGE_COLUMN))
+      fi
+      if [ "$index" -eq "$last" ]; then
+        send_mouse "$side" 32 "$column" "${cells[index + 1]}" M
+      else
+        send_mouse "$side" "$motion" "$column" "${cells[index + 1]}" M
+      fi
+      sleep 0.1
+    done
+    send_mouse "$side" "$release_button" "$column" "${cells[last + 1]}" m
+  done
+}
+float_verdict() {
+  local name="$FLOAT_PREFIX$1" floats="$2"
+  wait_for "the $name floats on zz" float_count_is zz "$floats"
+  wait_for "the $name floats on tmux" float_count_is tmux "$floats"
+  wait_for "the $name geometry settled on zz" float_geometry_settled zz
+  wait_for "the $name geometry settled on tmux" float_geometry_settled tmux
+  check_value FLOAT "$name/geometry" "$(float_geometry zz)" "$(float_geometry tmux)"
+  check_value FLOAT "$name/active" "$(float_active zz)" "$(float_active tmux)"
+}
+kill_floats_both() {
+  local side pane
+  for side in zz tmux; do
+    for pane in $(side_command "$side" list-panes -t "=$INNER_SESSION" \
+      -F '#{pane_floating_flag} #{pane_id}' | awk '$1 == 1 { print $2 }'); do
+      side_command "$side" kill-pane -t "$pane" >/dev/null 2>&1 || true
+    done
+  done
+  wait_for 'zz floats gone' float_count_is zz 0
+  wait_for 'tmux floats gone' float_count_is tmux 0
+}
+case_float_create_from_pane() {
+  CASE_LABEL=float-create-pane
+  mark_both floatcreate
+  float_gesture 16 48 0 11 5 21 9 46 16 51 17
+  float_verdict float-create-pane 1
+  kill_floats_both
+}
+case_float_move() {
+  CASE_LABEL=float-move
+  mark_both floatmove
+  run_on_both new-pane -d -x 30 -y 8 -X 10 -Y 3 "$INNER_SHELL"
+  wait_for 'the zz float to move' float_count_is zz 1
+  wait_for 'the tmux float to move' float_count_is tmux 1
+  float_gesture 8 40 0 21 8 26 10 23 9 31 13
+  float_verdict float-move 1
+  kill_floats_both
+}
+case_float_border_resize() {
+  CASE_LABEL=float-border-resize
+  mark_both floatresize
+  run_on_both new-pane -d -x 30 -y 8 -X 10 -Y 3 "$INNER_SHELL"
+  wait_for 'the zz float to resize' float_count_is zz 1
+  wait_for 'the tmux float to resize' float_count_is tmux 1
+  float_gesture 0 32 0 40 7 46 7 51 9
+  float_verdict float-border-resize 1
+  float_gesture 0 32 0 51 11 56 14 58 16
+  float_verdict float-corner-resize 1
+  kill_floats_both
+}
+case_float_top_border_move() {
+  CASE_LABEL=float-top-border-move
+  mark_both floattop
+  run_on_both new-pane -d -x 30 -y 8 -X 10 -Y 3 "$INNER_SHELL"
+  wait_for 'the zz float to drag' float_count_is zz 1
+  wait_for 'the tmux float to drag' float_count_is tmux 1
+  float_gesture 0 32 0 21 4 25 7 31 9
+  float_verdict float-top-border-move 1
+  kill_floats_both
+}
+case_float_create_from_empty() {
+  CASE_LABEL=float-create-empty
+  run_on_both new-window -t "=$INNER_SESSION:1" -n empty "$INNER_SHELL"
+  run_on_both new-pane -x 20 -y 6 -X 2 -Y 2 "$INNER_SHELL"
+  local side tiled
+  for side in zz tmux; do
+    tiled="$(side_command "$side" list-panes -t "=$INNER_SESSION:1" -F '#{pane_floating_flag} #{pane_id}' |
+      awk '$1 == 0 { print $2; exit }')"
+    side_command "$side" kill-pane -t "$tiled" >/dev/null || die "$side refused kill-pane"
+  done
+  wait_for 'zz down to its float' pane_count_is zz 1
+  wait_for 'tmux down to its float' pane_count_is tmux 1
+  float_gesture 16 48 0 41 11 50 14 56 17 61 19
+  float_verdict float-create-empty 2
+  run_on_both kill-window -t "=$INNER_SESSION:1"
+  wait_for 'zz back on window 0' pane_count_is zz 1
+  wait_for 'tmux back on window 0' pane_count_is tmux 1
+}
+case_float_status_top() {
+  set_on_both status-position top
+  FLOAT_ROW_OFFSET=1
+  FLOAT_PREFIX=status-top-
+  case_float_create_from_pane
+  case_float_top_border_move
+  FLOAT_ROW_OFFSET=0
+  FLOAT_PREFIX=""
+  set_on_both status-position bottom
+}
+run_float_cases() {
+  case_float_create_from_pane
+  case_float_move
+  case_float_border_resize
+  case_float_top_border_move
+  case_float_create_from_empty
+  case_float_status_top
+}
+
 # --- dispositions ----------------------------------------------------------
 #
 # Each mode below is `same` where the two binaries are measured to agree and
@@ -1922,6 +2100,8 @@ case_customize_mouse_menu_outside() {
 # sabotage can drive a recorded channel in a case where it asserts.
 USER_BINDING_MODE=same
 USER_BINDING_REASON=""
+FLOAT_MODE=same
+FLOAT_REASON=""
 MOUSE_CONTEXT_MODE=same
 MOUSE_CONTEXT_REASON=""
 WHEEL_MODE=same
@@ -1950,8 +2130,8 @@ RIGHT_CLICK_MODE=same
 RIGHT_CLICK_REASON=""
 MODE_POINTER_MODE=same
 MODE_POINTER_REASON=""
-CUSTOMIZE_POINTER_MODE=record
-CUSTOMIZE_POINTER_REASON='PIN 3.8, gap:pin.formats-options: 3.8 rebuilt the customize tree (window-customize.c: hooks and environment sections, and Edit and Changed Only in its pointer menu), so every screen of the tree and its menu differs while zz draws the d77c9dc6 tree'
+CUSTOMIZE_POINTER_MODE=same
+CUSTOMIZE_POINTER_REASON=""
 
 run_cases() {
   start_both
@@ -1967,6 +2147,7 @@ run_cases() {
   case_mouse_context_formats
   case_border_drag
   case_border_click
+  run_float_cases
   case_status_clicks
   case_border_user_binding
   case_status_user_binding
@@ -2110,6 +2291,11 @@ sc_one_sided_border_drag() {
   BORDER_SABOTAGE_COLUMN=$((right + 2 - 4))
   case_border_drag
   BORDER_SABOTAGE_COLUMN=""
+}
+sc_one_sided_float_drag() {
+  FLOAT_SABOTAGE_COLUMN=3
+  case_float_move
+  FLOAT_SABOTAGE_COLUMN=""
 }
 # The pin's own `WheelDownStatus` unbound on zz only, so a wheel over the
 # status row steps the pin's window and leaves zz's where it was. Both wheel
@@ -2390,6 +2576,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case "zz's float drag released three cells further" catches \
+    sc_one_sided_float_drag
   self_check_case 'a longer paste under the menu on zz only' catches \
     sc_one_sided_menu_paste_tail
   self_check_case "zz's own pane marked and the pin's not" catches \

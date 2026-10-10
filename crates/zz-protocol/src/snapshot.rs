@@ -84,6 +84,7 @@ pub enum LayoutNode {
         first: Box<Self>,
         second: Box<Self>,
     },
+    Empty,
 }
 
 #[derive(Deserialize)]
@@ -96,6 +97,7 @@ enum LayoutNodeWire {
         first: Box<LayoutNode>,
         second: Box<LayoutNode>,
     },
+    Empty,
 }
 
 impl<'de> Deserialize<'de> for LayoutNode {
@@ -119,6 +121,7 @@ impl<'de> Deserialize<'de> for LayoutNode {
                 first,
                 second,
             },
+            LayoutNodeWire::Empty => Self::Empty,
         })
     }
 }
@@ -129,6 +132,7 @@ impl LayoutNode {
         match self {
             Self::Pane(id) => *id == pane,
             Self::Split { first, second, .. } => first.contains(pane) || second.contains(pane),
+            Self::Empty => false,
         }
     }
 
@@ -139,13 +143,14 @@ impl LayoutNode {
                 first.panes(output);
                 second.panes(output);
             }
+            Self::Empty => {}
         }
     }
 
     #[must_use]
     pub fn contains_split(&self, split: SplitId) -> bool {
         match self {
-            Self::Pane(_) => false,
+            Self::Pane(_) | Self::Empty => false,
             Self::Split {
                 id, first, second, ..
             } => *id == split || first.contains_split(split) || second.contains_split(split),
@@ -535,6 +540,8 @@ pub enum PaneMode {
         border_style: String,
         copy: bool,
         format: bool,
+        #[serde(default)]
+        clears: Vec<PanesModeClear>,
     },
 }
 
@@ -571,6 +578,17 @@ pub struct PanesModeBorder {
     pub cell: u8,
 }
 
+/// `window_panes_clear_floating_area`: the blank a float's frame paints over
+/// whatever is under it, before `areas[before]` is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PanesModeClear {
+    pub before: u32,
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub height: u16,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WindowSnapshot {
     pub id: WindowId,
@@ -605,6 +623,34 @@ pub struct WindowSnapshot {
     /// because `redraw_build_scene` walks the list in reverse.
     #[serde(default)]
     pub pane_z_order: Vec<PaneId>,
+    #[serde(default)]
+    pub floating: Vec<FloatingPaneSnapshot>,
+    #[serde(default)]
+    pub modal: Option<ModalPaneSnapshot>,
+    #[serde(default)]
+    pub sx: u16,
+    #[serde(default)]
+    pub sy: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FloatingPaneSnapshot {
+    pub pane: PaneId,
+    pub xoff: i32,
+    pub yoff: i32,
+    pub sx: u16,
+    pub sy: u16,
+    pub visible: bool,
+    pub border_lines: PaneBorderLines,
+    pub border_status: PaneBorderStatus,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ModalPaneSnapshot {
+    pub pane: PaneId,
+    pub capture_keys: bool,
+    pub close_on_click: bool,
+    pub close_on_cancel: bool,
 }
 
 fn deserialize_window_status_label<'de, D>(deserializer: D) -> Result<String, D::Error>
@@ -722,6 +768,10 @@ mod tests {
             pane_border_indicators: PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
+            sx: 0,
+            sy: 0,
         };
         let first = WindowId(1);
         let second = WindowId(2);
@@ -774,6 +824,10 @@ mod tests {
             pane_border_indicators: PaneBorderIndicators::Colour,
             pane_order: Vec::new(),
             pane_z_order: Vec::new(),
+            floating: Vec::new(),
+            modal: None,
+            sx: 0,
+            sy: 0,
         };
         let boundary = window("x".repeat(MAX_WINDOW_STATUS_LABEL_BYTES));
         let encoded = postcard::to_stdvec(&boundary).expect("encode boundary label");

@@ -7,10 +7,11 @@ use std::{
 use zz_protocol::LayoutNode;
 pub use zz_protocol::layout::{joined_layout, swapped_layout};
 use zz_protocol::{
-    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor, MAX_GUI_TEXT_BYTES,
-    MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot,
-    PaneSnapshot, PaneStatus, ServerError, SessionId, SessionSnapshot, SplitId, WindowId,
-    WindowSnapshot, normalize_browser_profile_name,
+    AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, EditorDescriptor,
+    FloatingPaneSnapshot, MAX_GUI_TEXT_BYTES, ModalPaneSnapshot, MuxSnapshot, PaneBorderIndicators,
+    PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot, PaneSnapshot, PaneStatus,
+    ServerError, SessionId, SessionSnapshot, SplitId, WindowId, WindowSnapshot,
+    normalize_browser_profile_name,
 };
 
 use crate::{
@@ -230,6 +231,7 @@ pub struct Pane {
     /// (spawn.c `spawn_pane`, layout.c `layout_assign_pane`).
     pub(crate) screen_extent: Option<(u16, u16)>,
     title_pinned: bool,
+    pub over_zoom: bool,
     input_options: InputOptions,
 }
 
@@ -267,7 +269,50 @@ pub struct Window {
     /// stored, kept while `window-size` is automatic so a return to manual
     /// restores it (resize.c `clients_calculate_size`).
     pub(crate) manual_extent: (u16, u16),
+    pub floats: WindowFloats,
     input_options: InputOptions,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FloatZ {
+    Front,
+    Back,
+    Forward,
+    Backward,
+    ForwardLoop,
+    BackwardLoop,
+    Index(u32),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Modal {
+    pub pane: PaneId,
+    pub last: Option<PaneId>,
+    pub capture_keys: bool,
+    pub close_on_click: bool,
+    pub close_on_cancel: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct WindowFloats {
+    pub modal: Option<Modal>,
+    pub last_new_pane: (i32, i32),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PushedZoom {
+    No,
+    Was(Option<PaneId>),
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(crate) struct FloatSpawn {
+    pub geometry: CellGeometry,
+    pub over_zoom: bool,
+    pub modal: Option<Modal>,
+    pub detached: bool,
+    pub before: bool,
+    pub full_size: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -281,6 +326,7 @@ struct SavedSelection {
     pane_order: Vec<PaneId>,
     active: PaneId,
     last_panes: Vec<PaneId>,
+    z_order: Vec<PaneId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -412,6 +458,11 @@ impl Window {
         &self.z_order
     }
 
+    #[must_use]
+    pub fn last_panes(&self) -> &[PaneId] {
+        &self.last_panes
+    }
+
     pub(crate) fn last_pane(&self) -> Option<PaneId> {
         self.last_panes.first().copied()
     }
@@ -428,8 +479,33 @@ impl Window {
             return self.layout_string(format, pane_base_index);
         };
         let (width, height) = self.layout.extent();
-        CellLayout::new(zoomed, width, height)
-            .dump_as(format, &|pane| self.leaf_state(pane, pane_base_index))
+        let mut visible = CellLayout::new(zoomed, width, height);
+        let mut next_id = 0;
+        let mut ids = || {
+            next_id += 1;
+            SplitId(next_id)
+        };
+        for pane in &self.pane_order {
+            if *pane == zoomed || !self.shows_floating(*pane) {
+                continue;
+            }
+            if let Some(geometry) = self.layout.pane_geometry(*pane) {
+                let _ = visible.float(zoomed, *pane, geometry, &mut ids);
+            }
+        }
+        visible.dump_as(format, &|pane| {
+            let mut state = self.leaf_state(pane, pane_base_index);
+            state.z = self.shows_floating(pane).then(|| {
+                let before = self
+                    .z_order
+                    .iter()
+                    .take_while(|candidate| **candidate != pane)
+                    .filter(|candidate| self.shows_floating(**candidate))
+                    .count();
+                u32::try_from(before).unwrap_or(u32::MAX)
+            });
+            state
+        })
     }
 
     fn saved_layout(&self, legacy: bool) -> SavedLayout {
@@ -442,6 +518,7 @@ impl Window {
                 .copied()
                 .filter(|pane| *pane != self.active_pane)
                 .collect(),
+            z_order: self.z_order.clone(),
         });
         SavedLayout {
             layout: self.layout.clone(),
@@ -460,7 +537,251 @@ impl Window {
             active: pane == self.active_pane,
             last: position(&self.last_panes),
             index: pane_base_index.saturating_add(position(&self.pane_order).unwrap_or_default()),
-            z: None,
+            z: self.layout.is_floating(pane).then(|| {
+                let zoomed_float = self.zoomed_pane == Some(self.active_pane)
+                    && self.layout.is_floating(self.active_pane);
+                match (zoomed_float, pane == self.active_pane) {
+                    (true, true) => 0,
+                    (true, false) => self.floats_before(pane).saturating_add(1),
+                    (false, _) => self.floats_before(pane),
+                }
+            }),
+        }
+    }
+
+    fn floats_before(&self, pane: PaneId) -> u32 {
+        let count = self
+            .z_order
+            .iter()
+            .take_while(|candidate| **candidate != pane)
+            .filter(|candidate| self.layout.is_floating(**candidate))
+            .count();
+        u32::try_from(count).unwrap_or(u32::MAX)
+    }
+
+    #[must_use]
+    pub fn is_floating(&self, pane: PaneId) -> bool {
+        self.layout.is_floating(pane)
+    }
+
+    #[must_use]
+    pub fn pane_z(&self, pane: PaneId) -> Option<u32> {
+        if !self.z_order.contains(&pane) {
+            return None;
+        }
+        let before = self
+            .z_order
+            .iter()
+            .take_while(|candidate| **candidate != pane)
+            .filter(|candidate| self.shows_floating(**candidate))
+            .count();
+        let before = u32::try_from(before).unwrap_or(u32::MAX);
+        Some(if self.shows_floating(pane) {
+            before
+        } else {
+            before.saturating_add(1)
+        })
+    }
+
+    #[must_use]
+    pub fn shows_floating(&self, pane: PaneId) -> bool {
+        if !self.layout.is_floating(pane) {
+            return false;
+        }
+        match self.zoomed_pane {
+            None => true,
+            Some(zoomed) => zoomed != pane && self.is_over_zoom(pane),
+        }
+    }
+
+    #[must_use]
+    pub fn is_over_zoom(&self, pane: PaneId) -> bool {
+        self.panes.get(&pane).is_some_and(|pane| pane.over_zoom)
+    }
+
+    #[must_use]
+    pub fn pane_is_visible(&self, pane: PaneId) -> bool {
+        match self.zoomed_pane {
+            None => true,
+            Some(zoomed) => zoomed == pane || self.shows_floating(pane),
+        }
+    }
+
+    #[must_use]
+    pub fn active_is_over_zoom(&self) -> bool {
+        self.zoomed_pane.is_some() && self.shows_floating(self.active_pane)
+    }
+
+    fn active_floats_over_zoom(&self) -> bool {
+        self.is_over_zoom(self.active_pane) && self.layout.is_floating(self.active_pane)
+    }
+
+    pub(crate) fn zoom(&mut self, pane: PaneId) -> bool {
+        if self.zoomed_pane.is_some() || self.panes.len() <= 1 || !self.panes.contains_key(&pane) {
+            return false;
+        }
+        if self.active_pane != pane && !self.active_floats_over_zoom() {
+            activate_window_pane(self, pane, false);
+        }
+        self.zoomed_pane = Some(pane);
+        if self.layout.is_floating(pane) {
+            self.lower_to_tail(pane);
+        }
+        self.clear_pane_screen_extents();
+        true
+    }
+
+    pub(crate) fn unzoom(&mut self) -> bool {
+        let Some(zoomed) = self.zoomed_pane.take() else {
+            return false;
+        };
+        if self.layout.is_floating(zoomed) {
+            self.z_order.retain(|candidate| *candidate != zoomed);
+            let index = if zoomed == self.active_pane {
+                0
+            } else {
+                self.z_order
+                    .iter()
+                    .position(|candidate| !self.layout.is_floating(*candidate))
+                    .unwrap_or(self.z_order.len())
+            };
+            self.z_order.insert(index, zoomed);
+        }
+        self.clear_pane_screen_extents();
+        true
+    }
+
+    pub(crate) fn push_zoom(&mut self, always: bool, flag: bool) -> PushedZoom {
+        let pushed = if flag && (always || self.zoomed_pane.is_some()) {
+            PushedZoom::Was(self.zoomed_pane)
+        } else {
+            PushedZoom::No
+        };
+        self.unzoom();
+        pushed
+    }
+
+    pub(crate) fn pop_zoom(&mut self, pushed: PushedZoom) -> bool {
+        let PushedZoom::Was(was_zoomed) = pushed else {
+            return false;
+        };
+        let target = if self.active_floats_over_zoom() {
+            was_zoomed
+                .filter(|pane| self.panes.contains_key(pane))
+                .unwrap_or(self.active_pane)
+        } else {
+            self.active_pane
+        };
+        self.zoom(target)
+    }
+
+    #[must_use]
+    pub fn has_floating_panes(&self) -> bool {
+        self.panes.keys().any(|pane| self.is_floating(*pane))
+    }
+
+    #[must_use]
+    pub fn modal_pane(&self) -> Option<PaneId> {
+        self.floats.modal.map(|modal| modal.pane)
+    }
+
+    fn raise(&mut self, pane: PaneId) {
+        self.z_order.retain(|candidate| *candidate != pane);
+        self.z_order.insert(0, pane);
+    }
+
+    fn lower_to_tail(&mut self, pane: PaneId) {
+        self.z_order.retain(|candidate| *candidate != pane);
+        self.z_order.push(pane);
+    }
+
+    fn insert_float_z(&mut self, pane: PaneId) {
+        self.z_order.retain(|candidate| *candidate != pane);
+        let index = self
+            .floats
+            .modal
+            .and_then(|modal| {
+                self.z_order
+                    .iter()
+                    .position(|candidate| *candidate == modal.pane)
+            })
+            .map_or(0, |index| index + 1);
+        self.z_order.insert(index, pane);
+    }
+
+    fn hidden_by_zoom(&self, pane: PaneId) -> bool {
+        self.zoomed_pane
+            .is_some_and(|zoomed| zoomed != pane && !self.is_over_zoom(pane))
+    }
+
+    pub(crate) fn move_float_z(&mut self, pane: PaneId, position: FloatZ) {
+        let hidden = |window: &Self, candidate: PaneId| window.is_floating(candidate);
+        let current = self.z_order.iter().position(|candidate| *candidate == pane);
+        let Some(current) = current else {
+            return;
+        };
+        match position {
+            FloatZ::Front => self.raise(pane),
+            FloatZ::Back => {
+                self.z_order.remove(current);
+                let index = self
+                    .z_order
+                    .iter()
+                    .position(|candidate| !hidden(self, *candidate))
+                    .unwrap_or(self.z_order.len());
+                self.z_order.insert(index, pane);
+            }
+            FloatZ::Forward | FloatZ::ForwardLoop => {
+                let previous = self.z_order[..current]
+                    .iter()
+                    .rev()
+                    .copied()
+                    .find(|candidate| !self.hidden_by_zoom(*candidate));
+                if let Some(previous) = previous {
+                    self.z_order.remove(current);
+                    let index = self
+                        .z_order
+                        .iter()
+                        .position(|candidate| *candidate == previous)
+                        .unwrap_or(0);
+                    self.z_order.insert(index, pane);
+                } else if position == FloatZ::ForwardLoop {
+                    self.z_order.remove(current);
+                    let index = self
+                        .z_order
+                        .iter()
+                        .position(|candidate| !hidden(self, *candidate))
+                        .unwrap_or(self.z_order.len());
+                    self.z_order.insert(index, pane);
+                }
+            }
+            FloatZ::Backward | FloatZ::BackwardLoop => {
+                let next = self.z_order[current + 1..]
+                    .iter()
+                    .copied()
+                    .find(|candidate| !self.hidden_by_zoom(*candidate));
+                if let Some(next) = next.filter(|next| self.shows_floating(*next)) {
+                    self.z_order.remove(current);
+                    let index = self
+                        .z_order
+                        .iter()
+                        .position(|candidate| *candidate == next)
+                        .map_or(self.z_order.len(), |index| index + 1);
+                    self.z_order.insert(index, pane);
+                } else if position == FloatZ::BackwardLoop {
+                    self.raise(pane);
+                }
+            }
+            FloatZ::Index(z) => {
+                self.z_order.remove(current);
+                let floats = self
+                    .z_order
+                    .iter()
+                    .take_while(|candidate| hidden(self, **candidate))
+                    .count();
+                let index = floats.min(usize::try_from(z).unwrap_or(usize::MAX));
+                self.z_order.insert(index, pane);
+            }
         }
     }
 }
@@ -596,6 +917,7 @@ impl MuxState {
             screen_extent: None,
             empty: false,
             title_pinned: false,
+            over_zoom: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -619,6 +941,7 @@ impl MuxState {
             previous_layout: None,
             last_extent_probe: None,
             manual_extent: extent,
+            floats: WindowFloats::default(),
             input_options: InputOptions::default(),
         };
         self.windows.insert(&mut self.journal, window_id, window);
@@ -725,6 +1048,7 @@ impl MuxState {
             screen_extent: None,
             empty: false,
             title_pinned: false,
+            over_zoom: false,
             input_options: InputOptions::default(),
         };
         let window = Window {
@@ -748,6 +1072,7 @@ impl MuxState {
             previous_layout: None,
             last_extent_probe: None,
             manual_extent: extent,
+            floats: WindowFloats::default(),
             input_options: InputOptions::default(),
         };
         self.windows.insert(&mut self.journal, window_id, window);
@@ -1293,6 +1618,7 @@ impl MuxState {
                 screen_extent: None,
                 empty: false,
                 title_pinned: false,
+                over_zoom: false,
                 input_options: InputOptions::default(),
             },
         );
@@ -1312,27 +1638,240 @@ impl MuxState {
         Ok(pane_id)
     }
 
+    pub(crate) fn float_pane_with(
+        &mut self,
+        target: PaneId,
+        kind: PaneKind,
+        spawn: &FloatSpawn,
+    ) -> Result<PaneId, ServerError> {
+        let window_id = self
+            .window_for_pane(target)
+            .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
+        let pane_id = PaneId(self.next_pane_id);
+        let active_point = self.allocate_sort_point();
+        let next_split_id = &mut self.next_split_id;
+        let mut ids = || {
+            let id = SplitId(*next_split_id);
+            *next_split_id = (*next_split_id).saturating_add(1);
+            id
+        };
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
+        window
+            .layout
+            .float(target, pane_id, spawn.geometry, &mut ids)
+            .map_err(|error| split_layout_error(error, target))?;
+        self.next_pane_id = self.next_pane_id.saturating_add(1);
+        window.panes.insert(
+            pane_id,
+            Pane {
+                id: pane_id,
+                title: pane_title(&kind, &self.default_pane_title),
+                kind,
+                active_point: 0,
+                bell: false,
+                status: None,
+                dead: false,
+                dead_status: None,
+                dead_time: None,
+                input_off: false,
+                screen_extent: None,
+                empty: false,
+                title_pinned: false,
+                over_zoom: spawn.over_zoom,
+                input_options: InputOptions::default(),
+            },
+        );
+        if spawn.before && !spawn.full_size {
+            insert_pane_order(&mut window.pane_order, pane_id, target, true, false);
+        } else if spawn.before {
+            window.pane_order.insert(0, pane_id);
+        } else {
+            window.pane_order.push(pane_id);
+        }
+        window.insert_float_z(pane_id);
+        let activate = if let Some(mut modal) = spawn.modal {
+            modal.pane = pane_id;
+            modal.last = Some(window.active_pane);
+            window.floats.modal = Some(modal);
+            true
+        } else {
+            !spawn.detached && window.floats.modal.is_none()
+        };
+        if activate && activate_window_pane(window, pane_id, true) {
+            window
+                .panes
+                .get_mut(&pane_id)
+                .expect("new pane exists")
+                .active_point = active_point;
+        }
+        window.clear_pane_screen_extents();
+        self.bump_generation();
+        Ok(pane_id)
+    }
+
+    pub(crate) fn float_existing(
+        &mut self,
+        pane: PaneId,
+        geometry: CellGeometry,
+        detached: bool,
+    ) -> Result<(), ServerError> {
+        let window_id = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let active_point = self.allocate_sort_point();
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
+        if !window.layout.float_tile(pane, geometry) {
+            return Err(ServerError::InvalidCommand(
+                "pane is already floating".to_owned(),
+            ));
+        }
+        window.raise(pane);
+        if !detached && activate_window_pane(window, pane, true) {
+            window
+                .panes
+                .get_mut(&pane)
+                .expect("floated pane exists")
+                .active_point = active_point;
+        }
+        window.clear_pane_screen_extents();
+        self.bump_generation();
+        Ok(())
+    }
+
+    pub(crate) fn tile_floating(
+        &mut self,
+        pane: PaneId,
+        detached: bool,
+    ) -> Result<(), ServerError> {
+        let window_id = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let active_point = self.allocate_sort_point();
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
+        window
+            .layout
+            .tile_float(pane)
+            .map_err(|error| pane_layout_error(error, pane))?;
+        window.lower_to_tail(pane);
+        if !detached && activate_window_pane(window, pane, true) {
+            window
+                .panes
+                .get_mut(&pane)
+                .expect("tiled pane exists")
+                .active_point = active_point;
+        }
+        window.clear_pane_screen_extents();
+        self.bump_generation();
+        Ok(())
+    }
+
+    pub(crate) fn set_float_geometry(
+        &mut self,
+        pane: PaneId,
+        geometry: CellGeometry,
+    ) -> Result<bool, ServerError> {
+        let window_id = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let window = self
+            .windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists");
+        let changed = window.layout.set_float_geometry(pane, geometry);
+        if changed {
+            window.clear_pane_screen_extents();
+            self.bump_generation();
+        }
+        Ok(changed)
+    }
+
+    pub(crate) fn move_float_z(
+        &mut self,
+        pane: PaneId,
+        position: FloatZ,
+    ) -> Result<(), ServerError> {
+        let window_id = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        self.windows
+            .get_mut(&mut self.journal, &window_id)
+            .expect("window exists")
+            .move_float_z(pane, position);
+        self.bump_generation();
+        Ok(())
+    }
+
+    pub(crate) fn push_zoom(&mut self, window: WindowId, always: bool, flag: bool) -> PushedZoom {
+        let Some(window) = self.windows.get_mut(&mut self.journal, &window) else {
+            return PushedZoom::No;
+        };
+        let zoomed = window.zoomed_pane.is_some();
+        let pushed = window.push_zoom(always, flag);
+        if zoomed {
+            self.bump_generation();
+        }
+        pushed
+    }
+
+    pub(crate) fn pop_zoom(&mut self, window: WindowId, pushed: PushedZoom) -> bool {
+        let active_point = self.allocate_sort_point();
+        let Some(window) = self.windows.get_mut(&mut self.journal, &window) else {
+            return false;
+        };
+        let before = window.active_pane;
+        let zoomed = window.pop_zoom(pushed);
+        if window.active_pane != before {
+            let active = window.active_pane;
+            if let Some(pane) = window.panes.get_mut(&active) {
+                pane.active_point = active_point;
+            }
+        }
+        if zoomed {
+            self.bump_generation();
+        }
+        zoomed
+    }
+
+    pub(crate) fn set_last_new_pane(&mut self, window: WindowId, cascade: (i32, i32)) {
+        if let Some(window) = self.windows.get_mut(&mut self.journal, &window) {
+            window.floats.last_new_pane = cascade;
+        }
+    }
+
     pub fn kill_pane(&mut self, pane: PaneId) -> Result<Vec<PaneId>, ServerError> {
         let window_id = self
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
-        let removed = self
-            .windows
-            .get_mut(&mut self.journal, &window_id)
-            .expect("window exists")
-            .layout
-            .remove(pane);
-        match removed {
-            Ok(()) => {}
-            Err(LayoutError::LastPane) => return self.kill_window(window_id),
-            Err(error) => return Err(pane_layout_error(error, pane)),
+        if self.windows[&window_id].panes.len() <= 1 {
+            return self.kill_window(window_id);
         }
         let window = self
             .windows
             .get_mut(&mut self.journal, &window_id)
             .expect("window exists");
+        let over_zoom = window.is_over_zoom(pane);
+        let previous_zoom = window.zoomed_pane;
+        let pushed = window.push_zoom(false, over_zoom);
+        match window.layout.remove(pane) {
+            Ok(()) => {}
+            Err(LayoutError::LastPane) => return self.kill_window(window_id),
+            Err(error) => {
+                window.zoomed_pane = previous_zoom;
+                return Err(pane_layout_error(error, pane));
+            }
+        }
         window.panes.remove(&pane);
         repair_window_after_pane_removal(window, pane);
+        window.pop_zoom(pushed);
         self.journal.note_removal();
         self.bump_generation();
         Ok(vec![pane])
@@ -1498,9 +2037,7 @@ impl MuxState {
             .windows
             .get_mut(&mut self.journal, &window_id)
             .expect("window exists");
-        if window.active_pane == pane && window.zoomed_pane.is_some() && !preserve_zoom {
-            window.zoomed_pane = None;
-            self.bump_generation();
+        if window.active_pane == pane {
             return Ok(false);
         }
         let pane_changed = activate_window_pane(window, pane, preserve_zoom);
@@ -1528,17 +2065,17 @@ impl MuxState {
             return Ok(());
         }
         window.clear_pane_screen_extents();
-        if window.zoomed_pane.is_some() {
-            window.zoomed_pane = None;
-        } else {
-            if activate_window_pane(window, pane, false) {
-                window
-                    .panes
-                    .get_mut(&pane)
-                    .expect("selected pane exists")
-                    .active_point = active_point;
-            }
-            window.zoomed_pane = Some(pane);
+        let before = window.active_pane;
+        if !window.unzoom() {
+            window.zoom(pane);
+        }
+        if window.active_pane != before {
+            let active = window.active_pane;
+            window
+                .panes
+                .get_mut(&active)
+                .expect("active pane exists")
+                .active_point = active_point;
         }
         self.bump_generation();
         Ok(())
@@ -1672,11 +2209,12 @@ impl MuxState {
             .pane_order
             .clone();
         debug_assert!(!panes.is_empty(), "validated windows are never empty");
-        let split_ids = (0..panes.len().saturating_sub(1))
-            .map(|_| self.allocate_split_id())
-            .collect::<Vec<_>>();
-        let mut split_ids = split_ids.into_iter();
-        let mut ids = || split_ids.next().expect("preset has one split ID per edge");
+        let next_split_id = &mut self.next_split_id;
+        let mut ids = || {
+            let id = SplitId(*next_split_id);
+            *next_split_id = (*next_split_id).saturating_add(1);
+            id
+        };
 
         let window = self
             .windows
@@ -1686,8 +2224,6 @@ impl MuxState {
         window
             .layout
             .apply_preset(preset, &panes, options, &mut ids);
-        let split_ids_exhausted = split_ids.next().is_none();
-        debug_assert!(split_ids_exhausted, "preset consumes one split ID per edge");
         window.previous_layout = Some(Box::new(previous));
         window.last_layout = Some(preset);
         self.bump_generation();
@@ -1699,14 +2235,33 @@ impl MuxState {
         window: WindowId,
         layout: &str,
     ) -> Result<(), ServerError> {
-        let panes = self
+        let window_state = self
             .windows
             .get(&window)
-            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?
-            .pane_order
-            .clone();
+            .ok_or_else(|| ServerError::MissingTarget(window.to_string()))?;
+        let all_panes = window_state.pane_order.clone();
+        let floats = all_panes
+            .iter()
+            .copied()
+            .filter(|pane| window_state.is_floating(*pane))
+            .filter_map(|pane| Some((pane, window_state.layout.pane_geometry(pane)?)))
+            .collect::<Vec<_>>();
+        let old_extent = window_state.layout.extent();
         let invalid = |cause: &str| ServerError::InvalidCommand(format!("{cause}: {layout}"));
         let mut parsed = CellLayout::parse(layout).map_err(|error| invalid(error.cause()))?;
+        let legacy = parsed.version() == 1;
+        let panes = if legacy {
+            all_panes
+                .iter()
+                .copied()
+                .filter(|pane| !floats.iter().any(|(float, _)| float == pane))
+                .collect::<Vec<_>>()
+        } else {
+            all_panes.clone()
+        };
+        if panes.is_empty() {
+            return Err(invalid(&format!("window {window} has no panes")));
+        }
         let cells = parsed.pane_count();
         if panes.len() > cells {
             return Err(invalid(&format!(
@@ -1720,10 +2275,7 @@ impl MuxState {
         parsed
             .check_sizes()
             .map_err(|error| invalid(error.cause()))?;
-        if parsed.has_floating() {
-            return Err(invalid("floating panes are not supported"));
-        }
-        let split_ids = (0..panes.len().saturating_sub(1))
+        let split_ids = (0..all_panes.len().saturating_sub(1))
             .map(|_| self.allocate_split_id())
             .collect::<Vec<_>>();
         let mut split_ids = split_ids.into_iter();
@@ -1732,7 +2284,13 @@ impl MuxState {
                 .next()
                 .expect("parsed layout has one split ID per edge")
         };
-        let (next, selection) = parsed.into_layout(&panes, &mut ids);
+        let (mut next, selection) = parsed.into_layout(&panes, &mut ids);
+        if legacy {
+            next.link_floats(&floats, &mut ids);
+        }
+        if !next.has_tiled() {
+            next.keep_extent(old_extent);
+        }
         let split_ids_exhausted = split_ids.next().is_none();
         debug_assert!(
             split_ids_exhausted,
@@ -1748,7 +2306,18 @@ impl MuxState {
             .get_mut(&mut self.journal, &window)
             .expect("window was resolved");
         let previous = window.saved_layout(self.legacy_layout_saves);
+        let old_z = window.z_order.clone();
         window.layout = next;
+        if let Some(selection) = &selection {
+            let mut z_order = selection.floats.clone();
+            z_order.extend(
+                old_z
+                    .iter()
+                    .copied()
+                    .filter(|pane| !window.layout.is_floating(*pane)),
+            );
+            window.z_order = z_order;
+        }
         window.previous_layout = Some(Box::new(previous));
         window.last_extent_probe = None;
         if let Some(selection) = selection {
@@ -1872,6 +2441,18 @@ impl MuxState {
                 .filter_map(|pane| moved(*pane, &saved))
                 .collect();
             apply_window_selection(window, active, last_panes, Some(active_point));
+            let mut z_order = window.modal_pane().into_iter().collect::<Vec<_>>();
+            for pane in saved.z_order.iter().filter_map(|pane| moved(*pane, &saved)) {
+                if window.layout.is_floating(pane) && !z_order.contains(&pane) {
+                    z_order.push(pane);
+                }
+            }
+            for pane in window.z_order.clone() {
+                if !z_order.contains(&pane) {
+                    z_order.push(pane);
+                }
+            }
+            window.z_order = z_order;
         }
         self.bump_generation();
         Ok(())
@@ -3191,10 +3772,9 @@ impl MuxState {
     }
 
     /// The pin's `window_find_string` plus `window_get_active_at`: a compass
-    /// word names one window cell and the covering tiled pane answers, its
-    /// right and bottom borders included. Tiled cells never overlap, so the
-    /// pin's z-index walk and this layout walk pick the same pane; a zoomed
-    /// window shows only its active pane, which then covers every cell.
+    /// word names one window cell; the modal answers alone, then visible
+    /// floats front to back with their borders, then the covering tiled pane,
+    /// its right and bottom borders included.
     fn pane_at_compass_point(&self, window: WindowId, target: &str) -> Option<PaneId> {
         let state = self.windows.get(&window)?;
         let compass = PANE_COMPASS_TARGETS
@@ -3212,13 +3792,37 @@ impl MuxState {
             "bottom-left" => (0, last_row),
             _ => (last_column, last_row),
         };
+        let (x, y) = (i32::from(x), i32::from(y));
+        let float_contains = |pane: PaneId| {
+            state.layout.pane_geometry(pane).is_some_and(|geometry| {
+                (geometry.xoff - 1..=geometry.xoff + i32::from(geometry.sx)).contains(&x)
+                    && (geometry.yoff - 1..=geometry.yoff + i32::from(geometry.sy)).contains(&y)
+            })
+        };
+        if let Some(modal) = state.modal_pane() {
+            return float_contains(modal).then_some(modal);
+        }
+        let visible = |pane: PaneId| match state.zoomed_pane {
+            Some(zoomed) => {
+                zoomed != pane && state.panes.get(&pane).is_some_and(|pane| pane.over_zoom)
+            }
+            None => true,
+        };
+        if let Some(pane) = state
+            .z_order
+            .iter()
+            .copied()
+            .find(|pane| state.is_floating(*pane) && visible(*pane) && float_contains(*pane))
+        {
+            return Some(pane);
+        }
         if let Some(zoomed) = state.zoomed_pane {
             return Some(zoomed);
         }
-        state.layout.panes_in_order().into_iter().find(|pane| {
+        state.layout.tiled_panes().into_iter().find(|pane| {
             state.layout.pane_geometry(*pane).is_some_and(|geometry| {
-                (geometry.xoff..=geometry.xoff.saturating_add(geometry.sx)).contains(&x)
-                    && (geometry.yoff..=geometry.yoff.saturating_add(geometry.sy)).contains(&y)
+                (geometry.xoff..=geometry.xoff + i32::from(geometry.sx)).contains(&x)
+                    && (geometry.yoff..=geometry.yoff + i32::from(geometry.sy)).contains(&y)
             })
         })
     }
@@ -3342,31 +3946,34 @@ impl MuxState {
             .window_for_pane(pane)
             .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
         let window = &self.windows[&window_id];
+        if window.has_floating_panes() {
+            return Ok(pane_in_direction_with_floats(window, pane, direction));
+        }
         let (window_columns, window_rows) = window.layout.extent();
         let rects = window
             .layout
-            .panes_in_order()
+            .tiled_panes()
             .into_iter()
             .map(|pane| {
                 let geometry = window
                     .layout
                     .pane_geometry(pane)
                     .expect("layout order contains a pane geometry");
-                let right = geometry
-                    .xoff
+                let left = u16::try_from(geometry.xoff.max(0)).unwrap_or(u16::MAX);
+                let top = u16::try_from(geometry.yoff.max(0)).unwrap_or(u16::MAX);
+                let right = left
                     .saturating_add(geometry.sx)
                     .saturating_add(1)
                     .min(window_columns);
-                let bottom = geometry
-                    .yoff
+                let bottom = top
                     .saturating_add(geometry.sy)
                     .saturating_add(1)
                     .min(window_rows);
                 (
                     pane,
                     PaneRect {
-                        left: normalize_cell_coordinate(geometry.xoff, window_columns),
-                        top: normalize_cell_coordinate(geometry.yoff, window_rows),
+                        left: normalize_cell_coordinate(left, window_columns),
+                        top: normalize_cell_coordinate(top, window_rows),
                         right: normalize_cell_coordinate(right, window_columns),
                         bottom: normalize_cell_coordinate(bottom, window_rows),
                     },
@@ -3392,6 +3999,27 @@ impl MuxState {
 
     pub fn next_pane(&self, pane: PaneId) -> Result<PaneId, ServerError> {
         self.pane_at_order_offset(pane, 1)
+    }
+
+    pub fn next_tiled_pane(&self, pane: PaneId, step: isize) -> Result<PaneId, ServerError> {
+        let window_id = self
+            .window_for_pane(pane)
+            .ok_or_else(|| ServerError::MissingTarget(pane.to_string()))?;
+        let window = &self.windows[&window_id];
+        let order = &window.pane_order;
+        let index = order
+            .iter()
+            .position(|candidate| *candidate == pane)
+            .expect("validated pane order contains every window pane");
+        let len = isize::try_from(order.len()).expect("pane count fits isize");
+        let start = isize::try_from(index).expect("pane index fits isize");
+        Ok((1..=len)
+            .map(|distance| {
+                order[usize::try_from((start + distance * step).rem_euclid(len))
+                    .expect("wrapped index is nonnegative")]
+            })
+            .find(|candidate| !window.is_floating(*candidate))
+            .unwrap_or(pane))
     }
 
     fn pane_at_order_offset(&self, pane: PaneId, offset: isize) -> Result<PaneId, ServerError> {
@@ -3467,31 +4095,24 @@ impl MuxState {
             .window_for_pane(target)
             .ok_or_else(|| ServerError::MissingTarget(target.to_string()))?;
 
+        let pushed_target = self.push_zoom(target_window, false, preserve_zoom);
         if source == target {
-            let window = self
-                .windows
-                .get_mut(&mut self.journal, &source_window)
-                .expect("window exists");
-            if window.zoomed_pane.is_some() && !preserve_zoom {
-                window.zoomed_pane = None;
-                self.bump_generation();
-            }
+            self.pop_zoom(target_window, pushed_target);
             return Ok(());
         }
-
+        let pushed_source = (source_window != target_window)
+            .then(|| self.push_zoom(source_window, false, preserve_zoom));
         if source_window == target_window {
-            let was_zoomed = {
+            {
                 let window = self
                     .windows
                     .get_mut(&mut self.journal, &source_window)
                     .expect("window exists");
-                let was_zoomed = window.zoomed_pane.is_some();
                 let swapped = window.layout.swap(source, target);
                 debug_assert!(swapped);
                 swap_pane_order(&mut window.pane_order, source, target);
                 swap_pane_order(&mut window.z_order, source, target);
-                was_zoomed
-            };
+            }
             if detached {
                 if self.windows[&source_window].active_pane == source {
                     let changed = activate_window_pane(
@@ -3529,17 +4150,11 @@ impl MuxState {
                     self.touch_pane_active_point(target);
                 }
             }
-            let active = self.windows[&source_window].active_pane;
-            self.windows
-                .get_mut(&mut self.journal, &source_window)
-                .expect("window exists")
-                .zoomed_pane = (preserve_zoom && was_zoomed).then_some(active);
+            self.pop_zoom(source_window, pushed_target);
             self.bump_generation();
             return Ok(());
         }
 
-        let source_was_zoomed = self.windows[&source_window].zoomed_pane.is_some();
-        let target_was_zoomed = self.windows[&target_window].zoomed_pane.is_some();
         let source_active = self.windows[&source_window].active_pane;
         let target_active = self.windows[&target_window].active_pane;
 
@@ -3584,10 +4199,6 @@ impl MuxState {
             activate_relocated_window_pane(&mut source_state, next_source_active, source);
         let target_changed =
             activate_relocated_window_pane(target_state, next_target_active, target);
-        source_state.zoomed_pane =
-            (preserve_zoom && source_was_zoomed).then_some(source_state.active_pane);
-        target_state.zoomed_pane =
-            (preserve_zoom && target_was_zoomed).then_some(target_state.active_pane);
         self.windows
             .insert(&mut self.journal, source_window, source_state);
         if source_changed {
@@ -3596,6 +4207,10 @@ impl MuxState {
         if target_changed {
             self.touch_pane_active_point(next_target_active);
         }
+        if let Some(pushed_source) = pushed_source {
+            self.pop_zoom(source_window, pushed_source);
+        }
+        self.pop_zoom(target_window, pushed_target);
         self.bump_generation();
         Ok(())
     }
@@ -3613,6 +4228,7 @@ impl MuxState {
             destination_session,
             destination_index,
             name,
+            String::new(),
             detached,
             0,
         )
@@ -3624,6 +4240,7 @@ impl MuxState {
         destination_session: SessionId,
         destination_index: Option<u32>,
         name: Option<String>,
+        default_name: String,
         detached: bool,
         base_index: u32,
     ) -> Result<WindowId, ServerError> {
@@ -3679,7 +4296,7 @@ impl MuxState {
                 .insert(&mut self.journal, source_window, source);
             None
         };
-        let window_name = name.unwrap_or_else(|| pane_state.title.clone());
+        let window_name = name.unwrap_or(default_name);
         self.windows.insert(
             &mut self.journal,
             window_id,
@@ -3704,6 +4321,7 @@ impl MuxState {
                 previous_layout: None,
                 last_extent_probe: None,
                 manual_extent: inherited_extent,
+                floats: WindowFloats::default(),
                 input_options: InputOptions::default(),
             },
         );
@@ -4039,6 +4657,7 @@ impl MuxState {
         let pane_base_index = self.pane_base_index(window.id);
         let layout_dump = window.layout_string(LayoutFormat::V2, pane_base_index);
         let visible_layout_dump = window.visible_layout_string(LayoutFormat::V2, pane_base_index);
+        let (sx, sy) = window.layout.extent();
         WindowSnapshot {
             id: window.id,
             index: window.index,
@@ -4086,6 +4705,32 @@ impl MuxState {
             pane_border_indicators: PaneBorderIndicators::Colour,
             pane_order: window.pane_order.clone(),
             pane_z_order: window.z_order.clone(),
+            floating: window
+                .z_order
+                .iter()
+                .filter(|pane| window.layout.is_floating(**pane))
+                .filter_map(|pane| {
+                    let geometry = window.layout.pane_geometry(*pane)?;
+                    Some(FloatingPaneSnapshot {
+                        pane: *pane,
+                        xoff: geometry.xoff,
+                        yoff: geometry.yoff,
+                        sx: geometry.sx,
+                        sy: geometry.sy,
+                        visible: window.shows_floating(*pane),
+                        border_lines: PaneBorderLines::Single,
+                        border_status: PaneBorderStatus::Off,
+                    })
+                })
+                .collect(),
+            modal: window.floats.modal.map(|modal| ModalPaneSnapshot {
+                pane: modal.pane,
+                capture_keys: modal.capture_keys,
+                close_on_click: modal.close_on_click,
+                close_on_cancel: modal.close_on_cancel,
+            }),
+            sx,
+            sy,
         }
     }
 
@@ -4109,6 +4754,17 @@ impl MuxState {
             if layout_set != pane_set || layout_panes.len() != layout_set.len() {
                 return Err(format!("window {window_id} layout does not match panes"));
             }
+            let z_order = window.z_order.iter().copied().collect::<BTreeSet<_>>();
+            if z_order != pane_set || window.z_order.len() != z_order.len() {
+                return Err(format!("window {window_id} z order does not match panes"));
+            }
+            if window
+                .floats
+                .modal
+                .is_some_and(|modal| !window.is_floating(modal.pane))
+            {
+                return Err(format!("window {window_id} modal pane is not floating"));
+            }
             let pane_order = window.pane_order.iter().copied().collect::<BTreeSet<_>>();
             if pane_order != pane_set || window.pane_order.len() != pane_order.len() {
                 return Err(format!(
@@ -4129,10 +4785,10 @@ impl MuxState {
             if history.len() != window.last_panes.len() || !history.is_subset(&pane_set) {
                 return Err(format!("window {window_id} pane history is invalid"));
             }
-            if window
-                .zoomed_pane
-                .is_some_and(|pane| pane != window.active_pane || !pane_set.contains(&pane))
-            {
+            if window.zoomed_pane.is_some_and(|pane| {
+                !pane_set.contains(&pane)
+                    || (pane != window.active_pane && !window.active_floats_over_zoom())
+            }) {
                 return Err(format!("window {window_id} zoomed pane is invalid"));
             }
             for pane in pane_set {
@@ -4234,6 +4890,9 @@ fn pane_title(kind: &PaneKind, terminal: &str) -> String {
 fn split_layout_error(error: LayoutError, target: PaneId) -> ServerError {
     match error {
         LayoutError::NoSpace => ServerError::InvalidCommand("no space for a new pane".to_owned()),
+        LayoutError::Floating => {
+            ServerError::InvalidCommand("can't split a floating pane".to_owned())
+        }
         LayoutError::UnknownPane => ServerError::MissingTarget(target.to_string()),
         LayoutError::LastPane | LayoutError::UnknownDivider => {
             ServerError::Internal(format!("unexpected split layout error: {error:?}"))
@@ -4244,7 +4903,9 @@ fn split_layout_error(error: LayoutError, target: PaneId) -> ServerError {
 fn pane_layout_error(error: LayoutError, pane: PaneId) -> ServerError {
     match error {
         LayoutError::UnknownPane => ServerError::MissingTarget(pane.to_string()),
-        LayoutError::LastPane | LayoutError::NoSpace | LayoutError::UnknownDivider => {
+        LayoutError::NoSpace => ServerError::InvalidCommand("no space for a new pane".to_owned()),
+        LayoutError::Floating => ServerError::InvalidCommand("pane is floating".to_owned()),
+        LayoutError::LastPane | LayoutError::UnknownDivider => {
             ServerError::Internal(format!("unexpected pane layout error: {error:?}"))
         }
     }
@@ -4253,7 +4914,10 @@ fn pane_layout_error(error: LayoutError, pane: PaneId) -> ServerError {
 fn divider_layout_error(error: LayoutError, split: SplitId) -> ServerError {
     match error {
         LayoutError::UnknownDivider => ServerError::MissingTarget(split.to_string()),
-        LayoutError::LastPane | LayoutError::NoSpace | LayoutError::UnknownPane => {
+        LayoutError::LastPane
+        | LayoutError::NoSpace
+        | LayoutError::UnknownPane
+        | LayoutError::Floating => {
             ServerError::Internal(format!("unexpected divider layout error: {error:?}"))
         }
     }
@@ -4565,9 +5229,16 @@ fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) 
     if window.active_pane == pane {
         return false;
     }
+    if window.floats.modal.is_some_and(|modal| modal.pane != pane) {
+        return false;
+    }
     debug_assert!(window.panes.contains_key(&pane));
+    if window.layout.is_floating(pane) {
+        window.raise(pane);
+    }
     let previous = window.active_pane;
     let was_zoomed = window.zoomed_pane.is_some();
+    let visible = window.pane_is_visible(pane);
     window
         .last_panes
         .retain(|candidate| *candidate != pane && *candidate != previous);
@@ -4576,7 +5247,12 @@ fn activate_window_pane(window: &mut Window, pane: PaneId, preserve_zoom: bool) 
         .last_panes
         .truncate(window.panes.len().saturating_sub(1));
     window.active_pane = pane;
-    window.zoomed_pane = (preserve_zoom && was_zoomed).then_some(pane);
+    if was_zoomed && !visible {
+        window.unzoom();
+        if preserve_zoom {
+            window.zoom(pane);
+        }
+    }
     window.clear_pane_screen_extents();
     true
 }
@@ -4609,7 +5285,16 @@ fn repair_window_after_pane_removal(window: &mut Window, pane: PaneId) {
 }
 
 fn lose_window_pane(window: &mut Window, pane: PaneId) {
+    if let Some(modal) = &mut window.floats.modal
+        && modal.last == Some(pane)
+    {
+        modal.last = None;
+    }
     window.last_panes.retain(|candidate| *candidate != pane);
+    let modal = window.floats.modal.filter(|modal| modal.pane == pane);
+    if modal.is_some() {
+        window.floats.modal = None;
+    }
     if window.active_pane != pane {
         return;
     }
@@ -4618,10 +5303,10 @@ fn lose_window_pane(window: &mut Window, pane: PaneId) {
         .iter()
         .position(|candidate| *candidate == pane)
         .expect("relocated pane belongs to the window");
-    let next = window
-        .last_panes
-        .first()
-        .copied()
+    let next = modal
+        .and_then(|modal| modal.last)
+        .filter(|last| *last != pane && window.panes.contains_key(last))
+        .or_else(|| window.last_panes.first().copied())
         .or_else(|| {
             position
                 .checked_sub(1)
@@ -4701,6 +5386,7 @@ fn activate_relocated_window_pane(window: &mut Window, pane: PaneId, outgoing: P
 fn collect_pane_rects(node: &LayoutNode, bounds: PaneRect, output: &mut Vec<(PaneId, PaneRect)>) {
     match node {
         LayoutNode::Pane(pane) => output.push((*pane, bounds)),
+        LayoutNode::Empty => {}
         LayoutNode::Split {
             axis,
             ratio,
@@ -4827,6 +5513,59 @@ fn directional_candidates(
             adjacent.then_some(*candidate)
         })
         .collect()
+}
+
+fn pane_in_direction_with_floats(
+    window: &Window,
+    pane: PaneId,
+    direction: PaneDirection,
+) -> Option<PaneId> {
+    let (columns, rows) = window.layout.extent();
+    let (columns, rows) = (i32::from(columns), i32::from(rows));
+    let current = window.layout.pane_geometry(pane)?;
+    let (xoff, yoff) = (current.xoff, current.yoff);
+    let (sx, sy) = (i32::from(current.sx), i32::from(current.sy));
+    let (edge, low, high) = match direction {
+        PaneDirection::Up => (if yoff == 0 { rows + 1 } else { yoff }, xoff, xoff + sx),
+        PaneDirection::Down => {
+            let edge = yoff + sy + 1;
+            (if edge >= rows { 0 } else { edge }, xoff, xoff + sx)
+        }
+        PaneDirection::Left => (if xoff == 0 { columns + 1 } else { xoff }, yoff, yoff + sy),
+        PaneDirection::Right => {
+            let edge = xoff + sx + 1;
+            (if edge >= columns { 0 } else { edge }, yoff, yoff + sy)
+        }
+    };
+    let mut best: Option<PaneId> = None;
+    for candidate in &window.pane_order {
+        if *candidate == pane {
+            continue;
+        }
+        let Some(geometry) = window.layout.pane_geometry(*candidate) else {
+            continue;
+        };
+        let (x, y) = (geometry.xoff, geometry.yoff);
+        let (w, h) = (i32::from(geometry.sx), i32::from(geometry.sy));
+        let (on_edge, start, size) = match direction {
+            PaneDirection::Up => (y + h + 1 == edge, x, w),
+            PaneDirection::Down => (y == edge, x, w),
+            PaneDirection::Left => (x + w + 1 == edge, y, h),
+            PaneDirection::Right => (x == edge, y, h),
+        };
+        let end = start + size - 1;
+        let found = (start < low && end > high)
+            || (start >= low && start <= high)
+            || (end >= low && end <= high);
+        if !on_edge || !found {
+            continue;
+        }
+        let point = |pane: PaneId| window.panes.get(&pane).map_or(0, |pane| pane.active_point);
+        if best.is_none_or(|best| point(*candidate) > point(best)) {
+            best = Some(*candidate);
+        }
+    }
+    best
 }
 
 fn ranges_overlap(first_start: u32, first_end: u32, second_start: u32, second_end: u32) -> bool {

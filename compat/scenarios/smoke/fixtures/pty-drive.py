@@ -17,6 +17,8 @@ import termios
 import threading
 import time
 
+from pty_queries import Answerer
+
 STEP_TIMEOUT = 120.0
 
 
@@ -66,12 +68,15 @@ def resize(master, columns, rows):
 
 
 def drain(master):
+    answerer = Answerer(master)
     while True:
         try:
-            if not os.read(master, 4096):
-                break
+            data = os.read(master, 4096)
         except OSError:
             break
+        if not data:
+            break
+        answerer.feed(data)
 
 
 def wait_for(path):

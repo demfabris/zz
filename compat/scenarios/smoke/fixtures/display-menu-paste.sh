@@ -21,8 +21,9 @@ main_client() {
 session=display-menu-paste
 work="$HOME/display-menu-paste-work-$side"
 steps="$work/steps"
+snaps="$work/snaps"
 rm -rf "$work"
-mkdir -p "$steps"
+mkdir -p "$steps" "$snaps"
 : >"$work/failures"
 failed=0
 check_count=0
@@ -95,12 +96,23 @@ open_menu() {
     sleep 1.0
 }
 
-menu_alive() {
-    if [ -n "$menu_pid" ] && kill -0 "$menu_pid" 2>/dev/null; then
-        printf alive
+# tmux 3.8 returns from display-menu as soon as the menu is up
+# (cmd-display-menu.c:556), so whether the menu is still there is read off the
+# client: a full redraw draws the menu's rows only while it is up. The d77c9dc6
+# pin held the display-menu command until the menu closed, and this fixture
+# used to ask whether that command was still running.
+check_menu() {
+    drive "snap flush-$step"
+    main_client refresh-client -t "$client"
+    sleep 0.6
+    probe="probe-$step"
+    drive "snap $probe"
+    if grep -q alpha "$snaps/$probe" 2>/dev/null; then
+        menu_state=alive
     else
-        printf gone
+        menu_state=gone
     fi
+    check_equal "$1" "$2" "$menu_state"
 }
 
 chosen() {
@@ -118,7 +130,7 @@ main_client set-option -g status off
 env -u TMUX -u TMUX_PANE -u ZZ_SOCKET -u ZZ_SESSION -u ZZ_PANE \
     -u TERM_PROGRAM -u TERM_PROGRAM_VERSION \
     TERM=xterm-256color \
-    python3 "$HOME/pty-drive.py" "$steps" 80 24 \
+    python3 "$HOME/chooser-drive.py" "$steps" "$snaps" 80 24 \
     "$binary" $prefix_args attach-session -t "=$session" \
     >"$work/attach.out" 2>&1 &
 attach_pid=$!
@@ -144,7 +156,7 @@ sleep 0.8
 # nothing: every key of the paste goes to the overlay first.
 open_menu
 paste 'ZW'
-check_equal inert-run-leaves-the-menu-up alive "$(menu_alive)"
+check_menu inert-run-leaves-the-menu-up alive
 check_equal inert-run-runs-nothing 'DISPLAY_MENU_PASTE_ROW=pending' "$(chosen)"
 check_equal inert-run-reaches-no-pane '' "$(pane_text)"
 drive 'keys 1b'
@@ -157,7 +169,7 @@ check_equal inert-run-still-reaches-no-pane '' "$(pane_text)"
 open_menu
 paste 'q'
 sleep 0.5
-check_equal cancel-key-closes-the-menu gone "$(menu_alive)"
+check_menu cancel-key-closes-the-menu gone
 check_equal cancel-key-runs-nothing 'DISPLAY_MENU_PASTE_ROW=pending' "$(chosen)"
 wait "$menu_pid" >/dev/null 2>&1 || true
 menu_pid=""
@@ -167,7 +179,7 @@ menu_pid=""
 open_menu
 paste 'ZaXY'
 sleep 0.8
-check_equal row-key-closes-the-menu gone "$(menu_alive)"
+check_menu row-key-closes-the-menu gone
 check_equal row-key-runs-its-row 'DISPLAY_MENU_PASTE_ROW=alpha' "$(chosen)"
 wait "$menu_pid" >/dev/null 2>&1 || true
 menu_pid=""

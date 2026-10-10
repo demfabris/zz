@@ -1,4 +1,7 @@
-corpus: none
+# gap: display-popup.modal-pane
+# display-popup is a modal floating pane as in tmux master 34cd5da4 (fabrico's
+# ruling), so this tmux 3.8 popup contract differs by the registered tuple.
+shim:
 # What popup_menu_done does and does not touch, and how long the popup's menu
 # lives, driven with SGR mouse reports on a client attached to a real pty.
 # Fill Space and Centre set pd->px/py (and sx/sy for Fill Space) and call
@@ -8,8 +11,9 @@ corpus: none
 # drawn by popup_draw_cb and freed by popup_free, so a menu still up when an
 # -E popup's job exits leaves with the popup instead of swallowing the keys
 # that follow.
-stage: fixtures/display-popup-menu-policy.sh ~/display-popup-menu-policy.sh
-stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/display-popup-menu-policy.sh ~/display-popup-menu-policy.sh
+stage: ../smoke/fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_MENU_POLICY
 run-shell 'sh ~/display-popup-menu-policy.sh'
 out: show-environment -g DISPLAY_POPUP_MENU_POLICY

@@ -3,10 +3,10 @@ mod mode_prompt;
 mod panes_mode;
 mod switch_mode;
 pub use customize::{
-    CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CustomizeMenu, CustomizeMenuItem,
-    CustomizeMode, CustomizeResult, customize_menu_feed,
+    CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CustomizeEdit, CustomizeMenu,
+    CustomizeMenuItem, CustomizeMode, CustomizeResult, customize_menu_feed,
 };
-pub use mode_prompt::{ModeKey, ModePrompt, PromptOutcome};
+pub use mode_prompt::{ModeKey, ModePrompt, PromptHistories, PromptOutcome};
 pub use panes_mode::{PanesModeAreaGeometry, PanesModeGeometry};
 pub use switch_mode::{SwitchAction, SwitchMode};
 
@@ -56,8 +56,11 @@ use crate::{
         AllowPassthrough, PaneOption, PaneOptions, ServerOption, ServerOptions, SessionOption,
         SessionOptions, WindowOption, WindowOptions,
     },
-    layout::{CellLayout, PANE_MAXIMUM},
-    model::{DEFAULT_WINDOW_EXTENT, GlobPattern, NO_MARKED_TARGET, is_marked_target},
+    layout::{CellGeometry, CellLayout, PANE_MAXIMUM, PANE_MINIMUM, split_floating_cell},
+    model::{
+        DEFAULT_WINDOW_EXTENT, FloatSpawn, FloatZ, GlobPattern, Modal, NO_MARKED_TARGET,
+        is_marked_target,
+    },
     terminfo::TtyTerm,
     tmux_options::{
         HOOK_NAMES, TmuxArrayValue, TmuxOption, TmuxOptionScope, TmuxStoredScalarKind,
@@ -99,6 +102,7 @@ pub const TMUX_OPTION_CONSUMERS: &[&str] = &[
     "default-shell",
     "default-command",
     "default-terminal",
+    "editor",
     "remain-on-exit",
     "focus-events",
     "extended-keys",
@@ -517,7 +521,7 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
     (
         "window-customize.c",
         "window_customize_build",
-        &["is_key", "is_option"],
+        &["is_environment", "is_key", "is_option"],
     ),
     (
         "window-customize.c",
@@ -526,8 +530,23 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
     ),
     (
         "window-customize.c",
+        "window_customize_build_environment",
+        &[
+            "environment_hidden",
+            "environment_is_global",
+            "environment_name",
+            "environment_removed",
+            "environment_scope",
+            "environment_value",
+            "is_environment",
+            "is_key",
+            "is_option",
+        ],
+    ),
+    (
+        "window-customize.c",
         "window_customize_build_keys",
-        &["is_key", "is_option", "key", "key_note"],
+        &["is_environment", "is_key", "is_option", "key", "key_note"],
     ),
     (
         "window-customize.c",
@@ -535,6 +554,9 @@ const ACCEPTED_NATIVE_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = 
         &[
             "option_is_array",
             "option_is_global",
+            "option_is_hook",
+            "option_is_monitor",
+            "option_monitor",
             "option_name",
             "option_scope",
             "option_unit",
@@ -571,38 +593,7 @@ const SHOW_HOOKS_MONITOR_CONTEXT_FORMATS: &[&str] = &[
     "option_value",
     "option_value_only",
 ];
-const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[
-    (
-        "window-customize.c",
-        "window_customize_build",
-        &["is_environment"],
-    ),
-    (
-        "window-customize.c",
-        "window_customize_build_environment",
-        &[
-            "environment_hidden",
-            "environment_is_global",
-            "environment_name",
-            "environment_removed",
-            "environment_scope",
-            "environment_value",
-            "is_environment",
-            "is_key",
-            "is_option",
-        ],
-    ),
-    (
-        "window-customize.c",
-        "window_customize_build_keys",
-        &["is_environment"],
-    ),
-    (
-        "window-customize.c",
-        "window_customize_build_option",
-        &["option_is_hook", "option_is_monitor", "option_monitor"],
-    ),
-];
+const MISSING_LITERAL_FORMAT_CONTEXT_SCOPES: &[(&str, &str, &[&str])] = &[];
 const MISSING_DERIVED_FORMAT_CONTEXT_FAMILIES: &[(&str, &[&str], &[&str])] = &[];
 
 #[doc(hidden)]
@@ -901,6 +892,7 @@ pub struct ExecutionContext {
     refuse_new_session_attach: bool,
     pub no_hooks: bool,
     pub format_variables: BTreeMap<String, String>,
+    spawn_pane_options: Vec<(String, String)>,
 }
 
 /// `struct mouse_event` as much of it as a bound mouse key carries: the pane
@@ -923,6 +915,55 @@ pub struct MouseEventTarget {
     /// `sr->start` for the status range the gesture landed in, which is where
     /// `cmd_display_menu_get_pos` puts `-x W`.
     pub status_range_start: Option<u16>,
+    pub press: Option<(u16, u16)>,
+    pub drag: Option<MouseDrag>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MouseDragKind {
+    NewPane,
+    MovePane,
+    ResizeFloat,
+    ResizeTiled,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MouseDrag {
+    pub kind: MouseDragKind,
+    pub pane: PaneId,
+    pub anchor: (u16, u16),
+    pub last: (u16, u16),
+}
+
+fn mouse_anchor(mouse: &MouseEventTarget) -> (u16, u16) {
+    mouse
+        .drag
+        .map(|drag| drag.anchor)
+        .or(mouse.press)
+        .unwrap_or((mouse.column, mouse.row))
+}
+
+fn mouse_anchor_cell(mouse: &MouseEventTarget) -> (i32, i32) {
+    let (x, y) = mouse_anchor(mouse);
+    (i32::from(x), i32::from(y))
+}
+
+fn mouse_last_cell(mouse: &MouseEventTarget) -> (i32, i32) {
+    let (x, y) = mouse
+        .drag
+        .map(|drag| drag.last)
+        .or(mouse.press)
+        .unwrap_or((mouse.column, mouse.row));
+    (i32::from(x), i32::from(y))
+}
+
+fn armed_mouse_drag(kind: MouseDragKind, pane: PaneId, mouse: &MouseEventTarget) -> MuxEffect {
+    MuxEffect::ArmMouseDrag(MouseDrag {
+        kind,
+        pane,
+        anchor: mouse_anchor(mouse),
+        last: (mouse.column, mouse.row),
+    })
 }
 
 impl MouseEventTarget {
@@ -1007,6 +1048,7 @@ impl fmt::Debug for ExecutionContext {
             .field("refuse_new_session_attach", &self.refuse_new_session_attach)
             .field("no_hooks", &self.no_hooks)
             .field("format_variables", &self.format_variables)
+            .field("spawn_pane_options", &self.spawn_pane_options)
             .finish()
     }
 }
@@ -1041,6 +1083,7 @@ impl Default for ExecutionContext {
             refuse_new_session_attach: false,
             no_hooks: false,
             format_variables: BTreeMap::new(),
+            spawn_pane_options: Vec::new(),
         }
     }
 }
@@ -1250,6 +1293,12 @@ impl ExecutionContext {
         self.refuse_new_session_attach = refuse;
     }
 
+    /// Pane options `new-pane` sets on the pane it creates before the daemon
+    /// spawns its process, so a command that exits at once already sees them.
+    pub fn set_spawn_pane_options(&mut self, options: Vec<(String, String)>) {
+        self.spawn_pane_options = options;
+    }
+
     pub fn retarget_to_pane(&mut self, state: &MuxState, pane: PaneId) -> bool {
         let Some(target) = Self::for_pane(state, pane) else {
             return false;
@@ -1345,6 +1394,7 @@ pub enum MuxEffect {
     PaneWaitForExit {
         pane: PaneId,
     },
+    ArmMouseDrag(MouseDrag),
     PanesRemoved(Vec<PaneId>),
     PaneRelocated {
         pane: PaneId,
@@ -3070,6 +3120,11 @@ impl MuxEngine {
 
     #[must_use]
     pub fn after_command_hook(command: &str) -> Option<&'static str> {
+        let command = if command == "new-pane" {
+            "split-window"
+        } else {
+            command
+        };
         HOOK_NAMES
             .binary_search_by(|hook| {
                 hook.strip_prefix("after-")
@@ -4998,6 +5053,14 @@ impl MuxEngine {
         Ok(())
     }
 
+    fn default_window_name(&self, pane: PaneId) -> String {
+        match self.state.pane(pane) {
+            Some(state) if !matches!(state.kind, PaneKind::Terminal) => state.title.clone(),
+            Some(_) => self.pane_command_fallback(pane),
+            None => String::new(),
+        }
+    }
+
     pub(crate) fn pane_command_fallback(&self, pane: PaneId) -> String {
         let command = self
             .pane_start_command(pane)
@@ -6179,6 +6242,7 @@ impl MuxEngine {
             "swap-window" => self.swap_window(context, &command.args)?,
             "find-window" => self.find_window(context, &command.args)?,
             "split-window" => self.split_window(context, &command.args, command.stdin(), hooks)?,
+            "new-pane" => self.new_pane(context, &command.args, command.stdin(), hooks)?,
             "select-pane-kind" => self.select_pane_kind(context, &command.args)?,
             "break-pane" => self.break_pane(context, &command.args, hooks)?,
             "join-pane" | "move-pane" => self.join_pane(context, &command.args, name, hooks)?,
@@ -7663,10 +7727,21 @@ impl MuxEngine {
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let (options, positional) = parse_command_options("split-window", args)?;
+        self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let kind = self.spawn_pane_kind("split-window", context, &options, &positional, hooks)?;
         let command = matches!(kind, PaneKind::Terminal)
             .then(|| shell_command_positional(&positional))
             .flatten();
+        pane_spawn_empty(&options, command.as_deref())?;
+        check_spawn_border_lines(&options)?;
+        let floating = match self.split_floating_target(context, &options)? {
+            Some(Err(cause)) => return Err(ServerError::InvalidCommand(cause)),
+            Some(Ok((target, old, spawn))) => {
+                let _ = self.state.set_float_geometry(target, old);
+                Some(spawn)
+            }
+            None => None,
+        };
         let mut execution = self.split_window_with_options(
             context,
             &options,
@@ -7674,6 +7749,7 @@ impl MuxEngine {
             command,
             split_size(&options),
             true,
+            floating,
             hooks,
         )?;
         if options.has("-I")
@@ -7689,6 +7765,277 @@ impl MuxEngine {
             });
         }
         Ok(execution)
+    }
+
+    fn new_pane(
+        &mut self,
+        context: &mut ExecutionContext,
+        args: &[RawText],
+        stdin: Option<&RawText>,
+        hooks: &mut impl StatusHooks,
+    ) -> Result<Execution, ServerError> {
+        let (mut options, positional) = parse_command_options("new-pane", args)?;
+        let floating = !options.has("-L");
+        let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        if let Some(target_context) = ExecutionContext::for_pane(&self.state, target) {
+            self.expand_float_values(&mut options, &target_context, context, hooks);
+        }
+        let window = self
+            .state
+            .window_for_pane(target)
+            .expect("resolved pane has a window");
+        if options.has("-O") {
+            if !floating {
+                return Err(ServerError::InvalidCommand(
+                    "modal pane must be floating".to_owned(),
+                ));
+            }
+            if self.state.windows[&window].modal_pane().is_some() {
+                return Err(ServerError::InvalidCommand(
+                    "window already has a modal pane".to_owned(),
+                ));
+            }
+        }
+        let drag_mouse = context.invoking_mouse().cloned();
+        if options.has("-M") && floating && drag_mouse.is_none() {
+            return Ok(Execution::default());
+        }
+        let kind = self.spawn_pane_kind("new-pane", context, &options, &positional, hooks)?;
+        let command = matches!(kind, PaneKind::Terminal)
+            .then(|| shell_command_positional(&positional))
+            .flatten();
+        pane_spawn_empty(&options, command.as_deref())?;
+        check_spawn_border_lines(&options)?;
+        let spawn = if floating {
+            let lines = match options.value("-B") {
+                Some(lines) => PaneBorderLines::parse(lines),
+                None => self.pane_border_lines(window),
+            };
+            let border = lines != PaneBorderLines::None;
+            let geometry = self
+                .float_geometry(window, &options, border, None)
+                .map_err(ServerError::InvalidCommand)?;
+            let modal = options.has("-O").then(|| Modal {
+                capture_keys: options.has("-K"),
+                close_on_click: options.has("-C"),
+                close_on_cancel: options.has("-D"),
+                ..Modal::default()
+            });
+            Some(FloatSpawn {
+                geometry,
+                over_zoom: options.has("-A") || options.has("-O"),
+                modal,
+                detached: options.has("-d"),
+                before: options.has("-b"),
+                full_size: options.has("-f"),
+            })
+        } else {
+            None
+        };
+        let spawn_options = std::mem::take(&mut context.spawn_pane_options);
+        let mut execution = self.split_window_with_options(
+            context,
+            &options,
+            kind,
+            command,
+            split_size(&options),
+            true,
+            spawn,
+            hooks,
+        )?;
+        let created = execution.effects.iter().find_map(|effect| match effect {
+            MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+            _ => None,
+        });
+        if let Some(pane) = created {
+            for (name, value) in spawn_options {
+                if let Some(mut option_context) = ExecutionContext::for_pane(&self.state, pane) {
+                    let _ = self.execute(
+                        &mut option_context,
+                        &CommandInvocation::new(
+                            "set-option",
+                            ["-p", "-t", &pane.to_string(), &name, &value],
+                        ),
+                    );
+                }
+            }
+        }
+        if options.has("-M")
+            && floating
+            && let Some(pane) = created
+            && let Some(mouse) = drag_mouse
+            && self.new_pane_mouse_resize(pane, &mouse)?
+        {
+            execution
+                .effects
+                .push(armed_mouse_drag(MouseDragKind::NewPane, pane, &mouse));
+        }
+        if options.has("-I")
+            && let Some(bytes) = stdin
+            && let Some(pane) = created
+        {
+            execution.effects.push(MuxEffect::PaneStreamInput {
+                pane,
+                bytes: bytes.clone(),
+            });
+        }
+        Ok(execution)
+    }
+
+    fn split_floating_target(
+        &self,
+        context: &ExecutionContext,
+        options: &Options,
+    ) -> Result<Option<Result<(PaneId, CellGeometry, FloatSpawn), String>>, ServerError> {
+        let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let window = self
+            .state
+            .window_for_pane(target)
+            .expect("resolved pane has a window");
+        let window_state = &self.state.windows[&window];
+        if !window_state.is_floating(target) {
+            return Ok(None);
+        }
+        let lines = match options.value("-B") {
+            Some(lines) => PaneBorderLines::parse(lines),
+            None => self.pane_border_lines(window),
+        };
+        let old = window_state
+            .layout
+            .pane_geometry(target)
+            .expect("floating pane has a cell");
+        let Some((old, new)) = split_floating_cell(
+            old,
+            window_state.layout.extent(),
+            lines != PaneBorderLines::None,
+            options.has("-h"),
+            options.has("-b"),
+            options.has("-f"),
+        ) else {
+            return Ok(Some(Err("no space for a new pane".to_owned())));
+        };
+        Ok(Some(Ok((
+            target,
+            old,
+            FloatSpawn {
+                geometry: new,
+                detached: options.has("-d"),
+                before: options.has("-b"),
+                full_size: options.has("-f"),
+                ..FloatSpawn::default()
+            },
+        ))))
+    }
+
+    fn expand_float_values(
+        &self,
+        options: &mut Options,
+        target: &ExecutionContext,
+        context: &ExecutionContext,
+        hooks: &mut impl StatusHooks,
+    ) {
+        for (name, value) in &mut options.values {
+            if !matches!(name.as_str(), "-x" | "-y" | "-X" | "-Y") || !value.contains('#') {
+                continue;
+            }
+            let (body, percent) = value
+                .strip_suffix('%')
+                .map_or((value.as_str(), ""), |body| (body, "%"));
+            let expanded = self.expand_target_format(
+                body,
+                target,
+                context.session,
+                context.target_format_client(),
+                hooks,
+            );
+            *value = format!("{expanded}{percent}");
+        }
+    }
+
+    fn float_geometry(
+        &mut self,
+        window: WindowId,
+        options: &Options,
+        border: bool,
+        defaults: Option<CellGeometry>,
+    ) -> Result<CellGeometry, String> {
+        let window_state = &self.state.windows[&window];
+        let (wsx, wsy) = window_state.layout.extent();
+        let (wsx, wsy) = (i64::from(wsx), i64::from(wsy));
+        let mut sx = defaults.map_or(wsx / 2, |cell| i64::from(cell.sx));
+        let mut sy = defaults.map_or(wsy / 4, |cell| i64::from(cell.sy));
+        let mut ox = defaults.map(|cell| i64::from(cell.xoff));
+        let mut oy = defaults.map(|cell| i64::from(cell.yoff));
+        let position = |cause: String| format!("position {cause}");
+        let pane_maximum = i64::from(PANE_MAXIMUM);
+        if let Some(value) = options.value("-x") {
+            sx = percentage_value(value, 0, pane_maximum, wsx).map_err(position)?;
+            if border {
+                sx -= 2;
+            }
+        }
+        if let Some(value) = options.value("-y") {
+            sy = percentage_value(value, 0, pane_maximum, wsy).map_err(position)?;
+            if border {
+                sy -= 2;
+            }
+        }
+        if let Some(value) = options.value("-X") {
+            ox = Some(percentage_value(value, -sx, wsx, wsx).map_err(position)?);
+        }
+        if let Some(value) = options.value("-Y") {
+            oy = Some(percentage_value(value, -sy, wsy, wsy).map_err(position)?);
+        }
+        let (mut last_x, mut last_y) = if window_state.has_floating_panes() {
+            window_state.floats.last_new_pane
+        } else {
+            (0, 0)
+        };
+        let pad = i64::from(border);
+        let xoff = match ox {
+            None => {
+                let mut xoff = 4;
+                if last_x != 0 {
+                    xoff = i64::from(last_x) + 4;
+                    if xoff + sx + pad > wsx {
+                        xoff = 4;
+                    }
+                }
+                last_x = i32::try_from(xoff).unwrap_or(i32::MAX);
+                xoff
+            }
+            Some(xoff) if options.value("-X").is_some() && border => xoff + 1,
+            Some(xoff) => xoff,
+        };
+        let yoff = match oy {
+            None => {
+                let mut yoff = 2;
+                if last_y != 0 {
+                    yoff = i64::from(last_y) + 2;
+                    if yoff + sy + pad > wsy {
+                        yoff = 2;
+                    }
+                }
+                last_y = i32::try_from(yoff).unwrap_or(i32::MAX);
+                yoff
+            }
+            Some(yoff) if options.value("-Y").is_some() && border => yoff + 1,
+            Some(yoff) => yoff,
+        };
+        self.state.set_last_new_pane(window, (last_x, last_y));
+        let minimum = i64::from(PANE_MINIMUM);
+        if !(minimum..=pane_maximum).contains(&sx) {
+            return Err("invalid width".to_owned());
+        }
+        if !(minimum..=pane_maximum).contains(&sy) {
+            return Err("invalid height".to_owned());
+        }
+        Ok(CellGeometry {
+            sx: u16::try_from(sx).unwrap_or(u16::MAX),
+            sy: u16::try_from(sy).unwrap_or(u16::MAX),
+            xoff: i32::try_from(xoff).unwrap_or(i32::MAX),
+            yoff: i32::try_from(yoff).unwrap_or(i32::MAX),
+        })
     }
 
     fn spawn_pane_kind(
@@ -7828,7 +8175,7 @@ impl MuxEngine {
         args: &[RawText],
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
-        let (options, positional) = parse_command_options("break-pane", args)?;
+        let (mut options, positional) = parse_command_options("break-pane", args)?;
         if !positional.is_empty() {
             return Err(ServerError::CommandParse(
                 "break-pane does not accept positional arguments".to_owned(),
@@ -7839,6 +8186,14 @@ impl MuxEngine {
             .state
             .window_for_pane(source)
             .expect("resolved source pane has a window");
+        if self.state.windows[&source_window].modal_pane() == Some(source) {
+            return Err(ServerError::InvalidCommand("pane is modal".to_owned()));
+        }
+        if options.has("-W") {
+            let target_context = context.clone();
+            self.expand_float_values(&mut options, &target_context, context, hooks);
+            return self.break_pane_float(context, &options, source_window, source);
+        }
         let source_session = self.state.windows[&source_window].session;
         let destination = match options.value("-t") {
             Some(target) => window_destination(&self.state, Some(target), context)?,
@@ -7866,11 +8221,13 @@ impl MuxEngine {
         let original_context = context.clone();
         let base_index = self.base_index_for_session(destination_session);
         let destroyed_source = self.destroyed_session_marker(source_session)?;
+        let default_name = self.default_window_name(source);
         let window = self.state.break_pane_with_base_index(
             source,
             destination_session,
             destination_index,
             name,
+            default_name,
             detached,
             base_index,
         )?;
@@ -7879,6 +8236,9 @@ impl MuxEngine {
                 .set_window_automatic_rename(window, Some(false))?;
         }
         self.record_destroyed_session(destroyed_source);
+        if window != source_window {
+            self.refresh_automatic_window_name_for_pane(source, hooks);
+        }
         if detached {
             if original_context.window == Some(source_window)
                 && original_context.pane == Some(source)
@@ -7931,6 +8291,171 @@ impl MuxEngine {
         Ok(execution)
     }
 
+    fn break_pane_float(
+        &mut self,
+        context: &mut ExecutionContext,
+        options: &Options,
+        window: WindowId,
+        pane: PaneId,
+    ) -> Result<Execution, ServerError> {
+        let window_state = &self.state.windows[&window];
+        if window_state.is_floating(pane) {
+            return Err(ServerError::InvalidCommand(
+                "pane is already floating".to_owned(),
+            ));
+        }
+        if window_state.zoomed_pane.is_some() {
+            return Err(ServerError::InvalidCommand(
+                "can't float a pane while window is zoomed".to_owned(),
+            ));
+        }
+        let border = self.pane_border_lines(window) != PaneBorderLines::None;
+        let defaults = window_state.layout.saved_float(pane);
+        let geometry = self
+            .float_geometry(window, options, border, defaults)
+            .map_err(|cause| {
+                ServerError::InvalidCommand(format!("failed to float pane: {cause}"))
+            })?;
+        let detached = options.has("-d");
+        self.state.float_existing(pane, geometry, detached)?;
+        if !detached {
+            let target = ExecutionContext::for_pane(&self.state, pane)
+                .expect("floated pane keeps its window");
+            context.retarget(&target);
+        }
+        Ok(Execution::default())
+    }
+
+    fn move_pane_float(
+        &mut self,
+        options: &Options,
+        target: PaneId,
+    ) -> Result<Execution, ServerError> {
+        let window = self
+            .state
+            .window_for_pane(target)
+            .expect("resolved pane has a window");
+        let window_state = &self.state.windows[&window];
+        if !window_state.shows_floating(target) {
+            return Err(ServerError::InvalidCommand(
+                "pane is not floating".to_owned(),
+            ));
+        }
+        let mut cell = window_state
+            .layout
+            .pane_geometry(target)
+            .expect("floating pane has a cell");
+        let (wsx, wsy) = window_state.layout.extent();
+        let (wx, wy) = (i32::from(wsx), i32::from(wsy));
+        let (px, py) = (i32::from(cell.sx), i32::from(cell.sy));
+        let border = i32::from(self.pane_lines(target) != PaneBorderLines::None);
+        if let Some(position) = options.value("-P") {
+            let z = match position {
+                "front" => Some(FloatZ::Front),
+                "back" => Some(FloatZ::Back),
+                "forward" => Some(FloatZ::Forward),
+                "backward" => Some(FloatZ::Backward),
+                "forward-loop" => Some(FloatZ::ForwardLoop),
+                "backward-loop" => Some(FloatZ::BackwardLoop),
+                _ => None,
+            };
+            if let Some(z) = z {
+                self.state.move_float_z(target, z)?;
+                return Ok(Execution::default());
+            }
+            let (xoff, yoff) = match position {
+                "top-left" => (border, border),
+                "top-centre" | "top-center" => ((wx - px) / 2, border),
+                "top-right" => (wx - px - border, border),
+                "centre-left" | "center-left" => (border, (wy - py) / 2),
+                "centre" | "center" => ((wx - px) / 2, (wy - py) / 2),
+                "centre-right" | "center-right" => (wx - px - border, (wy - py) / 2),
+                "bottom-left" => (border, wy - py - border),
+                "bottom-centre" | "bottom-center" => ((wx - px) / 2, wy - py - border),
+                "bottom-right" => (wx - px - border, wy - py - border),
+                "top-left-centre" | "top-left-center" => (wx / 4 - px / 2, wy / 4 - py / 2),
+                "top-right-centre" | "top-right-center" => ((3 * wx) / 4 - px / 2, wy / 4 - py / 2),
+                "bottom-left-centre" | "bottom-left-center" => {
+                    (wx / 4 - px / 2, (3 * wy) / 4 - py / 2)
+                }
+                "bottom-right-centre" | "bottom-right-center" => {
+                    ((3 * wx) / 4 - px / 2, (3 * wy) / 4 - py / 2)
+                }
+                _ => {
+                    return Err(ServerError::InvalidCommand(format!(
+                        "unknown position: {position}"
+                    )));
+                }
+            };
+            cell.xoff = xoff;
+            cell.yoff = yoff;
+            self.state.set_float_geometry(target, cell)?;
+            return Ok(Execution::default());
+        }
+        if let Some(value) = options.value("-z") {
+            let z = parse_strtonum(value, 0, i64::from(u32::MAX), "z-index")?;
+            self.state
+                .move_float_z(target, FloatZ::Index(u32::try_from(z).unwrap_or(u32::MAX)))?;
+            return Ok(Execution::default());
+        }
+        let position = |cause: String| ServerError::InvalidCommand(format!("position {cause}"));
+        if let Some(value) = options.value("-X") {
+            let x = percentage_value(value, -i64::from(wsx), i64::from(wsx), i64::from(wsx))
+                .map_err(position)?;
+            cell.xoff = i32::try_from(x).unwrap_or_default() + border;
+        }
+        if let Some(value) = options.value("-Y") {
+            let y = percentage_value(value, -i64::from(wsy), i64::from(wsy), i64::from(wsy))
+                .map_err(position)?;
+            cell.yoff = i32::try_from(y).unwrap_or_default() + border;
+        }
+        for flag in ["-U", "-D", "-L", "-R"] {
+            if !options.has(flag) && options.value(flag).is_none() {
+                continue;
+            }
+            let adjust = match options.value(flag) {
+                Some(value) => {
+                    parse_strtonum(value, i64::from(i32::MIN), i64::from(i32::MAX), "offset")?
+                }
+                None => 1,
+            };
+            let adjust = i32::try_from(adjust).unwrap_or_default();
+            match flag {
+                "-U" => cell.yoff -= adjust,
+                "-D" => cell.yoff += adjust,
+                "-L" => cell.xoff -= adjust,
+                _ => cell.xoff += adjust,
+            }
+        }
+        self.state.set_float_geometry(target, cell)?;
+        Ok(Execution::default())
+    }
+
+    #[must_use]
+    pub fn floating_pane_border_status(&self, pane: PaneId) -> PaneBorderStatus {
+        match self.scalar_option_effective(TmuxOptionTarget::Pane(pane), "pane-border-status") {
+            Some("top" | "top-floating") => PaneBorderStatus::Top,
+            Some("bottom" | "bottom-floating") => PaneBorderStatus::Bottom,
+            _ => PaneBorderStatus::Off,
+        }
+    }
+
+    #[must_use]
+    pub fn pane_lines(&self, pane: PaneId) -> PaneBorderLines {
+        let Some(window) = self.state.window_for_pane(pane) else {
+            return PaneBorderLines::Single;
+        };
+        if self.state.windows[&window].is_floating(pane)
+            && let Some(lines) = self
+                .pane_options
+                .get(&pane)
+                .and_then(|options| options.get(&PaneOption::PaneBorderLines))
+        {
+            return PaneBorderLines::parse(lines);
+        }
+        self.pane_border_lines(window)
+    }
+
     fn join_pane(
         &mut self,
         context: &mut ExecutionContext,
@@ -7944,6 +8469,37 @@ impl MuxEngine {
                 "{command} does not accept positional arguments"
             )));
         }
+        if command == "move-pane" {
+            if options.has("-M") {
+                let Some(mouse) = context.invoking_mouse().cloned() else {
+                    return Ok(Execution::default());
+                };
+                let Some(pane) = mouse.pane else {
+                    return Ok(Execution::default());
+                };
+                if self.mouse_float_geometry(pane).is_none() {
+                    return Ok(Execution::default());
+                }
+                self.state.select_pane_with_zoom(pane, true)?;
+                self.move_float_from_mouse(pane, &mouse)?;
+                return Ok(Execution {
+                    effects: vec![armed_mouse_drag(MouseDragKind::MovePane, pane, &mouse)],
+                    ..Execution::default()
+                });
+            }
+            if ["-P", "-z", "-X", "-Y", "-U", "-D", "-L", "-R"]
+                .iter()
+                .any(|flag| options.has(flag) || options.value(flag).is_some())
+            {
+                let target =
+                    self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+                let mut options = options;
+                if let Some(target_context) = ExecutionContext::for_pane(&self.state, target) {
+                    self.expand_float_values(&mut options, &target_context, context, hooks);
+                }
+                return self.move_pane_float(&options, target);
+            }
+        }
         let source = self.resolve_pane(options.value("-s"), context.window, context.pane)?;
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let source_window = self
@@ -7954,22 +8510,42 @@ impl MuxEngine {
             .state
             .window_for_pane(target)
             .expect("resolved target pane has a window");
+        if self.state.windows[&source_window].modal_pane() == Some(source)
+            || self.state.windows[&target_window].modal_pane() == Some(target)
+        {
+            return Err(ServerError::InvalidCommand("pane is modal".to_owned()));
+        }
         for window in [target_window, source_window] {
             if self
                 .state
                 .windows
                 .get_mut(&mut self.state.journal, &window)
                 .expect("resolved pane window exists")
-                .zoomed_pane
-                .take()
-                .is_some()
+                .unzoom()
             {
                 self.state.bump_generation();
             }
         }
         if source == target {
+            if self.state.windows[&source_window].is_floating(source) {
+                let detached = options.has("-d");
+                self.state.tile_floating(source, detached).map_err(|_| {
+                    ServerError::InvalidCommand("no space for a new pane".to_owned())
+                })?;
+                if !detached {
+                    let target = ExecutionContext::for_pane(&self.state, source)
+                        .expect("tiled pane keeps its window");
+                    context.retarget(&target);
+                }
+                return Ok(Execution::default());
+            }
             return Err(ServerError::InvalidCommand(
                 "source and target panes must be different".to_owned(),
+            ));
+        }
+        if self.state.windows[&target_window].is_floating(target) {
+            return Err(ServerError::InvalidCommand(
+                "size or position can't split a floating pane".to_owned(),
             ));
         }
         let source_session = self.state.windows[&source_window].session;
@@ -8240,6 +8816,7 @@ impl MuxEngine {
         command: Option<Vec<String>>,
         size: Option<SplitSize<'_>>,
         apply_tmux_zoom: bool,
+        floating: Option<FloatSpawn>,
         hooks: &mut impl StatusHooks,
     ) -> Result<Execution, ServerError> {
         let active_session = context.session;
@@ -8248,21 +8825,15 @@ impl MuxEngine {
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
         let empty = pane_spawn_empty(options, command.as_deref())?;
         let environment = spawn_environment(options);
-        if let Some(lines) = options.value("-B")
-            && !crate::tmux_option_metadata::tmux_option_metadata("pane-border-lines")
-                .choices
-                .contains(&lines)
-        {
-            return Err(ServerError::InvalidCommand(format!(
-                "pane-border-lines unknown value: {lines}"
-            )));
-        }
+        check_spawn_border_lines(options)?;
         let axis = if options.has("-h") {
             Axis::Horizontal
         } else {
             Axis::Vertical
         };
-        let placement = if apply_tmux_zoom {
+        let placement = if floating.is_some() {
+            None
+        } else if apply_tmux_zoom {
             let size = match size {
                 None => LayoutSplitSize::Default,
                 Some(SplitSize::Percentage(value)) => LayoutSplitSize::Percent(
@@ -8288,31 +8859,54 @@ impl MuxEngine {
                     }
                 }
             };
-            SplitPlacement {
+            Some(SplitPlacement {
                 size,
                 before: options.has("-b"),
                 full_size: options.has("-f"),
                 detached: options.has("-d"),
-            }
+            })
         } else {
-            self.split_placement(options, size)?
+            Some(self.split_placement(options, size)?)
         };
         let snapshot_kind = pane_kind_snapshot(&kind);
         let (inherit_cwd_from, cwd) =
             spawn_cwd_source(self, options, Some(target), &kind, format_client, hooks);
-        if apply_tmux_zoom
-            && self
-                .state
-                .window_for_pane(target)
-                .is_some_and(|window| self.state.windows[&window].zoomed_pane.is_some())
-        {
+        let over_zoom = floating.as_ref().is_some_and(|spawn| spawn.over_zoom);
+        let target_window = self
+            .state
+            .window_for_pane(target)
+            .expect("resolved pane has a window");
+        let mut float_zoom = None;
+        if apply_tmux_zoom && floating.is_some() {
+            let window_state = &self.state.windows[&target_window];
+            let active_over_zoom = window_state.active_is_over_zoom();
+            let restore = (active_over_zoom && window_state.pane_is_visible(target))
+                || (window_state.zoomed_pane.is_some() && over_zoom);
+            let pushed = if over_zoom || active_over_zoom {
+                self.state.push_zoom(target_window, false, true)
+            } else {
+                self.state.push_zoom(target_window, true, options.has("-Z"))
+            };
+            float_zoom = Some((restore, pushed));
+        } else if apply_tmux_zoom && self.state.windows[&target_window].zoomed_pane.is_some() {
             self.state.toggle_zoom(target)?;
         }
-        let pane = self.state.split_pane_with(target, axis, kind, placement)?;
+        let is_floating = floating.is_some();
+        let detached = placement
+            .as_ref()
+            .map_or(options.has("-d"), |placement| placement.detached);
+        let pane = match (floating, placement) {
+            (Some(spawn), _) => self.state.float_pane_with(target, kind, &spawn)?,
+            (None, Some(placement)) => self.state.split_pane_with(target, axis, kind, placement)?,
+            (None, None) => unreachable!("a tiled split has a placement"),
+        };
+        if let Some((true, pushed)) = float_zoom {
+            self.state.pop_zoom(target_window, pushed);
+        }
         if empty {
             self.state.mark_pane_empty(pane)?;
         }
-        if !placement.detached {
+        if !detached {
             let target =
                 ExecutionContext::for_pane(&self.state, pane).expect("new pane has a context");
             context.retarget(&target);
@@ -8321,7 +8915,7 @@ impl MuxEngine {
             .state
             .window_for_pane(pane)
             .expect("new pane belongs to a window");
-        if apply_tmux_zoom {
+        if apply_tmux_zoom && !is_floating {
             let active_pane = self.state.windows[&window].active_pane;
             let state = self
                 .state
@@ -8664,10 +9258,37 @@ impl MuxEngine {
             ));
         }
         let target = self.resolve_pane(options.value("-t"), context.window, context.pane)?;
+        let initial_source = match options.value("-s") {
+            Some(source) => Some(self.resolve_pane(Some(source), context.window, context.pane)?),
+            None => context.pane,
+        };
+        let is_modal = |pane: PaneId| {
+            self.state
+                .window_for_pane(pane)
+                .is_some_and(|window| self.state.windows[&window].modal_pane() == Some(pane))
+        };
+        if is_modal(target) || initial_source.is_some_and(is_modal) {
+            return Err(ServerError::InvalidCommand("pane is modal".to_owned()));
+        }
+        let target_window = self
+            .state
+            .window_for_pane(target)
+            .expect("resolved target pane has a window");
+        let target_floating = self.state.windows[&target_window].is_floating(target);
         let source = if options.has("-D") {
-            self.state.next_pane(target)?
+            if target_floating {
+                return Err(ServerError::InvalidCommand(
+                    "cannot swap down on floating pane".to_owned(),
+                ));
+            }
+            self.state.next_tiled_pane(target, 1)?
         } else if options.has("-U") {
-            self.state.previous_pane(target)?
+            if target_floating {
+                return Err(ServerError::InvalidCommand(
+                    "cannot swap up on floating pane".to_owned(),
+                ));
+            }
+            self.state.next_tiled_pane(target, -1)?
         } else {
             let source = options.value("-s").ok_or_else(|| {
                 ServerError::InvalidCommand(
@@ -8814,6 +9435,7 @@ impl MuxEngine {
                         (u32::from(left_extent.0) * u32::from(left_extent.1))
                             .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
                     }
+                    Some(TmuxSortOrder::Z) => window.pane_z(*left).cmp(&window.pane_z(*right)),
                     _ => std::cmp::Ordering::Equal,
                 };
                 ordering.then_with(|| left_pane.title.cmp(&right_pane.title))
@@ -8894,13 +9516,18 @@ impl MuxEngine {
             .state
             .window_for_pane(pane)
             .expect("resolved pane has a window");
-        if self.state.windows[&window].zoomed_pane.is_some() {
+        if !self.state.windows[&window].shows_floating(pane)
+            && self.state.windows[&window].zoomed_pane.is_some()
+        {
             self.state
                 .windows
                 .get_mut(&mut self.state.journal, &window)
                 .unwrap()
-                .zoomed_pane = None;
+                .unzoom();
             self.state.bump_generation();
+        }
+        if self.state.windows[&window].is_floating(pane) {
+            return self.resize_floating_pane(&options, &positional, window, pane);
         }
         let mut absolute = Vec::new();
         for (option, axis, dimension) in [
@@ -8953,6 +9580,116 @@ impl MuxEngine {
         Ok(Execution::default())
     }
 
+    fn resize_floating_pane(
+        &mut self,
+        options: &Options,
+        positional: &[RawText],
+        window: WindowId,
+        pane: PaneId,
+    ) -> Result<Execution, ServerError> {
+        let border = self.pane_lines(pane) != PaneBorderLines::None;
+        let minimum = i64::from(PANE_MINIMUM);
+        let maximum = i64::from(PANE_MAXIMUM);
+        for (option, axis, dimension) in [
+            ("-x", Axis::Horizontal, "width"),
+            ("-y", Axis::Vertical, "height"),
+        ] {
+            let Some(value) = options.value(option) else {
+                continue;
+            };
+            let extent = self
+                .window_extent(window, axis)
+                .expect("resolved window has a cell extent");
+            let mut size = i64::from(parse_resize_size(value, extent, dimension)?);
+            let mut cell = self.state.windows[&window]
+                .layout
+                .pane_geometry(pane)
+                .expect("floating pane has a cell");
+            if axis == Axis::Vertical
+                && match self.pane_border_status(window) {
+                    PaneBorderStatus::Top => cell.yoff == 1,
+                    PaneBorderStatus::Bottom => {
+                        cell.yoff + i32::from(cell.sy) == i32::from(extent) - 1
+                    }
+                    PaneBorderStatus::Off => false,
+                }
+            {
+                size += 1;
+            }
+            if border && size >= minimum + 2 {
+                size -= 2;
+            }
+            if !(minimum..=maximum).contains(&size) {
+                return Err(ServerError::InvalidCommand(
+                    "size size is too big or too small".to_owned(),
+                ));
+            }
+            let size = u16::try_from(size).expect("pane size is bounded");
+            match axis {
+                Axis::Horizontal => cell.sx = size,
+                Axis::Vertical => cell.sy = size,
+            }
+            self.state.set_float_geometry(pane, cell)?;
+        }
+        let mut opposite = false;
+        for (option, axis) in [
+            ("-U", Axis::Vertical),
+            ("-D", Axis::Vertical),
+            ("-L", Axis::Horizontal),
+            ("-R", Axis::Horizontal),
+        ] {
+            let value = match options.value(option) {
+                Some(value) => value,
+                None if options.has(option) => positional.first().map_or("1", |value| value),
+                None => continue,
+            };
+            let change = parse_strtonum(
+                value,
+                i64::from(i32::MIN),
+                i64::from(i32::MAX),
+                "adjustment",
+            )?;
+            if option == "-L" || option == "-U" {
+                opposite = true;
+            }
+            if change == 0 {
+                continue;
+            }
+            let mut cell = self.state.windows[&window]
+                .layout
+                .pane_geometry(pane)
+                .expect("floating pane has a cell");
+            let current = match axis {
+                Axis::Horizontal => cell.sx,
+                Axis::Vertical => cell.sy,
+            };
+            let size = i64::from(current) + change;
+            if !(minimum..=maximum).contains(&size) {
+                return Err(ServerError::InvalidCommand(
+                    "adjustment change is too big or too small".to_owned(),
+                ));
+            }
+            let size = u16::try_from(size).expect("pane size is bounded");
+            let change = i32::try_from(change).expect("adjustment fits i32");
+            match axis {
+                Axis::Horizontal => {
+                    cell.sx = size;
+                    if opposite {
+                        cell.xoff -= change;
+                    }
+                }
+                Axis::Vertical => {
+                    cell.sy = size;
+                    if opposite {
+                        cell.yoff -= change;
+                    }
+                }
+            }
+            self.state.set_float_geometry(pane, cell)?;
+        }
+        Ok(Execution::default())
+    }
+
     /// `resize_pane_mouse_update`: the border the drag grabbed follows the
     /// pointer, so the pane it belongs to ends at the cell the event landed on.
     /// The pin registers a drag callback and reads every later motion through
@@ -8964,28 +9701,233 @@ impl MuxEngine {
         context: &ExecutionContext,
         pane: PaneId,
     ) -> Result<Execution, ServerError> {
-        let Some(mouse) = context.invoking_mouse() else {
+        let Some(mouse) = context.invoking_mouse().cloned() else {
             return Ok(Execution::default());
         };
-        let Some(axis) = mouse.border else {
-            return Ok(Execution::default());
-        };
-        let window = self
+        if let Some(drag) = mouse.drag {
+            let alive = match drag.kind {
+                MouseDragKind::NewPane => self.new_pane_mouse_resize(drag.pane, &mouse)?,
+                MouseDragKind::MovePane => self.move_float_from_mouse(drag.pane, &mouse)?,
+                MouseDragKind::ResizeFloat => self.resize_float_from_mouse(drag.pane, &mouse)?,
+                MouseDragKind::ResizeTiled => {
+                    self.resize_tiled_from_mouse(drag.pane, &mouse)?;
+                    true
+                }
+            };
+            return Ok(Execution {
+                effects: alive
+                    .then(|| armed_mouse_drag(drag.kind, drag.pane, &mouse))
+                    .into_iter()
+                    .collect(),
+                ..Execution::default()
+            });
+        }
+        let floating = self
             .state
             .window_for_pane(pane)
-            .ok_or_else(|| ServerError::PaneNotFound(pane.to_string()))?;
+            .is_some_and(|window| self.state.windows[&window].shows_floating(pane));
+        let kind = if floating {
+            self.state.select_pane_with_zoom(pane, true)?;
+            self.resize_float_from_mouse(pane, &mouse)?;
+            MouseDragKind::ResizeFloat
+        } else {
+            self.resize_tiled_from_mouse(pane, &mouse)?;
+            MouseDragKind::ResizeTiled
+        };
+        Ok(Execution {
+            effects: vec![armed_mouse_drag(kind, pane, &mouse)],
+            ..Execution::default()
+        })
+    }
+
+    fn resize_tiled_from_mouse(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<(), ServerError> {
+        let Some(axis) = mouse.border else {
+            return Ok(());
+        };
+        let Some(window) = self.state.window_for_pane(pane) else {
+            return Ok(());
+        };
         let Some(geometry) = self.state.windows[&window].layout.pane_geometry(pane) else {
-            return Ok(Execution::default());
+            return Ok(());
         };
         let cells = match axis {
-            Axis::Horizontal => mouse.column.checked_sub(geometry.xoff),
-            Axis::Vertical => mouse.row.checked_sub(geometry.yoff),
+            Axis::Horizontal => i32::from(mouse.column) - geometry.xoff,
+            Axis::Vertical => self.mouse_window_row(pane, mouse.row) - geometry.yoff,
         };
+        let cells = u16::try_from(cells).ok();
         let Some(cells) = cells.filter(|cells| *cells > 0) else {
-            return Ok(Execution::default());
+            return Ok(());
         };
         self.state.resize_pane_to(pane, axis, cells)?;
-        Ok(Execution::default())
+        Ok(())
+    }
+
+    fn mouse_window_row(&self, pane: PaneId, row: u16) -> i32 {
+        let row = i32::from(row);
+        let Some(window) = self.state.window_for_pane(pane) else {
+            return row;
+        };
+        let session = self.state.windows[&window].session;
+        let lines = i32::from(self.status_rows_for_session(Some(session)));
+        if lines == 0 {
+            return row;
+        }
+        if self.status_formats_for_session(Some(session)).position == crate::StatusPosition::Top {
+            return if row >= lines { row - lines } else { row };
+        }
+        let at = i32::from(self.state.windows[&window].layout.extent().1);
+        if row >= at { at - 1 } else { row }
+    }
+
+    fn mouse_cells(&self, pane: PaneId, mouse: &MouseEventTarget) -> [(i32, i32); 3] {
+        let cell = |(x, y): (u16, u16)| (i32::from(x), self.mouse_window_row(pane, y));
+        let (lx, ly) = mouse_last_cell(mouse);
+        let (ax, ay) = mouse_anchor_cell(mouse);
+        [
+            cell((mouse.column, mouse.row)),
+            cell((
+                u16::try_from(lx).unwrap_or_default(),
+                u16::try_from(ly).unwrap_or_default(),
+            )),
+            cell((
+                u16::try_from(ax).unwrap_or_default(),
+                u16::try_from(ay).unwrap_or_default(),
+            )),
+        ]
+    }
+
+    fn mouse_float_geometry(&self, pane: PaneId) -> Option<CellGeometry> {
+        let window = self.state.window_for_pane(pane)?;
+        let window = &self.state.windows[&window];
+        if !window.shows_floating(pane) {
+            return None;
+        }
+        window.layout.pane_geometry(pane)
+    }
+
+    fn move_float_from_mouse(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<bool, ServerError> {
+        let Some(mut cell) = self.mouse_float_geometry(pane) else {
+            return Ok(false);
+        };
+        let [(x, y), (lx, ly), _] = self.mouse_cells(pane, mouse);
+        if x != lx || y != ly {
+            cell.xoff += x - lx;
+            cell.yoff += y - ly;
+            self.state.set_float_geometry(pane, cell)?;
+        }
+        Ok(true)
+    }
+
+    fn resize_float_from_mouse(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<bool, ServerError> {
+        let Some(cell) = self.mouse_float_geometry(pane) else {
+            return Ok(false);
+        };
+        let [(x, y), (lx, ly), _] = self.mouse_cells(pane, mouse);
+        let (sx, sy) = (i32::from(cell.sx), i32::from(cell.sy));
+        let left = cell.xoff - 1;
+        let right = cell.xoff + sx;
+        let top = cell.yoff - 1;
+        let bottom = cell.yoff + sy;
+        let at_left = lx == left || lx == left + 1;
+        let at_right = lx == right + 1 || lx == right;
+        let next = if at_left && ly == top {
+            Some(((sx + lx - x).max(1), (sy + ly - y).max(1), x + 1, y + 1))
+        } else if at_right && ly == top {
+            Some((
+                (x - cell.xoff).max(1),
+                (sy + ly - y).max(1),
+                cell.xoff,
+                y + 1,
+            ))
+        } else if at_left && ly == bottom {
+            let new_sy = y - cell.yoff;
+            (new_sy >= 1).then_some(((sx + lx - x).max(1), new_sy, x + 1, cell.yoff))
+        } else if at_right && ly == bottom {
+            Some((
+                (x - cell.xoff).max(1),
+                (y - cell.yoff).max(1),
+                cell.xoff,
+                cell.yoff,
+            ))
+        } else if lx == right {
+            let new_sx = x - cell.xoff;
+            (new_sx >= 1).then_some((new_sx, sy, cell.xoff, cell.yoff))
+        } else if lx == left {
+            let new_sx = sx + lx - x;
+            (new_sx >= 1).then_some((new_sx, sy, x + 1, cell.yoff))
+        } else if ly == bottom {
+            let new_sy = y - cell.yoff;
+            (new_sy >= 1).then_some((sx, new_sy, cell.xoff, cell.yoff))
+        } else if ly == top {
+            Some((sx, sy, cell.xoff + x - lx, y + 1))
+        } else {
+            None
+        };
+        if let Some((sx, sy, xoff, yoff)) = next {
+            self.state.set_float_geometry(
+                pane,
+                CellGeometry {
+                    sx: u16::try_from(sx).unwrap_or(u16::MAX),
+                    sy: u16::try_from(sy).unwrap_or(u16::MAX),
+                    xoff,
+                    yoff,
+                },
+            )?;
+        }
+        Ok(true)
+    }
+
+    fn new_pane_mouse_resize(
+        &mut self,
+        pane: PaneId,
+        mouse: &MouseEventTarget,
+    ) -> Result<bool, ServerError> {
+        if self.mouse_float_geometry(pane).is_none() {
+            return Ok(false);
+        }
+        let border = i32::from(self.pane_lines(pane) != PaneBorderLines::None);
+        let [(x, y), _, (ax, ay)] = self.mouse_cells(pane, mouse);
+        let span = |at: i32, anchor: i32| {
+            if at >= anchor {
+                (at - anchor + 1, anchor + border)
+            } else {
+                let size = anchor - at + 1;
+                (size, anchor - size + 1 + border)
+            }
+        };
+        let (sx, xoff) = span(x, ax);
+        let (sy, yoff) = span(y, ay);
+        let inner = |size: i32| {
+            if border == 0 {
+                size.max(1)
+            } else if size <= 2 {
+                1
+            } else {
+                size - 2
+            }
+        };
+        self.state.set_float_geometry(
+            pane,
+            CellGeometry {
+                sx: u16::try_from(inner(sx)).unwrap_or(u16::MAX),
+                sy: u16::try_from(inner(sy)).unwrap_or(u16::MAX),
+                xoff,
+                yoff,
+            },
+        )?;
+        Ok(true)
     }
 
     fn resize_window(
@@ -9149,7 +10091,17 @@ impl MuxEngine {
                 window.last_extent_probe = Some(probe);
                 break 'probe true;
             }
-            if window.active_pane != pane {
+            let driver = if window.is_floating(window.active_pane) {
+                window
+                    .last_panes()
+                    .iter()
+                    .chain(window.pane_order())
+                    .copied()
+                    .find(|candidate| !window.is_floating(*candidate))
+            } else {
+                Some(window.active_pane)
+            };
+            if driver != Some(pane) {
                 break 'probe false;
             }
             if window.last_extent_probe == Some(probe) {
@@ -9183,6 +10135,17 @@ impl MuxEngine {
             .windows
             .get(&window)?
             .displayed_pane_geometry_with_border(pane, status)
+    }
+
+    #[must_use]
+    pub fn pane_origin(&self, pane: PaneId) -> Option<(i32, i32)> {
+        let window = self.state.window_for_pane(pane)?;
+        let status = self.displayed_pane_border_status(window);
+        self.state
+            .windows
+            .get(&window)?
+            .displayed_pane_cell(pane, status)
+            .map(|cell| (cell.xoff, cell.yoff))
     }
 
     #[must_use]
@@ -13096,11 +14059,16 @@ impl MuxEngine {
             if options.has("-u") {
                 environment.remove(name);
             } else {
+                let hidden = if options.has("-r") {
+                    environment.get(name).is_some_and(|entry| entry.hidden)
+                } else {
+                    options.has("-h")
+                };
                 environment.insert(
                     name.clone(),
                     EnvironmentEntry {
                         value: value.clone(),
-                        hidden: options.has("-h") && !options.has("-r"),
+                        hidden,
                     },
                 );
             }
@@ -13929,6 +14897,12 @@ impl MuxEngine {
     /// `fnmatch` against the client's TERM to decide which features to turn on
     /// before it interrogates the terminal. It is a server option, so the
     /// global session store is the only place it lives.
+    #[must_use]
+    pub fn editor_option(&self) -> String {
+        self.global_tmux_option_value("editor")
+            .unwrap_or_else(|| "/usr/bin/vi".to_owned())
+    }
+
     #[must_use]
     pub fn terminal_features_option(&self) -> Vec<String> {
         self.array_option_readback(TmuxOptionTarget::Server, "terminal-features", true)
@@ -18006,6 +18980,21 @@ fn apply_client_environment_update(
     }
 }
 
+fn check_spawn_border_lines(options: &Options) -> Result<(), ServerError> {
+    match options.value("-B") {
+        Some(lines)
+            if !crate::tmux_option_metadata::tmux_option_metadata("pane-border-lines")
+                .choices
+                .contains(&lines) =>
+        {
+            Err(ServerError::InvalidCommand(format!(
+                "pane-border-lines unknown value: {lines}"
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
 fn pane_spawn_empty(options: &Options, command: Option<&[String]>) -> Result<bool, ServerError> {
     let empty_command = matches!(command, Some([value]) if value.is_empty());
     let empty_flag = options.has("-E") || options.has("-I");
@@ -18296,6 +19285,26 @@ fn reject_positionals(command: &str, positional: &[RawText]) -> Result<(), Serve
 /// The pin's `args_strtonum` (arguments.c) over OpenBSD `strtonum`: a leading
 /// sign and digits only, with `invalid` for anything unparseable and
 /// `too small`/`too large` for both range and overflow rejections.
+fn percentage_value(value: &str, minimum: i64, maximum: i64, current: i64) -> Result<i64, String> {
+    let strtonum = |value: &str, minimum: i64, maximum: i64| {
+        parse_strtonum(value, minimum, maximum, "").map_err(|error| match error {
+            ServerError::InvalidCommand(cause) => cause.trim_start().to_owned(),
+            other => other.to_string(),
+        })
+    };
+    if let Some(percent) = value.strip_suffix('%') {
+        let value = current * strtonum(percent, 0, 1000)? / 100;
+        if value < minimum {
+            return Err("too small".to_owned());
+        }
+        if value > maximum {
+            return Err("too large".to_owned());
+        }
+        return Ok(value);
+    }
+    strtonum(value, minimum, maximum)
+}
+
 fn parse_strtonum(
     value: &str,
     minimum: i64,
@@ -20375,7 +21384,7 @@ mod tests {
             .unwrap();
         let parsed = crate::parse_config(
             "cfg.in",
-            "bind-key -T root MouseDown3Pane display-menu Float f { break-pane -W }",
+            "bind-key -T root MouseDown3Pane display-menu Trim t { resize-pane -T }",
         );
         assert!(parsed.diagnostics.is_empty());
 
@@ -20389,14 +21398,14 @@ mod tests {
             .commands
             .clone();
         assert!(
-            format_callback_commands(&bound).contains("break-pane -W"),
+            format_callback_commands(&bound).contains("resize-pane -T"),
             "the item is kept as written: {}",
             format_callback_commands(&bound)
         );
 
         assert!(matches!(
-            engine.execute(&mut context, &command("break-pane", &["-W"])),
-            Err(ServerError::UnsupportedCommand(message)) if message == "break-pane -W"
+            engine.execute(&mut context, &command("resize-pane", &["-T"])),
+            Err(ServerError::UnsupportedCommand(message)) if message == "resize-pane -T"
         ));
     }
 
@@ -20667,9 +21676,9 @@ mod tests {
         );
         assert_eq!(
             engine
-                .execute(&mut context, &command("new-pane", &[]))
+                .execute(&mut context, &command("link-window", &[]))
                 .unwrap_err(),
-            ServerError::UnsupportedCommand("new-pane".to_owned())
+            ServerError::UnsupportedCommand("link-window".to_owned())
         );
     }
 
@@ -23912,6 +24921,89 @@ mod tests {
     }
 
     #[test]
+    fn break_pane_without_a_name_names_the_window_from_the_command_not_the_title() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(&mut context, &command("new-session", &["-s", "w"]))
+            .unwrap();
+        let break_out = |engine: &mut MuxEngine, context: &mut ExecutionContext, index: &str| {
+            engine
+                .execute(context, &command("split-window", &["-t", "=w:0"]))
+                .unwrap();
+            let pane = context.pane.unwrap();
+            engine
+                .set_pane_shell(pane, "/usr/bin/bash".to_owned())
+                .unwrap();
+            engine
+                .state
+                .update_pane_title(pane, "user@host:/home/user")
+                .unwrap();
+            (pane, index.to_owned())
+        };
+
+        let (shell_pane, index) = break_out(&mut engine, &mut context, "=w:6");
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &["-d", "-s", &shell_pane.to_string(), "-t", &index],
+                ),
+            )
+            .unwrap();
+        let shell_window = engine.state.window_for_pane(shell_pane).unwrap();
+        assert_eq!(engine.state.windows[&shell_window].name, "bash");
+        assert_eq!(
+            engine
+                .state
+                .window_automatic_rename_override(shell_window)
+                .unwrap(),
+            None
+        );
+
+        let (command_pane, index) = break_out(&mut engine, &mut context, "=w:7");
+        engine
+            .set_pane_start_command(
+                command_pane,
+                vec!["/usr/bin/vim".to_owned(), "notes.txt".to_owned()],
+            )
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &["-d", "-s", &command_pane.to_string(), "-t", &index],
+                ),
+            )
+            .unwrap();
+        let command_window = engine.state.window_for_pane(command_pane).unwrap();
+        assert_eq!(engine.state.windows[&command_window].name, "vim");
+
+        let (busy_pane, index) = break_out(&mut engine, &mut context, "=w:8");
+        engine.set_pane_runtime_facts(
+            busy_pane,
+            PaneRuntimeFacts {
+                current_command: "sleep".to_owned(),
+                ..PaneRuntimeFacts::default()
+            },
+        );
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &["-d", "-s", &busy_pane.to_string(), "-t", &index],
+                ),
+            )
+            .unwrap();
+        let busy_window = engine.state.window_for_pane(busy_pane).unwrap();
+        assert_eq!(engine.state.windows[&busy_window].name, "sleep");
+        assert!(engine.state.validate().is_ok());
+    }
+
+    #[test]
     fn break_pane_places_after_before_and_around_the_current_window() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
@@ -24662,7 +25754,7 @@ mod tests {
     }
 
     #[test]
-    fn session_alert_flag_formats_follow_the_resolved_window() {
+    fn session_alert_flag_formats_check_every_window() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -24699,7 +25791,7 @@ mod tests {
                 )
                 .expect("list sessions")
                 .output,
-            "0|1"
+            "1|1"
         );
         assert_eq!(
             engine
@@ -24715,7 +25807,22 @@ mod tests {
                 )
                 .expect("list windows")
                 .output,
-            "0|1|0\n1|0|1"
+            "0|1|1\n1|1|1"
+        );
+        let bell_pane = engine.state.windows[&second].active_pane;
+        engine.state.set_pane_bell(bell_pane, true);
+        assert_eq!(
+            engine
+                .execute(
+                    &mut context,
+                    &command(
+                        "display-message",
+                        &["-p", "-t", "work:0", "#{session_bell_flag}"],
+                    ),
+                )
+                .expect("display bell flag")
+                .output,
+            "1"
         );
     }
 
@@ -32942,6 +34049,10 @@ mod tests {
         ] {
             assert_eq!(MuxEngine::after_command_hook(name), None);
         }
+        assert_eq!(
+            MuxEngine::after_command_hook("new-pane"),
+            Some("after-split-window")
+        );
     }
 
     #[test]
@@ -38223,7 +39334,7 @@ mod tests {
         let engine = MuxEngine::default();
         let context = StatusContext::default();
         let snapshot = engine.format_option_snapshot();
-        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 166);
+        assert_eq!(TMUX_OPTION_CONSUMERS.len(), 167);
         for name in TMUX_OPTION_CONSUMERS {
             let direct = engine
                 .format_option_value(&context, name)
@@ -44986,7 +46097,7 @@ mod tests {
     }
 
     #[test]
-    fn break_pane_floating_placement_flags_stay_loudly_unsupported() {
+    fn break_pane_floating_placement_flags_float_the_pane() {
         let mut engine = MuxEngine::default();
         let mut context = ExecutionContext::default();
         engine
@@ -44996,42 +46107,24 @@ mod tests {
             .execute(&mut context, &command("split-window", &["-d"]))
             .expect("split");
         let window = context.window.expect("window");
-        let source = engine.state.windows[&window].pane_order()[1].to_string();
-
-        for (flag, value) in [
-            ("-W", None),
-            ("-x", Some("20")),
-            ("-y", Some("6")),
-            ("-X", Some("10")),
-            ("-Y", Some("3")),
-        ] {
-            let mut arguments = vec![flag];
-            arguments.extend(value);
-            arguments.extend(["-s", source.as_str()]);
-            assert!(
-                matches!(
-                    engine.execute(&mut context, &command("break-pane", &arguments)),
-                    Err(ServerError::UnsupportedCommand(message))
-                        if message == format!("break-pane {flag}")
+        let source_pane = engine.state.windows[&window].pane_order()[1];
+        let source = source_pane.to_string();
+        engine
+            .execute(
+                &mut context,
+                &command(
+                    "break-pane",
+                    &[
+                        "-W", "-x", "20", "-y", "6", "-X", "10", "-Y", "3", "-s", &source,
+                    ],
                 ),
-                "break-pane {flag}"
-            );
-        }
-        assert_eq!(engine.state.windows[&window].panes.len(), 2);
+            )
+            .expect("break-pane -W");
+        let state = &engine.state.windows[&window];
+        assert!(state.is_floating(source_pane));
+        assert_eq!(state.displayed_pane_geometry(source_pane), Some((18, 4)));
+        assert_eq!(state.panes.len(), 2);
         assert_eq!(engine.state.windows.len(), 1);
-        assert_eq!(
-            engine
-                .execute(
-                    &mut context,
-                    &command(
-                        "display-message",
-                        &["-p", "-t", &source, "#{pane_floating_flag}"]
-                    ),
-                )
-                .expect("floating flag readback")
-                .output,
-            "0"
-        );
     }
 
     #[test]
@@ -45964,9 +47057,9 @@ mod tests {
         assert!(engine.state.validate().is_ok());
 
         assert!(matches!(
-            engine.execute(&mut context, &command("break-pane", &["-W"])),
+            engine.execute(&mut context, &command("resize-pane", &["-T"])),
             Err(ServerError::UnsupportedCommand(message))
-                if message == "break-pane -W"
+                if message == "resize-pane -T"
         ));
     }
 

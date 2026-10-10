@@ -7,6 +7,7 @@ corpus: none
 # a real pty and reads back which row ran the template.
 stage: fixtures/chooser-row-flags.sh ~/chooser-row-flags.sh
 stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu CHOOSER_ROW_FLAGS
 run-shell 'sh ~/chooser-row-flags.sh'
 out: show-environment -g CHOOSER_ROW_FLAGS

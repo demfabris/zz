@@ -318,32 +318,38 @@ if [ "$cold_status" -eq 0 ] && [ ! -s "$cold_out" ] && [ ! -s "$cold_err" ]; the
     cold_control_status=$?
     set -e
     startup_diagnostic="%config-error $root_invalid:3: command set-environment: too few arguments (need at least 1)"
+    # tmux 3.8 writes the startup causes with control_notify_write
+    # (cfg.c:257), which holds them while the attach command's guard is open
+    # (control.c:570), so they follow %end and the %session-changed that
+    # server_client_set_session queued first (cmd-attach-session.c:161-171).
+    # The d77c9dc6 pin wrote them inside the block: begin-0, config-error,
+    # end-0, session-changed.
     awk -v expected="$startup_diagnostic" '
         !started && /^%begin [0-9]+ [0-9]+ 0$/ {
             started = 1
             print "begin-0"
             next
         }
-        started && !cause && $0 == expected {
-            cause = 1
-            print "config-error"
-            next
-        }
-        cause && !ended && /^%end [0-9]+ [0-9]+ 0$/ {
+        started && !ended && /^%end [0-9]+ [0-9]+ 0$/ {
             ended = 1
             print "end-0"
             next
         }
-        ended && /^%session-changed / {
+        ended && !changed && /^%session-changed / {
+            changed = 1
             print "session-changed"
+            next
+        }
+        changed && $0 == expected {
+            print "config-error"
             exit
         }
     ' "$cold_control_raw" >"$cold_control_normalized"
     printf '%s\n' \
         'begin-0' \
-        'config-error' \
         'end-0' \
         'session-changed' \
+        'config-error' \
         >"$cold_control_expected"
     startup_config_errors="$(awk '
         /^%config-error / { count++ }

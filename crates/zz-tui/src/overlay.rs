@@ -40,10 +40,8 @@ pub(crate) fn dismiss_client_message(
         Event::Mouse(mouse) => matches!(mouse.kind, MouseEventKind::Down(_)),
         _ => false,
     };
-    let owned_here = model.menu.is_some()
-        || model.confirm.is_some()
-        || model.popup.is_some()
-        || model.display_panes.is_some();
+    let owned_here =
+        model.menu.is_some() || model.confirm.is_some() || model.display_panes.is_some();
     let from_daemon = model
         .client_message
         .as_ref()

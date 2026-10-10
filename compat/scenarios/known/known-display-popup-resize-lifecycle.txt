@@ -1,0 +1,10 @@
+# gap: display-popup.modal-pane
+# display-popup is a modal floating pane as in tmux master 34cd5da4 (fabrico's
+# ruling), so this tmux 3.8 popup contract differs by the registered tuple.
+shim:
+stage: ../smoke/fixtures/display-popup-resize-lifecycle.sh ~/display-popup-resize-lifecycle.sh
+stage: ../smoke/fixtures/pty-drive.py ~/pty-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
+out: set-environment -gu DISPLAY_POPUP_RESIZE_LIFECYCLE
+run-shell 'sh ~/display-popup-resize-lifecycle.sh'
+out: show-environment -g DISPLAY_POPUP_RESIZE_LIFECYCLE

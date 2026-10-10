@@ -6,6 +6,7 @@ corpus: none
 # every check here reads the copy-mode format family instead.
 stage: fixtures/copy-mode-prompt-bindings.sh ~/copy-mode-prompt-bindings.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu COPY_MODE_PROMPT_BINDINGS
 run-shell 'sh ~/copy-mode-prompt-bindings.sh'
 out: show-environment -g COPY_MODE_PROMPT_BINDINGS

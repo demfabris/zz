@@ -24,9 +24,7 @@ use zz_gpui::{
     Point, Render, ScrollDelta, ScrollWheelEvent, Subscription, Task, UTF16Selection, Window,
     anchored, deferred, div, img, point, prelude::*, px,
 };
-use zz_protocol::{
-    ClientMessageKind, CommandInvocation, InputMessage, PaneId, PopupAction, TerminalUiCommand,
-};
+use zz_protocol::{ClientMessageKind, CommandInvocation, InputMessage, PaneId, TerminalUiCommand};
 use zz_terminal::{
     AppearanceConfigKey, AppearanceProvenance, AppearanceSource, ClipboardTarget,
     IMAGE_PLACEHOLDER_SCHEME, KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent,
@@ -385,22 +383,6 @@ fn terminal_text_input(pane: PaneId, key: Option<&KeyDownEvent>, text: &str) -> 
     }
 }
 
-fn popup_input(input: InputMessage) -> InputMessage {
-    let action = match input {
-        InputMessage::Key {
-            input,
-            text_follows,
-            ..
-        } => PopupAction::Key {
-            input,
-            text_follows,
-        },
-        InputMessage::Text { text, .. } => PopupAction::Text(text),
-        other => return other,
-    };
-    InputMessage::Popup { action }
-}
-
 #[allow(
     clippy::struct_excessive_bools,
     reason = "independent GPUI gesture and timer lifecycles are intentionally tracked separately"
@@ -408,7 +390,7 @@ fn popup_input(input: InputMessage) -> InputMessage {
 pub(crate) struct TerminalView {
     pane: PaneId,
     command_output: bool,
-    popup: bool,
+    floating: bool,
     text_opacity: f32,
     window_corners: WindowCorners,
     mux: Entity<MuxClient>,
@@ -755,15 +737,7 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::new_surface(
-            pane,
-            false,
-            false,
-            mux,
-            terminal_resize_suppressed,
-            window,
-            cx,
-        )
+        Self::new_surface(pane, false, mux, terminal_resize_suppressed, window, cx)
     }
 
     /// Command output is a read-only overlay backed by the same surface.
@@ -773,30 +747,12 @@ impl TerminalView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        Self::new_surface(
-            pane,
-            true,
-            false,
-            mux,
-            Rc::new(Cell::new(false)),
-            window,
-            cx,
-        )
-    }
-
-    pub(crate) fn new_popup(
-        pane: PaneId,
-        mux: Entity<MuxClient>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        Self::new_surface(pane, false, true, mux, Rc::new(Cell::new(true)), window, cx)
+        Self::new_surface(pane, true, mux, Rc::new(Cell::new(false)), window, cx)
     }
 
     fn new_surface(
         pane: PaneId,
         command_output: bool,
-        popup: bool,
         mux: Entity<MuxClient>,
         terminal_resize_suppressed: Rc<Cell<bool>>,
         window: &mut Window,
@@ -835,7 +791,7 @@ impl TerminalView {
                 copy_generation: 0,
             }))
         });
-        let kitty_images = if command_output || popup {
+        let kitty_images = if command_output {
             Arc::new(RwLock::new(KittyImageCache::default()))
         } else {
             mux.read(cx)
@@ -847,7 +803,7 @@ impl TerminalView {
             images.retain_view();
             images.revision()
         };
-        let observed_pasted_image_revision = if command_output || popup {
+        let observed_pasted_image_revision = if command_output {
             0
         } else {
             mux.read(cx).pasted_image_revision(pane)
@@ -890,7 +846,7 @@ impl TerminalView {
                         cx.notify();
                     }
                 }
-                InputEvent::Focus if !view.command_output && !view.popup => {
+                InputEvent::Focus if !view.command_output => {
                     view.mux.read(cx).execute(CommandInvocation::new(
                         "select-pane",
                         ["-t", &view.pane.to_string()],
@@ -947,21 +903,6 @@ impl TerminalView {
                     });
                 cx.notify(entity_id);
             }));
-        } else if popup {
-            let focused_mux = mux.clone();
-            subscriptions.push(window.on_focus_in(&focus_handle, cx, move |_, cx| {
-                focused_mux.read(cx).send_input(InputMessage::Popup {
-                    action: PopupAction::TerminalView(TerminalViewAction::Focus(true)),
-                });
-                cx.notify(entity_id);
-            }));
-            let blurred_mux = mux.clone();
-            subscriptions.push(window.on_focus_out(&focus_handle, cx, move |_, _, cx| {
-                blurred_mux.read(cx).send_input(InputMessage::Popup {
-                    action: PopupAction::TerminalView(TerminalViewAction::Focus(false)),
-                });
-                cx.notify(entity_id);
-            }));
         } else {
             let focused_mux = mux.clone();
             subscriptions.push(window.on_focus_in(&focus_handle, cx, move |_, cx| {
@@ -1004,12 +945,11 @@ impl TerminalView {
             } else {
                 mux.viewport(pane)
             };
-            let kitty_images = (!view.command_output && !view.popup)
+            let kitty_images = (!view.command_output)
                 .then(|| mux.kitty_images(pane))
                 .flatten();
             let mut changed = false;
             if !view.command_output
-                && !view.popup
                 && view
                     .last_grid_size
                     .is_some_and(|(_, generation)| generation != mux.layout_generation())
@@ -1084,7 +1024,7 @@ impl TerminalView {
                     changed = true;
                 }
             }
-            let pasted_image_revision = if view.command_output || view.popup {
+            let pasted_image_revision = if view.command_output {
                 0
             } else {
                 mux.pasted_image_revision(pane)
@@ -1121,7 +1061,7 @@ impl TerminalView {
         let mut view = Self {
             pane,
             command_output,
-            popup,
+            floating: false,
             text_opacity: 1.0,
             window_corners: WindowCorners::NONE,
             mux,
@@ -1237,15 +1177,11 @@ impl TerminalView {
             self.retained.read().viewport.background,
             self.render_appearance.source.background_opacity,
         );
-        if self.popup {
-            background
-        } else {
-            cx.theme()
-                .background
-                .opaque()
-                .blend(background)
-                .opacity(cx.theme().pane_background_opacity)
-        }
+        cx.theme()
+            .background
+            .opaque()
+            .blend(background)
+            .opacity(cx.theme().pane_background_opacity)
     }
 
     pub(crate) fn local_scroll_target(&self) -> Option<u32> {
@@ -1328,7 +1264,7 @@ impl TerminalView {
     }
 
     fn request_local_scroll_prefetch(&self, target: u32, cx: &mut Context<Self>) {
-        if self.command_output || self.popup {
+        if self.command_output {
             return;
         }
         self.mux
@@ -1419,6 +1355,14 @@ impl TerminalView {
         self.command_output
     }
 
+    pub(crate) fn set_floating(&mut self, floating: bool, cx: &mut Context<Self>) {
+        if self.floating != floating {
+            self.floating = floating;
+            self.last_grid_size = None;
+            cx.notify();
+        }
+    }
+
     pub(crate) fn update_geometry(
         &mut self,
         grid_size: GridSize,
@@ -1435,13 +1379,13 @@ impl TerminalView {
         let previous = self.last_grid_size;
         let reported = (
             grid_size,
-            if self.command_output || self.popup {
+            if self.command_output {
                 0
             } else {
                 self.mux.read(cx).layout_generation()
             },
         );
-        if !self.popup
+        if !self.floating
             && self.last_grid_size != Some(reported)
             && (self.command_output || !self.terminal_resize_suppressed.get())
         {
@@ -1512,7 +1456,7 @@ impl TerminalView {
         } else {
             None
         };
-        if !self.command_output && !self.popup {
+        if !self.command_output {
             self.mux.read(cx).execute(CommandInvocation::new(
                 "select-pane",
                 ["-t", &self.pane.to_string()],
@@ -1793,7 +1737,6 @@ impl TerminalView {
     fn on_scroll(&mut self, event: &ScrollWheelEvent, window: &mut Window, cx: &mut Context<Self>) {
         if let ScrollDelta::Pixels(delta) = event.delta
             && !self.command_output
-            && !self.popup
             && self.should_use_local_scroll()
             && self.scroll_by_pixels(delta.y, cx)
         {
@@ -2088,10 +2031,6 @@ impl TerminalView {
     fn send_view_action(&self, cx: &Context<Self>, action: TerminalViewAction) {
         self.mux.read(cx).send_input(if self.command_output {
             InputMessage::CommandOutputView { action }
-        } else if self.popup {
-            InputMessage::Popup {
-                action: PopupAction::TerminalView(action),
-            }
         } else {
             InputMessage::TerminalView {
                 pane: self.pane,
@@ -2156,7 +2095,7 @@ impl TerminalView {
     }
 
     fn snapshot_clipboard_image(&mut self, item: ClipboardItem, cx: &mut Context<Self>) -> bool {
-        if self.command_output || self.popup {
+        if self.command_output {
             return false;
         }
         let Some(image) = item.into_entries().find_map(|entry| match entry {
@@ -2192,7 +2131,7 @@ impl TerminalView {
     }
 
     fn upload_clipboard_image(&mut self, item: ClipboardItem, cx: &mut Context<Self>) -> bool {
-        if self.command_output || self.popup {
+        if self.command_output {
             return false;
         }
         let Some(image) = item.into_entries().find_map(|entry| match entry {
@@ -2247,27 +2186,6 @@ impl TerminalView {
             && !modifiers.platform();
         self.text_input_key =
             (text_key && self.retained.read().viewport.kitty_keyboard).then(|| event.clone());
-        if self.popup {
-            if !text_key {
-                self.forwarded_keys.insert(event.keystroke.key.clone());
-                cx.stop_propagation();
-            }
-            self.mux.read(cx).send_input(InputMessage::Popup {
-                action: PopupAction::Key {
-                    input: key_input(
-                        &event.keystroke,
-                        code,
-                        if event.is_held {
-                            KeyAction::Repeat
-                        } else {
-                            KeyAction::Press
-                        },
-                    ),
-                    text_follows: text_key,
-                },
-            });
-            return;
-        }
         let chrome = crate::keymap::resolve(cx, TERMINAL_TABLE, &event.keystroke);
         let font_adjustment = match chrome {
             Some(ChromeAction::TerminalFontIncrease) => Some(TerminalFontSizeAdjustment::Increase),
@@ -2362,18 +2280,6 @@ impl TerminalView {
         self.reset_cursor_blink(cx);
         let code = key_code(&event.keystroke.key);
         let forwarded_press = self.forwarded_keys.remove(&event.keystroke.key);
-        if self.popup {
-            if forwarded_press {
-                self.mux.read(cx).send_input(InputMessage::Popup {
-                    action: PopupAction::Key {
-                        input: key_input(&event.keystroke, code, KeyAction::Release),
-                        text_follows: false,
-                    },
-                });
-            }
-            cx.stop_propagation();
-            return;
-        }
         if self.swallowed_overlay_key == Some(code) {
             self.swallowed_overlay_key = None;
             cx.stop_propagation();
@@ -2523,7 +2429,7 @@ impl Render for TerminalView {
         let line_height = terminal_line_height(&appearance);
         let retained = self.retained();
         let marked_text = self.marked_text();
-        let status = (!self.popup).then(|| self.status_message()).flatten();
+        let status = self.status_message();
         let search_query = self.search_query.clone();
         let copy_flash = self.live_copy_flash();
         let (mode, unseen_output, search_status, hovered_uri) = {
@@ -2536,16 +2442,14 @@ impl Render for TerminalView {
             )
         };
         let background = self.pane_background(cx);
-        let mode_indicator = (!self.popup)
-            .then(|| mode_indicator(mode, unseen_output))
-            .flatten();
+        let mode_indicator = mode_indicator(mode, unseen_output);
         let mut root = round_div_radii(
             div()
                 .id("terminal-root")
                 .relative()
                 .flex()
                 .size_full()
-                .when(!self.popup, |terminal| {
+                .when(!self.floating, |terminal| {
                     terminal
                         .pl(px(appearance.padding_left))
                         .pr(px(appearance.padding_right))
@@ -2583,16 +2487,12 @@ impl Render for TerminalView {
                                 view.send_view_action(cx, TerminalViewAction::ClearHistory);
                             }),
                         )
-                        .when(!self.popup, |terminal| {
-                            terminal.on_action(cx.listener(
-                                |view, _: &crate::menus::CopyMode, _, cx| {
-                                    view.mux.read(cx).execute(CommandInvocation::new(
-                                        "copy-mode",
-                                        ["-t", &view.pane.to_string()],
-                                    ));
-                                },
-                            ))
-                        })
+                        .on_action(cx.listener(|view, _: &crate::menus::CopyMode, _, cx| {
+                            view.mux.read(cx).execute(CommandInvocation::new(
+                                "copy-mode",
+                                ["-t", &view.pane.to_string()],
+                            ));
+                        }))
                 })
                 .on_key_down(cx.listener(Self::on_key_down))
                 .on_key_up(cx.listener(Self::on_key_up))
@@ -2623,7 +2523,7 @@ impl Render for TerminalView {
                 )),
             pane_content_radii(cx, self.window_corners),
         )
-        .when(!self.popup, |root| {
+        .when(!self.floating, |root| {
             root.rounded_tl(px(0.0)).rounded_tr(px(0.0))
         });
 
@@ -2749,11 +2649,7 @@ impl EntityInputHandler for TerminalView {
                     self.forwarded_keys.insert(event.keystroke.key.clone());
                 }
                 let input = terminal_text_input(self.pane, key.as_ref(), text);
-                self.mux.read(cx).send_input(if self.popup {
-                    popup_input(input)
-                } else {
-                    input
-                });
+                self.mux.read(cx).send_input(input);
             }
         }
         window.invalidate_character_coordinates();
@@ -2979,12 +2875,6 @@ mod tests {
             InputMessage::Text {
                 pane: PaneId(7),
                 text: "typed".to_owned(),
-            }
-        );
-        assert_eq!(
-            popup_input(terminal_text_input(PaneId(7), None, "é")),
-            InputMessage::Popup {
-                action: PopupAction::Text("é".to_owned()),
             }
         );
     }

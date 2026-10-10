@@ -22,6 +22,8 @@ mod tree_delta;
 
 #[cfg(test)]
 mod control_tests;
+#[cfg(test)]
+mod float_wire_tests;
 
 pub use tree_delta::{TreeDelta, TreeDeltaError, TreeOp};
 
@@ -109,12 +111,12 @@ pub use path_list::{
 };
 pub use snapshot::{
     AgentDescriptor, AgentProvider, Axis, BrowserDescriptor, BrowserProfileNameError,
-    DEFAULT_BROWSER_PROFILE, EditorDescriptor, EditorDescriptorError, LayoutNode,
-    MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MAX_FAVICON_BYTES,
-    MAX_WINDOW_STATUS_LABEL_BYTES, MuxSnapshot, PaneBorderIndicators, PaneBorderLines,
-    PaneBorderStatus, PaneKindSnapshot, PaneMode, PaneSnapshot, PaneStatus, PaneStatusKind,
-    PaneStatusState, PanesModeArea, PanesModeBorder, SessionSnapshot, SessionViewer,
-    WindowSnapshot, normalize_browser_profile_name,
+    DEFAULT_BROWSER_PROFILE, EditorDescriptor, EditorDescriptorError, FloatingPaneSnapshot,
+    LayoutNode, MAX_BROWSER_PROFILE_NAME_BYTES, MAX_EDITOR_PATH_BYTES, MAX_FAVICON_BYTES,
+    MAX_WINDOW_STATUS_LABEL_BYTES, ModalPaneSnapshot, MuxSnapshot, PaneBorderIndicators,
+    PaneBorderLines, PaneBorderStatus, PaneKindSnapshot, PaneMode, PaneSnapshot, PaneStatus,
+    PaneStatusKind, PaneStatusState, PanesModeArea, PanesModeBorder, PanesModeClear,
+    SessionSnapshot, SessionViewer, WindowSnapshot, normalize_browser_profile_name,
 };
 pub use style::{
     COLOUR_THEME_COUNT, DEFAULT_DARK_THEME_COLOURS, StyledSegment, ThemeColours, TmuxAlign,

@@ -9,8 +9,7 @@ use zz_daemon_client::{
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, CommandInvocation, CommandPromptAction,
     CommandPromptMode, ConfirmAction, ConfirmState, DisplayPanesAction, InputMessage,
-    MAX_COMMAND_PROMPT_BYTES, MenuAction, MenuState, PaneKindSnapshot, PopupAction, PopupPointer,
-    PopupPointerButton,
+    MAX_COMMAND_PROMPT_BYTES, MenuAction, MenuState, PaneKindSnapshot,
 };
 use zz_terminal::{
     KeyAction, KeyCode, KeyInput, Modifiers, PointerCellEvent, SearchQuery, TerminalColorScheme,
@@ -50,7 +49,6 @@ pub(crate) fn handle(
     browser: &mut BrowserState,
     event: TerminalEvent,
     pixel_mouse: bool,
-    key_releases: bool,
     prefix: PrefixView,
 ) -> Result<InputOutcome, String> {
     if let TerminalEvent::Clipboard(data) = event {
@@ -129,34 +127,6 @@ pub(crate) fn handle(
             return Ok(InputOutcome::None);
         }
     };
-    let event = match event {
-        TerminalEvent::Key(event) => {
-            let popup = model.popup.as_ref().map(|popup| popup.pane);
-            let popup_kitty_keyboard = popup.is_some_and(|pane| {
-                model
-                    .viewports
-                    .get(&pane)
-                    .is_some_and(|viewport| viewport.kitty_keyboard)
-            });
-            match popup_key_route(
-                popup,
-                popup_kitty_keyboard,
-                key_releases,
-                &mut model.popup_keys_down,
-                event,
-            ) {
-                PopupKeyRoute::Forward(event) => TerminalEvent::Key(event),
-                PopupKeyRoute::Consume => return Ok(InputOutcome::None),
-                PopupKeyRoute::Action(action) => {
-                    client
-                        .send_input(InputMessage::Popup { action })
-                        .map_err(|error| error.to_string())?;
-                    return Ok(InputOutcome::None);
-                }
-            }
-        }
-        event => event,
-    };
     match event {
         TerminalEvent::CellSize {
             width_px,
@@ -200,23 +170,7 @@ pub(crate) fn handle(
             send_focus(model, client, false)?;
             Ok(InputOutcome::None)
         }
-        TerminalEvent::Paste(text) => match popup_paste_input(model.popup.is_some(), &text) {
-            Some(input) => {
-                client
-                    .send_input(input)
-                    .map_err(|error| error.to_string())?;
-                Ok(InputOutcome::None)
-            }
-            None => handle_paste(model, client, text),
-        },
-        TerminalEvent::Mouse(event) if model.popup.is_some() => {
-            if let Some(action) = popup_pointer_action(model, event, pixel_mouse) {
-                client
-                    .send_input(InputMessage::Popup { action })
-                    .map_err(|error| error.to_string())?;
-            }
-            Ok(InputOutcome::None)
-        }
+        TerminalEvent::Paste(text) => handle_paste(model, client, text),
         TerminalEvent::Mouse(event) => handle_mouse(model, client, browser, event, pixel_mouse),
         TerminalEvent::Key(event) => handle_key(model, client, browser, event, prefix),
     }
@@ -235,8 +189,6 @@ pub(crate) fn plain_key_pane(
         || model.confirm.is_some()
         || model.confirm_reply_pending
         || model.confirm_swallowed_key.is_some()
-        || model.popup.is_some()
-        || !model.popup_keys_down.is_empty()
         || model.sidebar_edit.is_some()
         || model.command_prompt.is_some()
         || model.choose_tree.is_some()
@@ -253,74 +205,6 @@ pub(crate) fn plain_key_pane(
     (matches!(model.pane_snapshot(pane)?.kind, PaneKindSnapshot::Terminal)
         && !browser.has_surface(pane))
     .then_some(pane)
-}
-
-fn popup_paste_input(active: bool, text: &str) -> Option<InputMessage> {
-    active.then_some(InputMessage::Popup {
-        action: PopupAction::TerminalView(TerminalViewAction::Paste(text.to_owned())),
-    })
-}
-
-#[derive(Debug, Eq, PartialEq)]
-enum PopupKeyRoute {
-    Forward(KeyEvent),
-    Consume,
-    Action(PopupAction),
-}
-
-fn popup_key_route(
-    popup: Option<zz_protocol::PaneId>,
-    kitty_keyboard: bool,
-    key_releases: bool,
-    keys_down: &mut Vec<(zz_protocol::PaneId, KeyCode)>,
-    event: KeyEvent,
-) -> PopupKeyRoute {
-    let code = key_code(event.code);
-    if let Some(index) = keys_down
-        .iter()
-        .position(|(owner, key)| Some(*owner) != popup && *key == code)
-    {
-        return match event.kind {
-            KeyEventKind::Repeat => PopupKeyRoute::Consume,
-            KeyEventKind::Release => {
-                keys_down.swap_remove(index);
-                PopupKeyRoute::Consume
-            }
-            KeyEventKind::Press => {
-                keys_down.swap_remove(index);
-                popup_key_route(popup, kitty_keyboard, key_releases, keys_down, event)
-            }
-        };
-    }
-    let Some(pane) = popup else {
-        return PopupKeyRoute::Forward(event);
-    };
-    match event.kind {
-        KeyEventKind::Press | KeyEventKind::Repeat => {
-            if key_releases && !keys_down.contains(&(pane, code)) {
-                keys_down.push((pane, code));
-            }
-            PopupKeyRoute::Action(PopupAction::Key {
-                input: key_input(event),
-                text_follows: false,
-            })
-        }
-        KeyEventKind::Release => {
-            let forwarded_press = keys_down
-                .iter()
-                .position(|tracked| *tracked == (pane, code))
-                .map(|index| keys_down.swap_remove(index))
-                .is_some();
-            if kitty_keyboard && forwarded_press {
-                PopupKeyRoute::Action(PopupAction::Key {
-                    input: key_input(event),
-                    text_follows: false,
-                })
-            } else {
-                PopupKeyRoute::Consume
-            }
-        }
-    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -1384,7 +1268,13 @@ fn bound_mouse_key(
         key,
         (global_column, global_row, global_x, global_y),
     );
-    if !model.mouse_bindings.contains(&key)
+    let outside_modal =
+        latch.location == "Empty" && model.window().is_some_and(|window| window.modal.is_some());
+    let gesture_continues = matches!(event.kind, MouseEventKind::Drag(_) | MouseEventKind::Up(_));
+    let bound_gesture = gesture_continues && latch.bound;
+    if !outside_modal
+        && !bound_gesture
+        && !model.mouse_bindings.contains(&key)
         && !copy_mouse_key_is_reachable(model, &latch, &key)
         && !pane_mode_mouse_key_is_reachable(model, &latch, &key)
         && !is_click_sequence_name(&key)
@@ -1404,6 +1294,7 @@ fn bound_mouse_key(
         row: global_row,
         border: latch.border,
         status_range_start: mouse_status_range_start(model, global_column, global_row),
+        press: gesture_continues.then_some((latch.press.0, latch.press.1)),
         view_action: latch.pane.and_then(|pane| {
             bound_mouse_view_action(
                 model,
@@ -1535,6 +1426,7 @@ pub(crate) fn expire_click_sequence(
             status_range_start: mouse_status_range_start(model, column, row),
             view_action: action.clone(),
             press_action: action,
+            press: None,
         })
         .map_err(|error| error.to_string())
 }
@@ -1587,10 +1479,16 @@ fn native_pane_mouse_action(
         }
         None => (content, global_column),
     };
+    let source = model
+        .layout
+        .panes
+        .iter()
+        .find(|entry| entry.pane == pane)
+        .map_or((0, 0), |entry| entry.source);
     pane_mouse_action(
         &model.size,
         event,
-        content,
+        (content, source),
         global_column,
         global_row,
         global_x,
@@ -1876,62 +1774,6 @@ fn pointer_focus_follows_mouse(
     focus_pane(model, client, entry.pane)
 }
 
-/// Every pointer event a popup is up for. tmux runs the border, drag, and menu
-/// policy in `popup_key_cb`, above the job, so the client reports the event in
-/// its own cell grid and carries the job's action along for the daemon to run
-/// if the policy leaves it alone.
-fn popup_pointer_action(
-    model: &Model,
-    event: MouseEvent,
-    pixel_mouse: bool,
-) -> Option<PopupAction> {
-    let popup = model.popup.as_ref()?;
-    let content = model.popup_layout()?.content;
-    let (global_column, global_row, global_x, global_y) =
-        global_mouse_position(model, event, pixel_mouse);
-    let view = if content.contains(global_column, global_row)
-        && model
-            .viewports
-            .get(&popup.pane)
-            .is_some_and(|viewport| viewport.mouse_tracking)
-    {
-        pane_mouse_action(
-            &model.size,
-            event,
-            content,
-            global_column,
-            global_row,
-            global_x,
-            global_y,
-            event.modifiers.contains(KeyModifiers::SHIFT),
-        )
-    } else {
-        None
-    };
-    Some(PopupAction::Pointer {
-        pointer: PopupPointer {
-            column: global_column,
-            row: global_row,
-            button: popup_pointer_button(event.kind),
-            drag: matches!(event.kind, MouseEventKind::Drag(_)),
-            release: matches!(event.kind, MouseEventKind::Up(_)),
-            meta: event.modifiers.contains(KeyModifiers::ALT),
-        },
-        view,
-    })
-}
-
-const fn popup_pointer_button(kind: MouseEventKind) -> PopupPointerButton {
-    match kind {
-        MouseEventKind::Down(button) | MouseEventKind::Drag(button) => match button {
-            MouseButton::Left => PopupPointerButton::Left,
-            MouseButton::Middle => PopupPointerButton::Middle,
-            MouseButton::Right => PopupPointerButton::Right,
-        },
-        _ => PopupPointerButton::None,
-    }
-}
-
 fn global_mouse_position(
     model: &Model,
     event: MouseEvent,
@@ -2003,7 +1845,7 @@ pub(crate) fn app_mouse_forward_action(
     let action = pane_mouse_action(
         &model.size,
         event,
-        content,
+        (content, entry.source),
         global_column,
         global_row,
         global_x,
@@ -2017,17 +1859,27 @@ pub(crate) fn app_mouse_forward_action(
 fn pane_mouse_action(
     size: &crate::tty::TerminalSize,
     event: MouseEvent,
-    content: Rect,
+    (content, source): (Rect, (u16, u16)),
     global_column: u16,
     global_row: u16,
     global_x: u32,
     global_y: u32,
     force_selection: bool,
 ) -> Option<TerminalViewAction> {
-    let column = global_column.saturating_sub(content.x);
-    let row = global_row.saturating_sub(content.y);
-    let x = global_x.saturating_sub(u32::from(content.x).saturating_mul(size.cell_width_px));
-    let y = global_y.saturating_sub(u32::from(content.y).saturating_mul(size.cell_height_px));
+    let (left, top) = source;
+    let column = global_column.saturating_sub(content.x).saturating_add(left);
+    let row = global_row.saturating_sub(content.y).saturating_add(top);
+    let x = global_x
+        .saturating_sub(u32::from(content.x).saturating_mul(size.cell_width_px))
+        .saturating_add(u32::from(left).saturating_mul(size.cell_width_px));
+    let y = global_y
+        .saturating_sub(u32::from(content.y).saturating_mul(size.cell_height_px))
+        .saturating_add(u32::from(top).saturating_mul(size.cell_height_px));
+    let content = Rect {
+        width: content.width.saturating_add(left),
+        height: content.height.saturating_add(top),
+        ..content
+    };
     let (phase, button) = mouse_routing(event.kind);
     let input = TerminalMouseInput::new(
         phase,
@@ -2089,26 +1941,12 @@ fn send_focus(model: &mut Model, client: &InteractiveClient, focused: bool) -> R
             .pane_snapshot(pane)
             .map(|snapshot| (pane, &snapshot.kind))
     });
-    if let Some(input) = surface_focus_input(model.popup.as_ref(), active_pane, focused) {
+    if let Some(input) = pane_focus_input(active_pane, focused) {
         client
             .send_input(input)
             .map_err(|error| error.to_string())?;
     }
     Ok(())
-}
-
-fn surface_focus_input(
-    popup: Option<&zz_protocol::PopupState>,
-    active_pane: Option<(zz_protocol::PaneId, &PaneKindSnapshot)>,
-    focused: bool,
-) -> Option<InputMessage> {
-    match popup {
-        Some(popup) if popup.dead && popup.close_on_any_key => Some(InputMessage::Popup {
-            action: PopupAction::Close,
-        }),
-        Some(_) => None,
-        None => pane_focus_input(active_pane, focused),
-    }
 }
 
 fn pane_focus_input(
@@ -2397,7 +2235,7 @@ mod tests {
 
     use super::*;
     use zz_client::{ClientCore, InputEvent, InputOwner, SIDEBAR_TABLE, SurfaceKind};
-    use zz_protocol::{MenuItem, PopupBorderLines, PopupState};
+    use zz_protocol::{MenuItem, PopupBorderLines};
 
     fn routing_model() -> Model {
         use zz_protocol::{
@@ -2405,9 +2243,7 @@ mod tests {
             WindowSnapshot,
         };
 
-        let mut model = popup_model(PopupBorderLines::Single, false);
-        model.popup = None;
-        model.viewports.clear();
+        let mut model = base_model();
         model.size.columns = 120;
         model.attached_session = Some(SessionId(1));
         let panes = [
@@ -2466,6 +2302,10 @@ mod tests {
                     pane_border_indicators: zz_protocol::PaneBorderIndicators::Colour,
                     pane_order: vec![PaneId(1), PaneId(2)],
                     pane_z_order: Vec::new(),
+                    floating: Vec::new(),
+                    modal: None,
+                    sx: 0,
+                    sy: 0,
                 }],
                 viewers: Vec::new(),
             }],
@@ -2667,9 +2507,6 @@ mod tests {
         model.menu_action_pending = true;
         assert_eq!(plain_key_pane(&model, &browser, false, false), None);
         model.menu_action_pending = false;
-        model.popup_keys_down.push((pane, KeyCode::Character('a')));
-        assert_eq!(plain_key_pane(&model, &browser, false, false), None);
-        model.popup_keys_down.clear();
         model.focus_sidebar();
         assert_eq!(plain_key_pane(&model, &browser, false, false), None);
     }
@@ -2897,11 +2734,11 @@ mod tests {
         );
     }
 
-    fn popup_model(border_lines: PopupBorderLines, mouse_tracking: bool) -> Model {
+    fn base_model() -> Model {
         let core = zz_client::ClientCore::new();
         let endpoint =
-            Endpoint::parse("unix:///tmp/zz-input-popup-test.sock").expect("test endpoint");
-        let mut model = Model::new(
+            Endpoint::parse("unix:///tmp/zz-input-base-test.sock").expect("test endpoint");
+        Model::new(
             &core,
             crate::tty::TerminalSize {
                 columns: 40,
@@ -2914,296 +2751,7 @@ mod tests {
             endpoint.clone(),
             endpoint,
             Vec::new(),
-        );
-        let pane = zz_protocol::PaneId(u64::MAX - 1);
-        model.popup = Some(PopupState {
-            pane,
-            left: 10,
-            top: 5,
-            width: 12,
-            height: 8,
-            client_columns: 40,
-            client_rows: 20,
-            cell_width_px: 8,
-            cell_height_px: 16,
-            title: "Popup".to_owned(),
-            style: "default".to_owned(),
-            border_style: "default".to_owned(),
-            border_lines,
-            close_on_exit: false,
-            close_on_exit_zero: false,
-            close_on_any_key: false,
-            dead: false,
-        });
-        let mut viewport =
-            zz_terminal::TerminalViewport::blank(12, 8, zz_terminal::SessionStatus::Running);
-        viewport.mouse_tracking = mouse_tracking;
-        model.viewports.insert(pane, viewport);
-        model
-    }
-
-    #[test]
-    fn popup_press_repeat_and_kitty_release_use_the_popup_key_lane() {
-        let pane = zz_protocol::PaneId(u64::MAX - 1);
-        let mut keys_down = Vec::new();
-        for (kind, expected) in [
-            (KeyEventKind::Press, KeyAction::Press),
-            (KeyEventKind::Repeat, KeyAction::Repeat),
-        ] {
-            let route = popup_key_route(
-                Some(pane),
-                false,
-                true,
-                &mut keys_down,
-                KeyEvent {
-                    code: TerminalKeyCode::Char('x'),
-                    modifiers: KeyModifiers::NONE,
-                    kind,
-                },
-            );
-            assert!(matches!(
-                route,
-                PopupKeyRoute::Action(PopupAction::Key {
-                    input,
-                    text_follows: false,
-                }) if input.action == expected
-                    && input.key == KeyCode::Character('x')
-                    && input.text.as_deref() == Some("x")
-            ));
-            assert_eq!(keys_down, [(pane, KeyCode::Character('x'))]);
-        }
-
-        let release = popup_key_route(
-            Some(pane),
-            true,
-            true,
-            &mut keys_down,
-            KeyEvent {
-                code: TerminalKeyCode::Char('x'),
-                modifiers: KeyModifiers::NONE,
-                kind: KeyEventKind::Release,
-            },
-        );
-        assert!(matches!(
-            release,
-            PopupKeyRoute::Action(PopupAction::Key {
-                input,
-                text_follows: false,
-            }) if input.action == KeyAction::Release
-        ));
-        assert!(keys_down.is_empty());
-
-        let mut legacy = vec![(pane, KeyCode::Character('x'))];
-        assert_eq!(
-            popup_key_route(
-                Some(pane),
-                false,
-                true,
-                &mut legacy,
-                KeyEvent {
-                    code: TerminalKeyCode::Char('x'),
-                    modifiers: KeyModifiers::NONE,
-                    kind: KeyEventKind::Release,
-                },
-            ),
-            PopupKeyRoute::Consume
-        );
-        assert!(legacy.is_empty());
-
-        assert!(matches!(
-            popup_key_route(
-                Some(pane),
-                false,
-                false,
-                &mut legacy,
-                KeyEvent::new(TerminalKeyCode::Char('x'), KeyModifiers::NONE),
-            ),
-            PopupKeyRoute::Action(_)
-        ));
-        assert!(legacy.is_empty());
-    }
-
-    #[test]
-    fn popup_close_and_replacement_swallow_the_triggering_key_lifecycle() {
-        let old = zz_protocol::PaneId(u64::MAX - 1);
-        let new = zz_protocol::PaneId(u64::MAX - 2);
-        let press = KeyEvent::new(TerminalKeyCode::Esc, KeyModifiers::NONE);
-        let mut keys_down = Vec::new();
-        assert!(matches!(
-            popup_key_route(Some(old), false, true, &mut keys_down, press),
-            PopupKeyRoute::Action(_)
-        ));
-
-        assert_eq!(
-            popup_key_route(
-                Some(new),
-                true,
-                true,
-                &mut keys_down,
-                KeyEvent {
-                    kind: KeyEventKind::Repeat,
-                    ..press
-                },
-            ),
-            PopupKeyRoute::Consume
-        );
-        assert_eq!(keys_down, [(old, KeyCode::Escape)]);
-        assert_eq!(
-            popup_key_route(
-                None,
-                false,
-                true,
-                &mut keys_down,
-                KeyEvent {
-                    kind: KeyEventKind::Release,
-                    ..press
-                },
-            ),
-            PopupKeyRoute::Consume
-        );
-        assert!(keys_down.is_empty());
-        assert_eq!(
-            popup_key_route(None, false, true, &mut keys_down, press),
-            PopupKeyRoute::Forward(press)
-        );
-    }
-
-    #[test]
-    fn popup_close_preserves_every_held_key_until_its_release() {
-        let pane = zz_protocol::PaneId(u64::MAX - 1);
-        let mut keys_down = Vec::new();
-        let a = KeyEvent::new(TerminalKeyCode::Char('a'), KeyModifiers::NONE);
-        let escape = KeyEvent::new(TerminalKeyCode::Esc, KeyModifiers::NONE);
-        assert!(matches!(
-            popup_key_route(Some(pane), false, true, &mut keys_down, a),
-            PopupKeyRoute::Action(_)
-        ));
-        assert!(matches!(
-            popup_key_route(Some(pane), false, true, &mut keys_down, escape),
-            PopupKeyRoute::Action(_)
-        ));
-        assert_eq!(
-            keys_down,
-            [(pane, KeyCode::Character('a')), (pane, KeyCode::Escape)]
-        );
-        for event in [
-            KeyEvent {
-                kind: KeyEventKind::Release,
-                ..escape
-            },
-            KeyEvent {
-                kind: KeyEventKind::Release,
-                ..a
-            },
-        ] {
-            assert_eq!(
-                popup_key_route(None, false, true, &mut keys_down, event),
-                PopupKeyRoute::Consume
-            );
-        }
-        assert!(keys_down.is_empty());
-    }
-
-    #[test]
-    fn popup_paste_uses_terminal_view_and_inactive_paste_does_not() {
-        assert_eq!(
-            popup_paste_input(true, "pasted"),
-            Some(InputMessage::Popup {
-                action: PopupAction::TerminalView(TerminalViewAction::Paste("pasted".to_owned())),
-            })
-        );
-        assert_eq!(popup_paste_input(false, "pasted"), None);
-    }
-
-    #[test]
-    fn popup_pointer_and_scroll_are_content_relative_and_tracking_gated() {
-        let model = popup_model(PopupBorderLines::Single, true);
-        let layout = model.popup_layout().expect("popup layout");
-        let view_of = |model: &Model, event| match popup_pointer_action(model, event, false) {
-            Some(PopupAction::Pointer { view, .. }) => view,
-            other => panic!("popup pointer was not reported: {other:?}"),
-        };
-        let pointer_of = |model: &Model, event| match popup_pointer_action(model, event, false) {
-            Some(PopupAction::Pointer { pointer, .. }) => pointer,
-            other => panic!("popup pointer was not reported: {other:?}"),
-        };
-        let pointer = MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: layout.content.x.saturating_add(2),
-            row: layout.content.y.saturating_add(1),
-            modifiers: KeyModifiers::SHIFT,
-        };
-        let reported = pointer_of(&model, pointer);
-        assert_eq!(reported.column, pointer.column);
-        assert_eq!(reported.row, pointer.row);
-        assert_eq!(reported.button, PopupPointerButton::Left);
-        assert!(!reported.drag);
-        assert!(!reported.release);
-        assert!(!reported.meta);
-
-        let Some(TerminalViewAction::Mouse(input)) = view_of(&model, pointer) else {
-            panic!("tracked popup pointer carried no action for the job");
-        };
-        assert_eq!(input.cell.column, 2);
-        assert_eq!(input.cell.row, 1);
-        assert_eq!((input.x, input.y), (16, 16));
-        assert_eq!(
-            (input.screen_width, input.screen_height),
-            (
-                u32::from(layout.content.width) * 8,
-                u32::from(layout.content.height) * 16,
-            )
-        );
-        assert!(input.force_selection());
-
-        let scroll = MouseEvent {
-            kind: MouseEventKind::ScrollUp,
-            modifiers: KeyModifiers::NONE,
-            ..pointer
-        };
-        assert!(matches!(
-            view_of(&model, scroll),
-            Some(TerminalViewAction::ScrollWheel { lines: -1, input })
-                if input.cell.column == 2 && input.cell.row == 1
-        ));
-        assert_eq!(pointer_of(&model, scroll).button, PopupPointerButton::None);
-
-        let border = MouseEvent {
-            column: layout.frame.x,
-            row: layout.frame.y,
-            ..pointer
-        };
-        assert_eq!(view_of(&model, border), None);
-        assert_eq!(pointer_of(&model, border).column, layout.frame.x);
-        let outside = MouseEvent {
-            column: layout.frame.x.saturating_sub(1),
-            row: layout.frame.y,
-            ..pointer
-        };
-        assert_eq!(view_of(&model, outside), None);
-
-        let untracked = popup_model(PopupBorderLines::Single, false);
-        assert_eq!(view_of(&untracked, pointer), None);
-
-        let borderless = popup_model(PopupBorderLines::None, true);
-        let frame = borderless.popup_layout().expect("borderless layout").frame;
-        let edge = MouseEvent {
-            column: frame.x,
-            row: frame.y,
-            modifiers: KeyModifiers::NONE,
-            ..pointer
-        };
-        assert!(view_of(&borderless, edge).is_some());
-
-        let meta_drag = MouseEvent {
-            kind: MouseEventKind::Drag(MouseButton::Right),
-            modifiers: KeyModifiers::ALT,
-            ..pointer
-        };
-        let reported = pointer_of(&model, meta_drag);
-        assert_eq!(reported.button, PopupPointerButton::Right);
-        assert!(reported.drag);
-        assert!(reported.meta);
+        )
     }
 
     fn menu_state(selected: Option<u32>, stay_open: bool) -> MenuState {
@@ -4334,7 +3882,7 @@ mod tests {
     }
 
     #[test]
-    fn focus_events_skip_live_popups_close_dead_any_key_popups_and_forward_to_terminals() {
+    fn focus_events_forward_to_terminals_only() {
         assert_eq!(pane_focus_input(None, true), None);
         assert_eq!(
             pane_focus_input(
@@ -4352,26 +3900,6 @@ mod tests {
                 true,
             ),
             None
-        );
-
-        assert_eq!(
-            surface_focus_input(
-                popup_model(PopupBorderLines::Single, false).popup.as_ref(),
-                Some((zz_protocol::PaneId(7), &PaneKindSnapshot::Terminal)),
-                false,
-            ),
-            None
-        );
-
-        let mut dead = popup_model(PopupBorderLines::Single, false);
-        let popup = dead.popup.as_mut().unwrap();
-        popup.dead = true;
-        popup.close_on_any_key = true;
-        assert_eq!(
-            surface_focus_input(dead.popup.as_ref(), None, false),
-            Some(InputMessage::Popup {
-                action: PopupAction::Close,
-            })
         );
     }
 

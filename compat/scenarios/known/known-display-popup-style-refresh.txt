@@ -1,0 +1,14 @@
+# gap: display-popup.modal-pane
+# display-popup is a modal floating pane as in tmux master 34cd5da4 (fabrico's
+# ruling), so this tmux 3.8 popup contract differs by the registered tuple.
+shim:
+# popup-style and popup-border-style are read again every time the popup is
+# drawn, so setting one while the popup is up repaints the live box without a
+# key; popup-border-lines is copied in when the popup opens and is never read
+# again.
+stage: ../smoke/fixtures/display-popup-style-refresh.sh ~/display-popup-style-refresh.sh
+stage: ../smoke/fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
+out: set-environment -gu DISPLAY_POPUP_STYLE_REFRESH
+run-shell 'sh ~/display-popup-style-refresh.sh'
+out: show-environment -g DISPLAY_POPUP_STYLE_REFRESH

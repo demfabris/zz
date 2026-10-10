@@ -758,20 +758,21 @@ fn chooser_prompt_look(
     let session = super::client_attached_session(inner, client);
     let (prompt_type, flags, input): (_, &[&str], _) = match prompt {
         Some(prompt) => match prompt.kind {
-            super::ChooserPromptKind::Kill if accept => (
-                "command",
-                &["SINGLE", "NOFORMAT", "ACCEPT"],
-                prompt.input.as_str(),
-            ),
-            super::ChooserPromptKind::Kill => {
-                ("command", &["SINGLE", "NOFORMAT"], prompt.input.as_str())
+            super::ChooserPromptKind::Kill if accept => {
+                ("command", &["SINGLE", "NOFORMAT", "ACCEPT"], prompt.input())
             }
-            super::ChooserPromptKind::Command => ("command", &["NOFORMAT"], prompt.input.as_str()),
-            super::ChooserPromptKind::Filter => ("search", &["NOFORMAT"], prompt.input.as_str()),
+            super::ChooserPromptKind::Kill => ("command", &["SINGLE", "NOFORMAT"], prompt.input()),
+            super::ChooserPromptKind::Command => ("command", &["NOFORMAT"], prompt.input()),
+            super::ChooserPromptKind::Filter => ("search", &["NOFORMAT"], prompt.input()),
         },
-        None => ("search", &["NOFORMAT"], search.unwrap_or_default()),
+        None => (
+            "search",
+            &["NOFORMAT"],
+            search.unwrap_or_default().to_owned(),
+        ),
     };
-    mode_prompt_look(inner, session, prompt_type, flags, input, false)
+    let command_mode = prompt.is_some_and(|prompt| prompt.editor.command_mode());
+    mode_prompt_look(inner, session, prompt_type, flags, &input, command_mode)
 }
 
 pub(super) fn pane_session(inner: &ServerState, pane: PaneId) -> Option<SessionId> {
@@ -805,6 +806,12 @@ pub(super) fn chooser_presentation(
             chooser.search.as_ref().map(|search| search.query.as_str()),
             chooser.prompt_accept,
         );
+        let (prompt_line, prompt_column) = edited_prompt_line(
+            inner,
+            client,
+            chooser.prompt.as_ref(),
+            chooser.search_editor.as_ref(),
+        );
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
         let preview = chooser
             .rendered
@@ -828,6 +835,8 @@ pub(super) fn chooser_presentation(
             preview_size: chooser.preview_size,
             preview,
             prompt_cursor,
+            prompt_column,
+            prompt_line,
         });
     }
     let chooser = inner
@@ -839,6 +848,12 @@ pub(super) fn chooser_presentation(
         chooser.prompt.as_ref(),
         chooser.search.as_ref().map(|search| search.query.as_str()),
         false,
+    );
+    let (prompt_line, prompt_column) = edited_prompt_line(
+        inner,
+        client,
+        chooser.prompt.as_ref(),
+        chooser.search_editor.as_ref(),
     );
     let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
     let preview = chooser
@@ -871,7 +886,32 @@ pub(super) fn chooser_presentation(
         preview_size: chooser.preview_size,
         preview,
         prompt_cursor,
+        prompt_column,
+        prompt_line,
     })
+}
+
+fn edited_prompt_line(
+    inner: &ServerState,
+    client: ClientId,
+    prompt: Option<&super::ChooserPrompt>,
+    search: Option<&ModePrompt>,
+) -> (String, u16) {
+    let editor = match prompt {
+        Some(prompt) if matches!(prompt.kind, super::ChooserPromptKind::Kill) => {
+            return (String::new(), 0);
+        }
+        Some(prompt) => &prompt.editor,
+        None => match search {
+            Some(editor) => editor,
+            None => return (String::new(), 0),
+        },
+    };
+    let columns = inner
+        .client(client)
+        .and_then(|c| c.size)
+        .map_or(80, |(columns, _)| columns);
+    editor.draw(columns)
 }
 
 fn tree_preview(

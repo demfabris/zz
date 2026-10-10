@@ -1,0 +1,35 @@
+# The floating-pane keys of tmux 3.8: prefix * @ g Tab BTab, the move table
+# prefix g switches to, and the root mouse rows that create, move and toggle
+# floats, as list-keys prints them.
+out: list-keys -T prefix *
+out: list-keys -T prefix @
+out: list-keys -T prefix g
+out: list-keys -T prefix Tab
+out: list-keys -T prefix BTab
+out: list-keys -N -T prefix *
+out: list-keys -N -T prefix @
+out: list-keys -N -T prefix g
+out: list-keys -N -T prefix Tab
+out: list-keys -N -T prefix BTab
+out: list-keys -T root C-MouseDrag1Pane
+out: list-keys -T root C-MouseDrag1Empty
+out: list-keys -T root M-MouseDrag1Pane
+out: list-keys -T root M-MouseDrag1Border
+out: list-keys -T root MouseDown1Control7
+out: list-keys -T move
+out: list-keys -N -T move
+new-pane -M
+out: list-panes -F #{pane_id}:#{pane_floating_flag}
+move-pane -M
+out: list-panes -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_floating_flag}
+new-pane -x 20 -y 6 -X 4 -Y 2
+move-pane -M
+resize-pane -M
+out: list-panes -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_floating_flag}
+new-window -n empty
+new-pane -x 20 -y 6 -X 2 -Y 2
+kill-pane -t empty.0
+new-pane
+new-pane -x 30 -y 8 -X 40 -Y 10
+out: list-panes -t empty -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}
+out: display-message -p -t empty #{window_layout}

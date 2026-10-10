@@ -14,12 +14,15 @@ import struct
 import sys
 import termios
 
+from pty_queries import Answerer
+
 
 def record(path, columns, rows, command):
     pid, master = pty.fork()
     if pid == 0:
         os.execvp(command[0], command)
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, columns, 0, 0))
+    answerer = Answerer(master)
     with open(path, "ab", buffering=0) as handle:
         while True:
             try:
@@ -29,6 +32,7 @@ def record(path, columns, rows, command):
             if not chunk:
                 break
             handle.write(chunk)
+            answerer.feed(chunk)
     os.waitpid(pid, 0)
 
 

@@ -1,4 +1,7 @@
-corpus: none
+# gap: display-popup.modal-pane
+# display-popup is a modal floating pane as in tmux master 34cd5da4 (fabrico's
+# ruling), so this tmux 3.8 popup contract differs by the registered tuple.
+shim:
 # popup_key_cb's drag arm on both binaries, driven with SGR mouse reports on a
 # client attached to a real pty. A press on the popup's top border followed by
 # a drag report still on that border arms MOVE - the border is read from the
@@ -7,8 +10,9 @@ corpus: none
 # the border and a drag ten columns and five rows away moves the box exactly
 # that far. A drag that starts inside the content box, away from every border,
 # belongs to the popup's job and never moves the box.
-stage: fixtures/display-popup-drag.sh ~/display-popup-drag.sh
-stage: fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/display-popup-drag.sh ~/display-popup-drag.sh
+stage: ../smoke/fixtures/chooser-drive.py ~/chooser-drive.py
+stage: ../smoke/fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu DISPLAY_POPUP_DRAG
 run-shell 'sh ~/display-popup-drag.sh'
 out: show-environment -g DISPLAY_POPUP_DRAG

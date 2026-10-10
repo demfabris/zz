@@ -816,8 +816,21 @@ tall_case() {
 # box title then carries `(filter: active)`. `c` is the pin's undo for it
 # (mode-tree.c, case 'c'): mode_tree_clear_prompt then mode_tree_clear_filter,
 # which rebuilds the tree from every row again and drops `(filter: active)`
-# from the title while mode_tree_set_current keeps the selected row.
+# from the title while mode_tree_set_current keeps the selected row. The prompt
+# is a server prompt of PROMPT_TYPE_SEARCH, so Up brings back the filter Enter
+# just added to the search history and Down walks back to an empty line; the
+# search prompt is one too, so a search answer is what Up brings back next. It
+# edits the way prompt_key does, at a cursor: Left and Right, C-a and Home, C-e
+# and End, C-k, C-d and DC, BSpace before the cursor, C-w (which stops at the
+# session's word-separators) and C-u. prompt_set_options also hands it the
+# session's status-keys, so with vi Escape takes the line into command mode
+# (drawn in message-command-style), h, x, 0 and i are vi commands there, and q
+# closes the prompt. A line wider than the screen scrolls so the cursor stays
+# on it, the way prompt_draw offsets it, and the search prompt edits the same
+# way.
 FILTER_FORMAT='#{==:#{window_name},two}'
+LONG_FILTER=0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
+LONG_FILTER_EDITED="${LONG_FILTER:0:98}${LONG_FILTER:99}"
 filter_case() {
   CASE_LABEL=filter
   mark_both filter
@@ -830,6 +843,69 @@ filter_case() {
   verdict filter-applied same
   step '0: win' c
   verdict filter-cleared same
+  step "(filter) $FILTER_FORMAT" f Up
+  verdict filter-history-up same
+  step '(filter) ' Down
+  verdict filter-history-down same
+  step '0: win' C-c
+  verdict filter-history-cancelled same
+  step '(search) two' / t w o
+  verdict search-typed same
+  step '0: win' Enter
+  verdict search-applied same
+  step '(filter) two' f Up
+  verdict filter-history-search same
+  step '0: win' C-c
+  verdict filter-history-search-cancelled same
+  step '(filter) abXcd' f a b c d Left Left X
+  verdict filter-edit-insert same
+  step '(filter) YabXcdZ' C-a Y C-e Z
+  verdict filter-edit-ends same
+  step '(filter) YabXcd' Left C-k
+  verdict filter-edit-kill same
+  step '(filter) abXcd' C-a C-d
+  verdict filter-edit-delete same
+  step '(filter) abXc' End BSpace
+  verdict filter-edit-backspace same
+  step '(filter) aXc' Home Right DC
+  verdict filter-edit-forward-delete same
+  step '(filter) Xc' C-w
+  verdict filter-edit-word same
+  step '(filter) ' C-u
+  verdict filter-edit-clear same
+  step '(filter) ab cd-ef' -l 'ab cd-ef'
+  step '(filter) ab cd-' C-w
+  verdict filter-edit-word-separator same
+  step '0: win' C-c
+  verdict filter-edit-cancelled same
+  step '(filter) ' f
+  step "${LONG_FILTER:30}" -l "$LONG_FILTER"
+  verdict filter-long-typed same
+  step "${LONG_FILTER:29}" Left
+  verdict filter-long-left same
+  step "${LONG_FILTER_EDITED:28}" BSpace
+  verdict filter-long-backspace same
+  step '0: win' C-c
+  verdict filter-long-cancelled same
+  step '(search) abcd' / a b c d
+  step '(search) Xabcd' C-a X
+  verdict search-edit-start same
+  step '0: win' C-c
+  verdict search-edit-cancelled same
+  set_on_both status-keys vi
+  step '(filter) abcd' f a b c d
+  verdict filter-vi-typed same
+  step '(filter) abcd' Escape
+  verdict filter-vi-command-mode same
+  step '(filter) abd' h x
+  verdict filter-vi-delete same
+  step '(filter) Zabd' 0 i Z
+  verdict filter-vi-insert same
+  step '(filter) Zabd' Escape
+  verdict filter-vi-command-again same
+  step '0: win' q
+  verdict filter-vi-cancelled same
+  run_on_both set-option -gu status-keys
   step 'MARK-filter' q
   verdict filter-closed same
 }

@@ -18,6 +18,8 @@ import sys
 import termios
 import time
 
+from pty_queries import Answerer
+
 COLUMNS = 80
 ROWS = 24
 
@@ -33,6 +35,7 @@ def main():
         os.execvp(command[0], command)
     fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", ROWS, COLUMNS, 0, 0))
 
+    answerer = Answerer(master)
     drawn = bytearray()
     while time.time() < deadline:
         readable, _, _ = select.select([master], [], [], 0.2)
@@ -45,6 +48,7 @@ def main():
         if not chunk:
             break
         drawn += chunk
+        answerer.feed(chunk)
     try:
         os.close(master)
     except OSError:

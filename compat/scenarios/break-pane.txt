@@ -32,3 +32,14 @@ set-window-option -t =named-create:0 automatic-rename on
 split-window -d -h -t =named-create:0.0
 break-pane -d -s =named-create:0.1 -t =named-create:5 -n created
 out: show-window-options -v -t =named-create:5 automatic-rename
+
+# Without -n the new window starts from the pane's command line or shell, and
+# break-pane marks the pane changed, so automatic-rename then names it from the
+# foreground process: a shell running a quiet sleep breaks out as sleep.
+new-session -d -s busy -n source
+split-window -d -h -t =busy:0.0
+send-keys -t =busy:0.1 "sleep 300" Enter
+run-shell "sleep 1"
+break-pane -d -s =busy:0.1 -t =busy:5
+out: list-windows -t =busy -F #{window_index}:#{window_name}
+out: display-message -p -t =busy:5.0 #{pane_current_command}

@@ -4863,21 +4863,13 @@ mod completion_tests {
         );
 
         let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
-        let [
-            TimelineRow::Single(AgentEntry::Assistant { .. }),
-            TimelineRow::Group { entries, .. },
-        ] = rows.as_slice()
-        else {
-            panic!("the step leaves its place for its agent's row: {rows:?}");
+        let [TimelineRow::Group { entries, .. }] = rows.as_slice() else {
+            panic!("the step lands in its agent's turn row: {rows:?}");
         };
-        let agent = entries[0].id();
-        assert_eq!(
-            entries
-                .iter()
-                .map(zz_ui::agent::timeline_parent)
-                .collect::<Vec<_>>(),
-            [None, Some(agent)]
-        );
+        let [AgentEntry::Assistant { .. }, agent, step] = entries.as_slice() else {
+            panic!("the step follows its agent in the turn: {entries:?}");
+        };
+        assert_eq!(zz_ui::agent::timeline_parent(step), Some(agent.id()));
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -4932,22 +4924,19 @@ mod completion_tests {
         );
 
         let rows = cx.update(|_, cx| view.read(cx).timeline.rows.clone());
-        let [
-            TimelineRow::Single(AgentEntry::Assistant { .. }),
-            TimelineRow::Single(AgentEntry::Assistant { .. }),
-            TimelineRow::Group { entries, .. },
-        ] = rows.as_slice()
-        else {
-            panic!("the step joins its agent's row: {rows:?}");
+        let [TimelineRow::Group { entries, .. }] = rows.as_slice() else {
+            panic!("the step joins its agent's turn row: {rows:?}");
         };
-        let agent = entries[0].id();
-        assert_eq!(
-            entries
-                .iter()
-                .map(zz_ui::agent::timeline_parent)
-                .collect::<Vec<_>>(),
-            [None, Some(agent)]
-        );
+        let [
+            AgentEntry::Assistant { .. },
+            AgentEntry::Assistant { .. },
+            agent,
+            step,
+        ] = entries.as_slice()
+        else {
+            panic!("the step follows its agent in the turn: {entries:?}");
+        };
+        assert_eq!(zz_ui::agent::timeline_parent(step), Some(agent.id()));
     }
 
     #[cfg(not(target_os = "macos"))]

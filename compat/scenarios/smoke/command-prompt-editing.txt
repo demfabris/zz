@@ -11,5 +11,6 @@ corpus: none
 # message inherits it and keeps eating keys, and the parked prompt never closes.
 stage: fixtures/command-prompt-editing.sh ~/command-prompt-editing.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 run-shell 'sh ~/command-prompt-editing.sh'
 out: show-environment -g COMMAND_PROMPT_EDITING

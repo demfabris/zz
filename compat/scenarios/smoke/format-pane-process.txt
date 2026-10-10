@@ -7,6 +7,7 @@ corpus: none
 # clean.
 stage: fixtures/format-pane-process.sh ~/format-pane-process.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu FORMAT_PANE_PROCESS
 run-shell 'sh ~/format-pane-process.sh'
 out: show-environment -g FORMAT_PANE_PROCESS

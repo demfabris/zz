@@ -1,0 +1,98 @@
+# Zoom with floating panes as tmux 3.8 pushes and pops it: over-zoom floats
+# stay above a zoomed pane, a plain float from one keeps the zoom on itself,
+# and a zoomed float takes the window.
+split-window -h -t w.0
+resize-pane -Z -t w.0
+err: break-pane -W -s w.0
+new-pane -A -t w.0
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+out: display-message -p -t w #{window_visible_layout}
+out: display-message -p -t w #{window_layout}
+new-pane -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+out: display-message -p -t w #{window_visible_layout}
+kill-pane -t w.3
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+kill-pane -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+new-pane -A -t w.0
+kill-pane -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+select-pane -t w.0
+new-pane -t w.0
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+resize-pane -t w.2 -x 22 -y 8
+resize-pane -Z -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+out: display-message -p -t w #{window_visible_layout}
+out: display-message -p -t w #{window_layout}
+resize-pane -Z -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_zoomed_flag}:#{window_flags}:#{pane_id}
+
+# Modal: focus stays on it, it pins over zoom, and its close restores focus.
+new-session -d -s modal
+split-window -h -t modal.0
+select-pane -t modal.1
+resize-pane -Z -t modal.1
+new-pane -O -t modal.1
+out: list-panes -t modal -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t modal #{window_zoomed_flag}:#{window_flags}:#{window_modal_pane}:#{pane_id}
+select-pane -t modal.0
+out: display-message -p -t modal #{pane_id}
+err: swap-pane -s modal.2 -t modal.0
+err: break-pane -s modal.2
+err: join-pane -s modal.2 -t modal.0
+kill-pane -t modal.2
+out: list-panes -t modal -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t modal #{window_zoomed_flag}:#{window_flags}:#{window_modal_pane}:#{pane_id}
+new-pane -O -t modal.0
+kill-pane -t modal.1
+kill-pane -t modal.1
+out: list-panes -t modal -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t modal #{window_zoomed_flag}:#{window_flags}:#{window_modal_pane}:#{pane_id}
+
+# Selecting the active over-zoom float keeps the zoom, and move-pane -P
+# forward and backward step past floats the zoom hides.
+new-session -d -s zf
+new-pane -t zf.0
+resize-pane -Z -t zf.0
+new-pane -A -t zf.0
+select-pane -t zf.2
+out: display-message -p -t zf #{window_zoomed_flag}:#{pane_index}
+new-pane -A -t zf.0
+move-pane -P back -t zf.2
+out: list-panes -t zf -F #{pane_index}:#{pane_z}:#{pane_active}
+move-pane -P forward -t zf.2
+out: list-panes -t zf -F #{pane_index}:#{pane_z}:#{pane_active}
+move-pane -P backward -t zf.2
+out: list-panes -t zf -F #{pane_index}:#{pane_z}:#{pane_active}
+out: display-message -p -t zf #{window_zoomed_flag}
+
+# join-pane unzooms a zoomed float back to the front of the z order.
+new-session -d -s jz
+split-window -h -t jz.0
+new-pane -t jz.0
+new-pane -t jz.0
+resize-pane -Z -t jz.2
+join-pane -d -s jz.0 -t jz.1
+out: list-panes -t jz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}
+out: display-message -p -t jz #{window_zoomed_flag}
+
+# swap-pane -Z pushes and pops the zoom, so an over-zoom float stays active
+# above the zoomed tile it swaps.
+new-session -d -s sz
+split-window -h -t sz.0
+resize-pane -Z -t sz.0
+new-pane -A -t sz.0
+swap-pane -d -Z -s sz.0 -t sz.1
+out: list-panes -t sz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}:#{pane_flags}
+out: display-message -p -t sz #{window_zoomed_flag}:#{window_flags}
+out: display-message -p -t sz #{window_visible_layout}

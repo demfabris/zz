@@ -76,14 +76,14 @@ use zz_mux::{
     CommandPromptStep, CommandPromptTemplate, ConfigDiagnostic, CopyModeStyleValues, CustomizeMenu,
     CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT, DetachScope,
     Execution, ExecutionContext, FormatClient, FormatMonitorScope, FormatMonitorTarget,
-    FormatNeeds, KeyDecision, KeyEngine, KeyTables, MouseEventTarget, MuxEffect, MuxEngine,
-    PaneKind, PaneModeRequest, PaneRuntimeFacts, PanesMode, ParsedConfig, ParsedConfigBytes,
-    RetainedJobEnvironment, SourceStream, StatusHooks, SwitchAction, TmuxColour, TmuxSort,
-    TmuxSortOrder, WindowSize, canonical_command, command_block_body,
-    copy_mode_action_is_read_only_safe, customize_menu_feed, expand_format_bytes,
-    expand_format_values, expand_status, format_command, format_true, hook_format_variables,
-    if_shell_truthy, legacy_layouts_in, parse_tmux_colour, sanitize_client_output,
-    send_keys_is_read_only_safe, send_keys_target_client, utf8_sanitize,
+    FormatNeeds, KeyDecision, KeyEngine, KeyTables, ModeKey, ModePrompt, MouseEventTarget,
+    MuxEffect, MuxEngine, PaneKind, PaneModeRequest, PaneRuntimeFacts, PanesMode, ParsedConfig,
+    ParsedConfigBytes, PromptOutcome, RetainedJobEnvironment, SourceStream, StatusHooks,
+    SwitchAction, TmuxColour, TmuxSort, TmuxSortOrder, WindowSize, canonical_command,
+    command_block_body, copy_mode_action_is_read_only_safe, customize_menu_feed,
+    expand_format_bytes, expand_format_values, expand_status, format_command, format_true,
+    hook_format_variables, if_shell_truthy, legacy_layouts_in, parse_tmux_colour,
+    sanitize_client_output, send_keys_is_read_only_safe, send_keys_target_client, utf8_sanitize,
     validate_static_command_chain,
 };
 #[cfg(windows)]
@@ -105,12 +105,11 @@ use zz_protocol::{
     MAX_WINDOW_STATUS_LABEL_BYTES, MENU_ROW_MARGIN, MenuAction, MenuItem, MenuState, MuxOptionKey,
     MuxOptionSource, MuxOptions, MuxSnapshot, NEW_SESSION_ATTACH_CAPABILITY, PROTOCOL_VERSION,
     PaneId, PaneIndicator, PaneKindSnapshot, PaneMode, PaneStatus, PaneStatusKind, PaneStatusState,
-    PanesModeArea, PanesModeBorder, PasteUploadPurpose, PastedImageFormat, PatchTail, PopupAction,
-    PopupBorderLines, PopupPointer, PopupPointerButton, PopupState, PreparedCommand,
-    PreparedCommandResult, PromptCursor, ProtocolError, ProtocolMessage, RawText,
-    SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError, ServerHello, SessionId,
-    SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId, canonical_key,
-    encode_protocol_message_into, encode_terminal_patch_event_into,
+    PanesModeArea, PanesModeBorder, PasteUploadPurpose, PastedImageFormat, PatchTail,
+    PopupBorderLines, PreparedCommand, PreparedCommandResult, PromptCursor, ProtocolError,
+    ProtocolMessage, RawText, SERVER_OPTION_CAPABILITY_PREFIX, SPLIT_RATIO_BASIS, ServerError,
+    ServerHello, SessionId, SessionViewer, SourceSpan, SplitId, StatusLine, StdoutClaim, WindowId,
+    canonical_key, encode_protocol_message_into, encode_terminal_patch_event_into,
     encode_terminal_viewport_event_into, is_key_name, layout_menu_row, menu_row_cells,
     menu_row_width, resolve_command,
 };
@@ -145,7 +144,8 @@ use crate::{
     configure_shell_job_environment,
     keys::{
         ChooserPromptEdit, choose_buffer_key_action, choose_tree_key_action, chooser_prompt_answer,
-        chooser_prompt_edit, client_key_inputs, input_key_name, send_tokens,
+        chooser_prompt_edit, chooser_search_edit_key, client_key_inputs, input_key_name,
+        overlay_key_action, send_tokens,
     },
     shell_process,
     status::{
@@ -428,14 +428,6 @@ fn terminal_environment_for_session(
             }),
         )
         .collect())
-}
-
-/// What a job the pin runs on the server reports itself as. `environ_for_session`
-/// stamps the multiplexer's own identity over whatever the overlays carry.
-fn job_terminal_program_version() -> &'static str {
-    zz_protocol::CommandSpec::TMUX_VERSION_OUTPUT
-        .strip_prefix("tmux ")
-        .expect("tmux version output prefix")
 }
 
 fn tmux_environment(socket_path: &Path, session: Option<SessionId>) -> String {
@@ -5984,7 +5976,7 @@ impl Shared {
         terminate_shell_jobs: bool,
         destroy_sessions: bool,
     ) -> Vec<PendingHookEvent> {
-        let (events, terminals, wakes, pipes, shell_jobs, popups, menu_waiters, confirm_waiters) = {
+        let (events, terminals, wakes, pipes, shell_jobs, confirm_waiters) = {
             let mut inner = self.inner.lock();
             let mut terminals = std::mem::take(&mut inner.terminals)
                 .values()
@@ -6071,22 +6063,9 @@ impl Shared {
             } else {
                 Vec::new()
             };
-            let popups = inner
-                .clients
-                .iter_mut()
-                .filter_map(|(id, client)| {
-                    client
-                        .popup
-                        .take()
-                        .map(|popup| (*id, (popup, client.subscriber.clone(), false)))
-                })
-                .collect::<Vec<_>>();
-            let menu_waiters = inner
-                .clients
-                .values_mut()
-                .filter_map(|c| c.menu.take())
-                .filter_map(|menu| menu.waiter)
-                .collect::<Vec<_>>();
+            for client in inner.clients.values_mut() {
+                client.menu.take();
+            }
             let confirm_waiters = inner
                 .clients
                 .values_mut()
@@ -6096,16 +6075,7 @@ impl Shared {
                     ConfirmExecution::Deferred { .. } | ConfirmExecution::Background { .. } => None,
                 })
                 .collect::<Vec<_>>();
-            (
-                events,
-                terminals,
-                wakes,
-                pipes,
-                shell_jobs,
-                popups,
-                menu_waiters,
-                confirm_waiters,
-            )
+            (events, terminals, wakes, pipes, shell_jobs, confirm_waiters)
         };
         for terminal in terminals {
             terminal.terminate();
@@ -6125,12 +6095,6 @@ impl Shared {
             }
             #[cfg(not(unix))]
             terminate_managed_process(&process);
-        }
-        for (client, popup) in popups {
-            Self::retire_popup(client, popup, true);
-        }
-        for waiter in menu_waiters {
-            waiter.complete(false);
         }
         for waiter in confirm_waiters {
             waiter.complete(false);
@@ -6978,15 +6942,7 @@ impl Shared {
         self.enforce_destroy_unattached();
         self.fail_gui_requests_for(client);
         self.status.lock().forget(client);
-        let (
-            terminals,
-            command_output,
-            popup_waiters,
-            menu_waiters,
-            confirm_waiters,
-            shutdown,
-            wait_wakes,
-        ) = {
+        let (terminals, command_output, confirm_waiters, shutdown, wait_wakes) = {
             let mut inner = self.inner.lock();
             let mut removed_client = inner.clients.remove(&client);
             let files = inner
@@ -7030,31 +6986,6 @@ impl Shared {
                 Some(client),
             ));
             pane_exit::cancel_client(&mut inner, client);
-            let popup_waiters = inner
-                .clients
-                .values_mut()
-                .filter_map(|c| c.popup.as_mut())
-                .filter_map(|popup| {
-                    popup
-                        .waiter
-                        .as_ref()
-                        .is_some_and(|waiter| waiter.client == client)
-                        .then(|| popup.waiter.take())
-                        .flatten()
-                })
-                .collect::<Vec<_>>();
-            let menu_waiters = inner
-                .clients
-                .values_mut()
-                .filter_map(|c| c.menu.as_mut())
-                .filter_map(|menu| {
-                    menu.waiter
-                        .as_ref()
-                        .is_some_and(|waiter| waiter.0.client == client)
-                        .then(|| menu.waiter.take())
-                        .flatten()
-                })
-                .collect::<Vec<_>>();
             let confirm_waiters = inner
                 .clients
                 .values()
@@ -7095,8 +7026,6 @@ impl Shared {
                 removed_client
                     .as_mut()
                     .and_then(|c| c.command_output.take()),
-                popup_waiters,
-                menu_waiters,
                 confirm_waiters,
                 shutdown,
                 wait_wakes,
@@ -7112,12 +7041,6 @@ impl Shared {
         }
         for terminal in terminals {
             terminal.release_view(view);
-        }
-        for waiter in popup_waiters {
-            waiter.reply.try_send(129);
-        }
-        for waiter in menu_waiters {
-            waiter.complete(false);
         }
         for waiter in confirm_waiters {
             waiter.complete(false);
@@ -7535,6 +7458,23 @@ impl Shared {
         }
     }
 
+    fn release_removed_pane_wait(inner: &mut ServerState, pane: PaneId) {
+        let exit_code = inner
+            .terminals
+            .get(&pane)
+            .filter(|terminal| terminal.completion().is_some())
+            .map(|terminal| pane_wait_exit_code(terminal, &terminal.latest_viewport().status));
+        if let Some(exit_code) = exit_code {
+            Self::wake_pane_exit_wait(inner, pane, exit_code);
+            return;
+        }
+        if let Some(entry) = inner.pane_exit_waits.get(&pane) {
+            entry.current.kill();
+        }
+        pane_exit::remove_unused(inner, pane);
+        terminal_reads::pane_changed(inner, pane);
+    }
+
     fn wake_pane_exit_wait(inner: &mut ServerState, pane: PaneId, exit_code: u8) {
         if let Some(entry) = inner.pane_exit_waits.get(&pane) {
             entry.current.complete(exit_code);
@@ -7880,9 +7820,8 @@ impl Shared {
             return handed_off;
         }
         hook_events::release_input_change_window(self);
-        let split_input = canonical == "split-window"
-            && command_stdin_sink("split-window", &command.args)
-                == Some(CommandStdinSink::PaneInput);
+        let split_input = matches!(canonical, "split-window" | "new-pane")
+            && command_stdin_sink(canonical, &command.args) == Some(CommandStdinSink::PaneInput);
         let streamed_command = if split_input {
             let mut command = command.clone();
             command.set_stdin_spent();
@@ -8511,16 +8450,14 @@ impl Shared {
                         context,
                         canonical,
                         &command.args,
+                        mux_source,
+                        invoking_client_terminal,
                         queue_execution,
+                        format_facts_unread,
                     ),
-                    DaemonCommandDispatch::DisplayMenu => self.display_menu(
-                        client,
-                        kind,
-                        context,
-                        canonical,
-                        command,
-                        queue_execution,
-                    ),
+                    DaemonCommandDispatch::DisplayMenu => {
+                        self.display_menu(client, kind, context, canonical, command)
+                    }
                     DaemonCommandDispatch::ConfirmBefore => self.confirm_before(
                         client,
                         kind,
@@ -8779,7 +8716,6 @@ impl Shared {
                 continuation,
                 #[cfg(unix)]
                 shell: None,
-                popup: None,
                 overlay: commands.map(|commands| OverlayCommands {
                     commands,
                     accepted: Arc::clone(&waiter.0.accepted),
@@ -8838,12 +8774,13 @@ impl Shared {
         context: &ExecutionContext,
     ) -> ExecutionContext {
         let mut hook_context = context.clone();
-        if matches!(name, "new-session" | "new-window" | "split-window")
-            && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
-                MuxEffect::PaneCreated { pane, .. } => Some(*pane),
-                _ => None,
-            })
-        {
+        if matches!(
+            name,
+            "new-session" | "new-window" | "split-window" | "new-pane"
+        ) && let Some(pane) = execution.effects.iter().find_map(|effect| match effect {
+            MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+            _ => None,
+        }) {
             let inner = self.inner.lock();
             hook_context.retarget_to_pane(&inner.engine.state, pane);
         }
@@ -9369,7 +9306,7 @@ impl Shared {
             self.ensure_prompt_history();
         }
         let read_only = hook_events::command_is_read_only(command_name, &command.args);
-        let split_caller_stream = command_name == "split-window"
+        let split_caller_stream = matches!(command_name, "split-window" | "new-pane")
             && command_stdin_sink(command_name, &command.args) == Some(CommandStdinSink::PaneInput);
         let mut terminals_to_watch = Vec::new();
         let mut client_events = Vec::new();
@@ -9384,7 +9321,6 @@ impl Shared {
         let mut agent_panes_restarted = Vec::new();
         let mut relocated_terminal_views = Vec::new();
         let mut retired_command_outputs = Vec::new();
-        let mut retired_popups = Vec::new();
         let mut deferred_terminal_commands = Vec::new();
         let mut terminal_wait = None;
         let mut key_listing = None;
@@ -10184,6 +10120,11 @@ impl Shared {
                     | MuxEffect::SuppressAfterHook
                     | MuxEffect::PaneMovedInWindow { .. }
                     | MuxEffect::ZoomCycled { .. } => {}
+                    MuxEffect::ArmMouseDrag(drag) => {
+                        if let Some(registered) = inner.client_mut(client) {
+                            registered.mouse_drag = Some(*drag);
+                        }
+                    }
                     MuxEffect::PaneWaitForExit { pane } => {
                         if let Some(terminal) = inner.terminals.get(pane).cloned() {
                             let entry = inner
@@ -10287,7 +10228,10 @@ impl Shared {
                             if let Some(pipe) = inner.pane_pipes.remove(pane) {
                                 pipes_to_close.push(pipe);
                             }
-                            Self::wake_pane_exit_wait(&mut inner, *pane, 0);
+                            if let Some(editor) = inner.editors.remove(pane) {
+                                let _ = std::fs::remove_file(&editor.path);
+                            }
+                            Self::release_removed_pane_wait(&mut inner, *pane);
                             if let Some(terminal) = inner.terminals_mut().remove(pane) {
                                 retire_terminal(&terminal);
                             }
@@ -10694,7 +10638,6 @@ impl Shared {
                             None,
                             &mut direct_events,
                             &mut retired_command_outputs,
-                            &mut retired_popups,
                             &mut resume_client_terminals,
                         );
                         inner
@@ -10760,7 +10703,6 @@ impl Shared {
                             None,
                             &mut direct_events,
                             &mut retired_command_outputs,
-                            &mut retired_popups,
                             &mut resume_client_terminals,
                         );
                         inner
@@ -10826,7 +10768,6 @@ impl Shared {
                             Some(Overlay::CommandPrompt),
                             &mut direct_events,
                             &mut retired_command_outputs,
-                            &mut retired_popups,
                             &mut resume_client_terminals,
                         );
                         if inner
@@ -10944,7 +10885,6 @@ impl Shared {
                             Some(Overlay::ChooseTree),
                             &mut direct_events,
                             &mut retired_command_outputs,
-                            &mut retired_popups,
                             &mut resume_client_terminals,
                         );
                         inner
@@ -11017,7 +10957,6 @@ impl Shared {
                             Some(Overlay::ChooseBuffer),
                             &mut direct_events,
                             &mut retired_command_outputs,
-                            &mut retired_popups,
                             &mut resume_client_terminals,
                         );
                         inner
@@ -11860,9 +11799,6 @@ impl Shared {
         }
         for (client, output) in retired_command_outputs {
             self.retire_command_output(client, output);
-        }
-        for (client, popup) in retired_popups {
-            Self::retire_popup(client, popup, true);
         }
         for (terminal, previous, next) in relocated_terminal_views {
             for client in previous.difference(&next) {
@@ -13224,7 +13160,6 @@ impl Shared {
                     continuation,
                     #[cfg(unix)]
                     shell: None,
-                    popup: None,
                     overlay: None,
                     leaf: None,
                     guard: None,
@@ -14943,9 +14878,6 @@ impl Shared {
                 if let Some(shell) = wait.shell {
                     step.0 = shell.finish(self, &mut frame.context, Some(&frame.execution));
                 }
-                if let Some(popup) = wait.popup {
-                    step.0 = popup.finish();
-                }
                 if let Some(overlay) = wait.overlay {
                     step.0 = if overlay.accepted.load(Ordering::Acquire) {
                         self.run_confirm_commands(
@@ -16367,7 +16299,7 @@ impl Shared {
     }
 
     fn publish_background_command_error(
-        &self,
+        self: &Arc<Self>,
         client: ClientId,
         context: &ExecutionContext,
         error: &DaemonError,
@@ -16378,6 +16310,10 @@ impl Shared {
             && self.read_client(client, |c| c.and_then(|c| c.kind)) == Some(ClientKind::Interactive)
         {
             uppercase_first(&mut message);
+            if client_attached_session(&self.inner.lock(), client).is_some() {
+                self.publish_status_message(client, context, message);
+                return;
+            }
         }
         push_server_message(&mut self.inner.lock(), message.clone());
         self.publish_to_client(
@@ -16388,6 +16324,52 @@ impl Shared {
                 text: message,
             },
         );
+    }
+
+    /// The pin's `status_message_set(c, -1, 1, 0, 0, ...)` from a mode: logged
+    /// under the client's name, shown for the session's `display-time` until a
+    /// key clears it, with no command and so no `after-display-message`.
+    fn publish_status_message(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        text: String,
+    ) {
+        let (publication, retired, deadline) = {
+            let mut inner = self.inner.lock();
+            let client_name = server_log_client_name(&inner, client);
+            push_server_message(&mut inner, format!("{client_name} message: {text}"));
+            let duration_ms = client_attached_session(&inner, client).map_or(750, |session| {
+                inner.engine.display_time_for_session(session)
+            });
+            let message_id = next_timed_message_id(&mut inner);
+            if duration_ms != 0 {
+                let _ = inner
+                    .client_mut(client)
+                    .is_some_and(|client| std::mem::take(&mut client.message_ignore_keys));
+            }
+            let freeze = !inner.client(client).is_some_and(|c| c.native_chooser);
+            let (retired, deadline) =
+                arm_client_message(&mut inner, client, message_id, duration_ms, freeze);
+            let publication = OwnedClientMessagePublication {
+                client,
+                pane: context.pane,
+                kind: ClientMessageKind::Error,
+                text,
+                duration_ms,
+                message_id,
+            };
+            (publication, retired, deadline)
+        };
+        self.publish_owned_client_message(publication);
+        if let Some(retired) = retired {
+            self.retire_client_message(client, retired, true);
+        }
+        if let Some(deadline) = deadline {
+            let _ = self.timer_tx.send(timers::TimerInput::ClientMessage(
+                ClientMessageDeadlineCommand::Schedule(deadline),
+            ));
+        }
     }
 
     fn spawn_delay(
@@ -16442,7 +16424,6 @@ impl Shared {
                     continuation,
                     #[cfg(unix)]
                     shell: None,
-                    popup: None,
                     overlay: None,
                     leaf: None,
                     guard: None,
@@ -16473,7 +16454,6 @@ impl Shared {
                     name: String::new(),
                     continuation: wait.continuation.clone(),
                     shell: Some(wait),
-                    popup: None,
                     overlay: None,
                     leaf: None,
                     guard: None,
@@ -18747,16 +18727,19 @@ impl Shared {
         self: &Arc<Self>,
         client: ClientId,
         kind: ClientKind,
-        context: &ExecutionContext,
+        context: &mut ExecutionContext,
         command_name: &str,
         args: &[RawText],
+        mux_source: MuxOptionSource,
+        invoking_client_terminal: ClientTerminal,
         queue_execution: Option<&CommandQueueExecution>,
+        format_facts_unread: Option<bool>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_popup_args(args)?;
         if kind == ClientKind::Control {
             return Ok(Execution::default());
         }
-        let (target_client, mut target) = {
+        let (target_client, mut target, window) = {
             let inner = self.inner.lock();
             let target_client =
                 resolve_popup_client(&inner, client, context, parsed.target_client.as_deref())?;
@@ -18771,26 +18754,24 @@ impl Shared {
             target
                 .format_variables
                 .clone_from(&context.format_variables);
-            (target_client, target)
+            let window = target
+                .window
+                .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
+            (target_client, target, window)
         };
-
+        let modal = self.inner.lock().engine.state.windows[&window].modal_pane();
         if parsed.clear {
             let mut events = Vec::new();
             let mut outputs = Vec::new();
-            let mut popups = Vec::new();
             let mut resume_terminals = false;
-            {
-                let mut inner = self.inner.lock();
-                dismiss_overlays(
-                    &mut inner,
-                    target_client,
-                    None,
-                    &mut events,
-                    &mut outputs,
-                    &mut popups,
-                    &mut resume_terminals,
-                );
-            }
+            dismiss_overlays(
+                &mut self.inner.lock(),
+                target_client,
+                None,
+                &mut events,
+                &mut outputs,
+                &mut resume_terminals,
+            );
             for event in events {
                 self.publish_to_client(target_client, event);
             }
@@ -18800,133 +18781,37 @@ impl Shared {
             for (owner, output) in outputs {
                 self.retire_command_output(owner, output);
             }
-            for (owner, popup) in popups {
-                Self::retire_popup(owner, popup, true);
-            }
-            return Ok(Execution::default());
-        }
-
-        let modifying = self.read_client(target_client, |c| c.is_some_and(|c| c.popup.is_some()));
-        if modifying {
-            let (title, border_lines) = {
-                let inner = self.inner.lock();
-                let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                    expand_popup_value(
-                        &inner,
-                        &target,
-                        context.session,
-                        Some(command_name),
-                        title,
-                        Some(target_client),
-                    )
-                });
-                let border_lines = if parsed.borderless {
-                    Some(PopupBorderLines::None)
-                } else {
-                    parsed
-                        .border_lines
-                        .as_deref()
-                        .map(|value| {
-                            value.parse().map_err(|()| {
-                                ServerError::InvalidCommand(format!(
-                                    "popup-border-lines unknown value: {value}"
-                                ))
-                            })
-                        })
-                        .transpose()?
-                };
-                (title, border_lines)
-            };
-            let (terminal, state, resize) = {
-                let mut inner = self.inner.lock();
-                let options = client_overlay_style_window(&inner, target_client)
-                    .and_then(|window| inner.engine.popup_options_for_window(window).ok());
-                let Some(popup) = inner
-                    .client_mut(target_client)
-                    .and_then(|c| c.popup.as_mut())
-                else {
-                    return Ok(Execution::default());
-                };
-                if border_lines.is_some_and(|lines| {
-                    lines != PopupBorderLines::None
-                        && (popup.state.width <= 2 || popup.state.height <= 2)
-                }) {
-                    return Ok(Execution::default());
-                }
-                popup.state.title = title;
-                if parsed.style.is_some() {
-                    popup.styles.style.clone_from(&parsed.style);
-                }
-                if parsed.border_style.is_some() {
-                    popup.styles.border_style.clone_from(&parsed.border_style);
-                }
-                if let Some(options) = options {
-                    popup.state.style =
-                        overlay_style(&options.style, popup.styles.style.as_deref());
-                    popup.state.border_style =
-                        overlay_style(&options.border_style, popup.styles.border_style.as_deref());
-                } else {
-                    if let Some(style) = &parsed.style {
-                        popup.state.style.clone_from(style);
-                    }
-                    if let Some(style) = &parsed.border_style {
-                        popup.state.border_style.clone_from(style);
-                    }
-                }
-                let previous_lines = popup.state.border_lines;
-                if let Some(lines) = border_lines {
-                    popup.state.border_lines = lines;
-                }
-                if let Some((close_on_exit, close_on_exit_zero, close_on_any_key)) =
-                    popup_close_flags(&parsed, true)
-                {
-                    popup.state.close_on_exit = close_on_exit;
-                    popup.state.close_on_exit_zero = close_on_exit_zero;
-                    popup.state.close_on_any_key = close_on_any_key;
-                }
-                popup.state.dead |= popup.terminal.completion().is_some();
-                let resize = (previous_lines != popup.state.border_lines && !popup.state.dead)
-                    .then(|| popup_content_size(&popup.state))
-                    .flatten()
-                    .map(|(columns, rows)| {
-                        (columns, rows, popup.cell_width_px, popup.cell_height_px)
-                    });
-                (Arc::clone(&popup.terminal), popup.state.clone(), resize)
-            };
-            if let Some((columns, rows, cell_width_px, cell_height_px)) = resize {
-                terminal.resize(columns, rows, cell_width_px, cell_height_px);
-            }
-            self.publish_to_client(target_client, EventPayload::Popup { state: Some(state) });
-            return Ok(Execution::default());
-        }
-
-        if popup_other_overlay_present(&self.inner.lock(), target_client) {
-            return Ok(Execution::default());
-        }
-
-        let (geometry, history_limit, word_separators, appearance, spawn, mut state) = {
-            let inner = self.inner.lock();
-            let Some(geometry) = popup_client_geometry(&inner, target_client)? else {
+            let Some(modal) = modal else {
                 return Ok(Execution::default());
             };
-            let width = parse_popup_dimension("width", parsed.width.as_deref(), geometry.columns)?;
-            let height = parse_popup_dimension("height", parsed.height.as_deref(), geometry.rows)?;
-            let window = target
-                .window
-                .ok_or_else(|| ServerError::MissingTarget("current window".to_owned()))?;
-            let session = target
-                .session
-                .ok_or_else(|| ServerError::MissingTarget("current session".to_owned()))?;
-            let pane = target
-                .pane
-                .ok_or_else(|| ServerError::MissingTarget("current pane".to_owned()))?;
-            let style_window = inner
+            let kill = CommandInvocation::new("kill-pane", ["-t".to_owned(), modal.to_string()]);
+            return self.execute_with_mux_source_inner(
+                client,
+                kind,
+                context,
+                &kill,
+                mux_source,
+                invoking_client_terminal,
+                queue_execution,
+                format_facts_unread,
+            );
+        }
+        if modal.is_some() {
+            return Ok(Execution::default());
+        }
+        let (new_pane, remain_on_exit) = {
+            let inner = self.inner.lock();
+            let columns = inner
                 .engine
-                .state
-                .sessions
-                .get(&session)
-                .map_or(window, |state| state.active_window);
-            let defaults = inner.engine.popup_options_for_window(style_window)?;
+                .window_extent(window, zz_protocol::Axis::Horizontal)
+                .unwrap_or_default();
+            let rows = inner
+                .engine
+                .window_extent(window, zz_protocol::Axis::Vertical)
+                .unwrap_or_default();
+            let width = parse_popup_dimension("width", parsed.width.as_deref(), columns)?;
+            let height = parse_popup_dimension("height", parsed.height.as_deref(), rows)?;
+            let defaults = inner.engine.popup_options_for_window(window)?;
             let border_lines = if parsed.borderless {
                 PopupBorderLines::None
             } else if let Some(value) = parsed.border_lines.as_deref() {
@@ -18938,249 +18823,309 @@ impl Shared {
             } else {
                 defaults.border_lines
             };
+            let minimum = if border_lines == PopupBorderLines::None {
+                1
+            } else {
+                3
+            };
+            if width < minimum || height < minimum {
+                return Ok(Execution::default());
+            }
             let variables = popup_position_variables(
                 &inner.engine,
                 &target,
                 context.invoking_mouse(),
-                geometry.columns,
-                geometry.rows,
+                columns,
+                rows,
                 width,
                 height,
             );
             target.format_variables.extend(variables);
+            let expand = |value: &str| {
+                expand_popup_value(
+                    &inner,
+                    &target,
+                    context.session,
+                    Some(command_name),
+                    value,
+                    Some(target_client),
+                )
+            };
             let (left, top) = popup_position(
                 parsed.x.as_deref(),
                 parsed.y.as_deref(),
-                geometry.columns,
-                geometry.rows,
+                columns,
+                rows,
                 width,
                 height,
-                |value| {
-                    expand_popup_value(
-                        &inner,
-                        &target,
-                        context.session,
-                        Some(command_name),
-                        value,
-                        Some(target_client),
-                    )
-                },
+                expand,
             );
-            let title = parsed.title.as_deref().map_or_else(String::new, |title| {
-                expand_popup_value(
-                    &inner,
-                    &target,
-                    context.session,
-                    Some(command_name),
-                    title,
-                    Some(target_client),
-                )
-            });
-            let requested_cwd = parsed.start_directory.as_deref().map(|directory| {
-                expand_popup_value(
-                    &inner,
-                    &target,
-                    context.session,
-                    Some(command_name),
-                    directory,
-                    Some(target_client),
-                )
-            });
-            let working_directory =
-                job_working_directory(&inner, &target, requested_cwd.as_deref());
-            let shell = terminal_shell_for_session(&inner.engine, session)?;
-            let default_command = inner.engine.default_command_for_session(session)?;
-            let command = popup_command_shape(default_command, &parsed.command);
-            let mut env = terminal_environment_for_session(&inner.engine, session)?;
-            env.extend([
-                (OsString::from("TERM_PROGRAM"), Some("tmux".into())),
-                (
-                    "TERM_PROGRAM_VERSION".into(),
-                    Some(job_terminal_program_version().into()),
-                ),
-                ("COLORTERM".into(), Some("truecolor".into())),
-                ("ZZ_PANE".into(), Some(pane.to_string().into())),
-                (
-                    "ZZ_SOCKET".into(),
-                    Some(self.socket_path.as_os_str().to_owned()),
-                ),
-                ("ZZ_SESSION".into(), Some(session.to_string().into())),
-                (
-                    "TMUX".into(),
-                    Some(tmux_environment(&self.socket_path, Some(session)).into()),
-                ),
-            ]);
-            for assignment in &parsed.environment {
-                let Some((name, value)) = assignment.split_once('=') else {
-                    continue;
-                };
-                if name.is_empty() {
-                    continue;
-                }
-                env.retain(|(existing, _)| existing != name);
-                env.push((name.into(), Some(value.into())));
-            }
-            env.retain(|(name, _)| name != "PWD");
-            env.push(("PWD".into(), Some(working_directory.as_os_str().to_owned())));
-            let style = overlay_style(&defaults.style, parsed.style.as_deref());
-            let border_style =
-                overlay_style(&defaults.border_style, parsed.border_style.as_deref());
-            let (close_on_exit, close_on_exit_zero, close_on_any_key) =
-                popup_close_flags(&parsed, false).expect("new popup has close flags");
-            let state = PopupState {
-                pane: PaneId(0),
-                left,
-                top,
-                width,
-                height,
-                client_columns: geometry.columns,
-                client_rows: geometry.rows,
-                cell_width_px: geometry.cell_width_px,
-                cell_height_px: geometry.cell_height_px,
-                title,
-                style,
+            let escape = |value: String| value.replace('#', "##");
+            let mut arguments = vec![
+                "-O".to_owned(),
+                "-K".to_owned(),
+                "-t".to_owned(),
+                target
+                    .pane
+                    .ok_or_else(|| ServerError::MissingTarget("current pane".to_owned()))?
+                    .to_string(),
+                "-x".to_owned(),
+                width.to_string(),
+                "-y".to_owned(),
+                height.to_string(),
+                "-X".to_owned(),
+                left.to_string(),
+                "-Y".to_owned(),
+                top.to_string(),
+                "-B".to_owned(),
+                popup_pane_border_lines(border_lines).to_owned(),
+                "-s".to_owned(),
+                parsed.style.clone().unwrap_or(defaults.style),
+            ];
+            let border_style = parsed.border_style.clone().unwrap_or(defaults.border_style);
+            arguments.extend([
+                "-S".to_owned(),
+                border_style.clone(),
+                "-R".to_owned(),
                 border_style,
-                border_lines,
-                close_on_exit,
-                close_on_exit_zero,
-                close_on_any_key,
-                dead: false,
+            ]);
+            if parsed.close_on_exit_count == 0 {
+                arguments.push("-D".to_owned());
+            }
+            if let Some(title) = parsed.title.as_deref() {
+                arguments.extend(["-T".to_owned(), escape(expand(title))]);
+            }
+            if let Some(directory) = parsed.start_directory.as_deref() {
+                arguments.extend(["-c".to_owned(), escape(expand(directory))]);
+            }
+            for assignment in &parsed.environment {
+                arguments.extend(["-e".to_owned(), assignment.clone()]);
+            }
+            if matches!(kind, ClientKind::Command) {
+                arguments.push("-W".to_owned());
+            }
+            let command = match parsed.command.as_slice() {
+                [only] if only.is_empty() => &[][..],
+                command => command,
             };
-            let Some((columns, rows)) = popup_content_size(&state) else {
-                return Ok(Execution::default());
-            };
-            let spawn = TerminalSpawn {
-                knobs: EngineKnobs::default(),
-                working_directory: Some(working_directory),
-                command,
-                shell: Some(shell),
-                terminal_type: Some(inner.engine.default_terminal_for_spawn().to_owned()),
-                initial_size: Some(TerminalSize {
-                    columns,
-                    rows,
-                    cell_width_px: geometry.cell_width_px,
-                    cell_height_px: geometry.cell_height_px,
-                }),
-                non_login_shell: true,
-                env,
-                word_separators: None,
-                allow_passthrough: None,
-                wrap_search: None,
+            if !command.is_empty() {
+                arguments.push("--".to_owned());
+                arguments.extend(command.iter().cloned());
+            }
+            let remain_on_exit = match (parsed.close_on_exit_count, parsed.close_on_any_key) {
+                (0, false) => "on",
+                (0 | 1, true) => "key",
+                (1, false) => "off",
+                (_, true) => "failed-key",
+                (_, false) => "failed",
             };
             (
-                geometry,
-                inner.engine.history_limit_for_session(session),
-                WordSeparators::new(inner.engine.word_separators_for_pane(pane)?),
-                Arc::clone(&inner.appearance),
-                spawn,
-                state,
+                CommandInvocation::new("new-pane", arguments),
+                remain_on_exit,
             )
         };
-
-        let terminal = Arc::new(TerminalSession::spawn(history_limit, appearance, spawn));
-        terminal.set_word_separators(word_separators);
-        terminal.attach_view(TerminalViewId(target_client.0));
-        terminal.set_view_stream(TerminalViewId(target_client.0), ViewStream::Foreground);
-        let (wait, waiter) = if matches!(kind, ClientKind::Command | ClientKind::Control) {
-            let (wait, waiter) = PopupWait::new(self, client);
-            (Some(wait), Some(waiter))
-        } else {
-            (None, None)
-        };
-        {
-            let mut inner = self.inner.lock();
-            if inner
-                .client(target_client)
-                .is_some_and(|c| c.popup.is_some())
-                || popup_other_overlay_present(&inner, target_client)
-            {
-                terminal.terminate();
-                return Ok(Execution::default());
-            }
-            inner.next_popup_token = inner.next_popup_token.wrapping_add(1).max(1);
-            let token = inner.next_popup_token;
-            state.pane = PaneId(u64::MAX.saturating_sub(token));
-            inner
-                .client_entry(target_client)
-                .popup
-                .replace(PopupSession {
-                    terminal: Arc::clone(&terminal),
-                    state: state.clone(),
-                    pointer: PopupPointerState::default(),
-                    preferred: PopupPlacement {
-                        left: state.left,
-                        top: state.top,
-                        width: state.width,
-                        height: state.height,
-                    },
-                    cell_width_px: geometry.cell_width_px,
-                    cell_height_px: geometry.cell_height_px,
-                    styles: OverlayStyleOverrides {
-                        style: parsed.style.clone(),
-                        border_style: parsed.border_style.clone(),
-                        selected_style: None,
-                    },
-                    waiter,
-                });
+        let mut spawn_options = vec![
+            ("remain-on-exit", remain_on_exit),
+            ("remain-on-exit-format", ""),
+        ];
+        if parsed.title.is_some() {
+            spawn_options.extend([
+                ("pane-border-status", "top"),
+                ("pane-border-format", "#{pane_title}"),
+            ]);
         }
-        self.publish_to_client(
-            target_client,
-            EventPayload::Popup {
-                state: Some(state.clone()),
+        let mut new_context = target.clone();
+        new_context.set_spawn_pane_options(
+            spawn_options
+                .into_iter()
+                .map(|(name, value)| (name.to_owned(), value.to_owned()))
+                .collect(),
+        );
+        let execution = self.execute_with_mux_source_inner(
+            client,
+            kind,
+            &mut new_context,
+            &new_pane,
+            mux_source,
+            invoking_client_terminal,
+            queue_execution,
+            format_facts_unread,
+        )?;
+        self.publish_snapshot();
+        Ok(execution)
+    }
+
+    fn spawn_editor(
+        self: &Arc<Self>,
+        client: ClientId,
+        pane: PaneId,
+        text: &[u8],
+        target: EditorTarget,
+    ) {
+        let (columns, rows, lines, editor) = {
+            let inner = self.inner.lock();
+            let Some(window) = inner.engine.state.window_for_pane(pane) else {
+                return;
+            };
+            if inner.engine.state.windows[&window].modal_pane().is_some() {
+                return;
+            }
+            let columns = inner
+                .engine
+                .window_extent(window, zz_protocol::Axis::Horizontal)
+                .unwrap_or_default();
+            let rows = inner
+                .engine
+                .window_extent(window, zz_protocol::Axis::Vertical)
+                .unwrap_or_default();
+            (
+                columns,
+                rows,
+                inner.engine.pane_border_lines(window),
+                inner.engine.editor_option(),
+            )
+        };
+        let Ok(file) = tempfile::Builder::new()
+            .prefix("tmux.")
+            .rand_bytes(8)
+            .tempfile_in("/tmp")
+        else {
+            return;
+        };
+        let text = if text.is_empty() {
+            b"\n".as_slice()
+        } else {
+            text
+        };
+        if std::fs::write(file.path(), text).is_err() {
+            return;
+        }
+        let Ok(path) = file.into_temp_path().keep() else {
+            return;
+        };
+        let sx = i32::from(columns) * 9 / 10;
+        let sy = i32::from(rows) * 9 / 10;
+        let xoff = i32::from(columns) / 2 - sx / 2;
+        let yoff = i32::from(rows) / 2 - sy / 2;
+        let border = i32::from(lines != zz_protocol::PaneBorderLines::None);
+        let new_pane = CommandInvocation::new(
+            "new-pane",
+            [
+                "-O".to_owned(),
+                "-t".to_owned(),
+                pane.to_string(),
+                "-c".to_owned(),
+                "/tmp".to_owned(),
+                "-x".to_owned(),
+                (sx + 2 * border).to_string(),
+                "-y".to_owned(),
+                (sy + 2 * border).to_string(),
+                "-X".to_owned(),
+                (xoff - border).to_string(),
+                "-Y".to_owned(),
+                (yoff - border).to_string(),
+                "--".to_owned(),
+                format!("{editor} {}", path.display()),
+            ],
+        );
+        let Some(mut context) = ExecutionContext::for_pane(&self.inner.lock().engine.state, pane)
+        else {
+            return;
+        };
+        context.set_spawn_pane_options(vec![("remain-on-exit".to_owned(), "off".to_owned())]);
+        let created = self
+            .execute(client, ClientKind::Interactive, &mut context, &new_pane)
+            .ok()
+            .and_then(|execution| {
+                execution.effects.iter().find_map(|effect| match effect {
+                    MuxEffect::PaneCreated { pane, .. } => Some(*pane),
+                    _ => None,
+                })
+            });
+        let Some(editor_pane) = created else {
+            let _ = std::fs::remove_file(&path);
+            return;
+        };
+        self.inner.lock().editors.insert(
+            editor_pane,
+            EditorSession {
+                client,
+                path,
+                target,
             },
         );
-        if let Some(subscriber) = self.read_client(target_client, |c| {
-            c.and_then(|c| c.subscriber.as_ref()).cloned()
-        }) {
-            let _ = subscriber.replace_terminal_viewport(
-                state.pane,
-                terminal.latest_viewport().as_ref(),
-                &self.terminal_frames,
-            );
-        }
-        if let Err(error) = self.watch_popup(target_client, &terminal) {
-            self.close_popup(target_client, true);
-            return Err(error);
-        }
-        let Some(wait) = wait else {
-            return Ok(Execution::default());
+        self.publish_snapshot();
+    }
+
+    fn finish_editor(self: &Arc<Self>, pane: PaneId, exit_code: u8) {
+        let Some(session) = self.inner.lock().editors.remove(&pane) else {
+            return;
         };
-        if let Some(item) = &self.command_item {
-            let mut item = item.lock();
-            #[cfg(unix)]
-            let loop_leaf = item.loop_leaf;
-            #[cfg(not(unix))]
-            let loop_leaf = false;
-            if (item.loop_wait || loop_leaf)
-                && queue_execution.is_some_and(|queue| queue.frame_active.get())
-            {
-                item.pending_wait = Some(Box::new(RegisteredWait {
-                    name: String::new(),
-                    continuation: wait.continuation.clone(),
-                    #[cfg(unix)]
-                    shell: None,
-                    popup: Some(wait),
-                    overlay: None,
-                    leaf: None,
-                    guard: None,
-                    terminal: None,
-                    file: None,
-                }));
-                return Ok(Execution::default());
+        let text = (exit_code == 0)
+            .then(|| std::fs::read(&session.path).ok())
+            .flatten()
+            .filter(|text| !text.is_empty());
+        let _ = std::fs::remove_file(&session.path);
+        let Some(mut text) = text else {
+            return;
+        };
+        match session.target {
+            EditorTarget::Buffer { name, data } => {
+                {
+                    let mut inner = self.inner.lock();
+                    let Some(buffer) = inner
+                        .paste_buffers
+                        .iter_mut()
+                        .find(|buffer| buffer.name == name && Arc::ptr_eq(&buffer.data, &data))
+                    else {
+                        return;
+                    };
+                    if buffer.data.last().is_some_and(|last| *last != b'\n')
+                        && text.last() == Some(&b'\n')
+                    {
+                        text.pop();
+                    }
+                    if text.is_empty() {
+                        return;
+                    }
+                    buffer.data = Arc::from(text);
+                }
+                self.run_event_hooks(vec![PendingHookEvent::paste_buffer(
+                    "paste-buffer-changed",
+                    name,
+                )]);
+                self.refresh_choose_buffers();
             }
-        }
-        #[cfg(any(test, windows))]
-        {
-            wait.continuation.wait();
-            wait.finish()
-        }
-        #[cfg(all(unix, not(test)))]
-        {
-            self.close_popup(target_client, true);
-            Err(
-                ServerError::InvalidCommand("not able to wait outside a command queue".to_owned())
-                    .into(),
-            )
+            EditorTarget::Option { pane, edit } => {
+                if text.last() == Some(&b'\n') {
+                    text.pop();
+                }
+                let value = String::from_utf8_lossy(&text).into_owned();
+                let Some(PaneModeRequest::Customize(mut mode)) = self
+                    .inner
+                    .lock()
+                    .pane_modes
+                    .get(&pane)
+                    .and_then(|modes| modes.last())
+                    .cloned()
+                else {
+                    return;
+                };
+                let result = {
+                    let inner = self.inner.lock();
+                    let facts = borrowed_format_hook_facts(&inner);
+                    let mut expand = customize_expander(&inner, pane, &facts);
+                    inner
+                        .engine
+                        .customize_edited(pane, &mut mode, &edit, &value, &mut expand)
+                };
+                let Some(mut context) =
+                    ExecutionContext::for_pane(&self.inner.lock().engine.state, pane)
+                else {
+                    return;
+                };
+                self.apply_customize_result(session.client, &mut context, pane, mode, &result);
+            }
         }
     }
 
@@ -19296,7 +19241,6 @@ impl Shared {
             return;
         };
         self.refit_client_menu(client, geometry);
-        self.refit_client_popup(client, geometry);
     }
 
     fn refit_client_menu(self: &Arc<Self>, client: ClientId, geometry: TerminalGeometry) {
@@ -19327,52 +19271,6 @@ impl Shared {
         self.publish_to_client(client, EventPayload::Menu { state: Some(menu) });
     }
 
-    fn refit_client_popup(self: &Arc<Self>, client: ClientId, geometry: TerminalGeometry) {
-        let (state, resize) = {
-            let mut inner = self.inner.lock();
-            let Some(popup) = inner.client_mut(client).and_then(|c| c.popup.as_mut()) else {
-                return;
-            };
-            let preferred = popup.preferred;
-            let width = preferred.width.min(geometry.columns);
-            let height = preferred.height.min(geometry.rows);
-            let refit = PopupState {
-                left: overlay_origin_for_viewport(preferred.left, width, geometry.columns),
-                top: overlay_origin_for_viewport(preferred.top, height, geometry.rows),
-                width,
-                height,
-                client_columns: geometry.columns,
-                client_rows: geometry.rows,
-                cell_width_px: geometry.cell_width_px,
-                cell_height_px: geometry.cell_height_px,
-                ..popup.state.clone()
-            };
-            if refit == popup.state {
-                return;
-            }
-            popup.state = refit.clone();
-            popup.cell_width_px = geometry.cell_width_px;
-            popup.cell_height_px = geometry.cell_height_px;
-            let resize = (!refit.dead)
-                .then(|| popup_content_size(&refit))
-                .flatten()
-                .map(|(columns, rows)| {
-                    (
-                        Arc::clone(&popup.terminal),
-                        columns,
-                        rows,
-                        geometry.cell_width_px,
-                        geometry.cell_height_px,
-                    )
-                });
-            (refit, resize)
-        };
-        if let Some((terminal, columns, rows, cell_width_px, cell_height_px)) = resize {
-            terminal.resize(columns, rows, cell_width_px, cell_height_px);
-        }
-        self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
-    }
-
     /// Re-read the overlay style options the way `menu_reapply_styles` and
     /// `popup_reapply_styles` do on every draw, so a `set-option` that lands
     /// while an overlay is up repaints it with no key pressed. Both read the
@@ -19383,27 +19281,15 @@ impl Shared {
     fn restyle_client_overlays(self: &Arc<Self>) {
         let clients = {
             let inner = self.inner.lock();
-            if inner.clients.values().all(|c| c.menu.is_none())
-                && inner.clients.values().all(|c| c.popup.is_none())
-            {
-                return;
-            }
             inner
                 .clients
                 .iter()
                 .filter_map(|(id, client)| client.menu.as_ref().map(|_| id))
-                .chain(
-                    inner
-                        .clients
-                        .iter()
-                        .filter_map(|(id, client)| client.popup.as_ref().map(|_| id)),
-                )
                 .copied()
                 .collect::<BTreeSet<_>>()
         };
         for client in clients {
             self.restyle_client_menu(client);
-            self.restyle_client_popup(client);
         }
     }
 
@@ -19440,31 +19326,6 @@ impl Shared {
         self.publish_to_client(client, EventPayload::Menu { state: Some(state) });
     }
 
-    fn restyle_client_popup(self: &Arc<Self>, client: ClientId) {
-        let state = {
-            let mut inner = self.inner.lock();
-            let Some(window) = client_overlay_style_window(&inner, client) else {
-                return;
-            };
-            let Ok(options) = inner.engine.popup_options_for_window(window) else {
-                return;
-            };
-            let Some(popup) = inner.client_mut(client).and_then(|c| c.popup.as_mut()) else {
-                return;
-            };
-            let style = overlay_style(&options.style, popup.styles.style.as_deref());
-            let border_style =
-                overlay_style(&options.border_style, popup.styles.border_style.as_deref());
-            if style == popup.state.style && border_style == popup.state.border_style {
-                return;
-            }
-            popup.state.style = style;
-            popup.state.border_style = border_style;
-            popup.state.clone()
-        };
-        self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
-    }
-
     fn display_menu(
         self: &Arc<Self>,
         client: ClientId,
@@ -19472,7 +19333,6 @@ impl Shared {
         context: &ExecutionContext,
         command_name: &str,
         command: &CommandInvocation,
-        queue_execution: Option<&CommandQueueExecution>,
     ) -> Result<Execution, DaemonError> {
         let parsed = parse_display_menu_args(&command.args)?;
         if kind == ClientKind::Control {
@@ -19689,40 +19549,29 @@ impl Shared {
                     items,
                     selected,
                     stay_open: parsed.stay_open,
-                    mouse_keys: parsed.mouse,
+                    mouse_keys: parsed.mouse || context.invoking_mouse().is_some(),
                 },
                 commands,
             )
         };
-        let waiter = {
+        {
             let mut inner = self.inner.lock();
             if any_overlay_present(&inner, target_client) {
                 return Ok(Execution::default());
             }
-            let waiter = matches!(kind, ClientKind::Command | ClientKind::Control)
-                .then(|| self.register_overlay_wait(client, None, queue_execution));
             inner.client_entry(target_client).menu.replace(MenuSession {
                 state: state.clone(),
                 commands,
                 target,
-                popup_owner: false,
                 mode_tree: None,
                 styles: OverlayStyleOverrides {
                     style: parsed.style.clone(),
                     selected_style: parsed.selected_style.clone(),
                     border_style: parsed.border_style.clone(),
                 },
-                waiter: self
-                    .command_item
-                    .as_ref()
-                    .and_then(|item| item.lock().raising_overlay.take()),
             });
-            waiter
-        };
-        self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
-        if let Some(waiter) = waiter {
-            self.finish_overlay_wait(&waiter, true);
         }
+        self.publish_to_client(target_client, EventPayload::Menu { state: Some(state) });
         Ok(Execution::default())
     }
 
@@ -19844,7 +19693,6 @@ impl Shared {
         };
         let mut events = Vec::new();
         let mut outputs = Vec::new();
-        let mut popups = Vec::new();
         let mut resume_terminals = false;
         {
             let mut inner = self.inner.lock();
@@ -19854,7 +19702,6 @@ impl Shared {
                 None,
                 &mut events,
                 &mut outputs,
-                &mut popups,
                 &mut resume_terminals,
             );
             inner
@@ -19870,9 +19717,6 @@ impl Shared {
         }
         for (owner, output) in outputs {
             self.retire_command_output(owner, output);
-        }
-        for (owner, popup) in popups {
-            Self::retire_popup(owner, popup, true);
         }
         if resume_terminals {
             self.resume_client_terminals(target_client);
@@ -21041,7 +20885,6 @@ impl Shared {
             ));
         }
         let command_output = take_command_output(&mut inner, client);
-        let popup = take_popup(&mut inner, client);
         let menu = inner.client_mut(client).and_then(|c| c.menu.take());
         let confirm = inner.client_mut(client).and_then(|c| c.confirm.take());
         write_back_terminal_geometries(&mut inner, &affected_panes);
@@ -21094,13 +20937,7 @@ impl Shared {
         if let Some(command_output) = command_output {
             self.retire_command_output(client, command_output);
         }
-        if let Some(popup) = popup {
-            Self::retire_popup(client, popup, true);
-        }
-        if let Some(menu) = menu {
-            if let Some(waiter) = menu.waiter {
-                waiter.complete(false);
-            }
+        if menu.is_some() {
             self.publish_to_client(client, EventPayload::Menu { state: None });
         }
         if let Some(confirm) = confirm {
@@ -21463,18 +21300,7 @@ impl Shared {
                     action: zz_terminal::TerminalViewAction::Paste(text),
                 } => {
                     self.dismiss_client_message(client);
-                    let modal_active = {
-                        let inner = self.inner.lock();
-                        inner
-                            .client(client)
-                            .is_some_and(|c| c.choose_tree.is_some())
-                            || inner
-                                .client(client)
-                                .is_some_and(|c| c.choose_buffer.is_some())
-                            || inner
-                                .client(client)
-                                .is_some_and(|c| c.display_panes.is_some())
-                    };
+                    let modal_active = chooser_holds_input(&self.inner.lock(), client);
                     let mode_owns_paste = self.read_client(client, |c| {
                         c.and_then(|c| c.copy_session.as_ref())
                             .is_some_and(|session| session.pane == pane)
@@ -21487,17 +21313,7 @@ impl Shared {
                 InputMessage::TerminalView { pane, action } => {
                     let terminal = {
                         let inner = self.inner.lock();
-                        if !read_only
-                            && (inner
-                                .client(client)
-                                .is_some_and(|c| c.choose_tree.is_some())
-                                || inner
-                                    .client(client)
-                                    .is_some_and(|c| c.choose_buffer.is_some())
-                                || inner
-                                    .client(client)
-                                    .is_some_and(|c| c.display_panes.is_some()))
-                        {
+                        if !read_only && chooser_holds_input(&inner, client) {
                             None
                         } else {
                             if !client_is_attached_to_pane(&inner, client, pane) {
@@ -21545,6 +21361,7 @@ impl Shared {
                     view_action,
                     press_action,
                     status_range_start,
+                    press,
                 } => {
                     self.input_mouse_key(
                         client,
@@ -21560,10 +21377,12 @@ impl Shared {
                             view_action,
                             press_action,
                             status_range_start,
+                            press,
+                            drag: None,
                         },
                     )?;
                 }
-                InputMessage::DismissClientMessage => {}
+                InputMessage::DismissClientMessage | InputMessage::RetiredPopup { .. } => {}
                 InputMessage::ClipboardReply { data } => self.store_clipboard_reply(client, data),
                 InputMessage::ResizeCommandOutput {
                     columns,
@@ -21609,9 +21428,6 @@ impl Shared {
                 }
                 InputMessage::CancelPrefix { request_id } => {
                     self.cancel_prefix(client, request_id);
-                }
-                InputMessage::Popup { action } => {
-                    self.input_popup(client, action);
                 }
                 InputMessage::Menu { action } => {
                     self.input_menu(client, context, action);
@@ -21840,301 +21656,6 @@ impl Shared {
         true
     }
 
-    fn input_popup(&self, client: ClientId, action: PopupAction) {
-        let (terminal, state) = {
-            let inner = self.inner.lock();
-            let Some(popup) = inner.client(client).and_then(|c| c.popup.as_ref()) else {
-                return;
-            };
-            (Arc::clone(&popup.terminal), popup.state.clone())
-        };
-        let dead = state.dead || terminal.completion().is_some();
-        let close = match &action {
-            PopupAction::Close => true,
-            PopupAction::Key { input, .. }
-                if !matches!(input.action, zz_terminal::KeyAction::Release) =>
-            {
-                let escape = input.key == zz_terminal::KeyCode::Escape;
-                let control_c =
-                    input.key == zz_terminal::KeyCode::Character('c') && input.modifiers.control();
-                dead && state.close_on_any_key
-                    || (escape || control_c)
-                        && (dead || !state.close_on_exit && !state.close_on_exit_zero)
-            }
-            _ => false,
-        };
-        if close {
-            self.close_popup(client, true);
-            return;
-        }
-        match action {
-            PopupAction::Text(text) => {
-                terminal.send_text_for_view(TerminalViewId(client.0), text);
-            }
-            PopupAction::Key {
-                input,
-                text_follows,
-            } => {
-                if !text_follows {
-                    terminal.send_key_for_view(TerminalViewId(client.0), input);
-                }
-            }
-            PopupAction::TerminalView(action) => {
-                terminal.view_action(TerminalViewId(client.0), action);
-            }
-            PopupAction::Pointer { pointer, view } => {
-                self.popup_pointer(client, &terminal, pointer, view);
-            }
-            PopupAction::Close => {}
-        }
-    }
-
-    /// `popup_key_cb`'s mouse arm. A drag already under way owns every report
-    /// until the button lifts; outside the box only button 3 does anything, and
-    /// it raises the popup's own menu; button 3 with no modifier on the left or
-    /// top border raises the same menu; a meta drag, or a drag that began on a
-    /// border, moves the box with button 1 and resizes it with button 3; and
-    /// anything left over is the popup job's, which is the action the client
-    /// already built for it. The `m->lb`/`m->lx`/`m->ly` the arming condition
-    /// reads are the tty's, which `tty_keys_mouse` refreshes from every report
-    /// it decodes, so the previous report is remembered here whatever this one
-    /// turned out to be.
-    fn popup_pointer(
-        &self,
-        client: ClientId,
-        terminal: &Arc<TerminalSession>,
-        pointer: PopupPointer,
-        view: Option<zz_terminal::TerminalViewAction>,
-    ) {
-        enum PopupPointerOutcome {
-            Nothing,
-            Publish(PopupState, Option<(u16, u16)>),
-            Menu(u16, u16),
-            Job,
-        }
-        let outcome = {
-            let mut inner = self.inner.lock();
-            let Some(popup) = inner.client_mut(client).and_then(|c| c.popup.as_mut()) else {
-                return;
-            };
-            let mut state = popup.state.clone();
-            let mut cursor = popup.pointer;
-            let left = state.left;
-            let top = state.top;
-            let right = left.saturating_add(state.width).saturating_sub(1);
-            let bottom = top.saturating_add(state.height).saturating_sub(1);
-            let outcome = if cursor.dragging != PopupDrag::Off {
-                if !pointer.drag {
-                    cursor.dragging = PopupDrag::Off;
-                    PopupPointerOutcome::Nothing
-                } else if cursor.dragging == PopupDrag::Move {
-                    state.left = popup_drag_origin(
-                        pointer.column,
-                        cursor.dx,
-                        state.width,
-                        state.client_columns,
-                    );
-                    state.top =
-                        popup_drag_origin(pointer.row, cursor.dy, state.height, state.client_rows);
-                    cursor.dx = pointer.column.saturating_sub(state.left);
-                    cursor.dy = pointer.row.saturating_sub(state.top);
-                    PopupPointerOutcome::Publish(state.clone(), None)
-                } else {
-                    let margin = if matches!(state.border_lines, PopupBorderLines::None) {
-                        1
-                    } else {
-                        3
-                    };
-                    if pointer.column < left.saturating_add(margin)
-                        || pointer.row < top.saturating_add(margin)
-                    {
-                        PopupPointerOutcome::Nothing
-                    } else {
-                        state.width = pointer.column.saturating_sub(left);
-                        state.height = pointer.row.saturating_sub(top);
-                        PopupPointerOutcome::Publish(
-                            state.clone(),
-                            popup_content_size(&state).filter(|_| !state.dead),
-                        )
-                    }
-                }
-            } else if pointer.column < left
-                || pointer.column > right
-                || pointer.row < top
-                || pointer.row > bottom
-            {
-                if pointer.button == PopupPointerButton::Right {
-                    PopupPointerOutcome::Menu(pointer.column, pointer.row)
-                } else {
-                    PopupPointerOutcome::Nothing
-                }
-            } else {
-                let border = if matches!(state.border_lines, PopupBorderLines::None) {
-                    PopupBorder::None
-                } else if pointer.column == left {
-                    PopupBorder::Left
-                } else if pointer.column == right {
-                    PopupBorder::Right
-                } else if pointer.row == top {
-                    PopupBorder::Top
-                } else if pointer.row == bottom {
-                    PopupBorder::Bottom
-                } else {
-                    PopupBorder::None
-                };
-                if !pointer.meta
-                    && pointer.button == PopupPointerButton::Right
-                    && matches!(border, PopupBorder::Left | PopupBorder::Top)
-                {
-                    PopupPointerOutcome::Menu(pointer.column, pointer.row)
-                } else if pointer.meta
-                    || (!matches!(border, PopupBorder::None) && !cursor.last_drag)
-                {
-                    if pointer.drag {
-                        cursor.dragging = match cursor.last_button {
-                            PopupPointerButton::Left => PopupDrag::Move,
-                            PopupPointerButton::Right => PopupDrag::Size,
-                            _ => PopupDrag::Off,
-                        };
-                        cursor.dx = cursor.last_column.saturating_sub(left);
-                        cursor.dy = cursor.last_row.saturating_sub(top);
-                    }
-                    PopupPointerOutcome::Nothing
-                } else {
-                    PopupPointerOutcome::Job
-                }
-            };
-            cursor.last_column = pointer.column;
-            cursor.last_row = pointer.row;
-            cursor.last_button = pointer.button;
-            cursor.last_drag = pointer.drag;
-            popup.pointer = cursor;
-            if let PopupPointerOutcome::Publish(next, _) = &outcome {
-                popup.state = next.clone();
-                popup.preferred = PopupPlacement {
-                    left: next.left,
-                    top: next.top,
-                    width: next.width,
-                    height: next.height,
-                };
-            }
-            outcome
-        };
-        match outcome {
-            PopupPointerOutcome::Nothing => {}
-            PopupPointerOutcome::Job => {
-                if let Some(view) = view {
-                    terminal.view_action(TerminalViewId(client.0), view);
-                }
-            }
-            PopupPointerOutcome::Publish(state, resize) => {
-                if let Some((columns, rows)) = resize {
-                    terminal.resize(columns, rows, state.cell_width_px, state.cell_height_px);
-                }
-                self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
-            }
-            PopupPointerOutcome::Menu(column, row) => self.raise_popup_menu(client, column, row),
-        }
-    }
-
-    /// The menu `popup_key_cb` builds from `popup_menu_items`, kept on the
-    /// popup rather than raised through `display-menu`: `cmd_display_menu_exec`
-    /// refuses a client that already has an overlay, which is why the command
-    /// path stays gated on `any_overlay_present`.
-    fn raise_popup_menu(&self, client: ClientId, column: u16, row: u16) {
-        let state = {
-            let inner = self.inner.lock();
-            let Some(popup) = inner.client(client).and_then(|c| c.popup.as_ref()) else {
-                return;
-            };
-            let paste = find_buffer(&inner, None).map(|buffer| buffer.name.clone());
-            let columns = popup.state.client_columns;
-            let rows = popup.state.client_rows;
-            let row_room = usize::from(columns.saturating_sub(MENU_ROW_MARGIN));
-            let mut items: Vec<Option<MenuItem>> = Vec::new();
-            for entry in popup_menu_rows(paste.as_deref()) {
-                let Some((name, key)) = entry else {
-                    if matches!(items.last(), None | Some(None)) {
-                        continue;
-                    }
-                    items.push(None);
-                    continue;
-                };
-                if name.is_empty() {
-                    continue;
-                }
-                let layout = layout_menu_row(&name, Some(key), row_room);
-                items.push(Some(MenuItem {
-                    name: layout.name,
-                    key: Some(key.to_owned()),
-                    annotation: layout.annotation,
-                    enabled: true,
-                }));
-            }
-            let width = items
-                .iter()
-                .flatten()
-                .map(|item| menu_row_cells(&item.name, item.annotation.as_deref()))
-                .max()
-                .unwrap_or_default()
-                .saturating_add(usize::from(MENU_ROW_MARGIN));
-            let height = items.len().saturating_add(2);
-            let (Ok(width), Ok(height)) = (u16::try_from(width), u16::try_from(height)) else {
-                return;
-            };
-            if width > columns || height > rows {
-                return;
-            }
-            let Some(window) = client_overlay_style_window(&inner, client) else {
-                return;
-            };
-            let Ok(defaults) = inner.engine.menu_options_for_window(window) else {
-                return;
-            };
-            let left =
-                overlay_origin_for_viewport(column.saturating_sub(width / 2), width, columns);
-            let top = overlay_origin_for_viewport(row, height, rows);
-            MenuState {
-                left,
-                top,
-                width,
-                height,
-                client_columns: columns,
-                client_rows: rows,
-                cell_width_px: popup.cell_width_px,
-                cell_height_px: popup.cell_height_px,
-                title: String::new(),
-                style: overlay_style(&defaults.style, None),
-                selected_style: overlay_style(&defaults.selected_style, None),
-                border_style: overlay_style(&defaults.border_style, None),
-                border_lines: defaults.border_lines,
-                items,
-                selected: None,
-                stay_open: false,
-                mouse_keys: true,
-            }
-        };
-        {
-            let mut inner = self.inner.lock();
-            if inner.client(client).is_some_and(|c| c.menu.is_some())
-                || inner.client(client).is_none_or(|c| c.popup.is_none())
-            {
-                return;
-            }
-            let target = ExecutionContext::default();
-            inner.client_entry(client).menu.replace(MenuSession {
-                state: state.clone(),
-                commands: vec![None; state.items.len()],
-                target,
-                styles: OverlayStyleOverrides::default(),
-                waiter: None,
-                popup_owner: true,
-                mode_tree: None,
-            });
-        }
-        self.publish_to_client(client, EventPayload::Menu { state: Some(state) });
-    }
-
     fn raise_mode_tree_menu(
         &self,
         client: ClientId,
@@ -22199,10 +21720,30 @@ impl Shared {
             let Ok(defaults) = inner.engine.menu_options_for_window(window) else {
                 return;
             };
-            let left = u16::try_from(x.saturating_sub(usize::from(width) / 2)).unwrap_or(u16::MAX);
-            let top = u16::try_from(y).unwrap_or(u16::MAX);
-            let left = overlay_origin_for_viewport(left, width, geometry.columns);
-            let top = overlay_origin_for_viewport(top, height, geometry.rows);
+            let Some(target) = ExecutionContext::for_pane(&inner.engine.state, pane) else {
+                return;
+            };
+            let frame = menu_window_frame(&inner.engine, &target, geometry.columns, geometry.rows);
+            let (xoff, yoff) = inner.engine.pane_origin(pane).unwrap_or((0, 0));
+            let place = |origin: usize, offset: i32, extent: u16, available: u16| {
+                let origin = i64::try_from(origin)
+                    .unwrap_or(i64::MAX)
+                    .saturating_add(i64::from(offset))
+                    .max(0);
+                let origin = u16::try_from(origin).unwrap_or(u16::MAX);
+                if extent >= available {
+                    0
+                } else {
+                    overlay_origin_for_viewport(origin, extent, available)
+                }
+            };
+            let left = place(
+                x.saturating_sub(usize::from(width) / 2),
+                xoff,
+                width,
+                frame.columns,
+            );
+            let top = place(y, yoff, height, frame.rows).saturating_add(frame.top);
             MenuState {
                 left,
                 top,
@@ -22236,8 +21777,6 @@ impl Shared {
                 commands: vec![None; state.items.len()],
                 target,
                 styles: OverlayStyleOverrides::default(),
-                waiter: None,
-                popup_owner: false,
                 mode_tree: Some(ModeTreeMenu {
                     pane,
                     line: menu.line,
@@ -22246,151 +21785,6 @@ impl Shared {
             });
         }
         self.publish_to_client(client, EventPayload::Menu { state: Some(state) });
-    }
-
-    /// `popup_make_pane`: the popup's job and screen become a freshly split
-    /// pane's, the popup closes, and the new pane is the active one. tmux does
-    /// this below `cmd_split_window` - `layout_split_pane` plus
-    /// `window_add_pane` plus `job_transfer` - so this splits the model
-    /// directly and adopts the popup's terminal instead of spawning one.
-    fn popup_make_pane(self: &Arc<Self>, client: ClientId, axis: zz_protocol::Axis) {
-        let adopted = {
-            let mut inner = self.inner.lock();
-            let Some(session) = client_attached_session(&inner, client) else {
-                return;
-            };
-            let Some(source) = inner
-                .engine
-                .state
-                .sessions
-                .get(&session)
-                .map(|session| session.active_window)
-                .and_then(|window| inner.engine.state.windows.get(&window))
-                .map(|window| window.active_pane)
-            else {
-                return;
-            };
-            let Some((popup, subscriber, menu)) = take_popup(&mut inner, client) else {
-                return;
-            };
-            let Some(window) = inner.engine.state.window_for_pane(source) else {
-                return;
-            };
-            if let Some(window) = inner.engine.state.window_mut(window) {
-                window.zoomed_pane = None;
-            }
-            let Ok(pane) = inner
-                .engine
-                .state
-                .split_pane(source, axis, PaneKind::Terminal)
-            else {
-                Self::retire_popup(client, (popup, subscriber, menu), true);
-                return;
-            };
-            let terminal = Arc::clone(&popup.terminal);
-            if let Some(previous) = inner.terminals_mut().insert(pane, Arc::clone(&terminal)) {
-                retire_terminal(&previous);
-            }
-            let current_path = terminal_working_directory(&terminal)
-                .map(|path| path.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            inner.engine.set_pane_runtime_facts(
-                pane,
-                PaneRuntimeFacts {
-                    start_path: current_path.clone(),
-                    current_path,
-                    pid: terminal.process_id(),
-                    tty: terminal
-                        .tty()
-                        .map(|path| path.to_string_lossy().into_owned())
-                        .unwrap_or_default(),
-                    ..PaneRuntimeFacts::default()
-                },
-            );
-            let _ = inner.engine.state.select_pane(pane);
-            let geometry = terminal_resize_for_pane(&inner, pane).map(|(_, geometry)| geometry);
-            if let Some(subscriber) = subscriber {
-                subscriber.suspend_terminal(popup.state.pane);
-                Self::send_event(&subscriber, EventPayload::Popup { state: None });
-                if menu {
-                    Self::send_event(&subscriber, EventPayload::Menu { state: None });
-                }
-            }
-            if let Some(waiter) = popup.waiter {
-                waiter.reply.try_send(0);
-            }
-            (pane, terminal, geometry)
-        };
-        let (pane, terminal, geometry) = adopted;
-        if let Some(geometry) = geometry {
-            terminal.resize(
-                geometry.columns,
-                geometry.rows,
-                geometry.cell_width_px,
-                geometry.cell_height_px,
-            );
-        }
-        terminal.attach_view(TerminalViewId(client.0));
-        if let Err(error) = self.watch_terminal(pane, &terminal) {
-            log::warn!("could not watch the pane a popup became: {error}");
-        }
-        self.publish_snapshot();
-    }
-
-    /// `popup_menu_done`: the chosen row's key, not a command. `F` and `C` are
-    /// box moves and nothing else - neither resizes `pd->s` or the job, and
-    /// neither touches `ppx`/`ppy`/`psx`/`psy`, so `Fill Space` leaves the
-    /// content at its old size in the corner of the enlarged box and the next
-    /// owning-client resize puts the box back where `display-popup` asked for
-    /// it.
-    fn popup_menu_choice(self: &Arc<Self>, client: ClientId, key: &str) {
-        match key {
-            "q" => self.close_popup(client, true),
-            "p" => {
-                let (terminal, data) = {
-                    let inner = self.inner.lock();
-                    let Some(popup) = inner.client(client).and_then(|c| c.popup.as_ref()) else {
-                        return;
-                    };
-                    let Some(buffer) = find_buffer(&inner, None) else {
-                        return;
-                    };
-                    (Arc::clone(&popup.terminal), Arc::clone(&buffer.data))
-                };
-                terminal.paste_prepared_bytes(Some(TerminalViewId(client.0)), data, false);
-            }
-            "F" | "C" => {
-                let state = {
-                    let mut inner = self.inner.lock();
-                    let Some(popup) = inner.client_mut(client).and_then(|c| c.popup.as_mut())
-                    else {
-                        return;
-                    };
-                    let mut state = popup.state.clone();
-                    if key == "F" {
-                        state.width = state.client_columns;
-                        state.height = state.client_rows;
-                        state.left = 0;
-                        state.top = 0;
-                    } else {
-                        state.left = state
-                            .client_columns
-                            .saturating_div(2)
-                            .saturating_sub(state.width / 2);
-                        state.top = state
-                            .client_rows
-                            .saturating_div(2)
-                            .saturating_sub(state.height / 2);
-                    }
-                    popup.state = state.clone();
-                    state
-                };
-                self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
-            }
-            "h" => self.popup_make_pane(client, zz_protocol::Axis::Horizontal),
-            "v" => self.popup_make_pane(client, zz_protocol::Axis::Vertical),
-            _ => {}
-        }
     }
 
     fn input_menu(
@@ -22420,23 +21814,9 @@ impl Shared {
                 .expect("menu was present")
         };
         self.publish_to_client(client, EventPayload::Menu { state: None });
-        if let Some(waiter) = session.waiter {
-            waiter.complete(false);
-        }
         let MenuAction::Choose(index) = action else {
             return;
         };
-        if session.popup_owner {
-            if let Some(key) = usize::try_from(index)
-                .ok()
-                .and_then(|index| session.state.items.get(index))
-                .and_then(Option::as_ref)
-                .and_then(|item| item.key.clone())
-            {
-                self.popup_menu_choice(client, &key);
-            }
-            return;
-        }
         if let Some(owner) = session.mode_tree {
             self.mode_tree_menu_choice(client, context, &owner, index);
             return;
@@ -23176,16 +22556,7 @@ impl Shared {
         self.dismiss_client_message(client);
         {
             let inner = self.inner.lock();
-            if inner
-                .client(client)
-                .is_some_and(|c| c.choose_tree.is_some())
-                || inner
-                    .client(client)
-                    .is_some_and(|c| c.choose_buffer.is_some())
-                || inner
-                    .client(client)
-                    .is_some_and(|c| c.display_panes.is_some())
-            {
+            if chooser_holds_input(&inner, client) {
                 return Ok(());
             }
         }
@@ -23457,6 +22828,37 @@ impl Shared {
             )?;
             return Ok(());
         }
+        let modal = (!read_only)
+            .then(|| active_modal(&self.inner.lock(), pane))
+            .flatten();
+        if let Some(modal) = modal {
+            let name = input_key_name(&input);
+            if modal.close_on_cancel
+                && input.action != zz_terminal::KeyAction::Release
+                && matches!(name.as_str(), "Escape" | "C-c")
+            {
+                let target = pane.to_string();
+                self.execute_gesture(
+                    client,
+                    kind,
+                    context,
+                    "modal_cancel",
+                    &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+                )?;
+                return Ok(());
+            }
+            if modal.capture_keys {
+                self.note_terminal_input(client, pane);
+                if input.action != zz_terminal::KeyAction::Release
+                    && self.pane_mode_key(client, context, pane, &input, text_follows)
+                {
+                    return Ok(());
+                }
+                return self
+                    .dispatch_input_key(client, pane, input)
+                    .map_err(Into::into);
+            }
+        }
         if read_only {
             self.note_terminal_input_without_bell(client, pane);
         } else {
@@ -23598,15 +23000,22 @@ impl Shared {
         };
         match mode {
             PaneModeRequest::Customize(mut mode) => {
+                if matches!(input, PaneModeInput::Key(_)) {
+                    self.ensure_prompt_history();
+                }
                 let result = {
                     let inner = self.inner.lock();
                     let facts = borrowed_format_hook_facts(&inner);
                     let mut expand = customize_expander(&inner, pane, &facts);
                     match input {
                         PaneModeInput::Key(key) => {
+                            let history = zz_mux::PromptHistories {
+                                command: &inner.command_history,
+                                search: &inner.search_history,
+                            };
                             inner
                                 .engine
-                                .customize_key(pane, &mut mode, key, &mut expand)
+                                .customize_key(pane, &mut mode, key, history, &mut expand)
                         }
                         PaneModeInput::Pointer { key, x, y } => {
                             inner
@@ -23621,6 +23030,15 @@ impl Shared {
                     self.raise_mode_tree_menu(client, pane, menu, x, y);
                 }
                 self.apply_customize_result(client, context, pane, mode, &result);
+                if let Some(edit) = result.edit {
+                    let value = edit.value.clone();
+                    self.spawn_editor(
+                        client,
+                        pane,
+                        value.as_bytes(),
+                        EditorTarget::Option { pane, edit },
+                    );
+                }
                 true
             }
             PaneModeRequest::Switch(mut mode) => {
@@ -23808,8 +23226,21 @@ impl Shared {
                 modes.push(PaneModeRequest::Customize(mode));
             }
         }
+        if let Some((prompt_type, input)) = &result.remembered {
+            self.record_prompt_history(*prompt_type, input);
+        }
+        if let Some(message) = &result.message {
+            self.publish_status_message(client, context, message.clone());
+        }
         for command in &result.commands {
-            let _ = self.execute(client, ClientKind::Interactive, context, command);
+            if let Err(error) = self.execute(client, ClientKind::Interactive, context, command) {
+                let mut message = daemon_error_text(&error);
+                uppercase_first(&mut message);
+                self.publish_status_message(client, context, message);
+                if result.stop_on_error {
+                    break;
+                }
+            }
         }
         {
             let mut inner = self.inner.lock();
@@ -23889,6 +23320,49 @@ impl Shared {
         key: &str,
         mouse: &MouseEventTarget,
     ) -> Result<(), DaemonError> {
+        let base = key.rsplit('-').next().unwrap_or(key);
+        let armed = self
+            .inner
+            .lock()
+            .client_mut(client)
+            .and_then(|registered| registered.mouse_drag.take());
+        if let Some(drag) = armed {
+            if base.starts_with("MouseDrag") && !base.starts_with("MouseDragEnd") {
+                return self.update_mouse_drag(client, kind, context, drag, mouse);
+            }
+            if base.starts_with("Wheel")
+                && let Some(registered) = self.inner.lock().client_mut(client)
+            {
+                registered.mouse_drag = Some(drag);
+            }
+        }
+        let outside_modal = (!key.contains("Status"))
+            .then(|| {
+                let inner = self.inner.lock();
+                let window = mouse
+                    .window
+                    .or_else(|| client_focused_window_for_attachment(&inner, client))?;
+                inner.engine.state.windows.get(&window)?.floats.modal
+            })
+            .flatten()
+            .filter(|modal| mouse.pane != Some(modal.pane));
+        if let Some(modal) = outside_modal {
+            if modal.close_on_click
+                && ["MouseDown", "SecondClick", "TripleClick"]
+                    .iter()
+                    .any(|prefix| base.starts_with(prefix))
+            {
+                let target = modal.pane.to_string();
+                self.execute_gesture(
+                    client,
+                    kind,
+                    context,
+                    "modal_click",
+                    &CommandInvocation::new("kill-pane", ["-t", target.as_str()]),
+                )?;
+            }
+            return Ok(());
+        }
         let (pane, window) = (mouse.pane, mouse.window);
         let root_was_first;
         let Some((commands, repeat_binding, session, window, pane)) = ({
@@ -23970,7 +23444,6 @@ impl Shared {
                 continuation: continuation.clone(),
                 #[cfg(unix)]
                 shell: None,
-                popup: None,
                 overlay: None,
                 leaf: None,
                 guard: None,
@@ -24067,6 +23540,47 @@ impl Shared {
     /// a mouse mode armed, so the pane input the client encoded with the event
     /// is the write, and anything the client encoded for its own pointer
     /// handling instead is dropped the way an unarmed pane drops a report.
+    fn update_mouse_drag(
+        self: &Arc<Self>,
+        client: ClientId,
+        kind: ClientKind,
+        context: &ExecutionContext,
+        drag: zz_mux::MouseDrag,
+        mouse: &MouseEventTarget,
+    ) -> Result<(), DaemonError> {
+        let (session, window) = {
+            let inner = self.inner.lock();
+            let Some(session) = client_attached_session(&inner, client) else {
+                return Ok(());
+            };
+            let Some(window) = inner.engine.state.window_for_pane(drag.pane) else {
+                return Ok(());
+            };
+            (session, window)
+        };
+        let mut context = context.clone();
+        context.retarget(&ExecutionContext::new(
+            Some(session),
+            Some(window),
+            Some(drag.pane),
+        ));
+        context.no_hooks = true;
+        context.set_invoking_mouse(Some(MouseEventTarget {
+            pane: Some(drag.pane),
+            window: Some(window),
+            drag: Some(drag),
+            ..mouse.clone()
+        }));
+        let target = drag.pane.to_string();
+        self.execute(
+            client,
+            kind,
+            &mut context,
+            &CommandInvocation::new("resize-pane", ["-M", "-t", target.as_str()]),
+        )?;
+        Ok(())
+    }
+
     fn forward_mouse_key_to_pane(
         self: &Arc<Self>,
         client: ClientId,
@@ -24453,6 +23967,10 @@ impl Shared {
             }
             action => action,
         };
+        if matches!(action, ChooseTreeAction::Key(_)) {
+            self.ensure_prompt_history();
+        }
+        let mut remembered = None;
         let (result, state, delta, command, runs) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner.client_mut(client).and_then(|c| c.choose_tree.take())
@@ -24497,9 +24015,34 @@ impl Shared {
             let result = if let Some(step) = prompt_step {
                 match step {
                     ChooserPromptStep::Single(answer) => chooser.answer_kill_prompt(answer),
-                    ChooserPromptStep::Edit(edit) => chooser.edit_command_prompt(edit),
+                    ChooserPromptStep::Edit(edit) => {
+                        let prompt_type = chooser
+                            .prompt
+                            .as_ref()
+                            .map_or(CommandPromptType::Command, ChooserPrompt::history_type);
+                        let (vi, separators) = inner.engine.prompt_key_options(attached_session);
+                        chooser.edit_command_prompt(
+                            &edit,
+                            prompt_history(&inner, prompt_type),
+                            (vi, &separators),
+                            &mut remembered,
+                        )
+                    }
                 }
             } else if dismissed_help && matches!(action, ChooseTreeAction::Key(_)) {
+                ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
+            } else if let Some(key) = match &action {
+                ChooseTreeAction::Key(input) if chooser.search.is_some() => {
+                    chooser_search_edit_key(input)
+                }
+                _ => None,
+            } {
+                let (_, separators) = inner.engine.prompt_key_options(attached_session);
+                chooser.edit_search(
+                    key,
+                    prompt_history(&inner, CommandPromptType::Search),
+                    &separators,
+                );
                 ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
             } else {
                 let action = match action {
@@ -24529,6 +24072,13 @@ impl Shared {
                     }
                     action => action,
                 };
+                if matches!(action, ChooseTreeAction::SearchAccept) {
+                    remembered = chooser
+                        .search
+                        .as_ref()
+                        .filter(|search| !search.query.is_empty())
+                        .map(|search| (CommandPromptType::Search, search.query.clone()));
+                }
                 match chooser.apply(action, &inner.engine, attached_session, &facts) {
                     Ok(result) => result,
                     Err(error) => {
@@ -24610,6 +24160,9 @@ impl Shared {
             }
             (result, state, delta, command, runs)
         };
+        if let Some((prompt_type, input)) = remembered {
+            self.record_prompt_history(prompt_type, &input);
+        }
 
         match result {
             ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full) => {
@@ -24817,6 +24370,10 @@ impl Shared {
             action => action,
         };
 
+        if matches!(action, ChooseBufferAction::Key(_)) {
+            self.ensure_prompt_history();
+        }
+        let mut remembered = None;
         let (outcome, deleted) = {
             let mut inner = self.inner.lock();
             let Some(mut chooser) = inner
@@ -24835,6 +24392,7 @@ impl Shared {
                 }
                 _ => None,
             };
+            let mut search_edit = None;
             let swallowed_help = chooser.help
                 && prompt_edit.is_none()
                 && matches!(action, ChooseBufferAction::Key(_));
@@ -24845,6 +24403,36 @@ impl Shared {
                 _ if swallowed_help => ChooseBufferAction::Close,
                 ChooseBufferAction::Key(input) if prompt_edit.is_none() => {
                     let searching = chooser.search.is_some();
+                    if !searching
+                        && overlay_key_action(&inner.engine.keys, "choose-buffer", &input)
+                            == Some("edit")
+                    {
+                        let source = chooser.source_pane;
+                        let edit = usize::try_from(chooser.rendered.selected)
+                            .ok()
+                            .and_then(|index| chooser.rendered.items.get(index))
+                            .and_then(|item| {
+                                inner
+                                    .paste_buffers
+                                    .iter()
+                                    .find(|buffer| buffer.name == item.name)
+                            })
+                            .map(|buffer| (buffer.name.clone(), Arc::clone(&buffer.data)));
+                        inner.client_entry(client).choose_buffer.replace(chooser);
+                        drop(inner);
+                        if let Some((name, data)) = edit {
+                            self.spawn_editor(
+                                client,
+                                source,
+                                &data,
+                                EditorTarget::Buffer {
+                                    name,
+                                    data: Arc::clone(&data),
+                                },
+                            );
+                        }
+                        return Ok(());
+                    }
                     if let Some(row) =
                         chooser_row_for_key(&chooser.rendered.items, &input, searching, |item| {
                             &item.key
@@ -24855,6 +24443,11 @@ impl Shared {
                         choose_buffer_key_action(&inner.engine.keys, &input, searching)
                     {
                         action
+                    } else if let Some(key) =
+                        searching.then(|| chooser_search_edit_key(&input)).flatten()
+                    {
+                        search_edit = Some(key);
+                        ChooseBufferAction::Key(input)
                     } else {
                         inner.client_entry(client).choose_buffer.replace(chooser);
                         return Ok(());
@@ -24875,9 +24468,35 @@ impl Shared {
             } else {
                 let result = if swallowed_help {
                     ChooseBufferResult::Rebuild
+                } else if let Some(key) = search_edit {
+                    let (_, separators) = inner.engine.prompt_key_options(attached_session);
+                    chooser.edit_search(
+                        &inner.paste_buffers,
+                        key,
+                        prompt_history(&inner, CommandPromptType::Search),
+                        &separators,
+                    );
+                    ChooseBufferResult::Rebuild
                 } else if let Some(edit) = prompt_edit {
-                    chooser.edit_prompt(edit)
+                    let prompt_type = chooser
+                        .prompt
+                        .as_ref()
+                        .map_or(CommandPromptType::Search, ChooserPrompt::history_type);
+                    let (vi, separators) = inner.engine.prompt_key_options(attached_session);
+                    chooser.edit_prompt(
+                        &edit,
+                        prompt_history(&inner, prompt_type),
+                        (vi, &separators),
+                        &mut remembered,
+                    )
                 } else {
+                    if matches!(action, ChooseBufferAction::SearchAccept) {
+                        remembered = chooser
+                            .search
+                            .as_ref()
+                            .filter(|search| !search.query.is_empty())
+                            .map(|search| (CommandPromptType::Search, search.query.clone()));
+                    }
                     match chooser.apply(action, &inner.paste_buffers) {
                         Ok(result) => result,
                         Err(error) => {
@@ -24960,6 +24579,9 @@ impl Shared {
                 (outcome, deleted)
             }
         };
+        if let Some((prompt_type, input)) = remembered {
+            self.record_prompt_history(prompt_type, &input);
+        }
 
         if !deleted.is_empty() {
             self.run_event_hooks(
@@ -27196,9 +26818,7 @@ impl Shared {
             .get(&pane)
             .is_some_and(|current| Arc::ptr_eq(current, terminal))
             || inner.clients.values().any(|client| {
-                client.popup.as_ref().is_some_and(|popup| {
-                    popup.state.pane == pane && Arc::ptr_eq(&popup.terminal, terminal)
-                }) || client.command_output.as_ref().is_some_and(|output| {
+                client.command_output.as_ref().is_some_and(|output| {
                     output.pane == pane && Arc::ptr_eq(&output.terminal, terminal)
                 })
             })
@@ -27348,7 +26968,6 @@ impl Shared {
             choose_buffer,
             chooser_presentation,
             display_panes,
-            popup,
             menu,
             confirm,
         ) = {
@@ -27379,19 +26998,6 @@ impl Shared {
                 .client(client)
                 .and_then(|c| c.display_panes.as_ref())
                 .map(|overlay| overlay.state.clone());
-            let popup = inner
-                .client(client)
-                .and_then(|c| c.popup.as_ref())
-                .map(|popup| {
-                    (
-                        popup.state.clone(),
-                        Arc::clone(&popup.terminal),
-                        popup
-                            .terminal
-                            .latest_viewport_for(TerminalViewId(client.0))
-                            .unwrap_or_else(|| popup.terminal.latest_viewport()),
-                    )
-                });
             let menu = inner
                 .client(client)
                 .and_then(|c| c.menu.as_ref())
@@ -27436,7 +27042,6 @@ impl Shared {
                 choose_buffer,
                 chooser_presentation::chooser_presentation(&inner, client).map(Box::new),
                 display_panes,
-                popup,
                 menu,
                 confirm,
             )
@@ -27450,14 +27055,6 @@ impl Shared {
                 outbound,
                 EventPayload::CommandPrompt {
                     state: command_prompt,
-                },
-            );
-        }
-        if everything || popup.is_some() {
-            Self::send_event(
-                outbound,
-                EventPayload::Popup {
-                    state: popup.as_ref().map(|(state, _, _)| state.clone()),
                 },
             );
         }
@@ -27523,18 +27120,6 @@ impl Shared {
                 }
             }
         }
-        if let Some((state, terminal, viewport)) =
-            popup.filter(|_| !client_terminal_publication_frozen(&self.inner.lock(), client))
-        {
-            if !self.enqueue_kitty_images_for_viewport(outbound, state.pane, &terminal, &viewport) {
-                return;
-            }
-            let _ = outbound.replace_terminal_viewport(
-                state.pane,
-                viewport.as_ref(),
-                &self.terminal_frames,
-            );
-        }
         #[cfg(feature = "agent")]
         self.send_agent_resync(client, outbound);
         let inner = self.inner.lock();
@@ -27566,32 +27151,7 @@ impl Shared {
     }
 
     fn send_full(&self, client: ClientId, pane: PaneId, outbound: &OutboundMailbox) {
-        let popup = {
-            let inner = self.inner.lock();
-            if client_terminal_publication_frozen(&inner, client) {
-                return;
-            }
-            inner
-                .client(client)
-                .and_then(|c| c.popup.as_ref())
-                .and_then(|popup| {
-                    (popup.state.pane == pane).then(|| {
-                        (
-                            Arc::clone(&popup.terminal),
-                            popup
-                                .terminal
-                                .latest_viewport_for(TerminalViewId(client.0))
-                                .unwrap_or_else(|| popup.terminal.latest_viewport()),
-                        )
-                    })
-                })
-        };
-        if let Some((terminal, viewport)) = popup {
-            if !self.enqueue_kitty_images_for_viewport(outbound, pane, &terminal, &viewport) {
-                return;
-            }
-            let _ =
-                outbound.replace_terminal_viewport(pane, viewport.as_ref(), &self.terminal_frames);
+        if client_terminal_publication_frozen(&self.inner.lock(), client) {
             return;
         }
         let viewport = {
@@ -27798,7 +27358,6 @@ impl Shared {
             )
             .into());
         }
-        self.close_popup(client, true);
         let text = text
             .strip_suffix('\n')
             .filter(|rest| !rest.is_empty())
@@ -27946,123 +27505,6 @@ impl Shared {
             events,
             prefetched,
         )
-    }
-
-    fn watch_popup(
-        self: &Arc<Self>,
-        client: ClientId,
-        terminal: &Arc<TerminalSession>,
-    ) -> Result<(), DaemonError> {
-        #[cfg(any(test, windows))]
-        self.start_watcher_consumer()?;
-        self.watcher_tx.register(
-            watchers::Watcher::popup(client, terminal),
-            terminal.events(),
-            VecDeque::new(),
-        )
-    }
-
-    fn is_current_popup(&self, client: ClientId, terminal: &Arc<TerminalSession>) -> bool {
-        self.read_client(client, |c| {
-            c.and_then(|c| c.popup.as_ref())
-                .is_some_and(|popup| Arc::ptr_eq(&popup.terminal, terminal))
-        })
-    }
-
-    fn publish_popup_terminal(
-        &self,
-        client: ClientId,
-        terminal: &Arc<TerminalSession>,
-        base: Option<&TerminalViewport>,
-        viewport: &TerminalViewport,
-        fanout: &mut PaneFrameFanout,
-    ) {
-        let (pane, subscriber) = {
-            let inner = self.inner.lock();
-            if client_terminal_publication_frozen(&inner, client) {
-                return;
-            }
-            let Some(popup) = inner.client(client).and_then(|c| c.popup.as_ref()) else {
-                return;
-            };
-            if !Arc::ptr_eq(&popup.terminal, terminal) {
-                return;
-            }
-            (
-                popup.state.pane,
-                inner
-                    .client(client)
-                    .and_then(|c| c.subscriber.as_ref())
-                    .cloned(),
-            )
-        };
-        let Some(subscriber) = subscriber else {
-            return;
-        };
-        if !self.enqueue_kitty_images_for_viewport(&subscriber, pane, terminal, viewport) {
-            return;
-        }
-        let frames = &self.terminal_frames;
-        let delivery = TerminalDelivery::Foreground;
-        let result = fanout.enqueue(&subscriber, frames, pane, base, viewport, delivery);
-        if result == TerminalEnqueue::NeedsFull {
-            let _ = subscriber.replace_terminal_viewport(pane, viewport, frames);
-        }
-    }
-
-    fn finish_popup(&self, client: ClientId, terminal: &Arc<TerminalSession>, exit_code: u8) {
-        let outcome = {
-            let mut inner = self.inner.lock();
-            let Some(popup) = inner.client_mut(client).and_then(|c| c.popup.as_mut()) else {
-                return;
-            };
-            if !Arc::ptr_eq(&popup.terminal, terminal) {
-                return;
-            }
-            popup.state.dead = true;
-            if popup.state.close_on_exit || popup.state.close_on_exit_zero && exit_code == 0 {
-                take_popup(&mut inner, client).map(EitherPopupFinish::Closed)
-            } else {
-                Some(EitherPopupFinish::Retained(popup.state.clone()))
-            }
-        };
-        match outcome {
-            Some(EitherPopupFinish::Closed(popup)) => Self::retire_popup(client, popup, false),
-            Some(EitherPopupFinish::Retained(state)) => {
-                terminal.write_dead_notice(Some(Arc::from("")));
-                self.publish_to_client(client, EventPayload::Popup { state: Some(state) });
-            }
-            None => {}
-        }
-    }
-
-    fn close_popup(&self, client: ClientId, terminate: bool) {
-        let popup = take_popup(&mut self.inner.lock(), client);
-        if let Some(popup) = popup {
-            Self::retire_popup(client, popup, terminate);
-        }
-    }
-
-    fn retire_popup(
-        client: ClientId,
-        (mut popup, subscriber, menu): RetiredPopup,
-        terminate: bool,
-    ) {
-        let exit_code = popup_exit_code(&popup.terminal);
-        if terminate && exit_code.is_none() {
-            popup.terminal.terminate();
-        }
-        popup.terminal.release_view(TerminalViewId(client.0));
-        if let Some(subscriber) = subscriber {
-            subscriber.suspend_terminal(popup.state.pane);
-            Self::send_event(&subscriber, EventPayload::Popup { state: None });
-            if menu {
-                Self::send_event(&subscriber, EventPayload::Menu { state: None });
-            }
-        }
-        if let Some(waiter) = popup.waiter.take() {
-            waiter.reply.try_send(exit_code.unwrap_or(129));
-        }
     }
 
     fn publish_command_output(
@@ -28366,8 +27808,8 @@ impl Shared {
         ) {
             return;
         }
+        let exit_code = pane_wait_exit_code(terminal, &status);
         {
-            let exit_code = pane_wait_exit_code(terminal, &status);
             let mut inner = self.inner.lock();
             if !inner
                 .terminals
@@ -28378,6 +27820,7 @@ impl Shared {
             }
             Self::wake_pane_exit_wait(&mut inner, pane, exit_code);
         }
+        self.finish_editor(pane, exit_code);
         let (failed, dead_status, dead_signal) = match status {
             zz_terminal::SessionStatus::Exited(status) => {
                 let failed = status.code != 0 || status.signal.is_some();
@@ -31209,18 +30652,11 @@ impl Shared {
             else {
                 return;
             };
-            let mut panes = inner
+            let panes = inner
                 .client(client)
                 .and_then(|c| c.streamed_terminals.as_ref())
                 .map(|streamed| streamed.keys().copied().collect::<BTreeSet<_>>())
                 .unwrap_or_default();
-            if let Some(pane) = inner
-                .client(client)
-                .and_then(|c| c.popup.as_ref())
-                .map(|popup| popup.state.pane)
-            {
-                panes.insert(pane);
-            }
             (outbound, panes)
         };
         for pane in panes {
@@ -35917,7 +35353,6 @@ struct Client {
     display_panes: Option<DisplayPanesSession>,
     message: Option<ActiveClientMessage>,
     message_ignore_keys: bool,
-    popup: Option<PopupSession>,
     menu: Option<MenuSession>,
     confirm: Option<ConfirmSession>,
     copy_session: Option<CopySession>,
@@ -35952,6 +35387,7 @@ struct Client {
     ctrl_attachment: Option<u64>,
     ctrl_initializing: bool,
     clipboard_query: Option<Instant>,
+    mouse_drag: Option<zz_mux::MouseDrag>,
 }
 
 #[derive(Default)]
@@ -36027,6 +35463,7 @@ struct ServerState {
     next_message_number: u64,
     next_timed_message_id: u64,
     paste_buffers: Vec<PasteBuffer>,
+    editors: BTreeMap<PaneId, EditorSession>,
     automatic_paste_buffer_limit: AutomaticPasteBufferLimit,
     active_copy_pipes: usize,
     active_shell_jobs: usize,
@@ -36038,7 +35475,6 @@ struct ServerState {
     next_buffer_id: u64,
     next_client_id: u64,
     next_display_panes_token: u64,
-    next_popup_token: u64,
     pending_gui_requests: BTreeMap<u64, PendingGuiRequest>,
     paste_uploads: BTreeMap<(ClientId, u64), PasteUpload>,
     wait_channels: BTreeMap<String, WaitChannel>,
@@ -36123,7 +35559,6 @@ struct RegisteredWait {
     continuation: cmdq::WaitContinuation,
     #[cfg(unix)]
     shell: Option<ShellWait>,
-    popup: Option<PopupWait>,
     overlay: Option<OverlayCommands>,
     leaf: Option<InsertedLeafContinuation>,
     guard: Option<InsertedControlGuard>,
@@ -36745,6 +36180,7 @@ struct ChooseBufferSession {
     names: Vec<String>,
     selected: Option<String>,
     search: Option<ChooseBufferSearchState>,
+    search_editor: Option<ModePrompt>,
     last_search: Option<ChooseBufferSearchState>,
     rendered: ChooseBufferState,
     presentation_rows: Vec<ChooserRow>,
@@ -36787,6 +36223,7 @@ impl ChooseBufferSession {
             names: Vec::new(),
             selected: None,
             search: None,
+            search_editor: None,
             last_search: None,
             rendered: ChooseBufferState {
                 items: Vec::new(),
@@ -36936,25 +36373,44 @@ impl ChooseBufferSession {
         );
     }
 
-    fn edit_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseBufferResult {
+    fn edit_search(
+        &mut self,
+        buffers: &[PasteBuffer],
+        key: ModeKey,
+        history: &[String],
+        separators: &str,
+    ) {
+        let (Some(search), Some(editor)) = (self.search.as_mut(), self.search_editor.as_mut())
+        else {
+            return;
+        };
+        editor.set_key_options(false, separators);
+        editor.key_with_history(key, history);
+        search.query = editor.input();
+        let search = search.clone();
+        self.rendered.search = Some(search.clone());
+        self.select_search_match(buffers, &search.query, search.reverse, true);
+    }
+
+    fn edit_prompt(
+        &mut self,
+        edit: &ChooserPromptEdit,
+        history: &[String],
+        options: (bool, &str),
+        remembered: &mut Option<(CommandPromptType, String)>,
+    ) -> ChooseBufferResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseBufferResult::Updated;
         };
-        match edit {
-            ChooserPromptEdit::Append(text) => {
-                if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
-                    prompt.input.push_str(&text);
-                }
-            }
-            ChooserPromptEdit::Backspace => {
-                prompt.input.pop();
-            }
-            ChooserPromptEdit::Cancel => self.prompt = None,
-            ChooserPromptEdit::Accept => {
-                let input = std::mem::take(&mut prompt.input);
+        match prompt.edit(edit, history, options) {
+            PromptOutcome::Cancelled => self.prompt = None,
+            PromptOutcome::Done => {
+                *remembered = prompt.remembered();
+                let input = prompt.input();
                 self.prompt = None;
                 self.filter = (!input.is_empty()).then_some(input);
             }
+            _ => {}
         }
         ChooseBufferResult::Rebuild
     }
@@ -37015,10 +36471,11 @@ impl ChooseBufferSession {
                     query: String::new(),
                     reverse,
                 });
+                self.search_editor = Some(ModePrompt::new("(search) ", "", ""));
                 self.rendered.search.clone_from(&self.search);
             }
             ChooseBufferAction::SearchAppend(text) => {
-                let Some(search) = self.search.as_mut() else {
+                let Some(search) = self.search.as_ref() else {
                     return Ok(ChooseBufferResult::Updated);
                 };
                 if search.query.len().saturating_add(text.len()) > MAX_CHOOSE_BUFFER_QUERY_BYTES {
@@ -37026,21 +36483,15 @@ impl ChooseBufferSession {
                         "choose-buffer search exceeds {MAX_CHOOSE_BUFFER_QUERY_BYTES} bytes"
                     )));
                 }
-                search.query.push_str(&text);
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(buffers, &search.query, search.reverse, true);
+                for character in text.chars() {
+                    self.edit_search(buffers, ModeKey::Char(character), &[], "");
+                }
             }
             ChooseBufferAction::SearchBackspace => {
-                let Some(search) = self.search.as_mut() else {
-                    return Ok(ChooseBufferResult::Updated);
-                };
-                search.query.pop();
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(buffers, &search.query, search.reverse, true);
+                self.edit_search(buffers, ModeKey::Backspace, &[], "");
             }
             ChooseBufferAction::SearchAccept => {
+                self.search_editor = None;
                 if let Some(search) = self.search.take()
                     && !search.query.is_empty()
                 {
@@ -37049,6 +36500,7 @@ impl ChooseBufferSession {
                 self.rendered.search = None;
             }
             ChooseBufferAction::SearchCancel => {
+                self.search_editor = None;
                 self.search = None;
                 self.rendered.search = None;
             }
@@ -37097,12 +36549,12 @@ impl ChooseBufferSession {
                 return Ok(ChooseBufferResult::Updated);
             }
             ChooseBufferAction::FilterPrompt => {
-                self.prompt = Some(ChooserPrompt {
-                    kind: ChooserPromptKind::Filter,
-                    text: "(filter) ".to_owned(),
-                    input: self.filter.clone().unwrap_or_default(),
-                    targets: Vec::new(),
-                });
+                self.prompt = Some(ChooserPrompt::new(
+                    ChooserPromptKind::Filter,
+                    "(filter) ".to_owned(),
+                    self.filter.as_deref().unwrap_or_default(),
+                    Vec::new(),
+                ));
                 return Ok(ChooseBufferResult::Rebuild);
             }
             ChooseBufferAction::ClearFilter => {
@@ -37469,15 +36921,75 @@ enum ChooserPromptKind {
 struct ChooserPrompt {
     kind: ChooserPromptKind,
     text: String,
-    input: String,
+    editor: ModePrompt,
     targets: Vec<ChooseTreeTarget>,
 }
 
 impl ChooserPrompt {
+    fn new(
+        kind: ChooserPromptKind,
+        text: String,
+        input: &str,
+        targets: Vec<ChooseTreeTarget>,
+    ) -> Self {
+        let editor = ModePrompt::new(text.clone(), input, "");
+        Self {
+            kind,
+            text,
+            editor,
+            targets,
+        }
+    }
+
+    /// mode-tree.c raises the filter prompt as `PROMPT_TYPE_SEARCH` and
+    /// window-tree.c the `:` prompt as `PROMPT_TYPE_COMMAND`.
+    const fn history_type(&self) -> CommandPromptType {
+        match self.kind {
+            ChooserPromptKind::Filter => CommandPromptType::Search,
+            ChooserPromptKind::Kill | ChooserPromptKind::Command => CommandPromptType::Command,
+        }
+    }
+
+    fn input(&self) -> String {
+        self.editor.input()
+    }
+
+    fn edit(
+        &mut self,
+        edit: &ChooserPromptEdit,
+        history: &[String],
+        (vi, separators): (bool, &str),
+    ) -> PromptOutcome {
+        self.editor.set_key_options(vi, separators);
+        match edit {
+            ChooserPromptEdit::Append(text) => {
+                if self.input().len().saturating_add(text.len()) > MAX_CHOOSE_TREE_QUERY_BYTES {
+                    return PromptOutcome::Handled;
+                }
+                for character in text.chars() {
+                    let outcome = self
+                        .editor
+                        .key_with_history(ModeKey::Char(character), history);
+                    if matches!(outcome, PromptOutcome::Done | PromptOutcome::Cancelled) {
+                        return outcome;
+                    }
+                }
+                PromptOutcome::Handled
+            }
+            ChooserPromptEdit::Key(key) => self.editor.key_with_history(*key, history),
+        }
+    }
+
+    /// `prompt_add_history` on Enter for a non-empty line.
+    fn remembered(&self) -> Option<(CommandPromptType, String)> {
+        let input = self.input();
+        (!input.is_empty()).then(|| (self.history_type(), input))
+    }
+
     /// What the mode's screen shows: the prompt string with the line typed so
     /// far after it, which is empty for a `PROMPT_SINGLE` answer.
     fn line(&self) -> String {
-        format!("{}{}", self.text, self.input)
+        format!("{}{}", self.text, self.input())
     }
 }
 
@@ -37554,6 +37066,7 @@ struct ChooseTreeSession {
     built: Option<(BTreeSet<SessionId>, BTreeSet<zz_protocol::WindowId>)>,
     selected: Option<ChooseTreeTarget>,
     search: Option<ChooseTreeSearchState>,
+    search_editor: Option<ModePrompt>,
     last_search: Option<ChooseTreeSearchState>,
     rendered: ChooseTreeState,
     presentation_rows: Vec<ChooserRow>,
@@ -37637,6 +37150,7 @@ impl ChooseTreeSession {
             built: None,
             selected,
             search: None,
+            search_editor: None,
             last_search: None,
             rendered: ChooseTreeState {
                 items: Vec::new(),
@@ -37727,6 +37241,7 @@ impl ChooseTreeSession {
                             (u32::from(left_extent.0) * u32::from(left_extent.1))
                                 .cmp(&(u32::from(right_extent.0) * u32::from(right_extent.1)))
                         }
+                        Some(TmuxSortOrder::Z) => window.pane_z(*left).cmp(&window.pane_z(*right)),
                         _ => std::cmp::Ordering::Equal,
                     };
                     ordering.then_with(|| left_pane.title.cmp(&right_pane.title))
@@ -38240,10 +37755,11 @@ impl ChooseTreeSession {
                     query: String::new(),
                     reverse,
                 });
+                self.search_editor = Some(ModePrompt::new("(search) ", "", ""));
                 self.rendered.search.clone_from(&self.search);
             }
             ChooseTreeAction::SearchAppend(text) => {
-                let Some(search) = self.search.as_mut() else {
+                let Some(search) = self.search.as_ref() else {
                     return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
                 };
                 if search.query.len().saturating_add(text.len()) > MAX_CHOOSE_TREE_QUERY_BYTES {
@@ -38251,21 +37767,15 @@ impl ChooseTreeSession {
                         "choose-tree search exceeds {MAX_CHOOSE_TREE_QUERY_BYTES} bytes"
                     )));
                 }
-                search.query.push_str(&text);
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(&search.query, search.reverse, true);
+                for character in text.chars() {
+                    self.edit_search(ModeKey::Char(character), &[], "");
+                }
             }
             ChooseTreeAction::SearchBackspace => {
-                let Some(search) = self.search.as_mut() else {
-                    return Ok(ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta));
-                };
-                search.query.pop();
-                let search = search.clone();
-                self.rendered.search = Some(search.clone());
-                self.select_search_match(&search.query, search.reverse, true);
+                self.edit_search(ModeKey::Backspace, &[], "");
             }
             ChooseTreeAction::SearchAccept => {
+                self.search_editor = None;
                 if let Some(search) = self.search.take()
                     && !search.query.is_empty()
                 {
@@ -38274,6 +37784,7 @@ impl ChooseTreeSession {
                 self.rendered.search = None;
             }
             ChooseTreeAction::SearchCancel => {
+                self.search_editor = None;
                 self.search = None;
                 self.rendered.search = None;
             }
@@ -38401,14 +37912,13 @@ impl ChooseTreeSession {
                 self.preview_size = chooser_presentation::next_preview_size(self.preview_size);
             }
             ChooseTreeAction::FilterPrompt => {
-                let prompt = ChooserPrompt {
-                    kind: ChooserPromptKind::Filter,
-                    text: "(filter) ".to_owned(),
-                    input: self.filter.clone().unwrap_or_default(),
-                    targets: Vec::new(),
-                };
-                self.rendered.prompt = prompt.line();
-                self.prompt = Some(prompt);
+                self.prompt = Some(ChooserPrompt::new(
+                    ChooserPromptKind::Filter,
+                    "(filter) ".to_owned(),
+                    self.filter.as_deref().unwrap_or_default(),
+                    Vec::new(),
+                ));
+                self.show_prompt();
                 update = ChooseTreeUpdateKind::Full;
             }
             ChooseTreeAction::ClearFilter => {
@@ -38462,16 +37972,13 @@ impl ChooseTreeSession {
                 } else {
                     tagged
                 };
-                self.prompt = Some(ChooserPrompt {
-                    kind: ChooserPromptKind::Command,
+                self.prompt = Some(ChooserPrompt::new(
+                    ChooserPromptKind::Command,
                     text,
-                    input: String::new(),
+                    "",
                     targets,
-                });
-                self.rendered.prompt = self
-                    .prompt
-                    .as_ref()
-                    .map_or_else(String::new, ChooserPrompt::line);
+                ));
+                self.show_prompt();
                 update = ChooseTreeUpdateKind::Full;
             }
             ChooseTreeAction::Key(_) => {}
@@ -38576,56 +38083,74 @@ impl ChooseTreeSession {
             return ChooseTreeResult::Kill(targets);
         }
         self.rendered.prompt.clone_from(&text);
-        self.prompt = Some(ChooserPrompt {
-            kind: ChooserPromptKind::Kill,
+        self.prompt = Some(ChooserPrompt::new(
+            ChooserPromptKind::Kill,
             text,
-            input: String::new(),
+            "",
             targets,
-        });
+        ));
         ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
+    }
+
+    fn show_prompt(&mut self) {
+        self.rendered.prompt = self
+            .prompt
+            .as_ref()
+            .map_or_else(String::new, ChooserPrompt::line);
+    }
+
+    fn edit_search(&mut self, key: ModeKey, history: &[String], separators: &str) {
+        let (Some(search), Some(editor)) = (self.search.as_mut(), self.search_editor.as_mut())
+        else {
+            return;
+        };
+        editor.set_key_options(false, separators);
+        editor.key_with_history(key, history);
+        search.query = editor.input();
+        let search = search.clone();
+        self.rendered.search = Some(search.clone());
+        self.select_search_match(&search.query, search.reverse, true);
     }
 
     /// `prompt_key` on the `:` prompt, which is an ordinary edited line:
     /// `window_tree_command_callback` runs it once per tagged row and an empty
     /// line runs nothing at all.
-    fn edit_command_prompt(&mut self, edit: ChooserPromptEdit) -> ChooseTreeResult {
+    fn edit_command_prompt(
+        &mut self,
+        edit: &ChooserPromptEdit,
+        history: &[String],
+        options: (bool, &str),
+        remembered: &mut Option<(CommandPromptType, String)>,
+    ) -> ChooseTreeResult {
         let Some(prompt) = self.prompt.as_mut() else {
             return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Delta);
         };
-        match edit {
-            ChooserPromptEdit::Append(text) => {
-                if prompt.input.len().saturating_add(text.len()) <= MAX_CHOOSE_TREE_QUERY_BYTES {
-                    prompt.input.push_str(&text);
-                }
-            }
-            ChooserPromptEdit::Backspace => {
-                prompt.input.pop();
-            }
-            ChooserPromptEdit::Cancel => {
+        match prompt.edit(edit, history, options) {
+            PromptOutcome::Cancelled => {
                 self.prompt = None;
                 self.rendered.prompt.clear();
                 return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
             }
-            ChooserPromptEdit::Accept => {
+            PromptOutcome::Done => {
                 let prompt = self.prompt.take().expect("the prompt was just borrowed");
+                *remembered = prompt.remembered();
                 self.rendered.prompt.clear();
+                let input = prompt.input();
                 if matches!(prompt.kind, ChooserPromptKind::Filter) {
-                    self.filter = (!prompt.input.is_empty()).then_some(prompt.input);
+                    self.filter = (!input.is_empty()).then_some(input);
                     return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
                 }
-                if prompt.input.is_empty() {
+                if input.is_empty() {
                     return ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full);
                 }
                 return ChooseTreeResult::Command {
-                    template: prompt.input,
+                    template: input,
                     targets: prompt.targets,
                 };
             }
+            _ => {}
         }
-        self.rendered.prompt = self
-            .prompt
-            .as_ref()
-            .map_or_else(String::new, ChooserPrompt::line);
+        self.show_prompt();
         ChooseTreeResult::Updated(ChooseTreeUpdateKind::Full)
     }
 
@@ -38748,97 +38273,11 @@ struct CommandOutputSession {
     parked: bool,
 }
 
-struct PopupWaiter {
-    client: ClientId,
-    reply: cmdq::Reply<u8>,
-}
-
-struct PopupWait {
-    continuation: cmdq::WaitContinuation,
-    exit_code: Arc<Mutex<u8>>,
-}
-
-impl PopupWait {
-    fn new(shared: &Arc<Shared>, client: ClientId) -> (Self, PopupWaiter) {
-        let continuation = cmdq::WaitContinuation::new(
-            shared
-                .command_item
-                .as_ref()
-                .and_then(|item| item.lock().wait()),
-            shared
-                .client_writers
-                .lock()
-                .get(&client)
-                .map(Arc::downgrade),
-        );
-        let exit_code = Arc::new(Mutex::new(129));
-        let completed = continuation.clone();
-        let result = Arc::clone(&exit_code);
-        let owner = Arc::downgrade(&shared.server_owner());
-        let waiter = PopupWaiter {
-            client,
-            reply: cmdq::Reply::new(move |code| {
-                *result.lock() = code.unwrap_or(129);
-                if completed.complete()
-                    && let Some(owner) = owner.upgrade()
-                {
-                    owner.accept_wake.wake();
-                }
-            }),
-        };
-        (
-            Self {
-                continuation,
-                exit_code,
-            },
-            waiter,
-        )
-    }
-
-    fn finish(self) -> Result<Execution, DaemonError> {
-        let exit_code = *self.exit_code.lock();
-        if exit_code == 0 {
-            Ok(Execution::default())
-        } else {
-            Err(DaemonError::CommandExit {
-                output: RawText::default(),
-                exit_code,
-            })
-        }
-    }
-}
-
-#[cfg(all(test, unix))]
-#[path = "daemon/popup_queue_e17_tests.rs"]
-mod popup_queue_e17_tests;
-
 struct ClientFileWaiter {
     client: ClientId,
     path: PathBuf,
     pane: Option<PaneId>,
     complete: file_commands::Completion,
-}
-
-struct PopupSession {
-    terminal: Arc<TerminalSession>,
-    state: PopupState,
-    /// What `popup_key_cb` keeps in `dragging`, `dx`/`dy` and `lx`/`ly`/`lb`:
-    /// the drag in progress, its grab offset inside the box, and the previous
-    /// pointer report, which is what decides whether a drag started on a
-    /// border and which button began it.
-    pointer: PopupPointerState,
-    /// The position and size the popup asked for, kept for the life of the
-    /// popup. The pin holds the same four numbers in `ppx`/`ppy`/`psx`/`psy`
-    /// so a client that shrinks and grows again lands back where it started.
-    preferred: PopupPlacement,
-    cell_width_px: u32,
-    cell_height_px: u32,
-    /// The `-s` and `-S` styles the command carried. The pin keeps them beside
-    /// the popup because `popup_reapply_styles` rebuilds the cell from the
-    /// option on every draw and lets only these two replace its foreground and
-    /// background.
-    styles: OverlayStyleOverrides,
-    waiter: Option<PopupWaiter>,
 }
 
 /// The overlay styles a `display-menu` or `display-popup` command named, kept
@@ -38850,43 +38289,11 @@ struct OverlayStyleOverrides {
     border_style: Option<String>,
 }
 
-#[derive(Clone, Copy)]
-struct PopupPlacement {
-    left: u16,
-    top: u16,
-    width: u16,
-    height: u16,
-}
-
-#[derive(Clone, Copy, Default, PartialEq, Eq)]
-enum PopupDrag {
-    #[default]
-    Off,
-    Move,
-    Size,
-}
-
-#[derive(Clone, Copy, Default)]
-struct PopupPointerState {
-    dragging: PopupDrag,
-    dx: u16,
-    dy: u16,
-    last_column: u16,
-    last_row: u16,
-    last_button: PopupPointerButton,
-    last_drag: bool,
-}
-
 struct MenuSession {
     state: MenuState,
     commands: Vec<Option<String>>,
     target: ExecutionContext,
     styles: OverlayStyleOverrides,
-    waiter: Option<OverlayWait>,
-    /// Set for the menu a popup raises for itself. tmux keeps that one in
-    /// `pd->md` rather than on the client, and `popup_menu_done` switches on
-    /// the chosen row's key instead of running a command.
-    popup_owner: bool,
     mode_tree: Option<ModeTreeMenu>,
 }
 
@@ -38974,11 +38381,6 @@ struct ConfirmSession {
     execution: ConfirmExecution,
 }
 
-enum EitherPopupFinish {
-    Closed(RetiredPopup),
-    Retained(PopupState),
-}
-
 fn current_command_output_subscriber(
     inner: &ServerState,
     client: ClientId,
@@ -39011,7 +38413,6 @@ type KeyEngineHandler = fn(
     Duration,
     &str,
 ) -> (KeyDecision, bool);
-type RetiredPopup = (PopupSession, Option<Arc<OutboundMailbox>>, bool);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Overlay {
@@ -39019,7 +38420,6 @@ enum Overlay {
     ChooseTree,
     ChooseBuffer,
     DisplayPanes,
-    Popup,
     Menu,
     Confirm,
 }
@@ -39041,7 +38441,6 @@ fn dismiss_overlays(
     raising: Option<Overlay>,
     events: &mut Vec<EventPayload>,
     retired: &mut Vec<(ClientId, RetiredCommandOutput)>,
-    retired_popups: &mut Vec<(ClientId, RetiredPopup)>,
     resume_terminals: &mut bool,
 ) {
     if raising != Some(Overlay::CommandPrompt)
@@ -39076,17 +38475,12 @@ fn dismiss_overlays(
     {
         retired.push((client, output));
     }
-    if raising != Some(Overlay::Popup)
-        && let Some(popup) = take_popup(inner, client)
-    {
-        retired_popups.push((client, popup));
-    }
     if raising != Some(Overlay::Menu)
-        && let Some(menu) = inner.client_mut(client).and_then(|c| c.menu.take())
+        && inner
+            .client_mut(client)
+            .and_then(|c| c.menu.take())
+            .is_some()
     {
-        if let Some(waiter) = menu.waiter {
-            waiter.complete(false);
-        }
         events.push(EventPayload::Menu { state: None });
     }
     if raising != Some(Overlay::Confirm)
@@ -39117,22 +38511,21 @@ fn take_command_output(inner: &mut ServerState, client: ClientId) -> Option<Reti
     Some((output, subscriber))
 }
 
-/// The popup's menu is `pd->md`, drawn by `popup_draw_cb` and freed by
-/// `popup_free`, so it cannot outlive the popup that raised it.
-fn take_popup(inner: &mut ServerState, client: ClientId) -> Option<RetiredPopup> {
-    let popup = inner.client_mut(client).and_then(|c| c.popup.take())?;
-    let menu = inner
-        .client(client)
-        .and_then(|c| c.menu.as_ref())
-        .is_some_and(|menu| menu.popup_owner);
-    if menu {
-        inner.client_mut(client).and_then(|c| c.menu.take());
-    }
-    let subscriber = inner
-        .client(client)
-        .and_then(|c| c.subscriber.as_ref())
-        .cloned();
-    Some((popup, subscriber, menu))
+struct EditorSession {
+    client: ClientId,
+    path: PathBuf,
+    target: EditorTarget,
+}
+
+enum EditorTarget {
+    Buffer {
+        name: String,
+        data: Arc<[u8]>,
+    },
+    Option {
+        pane: PaneId,
+        edit: zz_mux::CustomizeEdit,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -40113,6 +39506,31 @@ fn chooser_shown(inner: &ServerState, client: ClientId) -> bool {
             .as_ref()
             .is_none_or(|output| output.parked)
         && inner.pane_modes.get(&pane).map_or(0, Vec::len) <= state.chooser_under.modes
+}
+
+fn chooser_holds_input(inner: &ServerState, client: ClientId) -> bool {
+    let Some(state) = inner.client(client) else {
+        return false;
+    };
+    if state.display_panes.is_some() {
+        return true;
+    }
+    let Some(source) = state
+        .choose_tree
+        .as_ref()
+        .map(|chooser| chooser.source_pane)
+        .or_else(|| {
+            state
+                .choose_buffer
+                .as_ref()
+                .map(|chooser| chooser.source_pane)
+        })
+    else {
+        return false;
+    };
+    client_focused_window_for_attachment(inner, client)
+        .and_then(|window| inner.engine.state.windows.get(&window))
+        .is_none_or(|window| window.active_pane == source)
 }
 
 fn chooser_takes_keys(inner: &ServerState, client: ClientId) -> bool {
@@ -42329,7 +41747,6 @@ fn plain_key_generation_locked(
         || registered.choose_tree.is_some()
         || registered.choose_buffer.is_some()
         || registered.display_panes.is_some()
-        || registered.popup.is_some()
         || registered.menu.is_some()
         || registered.confirm.is_some()
         || registered.copy_session.is_some()
@@ -42345,6 +41762,7 @@ fn plain_key_generation_locked(
             .get(&pane)
             .is_some_and(|modes| !modes.is_empty())
         || inner.engine.dead_pane_dismisses_on_key(pane)
+        || active_modal(inner, pane).is_some_and(|modal| modal.close_on_cancel)
     {
         return None;
     }
@@ -43620,8 +43038,12 @@ fn status_request_with_facts(
 }
 
 const BORDER_FORMAT_CACHE_BYTES: usize = 1024 * 1024;
-const BORDER_FORMAT_TEMPLATES: [&str; 2] =
-    ["#{E:pane-border-style}", "#{E:pane-active-border-style}"];
+const BORDER_FORMAT_TEMPLATES: [&str; 4] = [
+    "#{E:pane-border-style}",
+    "#{E:pane-active-border-style}",
+    "#{E:window-style}",
+    "#{E:window-active-style}",
+];
 
 struct CachedBorderPresentations {
     revision: (u64, u64, u64, u64),
@@ -43698,6 +43120,8 @@ impl CachedBorderPresentations {
             bytes = bytes
                 .saturating_add(pane.context.retained_bytes())
                 .saturating_add(pane.presentation.style.capacity())
+                .saturating_add(pane.presentation.window_style.capacity())
+                .saturating_add(pane.presentation.window_active_style.capacity())
                 .saturating_add(
                     pane.callback_values
                         .capacity()
@@ -43847,6 +43271,27 @@ fn border_format_style(
     crate::status::expand_style(format, context, hooks)
 }
 
+/// `tty_default_colours` takes a pane's grounds from `window-style`, and
+/// from `window-active-style` where the active pane's sets one, so the
+/// client gets both, expanded, and resolves their theme colours itself.
+fn window_style_presentation(
+    engine: &MuxEngine,
+    active: bool,
+    context: &zz_mux::StatusContext,
+    hooks: &mut DaemonFormatHooks<'_>,
+) -> (String, String) {
+    if !engine.has_window_style_settings() {
+        return (String::new(), String::new());
+    }
+    let window_style = crate::status::expand_style(BORDER_FORMAT_TEMPLATES[2], context, hooks);
+    let window_active_style = if active {
+        crate::status::expand_style(BORDER_FORMAT_TEMPLATES[3], context, hooks)
+    } else {
+        String::new()
+    };
+    (window_style, window_active_style)
+}
+
 #[cfg(test)]
 #[path = "daemon/format_border_tests.rs"]
 mod format_border_tests;
@@ -43960,10 +43405,16 @@ fn border_presentations_at(
             if let Some(count) = pane_in_mode {
                 hooks.set_pane_in_mode_count(*pane, count);
             }
-            let format = BORDER_FORMAT_TEMPLATES[usize::from(*pane == window_state.active_pane)];
+            let active = *pane == window_state.active_pane;
+            let format = BORDER_FORMAT_TEMPLATES[usize::from(active)];
+            let style = border_format_style(format, &context, &mut hooks);
+            let (window_style, window_active_style) =
+                window_style_presentation(&inner.engine, active, &context, &mut hooks);
             let presentation = zz_protocol::PaneBorderPresentation {
                 pane: *pane,
-                style: border_format_style(format, &context, &mut hooks),
+                style,
+                window_style,
+                window_active_style,
             };
             let mut callback_context = zz_mux::StatusContext::default();
             callback_context.session_id.clone_from(&context.session_id);
@@ -44025,14 +43476,16 @@ fn uncached_border_presentations(
             .take(zz_protocol::MAX_PANE_BORDER_PRESENTATIONS)
             .map(|pane| {
                 let context = contexts.status_context(Some(session), Some(window), Some(*pane));
-                let format = if *pane == window_state.active_pane {
-                    "#{E:pane-active-border-style}"
-                } else {
-                    "#{E:pane-border-style}"
-                };
+                let active = *pane == window_state.active_pane;
+                let format = BORDER_FORMAT_TEMPLATES[usize::from(active)];
+                let style = border_format_style(format, &context, &mut hooks);
+                let (window_style, window_active_style) =
+                    window_style_presentation(&inner.engine, active, &context, &mut hooks);
                 zz_protocol::PaneBorderPresentation {
                     pane: *pane,
-                    style: border_format_style(format, &context, &mut hooks),
+                    style,
+                    window_style,
+                    window_active_style,
                 }
             })
             .collect(),
@@ -44826,12 +44279,13 @@ fn stamp_pane_modes(inner: &ServerState, facts: &FormatHookFacts, snapshot: &mut
                                 chooser_presentation::tree_selection_style_for_pane(inner, *pane);
                             presentation.border_style =
                                 chooser_presentation::border_style_for_pane(inner, *pane);
+                            let (prompt_type, prompt_flags) = mode.prompt_kind();
                             (presentation.prompt_style, presentation.prompt_cursor) =
                                 chooser_presentation::mode_prompt_look(
                                     inner,
                                     chooser_presentation::pane_session(inner, *pane),
-                                    "command",
-                                    &["NOFORMAT"],
+                                    prompt_type,
+                                    prompt_flags,
                                     &mode.prompt_input(),
                                     mode.prompt_command_mode(),
                                 );
@@ -45020,6 +44474,7 @@ fn panes_mode_snapshot(
         border_style,
         copy: geometry.copy,
         format: !options.format.is_empty(),
+        clears: geometry.clears,
     }
 }
 
@@ -45073,10 +44528,24 @@ fn stamp_pane_border_chrome(
             window.pane_border_status = engine.displayed_pane_border_status(window.id);
             window.pane_border_lines = engine.pane_border_lines(window.id);
             window.pane_border_indicators = engine.pane_border_indicators(window.id);
-            if !window.pane_border_status.is_on() {
+            for float in &mut window.floating {
+                float.border_lines = engine.pane_lines(float.pane);
+                float.border_status = engine.floating_pane_border_status(float.pane);
+            }
+            let tiled_status = window.pane_border_status.is_on();
+            let float_status: Vec<PaneId> = window
+                .floating
+                .iter()
+                .filter(|float| float.border_status.is_on())
+                .map(|float| float.pane)
+                .collect();
+            if !tiled_status && float_status.is_empty() {
                 continue;
             }
             for (pane, pane_snapshot) in &mut window.panes {
+                if !tiled_status && !float_status.contains(pane) {
+                    continue;
+                }
                 let format = engine.pane_border_format(*pane);
                 if format.is_empty() {
                     continue;
@@ -46797,7 +46266,7 @@ fn visible_terminal_panes(
         .panes
         .iter()
         .filter(|(pane, entry)| {
-            window.zoomed_pane.is_none_or(|zoomed| **pane == zoomed)
+            window.pane_is_visible(**pane)
                 && inner.terminals.contains_key(pane)
                 && !matches!(entry.kind, PaneKind::Agent(_))
         })
@@ -47314,6 +46783,10 @@ fn terminal_geometry_for_mode_from(
 ) -> Option<TerminalGeometry> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let window_state = inner.engine.state.windows.get(&window)?;
+    let floating = window_state.is_floating(pane);
+    if floating && (source == GeometrySource::LaidOut || window_state.zoomed_pane != Some(pane)) {
+        return floating_terminal_geometry(inner, window_state, pane);
+    }
     if window_state
         .zoomed_pane
         .is_some_and(|zoomed| zoomed != pane)
@@ -47343,8 +46816,15 @@ fn terminal_geometry_for_mode_from(
         })
         .filter_map(|client| {
             let geometry = client_terminal_geometry(inner, *client, pane)?;
+            let reported = inner
+                .reported_pane_places
+                .get(&pane)
+                .and_then(|places| places.get(client));
+            if floating && reported.map(|reported| &reported.place) != place.as_ref() {
+                return None;
+            }
             let Some((columns, rows)) = place.as_ref().and_then(|place| {
-                let reported = inner.reported_pane_places.get(&pane)?.get(client)?;
+                let reported = reported?;
                 (reported.place != *place).then_some(reported.extent)
             }) else {
                 return Some((*client, geometry));
@@ -47422,6 +46902,35 @@ fn terminal_geometry_for_mode_from(
     Some(geometry)
 }
 
+fn floating_terminal_geometry(
+    inner: &ServerState,
+    window: &zz_mux::Window,
+    pane: PaneId,
+) -> Option<TerminalGeometry> {
+    if !window.pane_is_visible(pane) {
+        return None;
+    }
+    let (columns, rows) = inner.engine.pane_geometry(pane)?;
+    let (cell_width_px, cell_height_px) = inner
+        .attached
+        .get(&window.session)
+        .into_iter()
+        .flatten()
+        .find_map(|client| {
+            client_terminal_geometry(inner, *client, pane)
+                .or_else(|| client_terminal_geometry(inner, *client, window.active_pane))
+                .map(|geometry| (geometry.cell_width_px, geometry.cell_height_px))
+                .or_else(|| inner.client(*client).and_then(|c| c.cell_pixels))
+        })
+        .unwrap_or_default();
+    Some(TerminalGeometry {
+        columns,
+        rows,
+        cell_width_px,
+        cell_height_px,
+    })
+}
+
 fn terminal_resize_for_pane(
     inner: &ServerState,
     pane: PaneId,
@@ -47477,6 +46986,12 @@ fn record_report_place(
 fn pane_place(inner: &ServerState, pane: PaneId) -> Option<PanePlace> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let window = inner.engine.state.windows.get(&window)?;
+    if window.is_floating(pane) {
+        return Some(PanePlace {
+            path: Vec::new(),
+            zoomed: window.zoomed_pane == Some(pane),
+        });
+    }
     let mut node = window.layout.project();
     let mut path = Vec::new();
     loop {
@@ -47494,6 +47009,7 @@ fn pane_place(inner: &ServerState, pane: PaneId) -> Option<PanePlace> {
                 path.push((id, in_first));
                 node = if in_first { *first } else { *second };
             }
+            zz_protocol::LayoutNode::Empty => return None,
         }
     }
 }
@@ -47892,7 +47408,7 @@ fn retire_pending_committed_text_locked(
 fn read_only_blocks_input(input: &InputMessage) -> bool {
     match input {
         InputMessage::ResizeSplit { .. }
-        | InputMessage::Popup { .. }
+        | InputMessage::RetiredPopup { .. }
         | InputMessage::Menu { .. }
         | InputMessage::Confirm { .. }
         | InputMessage::MouseKey { .. }
@@ -47969,15 +47485,6 @@ fn terminal_view_action_is_mouse(action: &zz_terminal::TerminalViewAction) -> bo
 fn terminal_mouse_rejected(inner: &ServerState, client: ClientId, input: &InputMessage) -> bool {
     let (terminal, action) = match input {
         InputMessage::TerminalView { pane, action } => (inner.terminals.get(pane), action),
-        InputMessage::Popup {
-            action: PopupAction::TerminalView(action),
-        } => (
-            inner
-                .client(client)
-                .and_then(|c| c.popup.as_ref())
-                .map(|popup| &popup.terminal),
-            action,
-        ),
         _ => return false,
     };
     if !terminal_view_action_is_mouse(action)
@@ -50180,23 +49687,6 @@ fn inserted_execution(
     }
 }
 
-fn job_working_directory(
-    inner: &ServerState,
-    context: &ExecutionContext,
-    requested: Option<&str>,
-) -> PathBuf {
-    if let Some(requested) = requested {
-        return PathBuf::from(requested);
-    }
-    context
-        .pane
-        .and_then(|pane| inner.terminals.get(&pane))
-        .and_then(|terminal| terminal_working_directory(terminal))
-        .filter(|path| path.is_dir())
-        .or_else(|| std::env::current_dir().ok().filter(|path| path.is_dir()))
-        .unwrap_or_else(fallback_job_working_directory)
-}
-
 fn shell_job_working_directory(
     inner: &ServerState,
     invoking_client: ClientId,
@@ -50751,7 +50241,7 @@ pub fn command_stdin_sink(canonical_name: &str, args: &[RawText]) -> Option<Comm
         } else {
             CommandStdinSink::ConfigReplay
         }),
-        "display-message" | "split-window" => (args
+        "display-message" | "split-window" | "new-pane" => (args
             .iter()
             .any(|argument| argument.as_bytes().contains(&b'I'))
             && command_has_flag(canonical_name, args, "-I")
@@ -51659,71 +51149,12 @@ fn pane_wait_exit_code(terminal: &TerminalSession, status: &zz_terminal::Session
     }
 }
 
-fn popup_exit_code(terminal: &TerminalSession) -> Option<u8> {
-    terminal.completion().map(|completion| {
-        completion
-            .signal
-            .unwrap_or_else(|| u8::try_from(completion.code).unwrap_or(u8::MAX))
-    })
-}
-
-/// Which border cell the pointer is on, the way `popup_key_cb` names them.
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum PopupBorder {
-    None,
-    Left,
-    Right,
-    Top,
-    Bottom,
-}
-
-/// `popup_handle_drag`'s move clamp: the grabbed offset is kept until the box
-/// would leave the viewport, and then the box parks against the edge.
-fn popup_drag_origin(position: u16, offset: u16, extent: u16, available: u16) -> u16 {
-    if position < offset {
-        0
-    } else if position.saturating_sub(offset).saturating_add(extent) > available {
-        available.saturating_sub(extent)
-    } else {
-        position.saturating_sub(offset)
+fn popup_pane_border_lines(lines: PopupBorderLines) -> &'static str {
+    match lines {
+        PopupBorderLines::Rounded => "single",
+        PopupBorderLines::Padded => "spaces",
+        other => other.as_str(),
     }
-}
-
-/// `popup_menu_items`, whose `#{?buffer_name,Paste #{buffer_name},}` row
-/// expands empty when no buffer exists. `None` is one of the list's two
-/// literal separator rows; a row whose name expands empty is a row
-/// `menu_add_item` drops, not a separator.
-fn popup_menu_rows(paste: Option<&str>) -> [Option<(String, &'static str)>; 8] {
-    [
-        Some(("Close".to_owned(), "q")),
-        Some((
-            paste
-                .map(|name| format!("Paste {name}"))
-                .unwrap_or_default(),
-            "p",
-        )),
-        None,
-        Some(("Fill Space".to_owned(), "F")),
-        Some(("Centre".to_owned(), "C")),
-        None,
-        Some(("To Horizontal Pane".to_owned(), "h")),
-        Some(("To Vertical Pane".to_owned(), "v")),
-    ]
-}
-
-fn popup_content_size(state: &PopupState) -> Option<(u16, u16)> {
-    if state.border_lines == PopupBorderLines::None {
-        (state.width > 0 && state.height > 0).then_some((state.width, state.height))
-    } else {
-        (state.width > 2 && state.height > 2).then_some((state.width - 2, state.height - 2))
-    }
-}
-
-fn popup_command_shape(default_command: &str, command: &[String]) -> Option<Vec<String>> {
-    if command.is_empty() {
-        return (!default_command.is_empty()).then(|| vec![default_command.to_owned()]);
-    }
-    Some(command.to_vec())
 }
 
 fn popup_other_overlay_present(inner: &ServerState, client: ClientId) -> bool {
@@ -51746,9 +51177,22 @@ fn popup_other_overlay_present(inner: &ServerState, client: ClientId) -> bool {
         || inner.client(client).is_some_and(|c| c.confirm.is_some())
 }
 
+fn active_modal(inner: &ServerState, pane: PaneId) -> Option<zz_mux::Modal> {
+    let window = inner.engine.state.window_for_pane(pane)?;
+    let window = inner.engine.state.windows.get(&window)?;
+    let mut modal = window.floats.modal?;
+    if modal.pane != pane || window.active_pane != pane {
+        return None;
+    }
+    modal.capture_keys &= inner
+        .terminals
+        .get(&pane)
+        .is_some_and(|terminal| terminal.completion().is_none());
+    Some(modal)
+}
+
 fn any_overlay_present(inner: &ServerState, client: ClientId) -> bool {
     popup_other_overlay_present(inner, client)
-        || inner.client(client).is_some_and(|c| c.popup.is_some())
 }
 
 /// The pin's overlay re-fit rule: an origin moves only when the box would fall
@@ -51891,21 +51335,6 @@ fn expand_command_format(
             .engine
             .expand_pane_format(value, target, active_session, format_client, &mut hooks)
     }
-}
-
-fn popup_close_flags(parsed: &ParsedDisplayPopup, modifying: bool) -> Option<(bool, bool, bool)> {
-    if modifying
-        && !parsed.reset_close_flags
-        && parsed.close_on_exit_count == 0
-        && !parsed.close_on_any_key
-    {
-        return None;
-    }
-    Some((
-        parsed.close_on_exit_count == 1,
-        parsed.close_on_exit_count > 1,
-        parsed.close_on_any_key,
-    ))
 }
 
 fn check_plain_text(command: &str, text: &str) -> Result<(), ServerError> {
@@ -54637,6 +54066,12 @@ mod tests {
                 Some(CommandStdinSink::PaneInput),
             ),
             ("split-window", &["-h"][..], None),
+            (
+                "new-pane",
+                &["-I", "-t", "%1"][..],
+                Some(CommandStdinSink::PaneInput),
+            ),
+            ("new-pane", &["-d"][..], None),
             ("list-sessions", &[][..], None),
         ] {
             assert_eq!(
@@ -55014,11 +54449,224 @@ mod tests {
                 close: true,
                 commands: Vec::new(),
                 menu: None,
+                edit: None,
+                stop_on_error: false,
+                message: None,
+                remembered: None,
             },
         );
         let inner = shared.inner.lock();
         assert!(!inner.pane_modes.contains_key(&pane));
         assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn binding_errors_leave_a_native_clients_terminals_painting() {
+        for native in [false, true] {
+            let shared = Arc::new(Shared::new(1));
+            let mailbox = OutboundMailbox::new();
+            let (client, _) = shared.register_subscribed(
+                ClientKind::Interactive,
+                None,
+                None,
+                Arc::clone(&mailbox),
+            );
+            if native {
+                shared.inner.lock().client_entry(client).native_chooser = true;
+            }
+            let (_, pane, _) = attached_message_fixture(&shared, "binding-error", &[client]);
+            let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+                .expect("pane context");
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("set-option", ["-g", "display-time", "0"]),
+                )
+                .expect("display-time");
+            let error = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("kill-pane", ["-t", "missing"]),
+                )
+                .expect_err("a missing pane");
+            take_reliable_messages(&mailbox);
+            shared.publish_background_command_error(client, &context, &error, true);
+            let shown = take_reliable_messages(&mailbox)
+                .into_iter()
+                .filter_map(|message| match message {
+                    ProtocolMessage::Event(Event {
+                        payload:
+                            EventPayload::TimedClientMessage {
+                                text, duration_ms, ..
+                            },
+                        ..
+                    }) => Some((text, duration_ms)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(shown, [("Can't find pane: missing".to_owned(), 0)]);
+            let inner = shared.inner.lock();
+            assert!(inner.client(client).is_some_and(|c| c.message.is_some()));
+            assert_eq!(client_terminal_publication_frozen(&inner, client), !native);
+        }
+    }
+
+    #[test]
+    fn customize_errors_are_status_messages_that_fire_no_display_hooks_and_answers_are_history() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-error", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-display-message", "set -g @shown y"],
+            ),
+            CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+        ] {
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("setup");
+        }
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        take_reliable_messages(&mailbox);
+        shared.apply_customize_result(
+            client,
+            &mut context,
+            pane,
+            mode,
+            &CustomizeResult {
+                close: false,
+                commands: vec![CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "root", "C-a", "nosuchcommand"],
+                )],
+                menu: None,
+                edit: None,
+                stop_on_error: false,
+                message: Some("Unknown key: Nope".to_owned()),
+                remembered: Some((CommandPromptType::Command, "C-a nosuchcommand".to_owned())),
+            },
+        );
+        assert_eq!(
+            shared.inner.lock().command_history,
+            ["C-a nosuchcommand".to_owned()]
+        );
+        let shown = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::TimedClientMessage {
+                            kind: ClientMessageKind::Error,
+                            text,
+                            duration_ms,
+                            ..
+                        },
+                    ..
+                }) => Some((text, duration_ms)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shown,
+            [
+                ("Unknown key: Nope".to_owned(), 750),
+                ("Unknown command: nosuchcommand".to_owned(), 750)
+            ]
+        );
+        let hook = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@shown"]),
+            )
+            .expect("show-options");
+        assert_eq!(hook.output, "");
+    }
+
+    #[test]
+    fn customize_stop_on_error_results_skip_the_commands_after_a_failure() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-chain", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-new-window", "display-message kept"],
+            ),
+            CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+        ] {
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("setup");
+        }
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        let commands = vec![
+            CommandInvocation::new("set-option", ["-g", "after-new-window[4294967296]", "x"]),
+            CommandInvocation::new("set-option", ["-u", "-g", "after-new-window[0]"]),
+        ];
+        for (stop_on_error, kept) in [(true, true), (false, false)] {
+            shared.apply_customize_result(
+                client,
+                &mut context,
+                pane,
+                mode.clone(),
+                &CustomizeResult {
+                    close: false,
+                    commands: commands.clone(),
+                    menu: None,
+                    edit: None,
+                    stop_on_error,
+                    message: None,
+                    remembered: None,
+                },
+            );
+            let output = shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    &mut context,
+                    &CommandInvocation::new("show-hooks", ["-g", "after-new-window"]),
+                )
+                .expect("show-hooks");
+            assert_eq!(
+                output.output == "after-new-window[0] display-message kept",
+                kept,
+                "{}",
+                output.output
+            );
+        }
     }
 
     #[test]
@@ -55461,64 +55109,6 @@ mod tests {
         assert_eq!(
             popup_position(Some("999"), Some("999"), 80, 24, 20, 10, expand),
             (60, 14)
-        );
-    }
-
-    #[test]
-    fn popup_close_flag_matrix_distinguishes_e_ee_k_and_reset() {
-        let parsed = |args: &[&str]| {
-            parse_display_popup_args(
-                &args
-                    .iter()
-                    .map(|arg| RawText::from(*arg))
-                    .collect::<Vec<_>>(),
-            )
-            .unwrap()
-        };
-        assert_eq!(
-            popup_close_flags(&parsed(&[]), false),
-            Some((false, false, false))
-        );
-        assert_eq!(
-            popup_close_flags(&parsed(&["-E"]), false),
-            Some((true, false, false))
-        );
-        assert_eq!(
-            popup_close_flags(&parsed(&["-EE"]), false),
-            Some((false, true, false))
-        );
-        assert_eq!(
-            popup_close_flags(&parsed(&["-k"]), false),
-            Some((false, false, true))
-        );
-        assert_eq!(popup_close_flags(&parsed(&[]), true), None);
-        assert_eq!(
-            popup_close_flags(&parsed(&["-N"]), true),
-            Some((false, false, false))
-        );
-        assert_eq!(
-            popup_close_flags(&parsed(&["-NEk"]), true),
-            Some((true, false, true))
-        );
-    }
-
-    #[test]
-    fn popup_command_shape_preserves_shell_and_direct_exec_rows() {
-        assert_eq!(popup_command_shape("", &[]), None);
-        assert_eq!(
-            popup_command_shape("printf default", &[]),
-            Some(vec!["printf default".to_owned()])
-        );
-        assert_eq!(
-            popup_command_shape("ignored", &["printf one".to_owned()]),
-            Some(vec!["printf one".to_owned()])
-        );
-        assert_eq!(
-            popup_command_shape(
-                "ignored",
-                &["printf".to_owned(), "%s".to_owned(), "two".to_owned()]
-            ),
-            Some(vec!["printf".to_owned(), "%s".to_owned(), "two".to_owned()])
         );
     }
 
@@ -57167,7 +56757,7 @@ mod tests {
                  {glob_error_probe}\
                  source-file -q missing-quiet.conf ; set-option -g @quiet-same yes\n\
                  set-option -g @quiet-next yes\n\
-                 new-pane ; set-option -g @unsupported-command-same yes\n\
+                 link-window ; set-option -g @unsupported-command-same yes\n\
                  set-option -g @unsupported-command-next yes\n\
                  kill-session -t =missing ; set-option -g @runtime-same yes\n\
                  set-option -g @runtime-next yes\n\
@@ -62884,7 +62474,7 @@ mod tests {
     #[test]
     fn terminal_watcher_does_not_retain_idle_session_after_pane_removal() {
         let shared = Arc::new(Shared::new(1));
-        let pane = PaneId(u64::MAX - 1);
+        let pane = PaneId(9_999_998);
         let terminal = Arc::new(TerminalSession::spawn_output_view(
             "idle watcher fixture".to_owned(),
             String::new(),
@@ -65134,6 +64724,97 @@ mod tests {
                     })
                 ))
         );
+    }
+
+    #[test]
+    fn an_editor_write_back_names_its_buffer_and_skips_a_replaced_one() {
+        let shared = Arc::new(Shared::new(1));
+        let control_mailbox = OutboundMailbox::new();
+        let (control, _) = shared.register_subscribed(
+            ClientKind::Control,
+            None,
+            None,
+            Arc::clone(&control_mailbox),
+        );
+        let context = ExecutionContext::default();
+        let set = |data: &str| {
+            shared
+                .buffer_command(
+                    &context,
+                    "set-buffer",
+                    &["-b", "edit1", data].map(RawText::from),
+                )
+                .expect("set buffer");
+        };
+        let edit = |pane: u64, text: &str| {
+            let file = tempfile::NamedTempFile::new().expect("editor file");
+            std::fs::write(file.path(), text).expect("write editor file");
+            let path = file.into_temp_path().keep().expect("keep editor file");
+            let data = {
+                let inner = shared.inner.lock();
+                Arc::clone(
+                    &inner
+                        .paste_buffers
+                        .iter()
+                        .find(|buffer| buffer.name == "edit1")
+                        .expect("edit1")
+                        .data,
+                )
+            };
+            shared.inner.lock().editors.insert(
+                PaneId(pane),
+                EditorSession {
+                    client: control,
+                    path,
+                    target: EditorTarget::Buffer {
+                        name: "edit1".to_owned(),
+                        data,
+                    },
+                },
+            );
+        };
+        let buffer = || {
+            let inner = shared.inner.lock();
+            inner
+                .paste_buffers
+                .iter()
+                .find(|buffer| buffer.name == "edit1")
+                .map(|buffer| buffer.data.to_vec())
+                .expect("edit1")
+        };
+        let changes = || {
+            take_reliable_messages(&control_mailbox)
+                .into_iter()
+                .filter(|message| {
+                    matches!(
+                        message,
+                        ProtocolMessage::Event(Event {
+                            payload: EventPayload::HookEvent { name, .. },
+                            ..
+                        }) if name == "paste-buffer-changed"
+                    )
+                })
+                .count()
+        };
+
+        set("first line");
+        changes();
+        edit(900, "first lineappended\n");
+        shared.finish_editor(PaneId(900), 0);
+        assert_eq!(buffer(), b"first lineappended");
+        assert_eq!(changes(), 1);
+
+        edit(901, "stale\n");
+        set("replaced");
+        changes();
+        shared.finish_editor(PaneId(901), 0);
+        assert_eq!(buffer(), b"replaced");
+        assert_eq!(changes(), 0);
+
+        edit(902, "failed\n");
+        shared.finish_editor(PaneId(902), 1);
+        assert_eq!(buffer(), b"replaced");
+        assert_eq!(changes(), 0);
     }
 
     #[test]
@@ -84127,10 +83808,6 @@ set-option -g @alias-mixed-next yes
                 "{spelling}"
             );
             assert!(
-                inner.clients.values().all(|c| c.popup.is_none()),
-                "{spelling}"
-            );
-            assert!(
                 inner.clients.values().all(|c| c.menu.is_none()),
                 "{spelling}"
             );
@@ -84144,10 +83821,10 @@ set-option -g @alias-mixed-next yes
         let specs = zz_protocol::command_specs()
             .filter(|spec| spec.uses_tmux_option_grammar())
             .collect::<Vec<_>>();
-        assert_eq!(specs.len(), 89);
+        assert_eq!(specs.len(), 90);
         assert_eq!(
             specs.iter().map(|spec| spec.aliases.len()).sum::<usize>(),
-            75
+            76
         );
         let mut spellings = 0;
         let mut diagnostic_cases = 0;
@@ -84206,9 +83883,9 @@ set-option -g @alias-mixed-next yes
                 }
             }
         }
-        assert_eq!(spellings, 164);
-        assert_eq!(diagnostic_cases, 656);
-        assert_eq!(required_cases, 444);
+        assert_eq!(spellings, 166);
+        assert_eq!(diagnostic_cases, 664);
+        assert_eq!(required_cases, 482);
 
         let mut prefix_cases = 0;
         for spec in &specs {
@@ -84230,7 +83907,7 @@ set-option -g @alias-mixed-next yes
                 );
             }
         }
-        assert_eq!(prefix_cases, 566);
+        assert_eq!(prefix_cases, 569);
 
         for spec in &specs {
             let unknown = ('0'..='9')
@@ -88912,6 +88589,16 @@ set-option -g @alias-mixed-next yes
                                     },
                                 ..
                             }) => Some(text),
+                            ProtocolMessage::Event(Event {
+                                payload:
+                                    EventPayload::TimedClientMessage {
+                                        kind: ClientMessageKind::Error,
+                                        text,
+                                        duration_ms: 750,
+                                        ..
+                                    },
+                                ..
+                            }) => Some(format!("timed {text}")),
                             _ => None,
                         },
                     ) {
@@ -88948,7 +88635,10 @@ set-option -g @alias-mixed-next yes
                 &CommandInvocation::new("run-shell", ["-b", "-C", "not-a-command"]),
             )
             .expect("interactive background inserted command");
-        assert_eq!(wait_for_error(&mailbox), "Unknown command: not-a-command");
+        assert_eq!(
+            wait_for_error(&mailbox),
+            "timed Unknown command: not-a-command"
+        );
     }
 
     #[cfg(windows)]
@@ -92315,7 +92005,7 @@ set-option -g @alias-mixed-next yes
             client,
             ClientKind::Interactive,
             10,
-            PaneId(u64::MAX),
+            PaneId(9_999_999),
             PasteUploadPurpose::PastePath,
             "png".to_owned(),
             64,
@@ -94889,7 +94579,7 @@ bind - split-window -v -c "#{pane_current_path}"
         shared.request_full(client, first, &mailbox);
         assert_eq!(queued_fulls(), [first]);
 
-        shared.request_full(client, PaneId(u64::MAX), &mailbox);
+        shared.request_full(client, PaneId(9_999_999), &mailbox);
         assert_eq!(queued_fulls(), [first]);
     }
 
@@ -98100,7 +97790,7 @@ bind - split-window -v -c "#{pane_current_path}"
             matches!(
                 message,
                 ProtocolMessage::Event(Event {
-                    payload: EventPayload::ClientMessage {
+                    payload: EventPayload::TimedClientMessage {
                         kind: ClientMessageKind::Error,
                         text,
                         ..
@@ -104559,43 +104249,36 @@ bind - split-window -v -c "#{pane_current_path}"
     }
 
     #[test]
-    fn display_menu_blocking_cancel_returns_zero_and_disabled_stay_open_is_defensive() {
+    fn display_menu_returns_before_the_menu_closes_and_disabled_stay_open_is_defensive() {
         let (shared, interactive, _, context) = popup_test_workspace("desktop");
-        let sender = Arc::clone(&shared);
         let mut command_context = context.clone();
-        let (send, receive) = crossbeam_channel::bounded(1);
-        let worker = thread::spawn(move || {
-            let result = sender.execute(
-                ClientId(900),
-                ClientKind::Command,
-                &mut command_context,
-                &CommandInvocation::new(
-                    "display-menu",
-                    [
-                        "-c",
-                        "desktop",
-                        "-O",
-                        "--",
-                        "-Disabled",
-                        "d",
-                        "display-message nope",
-                    ],
-                ),
-            );
-            send.send(result).expect("return menu result");
-        });
-        wait_for_menu_state(&shared, interactive);
+        assert_eq!(
+            shared
+                .execute(
+                    ClientId(900),
+                    ClientKind::Command,
+                    &mut command_context,
+                    &CommandInvocation::new(
+                        "display-menu",
+                        [
+                            "-c",
+                            "desktop",
+                            "-O",
+                            "--",
+                            "-Disabled",
+                            "d",
+                            "display-message nope",
+                        ],
+                    ),
+                )
+                .expect("menu opens"),
+            Execution::default()
+        );
+        assert!(shared.read_client(interactive, |c| c.is_some_and(|c| c.menu.is_some())));
         shared.input_menu(interactive, &context, MenuAction::Choose(0));
         assert!(shared.read_client(interactive, |c| c.is_some_and(|c| c.menu.is_some())));
         shared.input_menu(interactive, &context, MenuAction::Cancel);
-        assert_eq!(
-            receive
-                .recv_timeout(Duration::from_secs(5))
-                .expect("menu cancel result")
-                .expect("menu cancel succeeds"),
-            Execution::default()
-        );
-        worker.join().expect("menu command worker");
+        assert!(shared.read_client(interactive, |c| c.is_none_or(|c| c.menu.is_none())));
     }
 
     #[test]
@@ -105475,86 +105158,6 @@ bind - split-window -v -c "#{pane_current_path}"
             .expect("existing lock session");
     }
 
-    #[cfg(unix)]
-    #[test]
-    fn display_popup_resolves_styles_from_the_sessions_current_window() {
-        let (shared, client, _, mut context) = popup_test_workspace("desktop");
-        let first_window = context.window.expect("current popup window");
-        let created = shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("new-window", ["-d", "-n", "target"]),
-            )
-            .expect("create popup target window");
-        let target_pane = match created.effects.first() {
-            Some(MuxEffect::PaneCreated { pane, .. }) => *pane,
-            other => panic!("expected target pane creation: {other:?}"),
-        };
-        let target_window = shared
-            .inner
-            .lock()
-            .engine
-            .state
-            .window_for_pane(target_pane)
-            .expect("popup target window");
-        let first_window = first_window.to_string();
-        let target_window = target_window.to_string();
-        let target_pane = target_pane.to_string();
-
-        for (window, style, border_style) in [
-            (target_window.as_str(), "bg=red", "fg=cyan"),
-            (first_window.as_str(), "bg=blue", "fg=magenta"),
-        ] {
-            shared
-                .execute(
-                    client,
-                    ClientKind::Interactive,
-                    &mut context,
-                    &CommandInvocation::new(
-                        "set-window-option",
-                        ["-t", window, "popup-style", style],
-                    ),
-                )
-                .expect("set window popup style");
-            shared
-                .execute(
-                    client,
-                    ClientKind::Interactive,
-                    &mut context,
-                    &CommandInvocation::new(
-                        "set-window-option",
-                        ["-t", window, "popup-border-style", border_style],
-                    ),
-                )
-                .expect("set window popup border style");
-        }
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-t", &target_pane, "exit 0"]),
-            )
-            .expect("open popup for target pane");
-        let state = wait_for_popup_state(&shared, client, |state| state.dead);
-        // The pin reads popup styles from the target session's current window
-        // (cmd-display-menu.c: `s->curw->window->options`), not from the window
-        // that owns the `-t` pane, which `new-window -d` left unfocused.
-        assert_eq!(state.style, "bg=blue");
-        assert_eq!(state.border_style, "fg=magenta");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-C"]),
-            )
-            .expect("clear target popup");
-    }
-
     #[test]
     fn a_command_line_overlay_style_replaces_only_the_option_colours() {
         assert_eq!(overlay_style("bold,bg=colour17", None), "bold,bg=colour17");
@@ -105585,8 +105188,6 @@ bind - split-window -v -c "#{pane_current_path}"
             ("menu-style", "bg=colour17"),
             ("menu-selected-style", "fg=colour46"),
             ("menu-border-style", "fg=colour201"),
-            ("popup-style", "bg=colour18"),
-            ("popup-border-style", "fg=colour129"),
         ] {
             shared
                 .execute(
@@ -105676,599 +105277,6 @@ bind - split-window -v -c "#{pane_current_path}"
             PopupBorderLines::Single
         );
         shared.input_menu(client, &context, MenuAction::Cancel);
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-x", "0", "-y", "0", "-S", "fg=cyan"]),
-            )
-            .expect("open popup");
-        let state = wait_for_popup_state(&shared, client, |state| !state.style.is_empty());
-        assert_eq!(state.style, "bg=colour18");
-        assert_eq!(state.border_style, "fg=colour129,fg=cyan,bg=default");
-        assert_eq!(state.border_lines, PopupBorderLines::Single);
-        for (option, value) in [
-            ("popup-style", "bg=colour52"),
-            ("popup-border-style", "fg=colour118"),
-            ("popup-border-lines", "double"),
-        ] {
-            shared
-                .execute(
-                    client,
-                    ClientKind::Interactive,
-                    &mut context,
-                    &CommandInvocation::new("set-window-option", [option, value]),
-                )
-                .expect("restyle the live popup");
-        }
-        let state = shared.inner.lock().clients[&client]
-            .popup
-            .as_ref()
-            .unwrap()
-            .state
-            .clone();
-        assert_eq!(state.style, "bg=colour52");
-        assert_eq!(state.border_style, "fg=colour118,fg=cyan,bg=default");
-        assert_eq!(state.border_lines, PopupBorderLines::Single);
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-C"]),
-            )
-            .expect("clear popup");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn display_popup_creates_modifies_and_clears_one_dead_overlay_safely() {
-        let (shared, client, mailbox, mut context) = popup_test_workspace("desktop");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new(
-                    "display-popup",
-                    [
-                        "-w20",
-                        "-h",
-                        "10",
-                        "-x",
-                        "#{?#{==:#{command},display-popup},29,0}",
-                        "-y",
-                        "#{?#{==:#{command},display-popup},16,0}",
-                        "-T",
-                        "first-#{command}",
-                        "-s",
-                        "bg=red,fg=white",
-                        "-S",
-                        "fg=cyan",
-                        "-b",
-                        "rounded",
-                        "-EE",
-                        "-k",
-                        "exit 3",
-                    ],
-                ),
-            )
-            .expect("open retained popup");
-        let state = wait_for_popup_state(&shared, client, |state| state.dead);
-        assert_eq!(
-            (state.left, state.top, state.width, state.height),
-            (29, 6, 20, 10)
-        );
-        assert_eq!((state.client_columns, state.client_rows), (80, 24));
-        assert_eq!((state.cell_width_px, state.cell_height_px), (8, 18));
-        assert_eq!(state.title, "first-display-popup");
-        assert_eq!(
-            state.style,
-            "bg=themedarkgrey,fg=themewhite,fg=white,bg=red"
-        );
-        assert_eq!(
-            state.border_style,
-            "bg=themedarkgrey,fg=themelightgrey,fg=cyan,bg=default"
-        );
-        assert_eq!(state.border_lines, PopupBorderLines::Rounded);
-        assert!(!state.close_on_exit);
-        assert!(state.close_on_exit_zero);
-        assert!(state.close_on_any_key);
-        let (terminal, viewport) = {
-            let inner = shared.inner.lock();
-            let terminal = Arc::clone(&inner.clients[&client].popup.as_ref().unwrap().terminal);
-            let viewport = terminal.latest_viewport();
-            (terminal, viewport)
-        };
-        assert_eq!((viewport.columns, viewport.rows), (18, 8));
-        assert!(
-            take_reliable_messages(&mailbox)
-                .iter()
-                .any(|message| matches!(
-                    message,
-                    ProtocolMessage::Event(Event {
-                        payload: EventPayload::Popup { state: Some(state) },
-                        ..
-                    }) if state.title == "first-display-popup"
-                ))
-        );
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new(
-                    "popup",
-                    ["-T", "second", "-B", "-NE", "-w", "60", "ignored"],
-                ),
-            )
-            .expect("modify dead popup");
-        let modified = shared.inner.lock().clients[&client]
-            .popup
-            .as_ref()
-            .unwrap()
-            .state
-            .clone();
-        assert_eq!(modified.title, "second");
-        assert_eq!((modified.width, modified.height), (20, 10));
-        assert_eq!(modified.border_lines, PopupBorderLines::None);
-        assert!(modified.close_on_exit);
-        assert!(!modified.close_on_exit_zero);
-        assert!(!modified.close_on_any_key);
-        assert!(modified.dead);
-        assert_eq!(
-            (
-                terminal.latest_viewport().columns,
-                terminal.latest_viewport().rows
-            ),
-            (18, 8)
-        );
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-C"]),
-            )
-            .expect("clear popup");
-        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.popup.is_none())));
-
-        shared
-            .inner
-            .lock()
-            .client_entry(client)
-            .command_prompt
-            .replace(CommandPrompt::new(
-                vec![CommandPromptStep {
-                    label: "prompt".to_owned(),
-                    input: String::new(),
-                }],
-                None,
-                None,
-                CommandPromptType::Command,
-                CommandPromptMode::Text,
-                false,
-                None,
-            ));
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["exit 0"]),
-            )
-            .expect("other overlay is a silent no-op");
-        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.popup.is_none())));
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-C"]),
-            )
-            .expect("clear other overlay");
-        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.command_prompt.is_none())));
-
-        let pane = context.pane.expect("popup test pane");
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::ResizeTerminal {
-                    pane,
-                    columns: 1,
-                    rows: 1,
-                    cell_width_px: 8,
-                    cell_height_px: 18,
-                },
-            )
-            .expect("shrink popup test client");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-B"]),
-            )
-            .expect("zero-sized borderless default is a silent no-op");
-        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.popup.is_none())));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn sub_three_by_three_popup_refuses_a_live_border_transition() {
-        let (shared, client, _, mut context) = popup_test_workspace("desktop");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-B", "-w", "2", "-h", "2", "sleep 30"]),
-            )
-            .expect("open live borderless popup");
-        let terminal = Arc::clone(
-            &shared.inner.lock().clients[&client]
-                .popup
-                .as_ref()
-                .unwrap()
-                .terminal,
-        );
-        assert_eq!(
-            (
-                terminal.latest_viewport().columns,
-                terminal.latest_viewport().rows
-            ),
-            (2, 2)
-        );
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-b", "single"]),
-            )
-            .expect("refuse bordered popup modification");
-        assert_eq!(
-            shared.inner.lock().clients[&client]
-                .popup
-                .as_ref()
-                .unwrap()
-                .state
-                .border_lines,
-            PopupBorderLines::None
-        );
-        assert_eq!(
-            (
-                terminal.latest_viewport().columns,
-                terminal.latest_viewport().rows
-            ),
-            (2, 2)
-        );
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-C"]),
-            )
-            .expect("clear live borderless popup");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn popup_escape_exit_flags_and_dead_any_key_follow_the_close_matrix() {
-        let (shared, client, _, mut context) = popup_test_workspace("desktop");
-        let key = |key, text| PopupAction::Key {
-            input: test_key(key, Modifiers::default(), text),
-            text_follows: text.is_some(),
-        };
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["sleep 30"]),
-            )
-            .expect("open plain popup");
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::Popup {
-                    action: key(KeyCode::Character('x'), Some("x")),
-                },
-            )
-            .expect("forward ordinary key");
-        assert!(shared.read_client(client, |c| c.is_some_and(|c| c.popup.is_some())));
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::Popup {
-                    action: key(KeyCode::Escape, None),
-                },
-            )
-            .expect("escape closes plain popup");
-        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.popup.is_none())));
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-E", "sleep 30"]),
-            )
-            .expect("open exit-closing popup");
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::Popup {
-                    action: key(KeyCode::Escape, None),
-                },
-            )
-            .expect("forward escape while exit close is armed");
-        assert!(shared.read_client(client, |c| c.is_some_and(|c| c.popup.is_some())));
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::Popup {
-                    action: PopupAction::Close,
-                },
-            )
-            .expect("dismiss exit-closing popup");
-
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-k", "sleep 30"]),
-            )
-            .expect("open any-key popup");
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::Popup {
-                    action: key(KeyCode::Character('x'), Some("x")),
-                },
-            )
-            .expect("live any-key popup forwards key");
-        let terminal = Arc::clone(
-            &shared.inner.lock().clients[&client]
-                .popup
-                .as_ref()
-                .unwrap()
-                .terminal,
-        );
-        assert!(shared.read_client(client, |c| c.is_some_and(|c| c.popup.is_some())));
-        terminal.terminate();
-        wait_for_popup_state(&shared, client, |state| state.dead);
-        shared
-            .input(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                InputMessage::Popup {
-                    action: key(KeyCode::Character('x'), Some("x")),
-                },
-            )
-            .expect("dead any-key popup closes");
-        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.popup.is_none())));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn popup_command_client_blocks_for_exit_signal_and_early_dismissal_statuses() {
-        let (shared, interactive, _, context) = popup_test_workspace("desktop");
-        let command = ClientId(900);
-        assert_eq!(
-            popup_command_with_timeout(
-                &shared,
-                command,
-                &context,
-                ["-E", "-c", "desktop", "exit 0"]
-                    .into_iter()
-                    .map(ToOwned::to_owned)
-                    .collect(),
-            )
-            .unwrap(),
-            Execution::default()
-        );
-        assert!(matches!(
-            popup_command_with_timeout(
-                &shared,
-                command,
-                &context,
-                ["-E", "-c", "desktop", "exit 3"]
-                    .into_iter()
-                    .map(ToOwned::to_owned)
-                    .collect(),
-            ),
-            Err(DaemonError::CommandExit { output, exit_code: 3 }) if output.is_empty()
-        ));
-        assert!(matches!(
-            popup_command_with_timeout(
-                &shared,
-                command,
-                &context,
-                ["-E", "-c", "desktop", "/bin/sh", "-c", "kill -TERM $$"]
-                    .into_iter()
-                    .map(ToOwned::to_owned)
-                    .collect(),
-            ),
-            Err(DaemonError::CommandExit { output, exit_code: 15 }) if output.is_empty()
-        ));
-
-        let sender = Arc::clone(&shared);
-        let mut command_context = context.clone();
-        let (send, receive) = crossbeam_channel::bounded(1);
-        let worker = thread::spawn(move || {
-            let result = sender.execute(
-                command,
-                ClientKind::Command,
-                &mut command_context,
-                &CommandInvocation::new("display-popup", ["-c", "desktop", "sleep 30"]),
-            );
-            send.send(result).expect("return dismissed popup result");
-        });
-        wait_for_popup_state(&shared, interactive, |_| true);
-        shared
-            .input(
-                interactive,
-                ClientKind::Interactive,
-                &mut context.clone(),
-                InputMessage::Popup {
-                    action: PopupAction::Close,
-                },
-            )
-            .expect("dismiss blocking popup");
-        assert!(matches!(
-            receive
-                .recv_timeout(Duration::from_secs(5))
-                .expect("dismissed popup command result"),
-            Err(DaemonError::CommandExit { output, exit_code: 129 }) if output.is_empty()
-        ));
-        worker.join().expect("dismissed popup command worker");
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn popup_jobs_receive_sigterm_on_target_detach_and_kill_server() {
-        let (shared, client, _, mut context) = popup_test_workspace("detach-target");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["sleep 30"]),
-            )
-            .expect("open popup before detach");
-        let terminal = Arc::clone(
-            &shared.inner.lock().clients[&client]
-                .popup
-                .as_ref()
-                .unwrap()
-                .terminal,
-        );
-        shared.detach(client);
-        assert!(shared.read_client(client, |c| c.is_none_or(|c| c.popup.is_none())));
-        assert_eq!(wait_for_popup_completion(&terminal).signal, Some(15));
-
-        let (shared, client, _, mut context) = popup_test_workspace("kill-target");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["sleep 30"]),
-            )
-            .expect("open popup before kill-server");
-        let terminal = Arc::clone(
-            &shared.inner.lock().clients[&client]
-                .popup
-                .as_ref()
-                .unwrap()
-                .terminal,
-        );
-        shared
-            .execute(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                &mut ExecutionContext::default(),
-                &CommandInvocation::new("kill-server", [] as [&str; 0]),
-            )
-            .expect("kill server");
-        assert!(
-            shared
-                .inner
-                .lock()
-                .clients
-                .values()
-                .all(|c| c.popup.is_none())
-        );
-        assert_eq!(wait_for_popup_completion(&terminal).signal, Some(15));
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn popup_expands_title_cwd_and_environment_into_the_pty() {
-        let (shared, client, _, mut context) = popup_test_workspace("desktop");
-        let directory = tempfile::tempdir().expect("popup working directory");
-        context.format_variables.insert(
-            "popup_test_dir".to_owned(),
-            directory.path().to_string_lossy().into_owned(),
-        );
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new(
-                    "display-popup",
-                    [
-                        "-w",
-                        "40",
-                        "-h",
-                        "8",
-                        "-d",
-                        "#{?#{==:#{command},display-popup},#{popup_test_dir},/missing}",
-                        "-e",
-                        "POPUP_VALUE=#{command}",
-                        "-T",
-                        "#{command}:#{session_name}:#{popup_width}:#{session_active}",
-                        "printf '%s|%s|%s' \"$POPUP_VALUE\" \"${PWD##*/}\" '#{command}'",
-                    ],
-                ),
-            )
-            .expect("open environment popup");
-        let state = wait_for_popup_state(&shared, client, |state| state.dead);
-        assert_eq!(state.title, "display-popup:popup-test:40:1");
-        let terminal = Arc::clone(
-            &shared.inner.lock().clients[&client]
-                .popup
-                .as_ref()
-                .unwrap()
-                .terminal,
-        );
-        let captured = terminal
-            .capture_frozen_frame(CaptureOptions::default())
-            .expect("capture popup terminal");
-        assert!(captured.contains("#{command}|"));
-        assert!(captured.contains("|#{command}"));
-        assert!(
-            captured.contains(
-                directory
-                    .path()
-                    .file_name()
-                    .expect("popup directory name")
-                    .to_string_lossy()
-                    .as_ref()
-            )
-        );
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-C"]),
-            )
-            .expect("clear environment popup");
     }
 
     #[test]
@@ -111761,93 +110769,6 @@ bind - split-window -v -c "#{pane_current_path}"
 
     #[cfg(unix)]
     #[test]
-    fn tracked_popup_mouse_is_accepted_when_the_global_mouse_option_is_off() {
-        let (shared, client, _, mut context) = popup_test_workspace("popup-mouse");
-        shared
-            .execute(
-                ClientId(u64::MAX),
-                ClientKind::Command,
-                &mut ExecutionContext::default(),
-                &CommandInvocation::new("set-option", ["-g", "mouse", "off"]),
-            )
-            .expect("turn mouse off");
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", [] as [&str; 0]),
-            )
-            .expect("open popup shell");
-        shared
-            .inner
-            .lock()
-            .client_entry(client)
-            .size
-            .replace((80, 24));
-        let terminal = Arc::clone(
-            &shared.inner.lock().clients[&client]
-                .popup
-                .as_ref()
-                .unwrap()
-                .terminal,
-        );
-        let wheel = InputMessage::Popup {
-            action: PopupAction::TerminalView(TerminalViewAction::ScrollWheel {
-                lines: 3,
-                input: TerminalMouseInput::new(
-                    TerminalMousePhase::Press,
-                    Some(TerminalMouseButton::ScrollDown),
-                    PointerCellEvent {
-                        column: 1,
-                        row: 1,
-                        click_count: 1,
-                        rectangle: false,
-                    },
-                    24,
-                    18,
-                    128,
-                    72,
-                    8,
-                    18,
-                    Modifiers::default(),
-                    false,
-                ),
-            }),
-        };
-        {
-            let inner = shared.inner.lock();
-            assert!(terminal_mouse_rejected(&inner, client, &wheel));
-        }
-        terminal.send_text("printf '\\033[?1002hMOUSEON\\n'\n");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while !terminal
-            .latest_viewport_for(TerminalViewId(client.0))
-            .unwrap_or_else(|| terminal.latest_viewport())
-            .mouse_tracking
-        {
-            assert!(
-                Instant::now() < deadline,
-                "popup never reported mouse tracking"
-            );
-            thread::sleep(Duration::from_millis(10));
-        }
-        {
-            let inner = shared.inner.lock();
-            assert!(!terminal_mouse_rejected(&inner, client, &wheel));
-        }
-        shared
-            .execute(
-                client,
-                ClientKind::Interactive,
-                &mut context,
-                &CommandInvocation::new("display-popup", ["-C"]),
-            )
-            .expect("close popup");
-    }
-
-    #[cfg(unix)]
-    #[test]
     fn nested_new_session_errors_precede_refusal_without_mutation() {
         let shared = Arc::new(Shared::new(1));
         let mailbox = OutboundMailbox::new();
@@ -115858,7 +114779,7 @@ bind - split-window -v -c "#{pane_current_path}"
             ClientKind::Command,
             &mut context,
             3,
-            &CommandInvocation::new("new-pane", [] as [&str; 0]),
+            &CommandInvocation::new("link-window", [] as [&str; 0]),
         );
         assert!(matches!(
             response,
@@ -115866,7 +114787,7 @@ bind - split-window -v -c "#{pane_current_path}"
                 request_id: 3,
                 error: ServerError::UnsupportedCommand(message),
                 output,
-            } if message == "new-pane" && output.is_empty()
+            } if message == "link-window" && output.is_empty()
         ));
 
         let inner = shared.inner.lock();
@@ -115883,8 +114804,8 @@ bind - split-window -v -c "#{pane_current_path}"
                 "device-7 message: can't find window: 99",
                 "device-7 command: wibble",
                 "device-7 message: unknown command: wibble",
-                "device-7 command: new-pane",
-                "device-7 message: unsupported command: new-pane",
+                "device-7 command: link-window",
+                "device-7 message: unsupported command: link-window",
             ]
         );
         drop(inner);
@@ -115892,8 +114813,8 @@ bind - split-window -v -c "#{pane_current_path}"
         let output = shared.show_messages("show-messages", &[]).unwrap().output;
         let lines = output.lines().collect::<Vec<_>>();
         assert_eq!(lines.len(), 6);
-        assert!(lines[0].ends_with(": device-7 message: unsupported command: new-pane"));
-        assert!(lines[1].ends_with(": device-7 command: new-pane"));
+        assert!(lines[0].ends_with(": device-7 message: unsupported command: link-window"));
+        assert!(lines[1].ends_with(": device-7 command: link-window"));
         assert!(lines[2].ends_with(": device-7 message: unknown command: wibble"));
         assert!(lines[3].ends_with(": device-7 command: wibble"));
         assert!(lines[4].ends_with(": device-7 message: can't find window: 99"));
@@ -116370,6 +115291,55 @@ bind - split-window -v -c "#{pane_current_path}"
                     })
                 ))
         );
+    }
+
+    #[test]
+    fn choose_tree_z_order_lists_panes_by_pane_z() {
+        let shared = Shared::new(1);
+        let mut inner = shared.inner.lock();
+        let (session, _, first) = inner.engine.state.create_session("z").expect("session");
+        let mut context =
+            ExecutionContext::for_pane(&inner.engine.state, first).expect("first pane context");
+        let mut floats = Vec::new();
+        for _ in 0..2 {
+            inner
+                .engine
+                .execute(
+                    &mut context,
+                    &CommandInvocation::new("new-pane", Vec::<String>::new()),
+                )
+                .expect("open a float");
+            floats.push(context.pane.expect("float pane"));
+        }
+        let facts = format_hook_facts(&inner);
+        let chooser = ChooseTreeSession::new(
+            ChooseTreeKind::Panes,
+            false,
+            Vec::new(),
+            false,
+            first,
+            &inner.engine,
+            Some(session),
+            &facts,
+            None,
+            None,
+            false,
+            false,
+            false,
+            TmuxSort::parse(Some("z"), false, None).unwrap(),
+            None,
+        )
+        .expect("chooser");
+        let panes = chooser
+            .rendered
+            .items
+            .iter()
+            .filter_map(|item| match item.target {
+                ChooseTreeTarget::Pane(pane) => Some(pane),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(panes, [floats[1], floats[0], first]);
     }
 
     #[test]
@@ -121850,6 +120820,519 @@ bind - split-window -v -c "#{pane_current_path}"
         }
     }
 
+    fn modal_pane(shared: &Shared, context: &ExecutionContext) -> Option<PaneId> {
+        let inner = shared.inner.lock();
+        inner.engine.state.windows[&context.window.expect("popup test window")].modal_pane()
+    }
+
+    fn window_pane_count(shared: &Shared, context: &ExecutionContext) -> usize {
+        let inner = shared.inner.lock();
+        inner.engine.state.windows[&context.window.expect("popup test window")]
+            .panes
+            .len()
+    }
+
+    fn wait_for_terminal_size(shared: &Shared, pane: PaneId, size: (u16, u16)) {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let current = shared
+                .inner
+                .lock()
+                .terminals
+                .get(&pane)
+                .map(|terminal| terminal.size());
+            if current == Some(size) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pane {pane} stayed at {current:?}, wanted {size:?}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn display_popup_is_one_modal_pane_every_attached_client_sees() {
+        let (shared, first, first_mailbox, mut context) = popup_test_workspace("modal-first");
+        let second_mailbox = OutboundMailbox::new();
+        let (second, _) = shared.register_subscribed(
+            ClientKind::Interactive,
+            Some("modal-second".to_owned()),
+            None,
+            Arc::clone(&second_mailbox),
+        );
+        shared
+            .attach(second, context.session.expect("popup test session"))
+            .expect("attach second client");
+        take_reliable_messages(&first_mailbox);
+        take_reliable_messages(&second_mailbox);
+
+        shared
+            .execute(
+                first,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-E", "sleep 1"]),
+            )
+            .expect("open popup");
+        let modal = modal_pane(&shared, &context).expect("display-popup made a modal pane");
+        for mailbox in [&first_mailbox, &second_mailbox] {
+            let messages = take_reliable_messages(mailbox);
+            assert!(!messages.iter().any(|message| matches!(
+                message,
+                ProtocolMessage::Event(Event {
+                    payload: EventPayload::RetiredPopup { .. },
+                    ..
+                })
+            )));
+            let window = &latest_reliable_snapshot(&messages).sessions[0].windows[0];
+            assert_eq!(window.modal.map(|modal| modal.pane), Some(modal));
+            assert!(window.modal.is_some_and(|modal| modal.capture_keys));
+            assert!(window.floating.iter().any(|float| float.pane == modal));
+        }
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while modal_pane(&shared, &context).is_some() {
+            assert!(
+                Instant::now() < deadline,
+                "the -E popup did not close on exit"
+            );
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(window_pane_count(&shared, &context), 1);
+        assert!(!shared.inner.lock().terminals.contains_key(&modal));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn display_popup_from_a_command_client_exits_with_the_pane_status() {
+        let (shared, _, _, context) = popup_test_workspace("modal-exit");
+        let error = popup_command_with_timeout(
+            &shared,
+            ClientId(7_000),
+            &context,
+            vec!["-E".to_owned(), "exit 3".to_owned()],
+        )
+        .expect_err("a failing popup command fails the command client");
+        assert!(
+            matches!(error, DaemonError::CommandExit { exit_code: 3, .. }),
+            "{error:?}"
+        );
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while modal_pane(&shared, &context).is_some() {
+            assert!(Instant::now() < deadline, "the -E popup did not close");
+            thread::sleep(Duration::from_millis(20));
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn display_popup_clear_second_popup_and_empty_command_follow_master() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-clear");
+        let tile = context.pane.expect("popup test pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-pane", ["-O", "-t", &tile.to_string()]),
+            )
+            .expect("open a modal pane");
+        assert!(modal_pane(&shared, &context).is_some());
+        assert_eq!(window_pane_count(&shared, &context), 2);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-t", &tile.to_string()]),
+            )
+            .expect("a second popup is ignored");
+        assert_eq!(window_pane_count(&shared, &context), 2);
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-C", "-t", &tile.to_string()]),
+            )
+            .expect("display-popup -C kills the modal");
+        assert_eq!(modal_pane(&shared, &context), None);
+        assert_eq!(window_pane_count(&shared, &context), 1);
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-t", &tile.to_string(), ""]),
+            )
+            .expect("display-popup with an empty command");
+        let modal = modal_pane(&shared, &context).expect("an empty command still opens a modal");
+        thread::sleep(Duration::from_millis(300));
+        let inner = shared.inner.lock();
+        let pane = inner.engine.state.pane(modal).expect("modal pane");
+        assert!(!pane.dead);
+        assert!(
+            inner
+                .terminals
+                .get(&modal)
+                .is_some_and(|terminal| terminal.completion().is_none())
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn display_popup_keeps_a_failed_command_that_exits_at_once() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-failed");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-EE", "exit 3"]),
+            )
+            .expect("open a popup whose command fails at once");
+        let modal = modal_pane(&shared, &context).expect("display-popup made a modal pane");
+        let deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            let dead = shared
+                .inner
+                .lock()
+                .engine
+                .state
+                .pane(modal)
+                .is_some_and(|pane| pane.dead);
+            if dead {
+                break;
+            }
+            assert!(
+                modal_pane(&shared, &context) == Some(modal),
+                "the -EE popup closed on a failed exit"
+            );
+            assert!(Instant::now() < deadline, "the failed popup never died");
+            thread::sleep(Duration::from_millis(20));
+        }
+        thread::sleep(Duration::from_millis(200));
+        assert_eq!(modal_pane(&shared, &context), Some(modal));
+        let shown = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new(
+                    "show-options",
+                    ["-pv", "-t", &modal.to_string(), "remain-on-exit"],
+                ),
+            )
+            .expect("show the popup's remain-on-exit");
+        assert_eq!(
+            String::from_utf8_lossy(shown.output.as_bytes()).trim(),
+            "failed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_waited_popup_killed_before_its_command_exits_answers_129() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-killed");
+        let waiter = {
+            let shared = Arc::clone(&shared);
+            let mut context = context.clone();
+            thread::spawn(move || {
+                shared.execute(
+                    ClientId(7_001),
+                    ClientKind::Command,
+                    &mut context,
+                    &CommandInvocation::new("display-popup", ["-E", "sleep 30"]),
+                )
+            })
+        };
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while modal_pane(&shared, &context).is_none() {
+            assert!(Instant::now() < deadline, "the waited popup never opened");
+            thread::sleep(Duration::from_millis(20));
+        }
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-C"]),
+            )
+            .expect("display-popup -C kills the waited popup");
+        let error = waiter
+            .join()
+            .expect("popup waiter")
+            .expect_err("a killed popup fails its command client");
+        assert!(
+            matches!(error, DaemonError::CommandExit { exit_code: 129, .. }),
+            "{error:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escape_kills_a_close_on_cancel_modal_and_capture_keys_skips_the_prefix() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-keys");
+        let tile = context.pane.expect("popup test pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-pane", ["-O", "-K", "-t", &tile.to_string()]),
+            )
+            .expect("open a capturing modal");
+        let modal = modal_pane(&shared, &context).expect("capturing modal");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: modal,
+                    input: test_key(
+                        KeyCode::Character('b'),
+                        Modifiers::new(false, true, false, false),
+                        None,
+                    ),
+                    text_follows: false,
+                },
+            )
+            .expect("send the prefix to the modal");
+        assert_ne!(
+            shared.read_client(client, |c| c
+                .and_then(|c| c.key_engine.as_ref())
+                .and_then(|engine| engine.active_table().map(str::to_owned))),
+            Some("prefix".to_owned())
+        );
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: modal,
+                    input: test_key(KeyCode::Escape, Modifiers::default(), None),
+                    text_follows: false,
+                },
+            )
+            .expect("escape without -D");
+        assert_eq!(modal_pane(&shared, &context), Some(modal));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", &modal.to_string()]),
+            )
+            .expect("close the capturing modal");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("display-popup", ["-t", &tile.to_string()]),
+            )
+            .expect("open a plain popup");
+        let modal = modal_pane(&shared, &context).expect("popup modal");
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::Key {
+                    pane: modal,
+                    input: test_key(KeyCode::Escape, Modifiers::default(), None),
+                    text_follows: false,
+                },
+            )
+            .expect("escape the popup");
+        assert_eq!(modal_pane(&shared, &context), None);
+        assert_eq!(window_pane_count(&shared, &context), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_click_outside_a_modal_does_nothing_or_closes_a_close_on_click_modal() {
+        let (shared, client, _, mut context) = popup_test_workspace("modal-click");
+        let tile = context.pane.expect("popup test pane");
+        let window = context.window.expect("popup test window");
+        let click = |shared: &Arc<Shared>, context: &mut ExecutionContext| {
+            shared
+                .input(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    InputMessage::MouseKey {
+                        key: "MouseDown1Pane".to_owned(),
+                        pane: Some(tile),
+                        window: Some(window),
+                        column: 1,
+                        row: 20,
+                        border: None,
+                        view_action: None,
+                        press_action: None,
+                        status_range_start: None,
+                        press: None,
+                    },
+                )
+                .expect("click outside the modal");
+        };
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-pane", ["-O", "-t", &tile.to_string()]),
+            )
+            .expect("open a modal");
+        let modal = modal_pane(&shared, &context).expect("modal");
+        click(&shared, &mut context);
+        assert_eq!(modal_pane(&shared, &context), Some(modal));
+        assert_eq!(
+            shared.inner.lock().engine.state.windows[&window].active_pane,
+            modal
+        );
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("kill-pane", ["-t", &modal.to_string()]),
+            )
+            .expect("close the modal");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-pane", ["-O", "-C", "-t", &tile.to_string()]),
+            )
+            .expect("open a close-on-click modal");
+        assert!(modal_pane(&shared, &context).is_some());
+        click(&shared, &mut context);
+        assert_eq!(modal_pane(&shared, &context), None);
+        assert_eq!(window_pane_count(&shared, &context), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn floating_pane_ptys_follow_their_allocation() {
+        let (shared, client, _, mut context) = popup_test_workspace("float-sizes");
+        let tile = context.pane.expect("popup test pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("new-pane", ["-x", "22", "-y", "8"]),
+            )
+            .expect("open a float");
+        let float = context.pane.expect("float pane");
+        wait_for_terminal_size(&shared, float, (20, 6));
+        let window = context.window.expect("float window");
+        let window_extent = |shared: &Shared| {
+            let inner = shared.inner.lock();
+            (
+                inner
+                    .engine
+                    .window_extent(window, zz_protocol::Axis::Horizontal),
+                inner
+                    .engine
+                    .window_extent(window, zz_protocol::Axis::Vertical),
+            )
+        };
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: float,
+                    columns: 50,
+                    rows: 20,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("a client size report for the float");
+        assert_eq!(window_extent(&shared), (Some(80), Some(24)));
+        wait_for_terminal_size(&shared, float, (20, 6));
+
+        let toggle_zoom = |context: &mut ExecutionContext| {
+            shared
+                .execute(
+                    client,
+                    ClientKind::Interactive,
+                    context,
+                    &CommandInvocation::new("resize-pane", ["-Z", "-t", &float.to_string()]),
+                )
+                .expect("toggle the float's zoom");
+        };
+        toggle_zoom(&mut context);
+        wait_for_terminal_size(&shared, float, (80, 24));
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: float,
+                    columns: 60,
+                    rows: 20,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("a client size report for the zoomed float");
+        assert_eq!(window_extent(&shared), (Some(60), Some(20)));
+        wait_for_terminal_size(&shared, float, (60, 20));
+        toggle_zoom(&mut context);
+        wait_for_terminal_size(&shared, float, (20, 6));
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("split-window", ["-t", &tile.to_string()]),
+            )
+            .expect("split the tile");
+        let split = context.pane.expect("split pane");
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("resize-pane", ["-Z", "-t", &split.to_string()]),
+            )
+            .expect("zoom a tile under the float");
+        thread::sleep(Duration::from_millis(200));
+        wait_for_terminal_size(&shared, float, (20, 6));
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("resize-pane", ["-Z", "-t", &split.to_string()]),
+            )
+            .expect("unzoom");
+
+        shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("resize-window", ["-x", "15", "-y", "5"]),
+            )
+            .expect("shrink the window");
+        wait_for_terminal_size(&shared, float, (13, 3));
+    }
+
     fn popup_test_workspace(
         name: &str,
     ) -> (
@@ -121897,27 +121380,6 @@ bind - split-window -v -c "#{pane_current_path}"
         (shared, client, mailbox, context)
     }
 
-    fn wait_for_popup_state(
-        shared: &Shared,
-        client: ClientId,
-        predicate: impl Fn(&PopupState) -> bool,
-    ) -> PopupState {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if let Some(state) = shared
-                .read_client(client, |c| {
-                    c.and_then(|c| c.popup.as_ref())
-                        .map(|popup| popup.state.clone())
-                })
-                .filter(&predicate)
-            {
-                return state;
-            }
-            assert!(Instant::now() < deadline, "popup state did not converge");
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
     fn wait_for_menu_state(shared: &Shared, client: ClientId) -> MenuState {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -121942,17 +121404,6 @@ bind - split-window -v -c "#{pane_current_path}"
                 return state;
             }
             assert!(Instant::now() < deadline, "confirm state did not converge");
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
-    fn wait_for_popup_completion(terminal: &TerminalSession) -> zz_terminal::TerminalProcessExit {
-        let deadline = Instant::now() + Duration::from_secs(5);
-        loop {
-            if let Some(completion) = terminal.completion() {
-                return completion;
-            }
-            assert!(Instant::now() < deadline, "popup process did not exit");
             thread::sleep(Duration::from_millis(10));
         }
     }

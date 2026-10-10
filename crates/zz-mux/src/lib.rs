@@ -7,6 +7,8 @@ mod command;
 mod compat_manifest_tests;
 mod copy_actions;
 #[cfg(test)]
+mod float_tests;
+#[cfg(test)]
 mod format_universe_tests;
 mod formats;
 mod honest_knobs;
@@ -31,15 +33,16 @@ pub use command::TMUX_OPTION_CONSUMERS as BEHAVES;
 pub use command::{
     AgentOptions, CUSTOMIZE_MENU_ITEMS, CUSTOMIZE_OUTSIDE_MENU_ITEMS, CommandAliasBodyError,
     CommandAliasResolution, CommandPromptStep, CommandPromptTemplate, CopyModeStyleValues,
-    CustomizeMenu, CustomizeMenuItem, CustomizeMode, CustomizeResult, DEFAULT_BUFFER_LIMIT,
-    DetachRequest, DetachScope, DisplayPanesOptions, Execution, ExecutionContext, FormatFacts,
-    FormatMonitor, FormatMonitorScope, FormatMonitorTarget, KeyListing, MAX_WORD_SEPARATORS_BYTES,
-    MenuOptions, ModeKey, ModePrompt, MouseEventTarget, MuxEffect, MuxEngine,
-    PaneBorderStyleValues, PaneModeRequest, PaneRuntimeFacts, PanesMode, PanesModeAreaGeometry,
-    PanesModeGeometry, PopupOptions, PromptOutcome, RetainedJobEnvironment, SourceStream,
-    StatusRowVariables, SwitchAction, SwitchMode, TMUX_OPTION_CONSUMERS, TerminalWorkerOptions,
-    WindowStyleValues, copy_mode_action_is_read_only_safe, customize_menu_feed, format_command,
-    hook_format_variables, if_shell_truthy, mouse_key_is_a_replayed_double_click, parse_tmux_key,
+    CustomizeEdit, CustomizeMenu, CustomizeMenuItem, CustomizeMode, CustomizeResult,
+    DEFAULT_BUFFER_LIMIT, DetachRequest, DetachScope, DisplayPanesOptions, Execution,
+    ExecutionContext, FormatFacts, FormatMonitor, FormatMonitorScope, FormatMonitorTarget,
+    KeyListing, MAX_WORD_SEPARATORS_BYTES, MenuOptions, ModeKey, ModePrompt, MouseDrag,
+    MouseDragKind, MouseEventTarget, MuxEffect, MuxEngine, PaneBorderStyleValues, PaneModeRequest,
+    PaneRuntimeFacts, PanesMode, PanesModeAreaGeometry, PanesModeGeometry, PopupOptions,
+    PromptHistories, PromptOutcome, RetainedJobEnvironment, SourceStream, StatusRowVariables,
+    SwitchAction, SwitchMode, TMUX_OPTION_CONSUMERS, TerminalWorkerOptions, WindowStyleValues,
+    copy_mode_action_is_read_only_safe, customize_menu_feed, format_command, hook_format_variables,
+    if_shell_truthy, mouse_key_is_a_replayed_double_click, parse_tmux_key,
     resolve_invoking_mouse_targets, send_keys_is_read_only_safe, send_keys_target_client,
     tmux_signal_name, validate_static_command_chain,
 };
@@ -69,7 +72,7 @@ pub use layout::{
 };
 pub use localtime::local_time;
 pub use model::{
-    LayoutPreset, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
+    LayoutPreset, Modal, MuxState, Pane, PaneDirection, PaneKind, Session, SplitPlacement, Window,
     joined_layout, swapped_layout,
 };
 pub use parser::{

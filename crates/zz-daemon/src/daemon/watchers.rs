@@ -120,7 +120,6 @@ impl FrameSnapshot {
 enum Surface {
     Terminal(Box<TerminalWatcher>),
     Command(CommandWatcher),
-    Popup(Box<PopupWatcher>),
 }
 
 struct TerminalWatcher {
@@ -142,12 +141,6 @@ struct CommandWatcher {
     pane: PaneId,
     admitted_generation: Option<TerminalGeneration>,
     presented: Option<(u8, ScrollbarState, Option<SearchStatus>)>,
-}
-
-struct PopupWatcher {
-    client: ClientId,
-    previous: Option<Arc<TerminalViewport>>,
-    fanout: PaneFrameFanout,
 }
 
 impl Watcher {
@@ -208,22 +201,10 @@ impl Watcher {
         )
     }
 
-    pub(super) fn popup(client: ClientId, terminal: &Arc<TerminalSession>) -> Self {
-        Self::new(
-            terminal,
-            Surface::Popup(Box::new(PopupWatcher {
-                client,
-                previous: None,
-                fanout: PaneFrameFanout::new(),
-            })),
-        )
-    }
-
     fn current(&self, shared: &Shared, terminal: &Arc<TerminalSession>) -> bool {
         match &self.surface {
             Surface::Terminal(surface) => shared.is_current_terminal(surface.pane, terminal),
             Surface::Command(surface) => shared.is_current_command_output(surface.client, terminal),
-            Surface::Popup(surface) => shared.is_current_popup(surface.client, terminal),
         }
     }
 
@@ -237,7 +218,6 @@ impl Watcher {
         match &mut self.surface {
             Surface::Terminal(surface) => surface.handle(shared, terminal, event, frame),
             Surface::Command(surface) => surface.handle(shared, terminal, event, frame),
-            Surface::Popup(surface) => surface.handle(shared, terminal, event, frame),
         }
     }
 }
@@ -317,103 +297,6 @@ impl CommandWatcher {
             | TerminalEvent::OpenUri(_)
             | TerminalEvent::ViewClosed(_)
             | TerminalEvent::ClipboardSet { .. }
-            | TerminalEvent::Bell
-            | TerminalEvent::RenameWindow(_)
-            | TerminalEvent::PlaceholderBound { .. }
-            | TerminalEvent::PendingPasteExpired { .. } => {}
-        }
-        true
-    }
-}
-
-impl PopupWatcher {
-    fn handle(
-        &mut self,
-        shared: &Arc<Shared>,
-        terminal: &Arc<TerminalSession>,
-        event: TerminalEvent,
-        frame: Option<FrameSnapshot>,
-    ) -> bool {
-        let client = self.client;
-        match event {
-            TerminalEvent::ViewportReady { .. } => {
-                let frame = frame.expect("viewport notification frame");
-                let viewport = frame
-                    .viewport_for(TerminalViewId(client.0))
-                    .unwrap_or(frame.runtime);
-                shared.publish_popup_terminal(
-                    client,
-                    terminal,
-                    self.previous.as_deref(),
-                    &viewport,
-                    &mut self.fanout,
-                );
-                self.fanout.release();
-                self.previous = Some(viewport);
-                if let Some(exit_code) = popup_exit_code(terminal) {
-                    shared.finish_popup(client, terminal, exit_code);
-                    return false;
-                }
-            }
-            TerminalEvent::ClipboardSet { target, text } => {
-                let pane = shared.read_client(client, |c| {
-                    c.and_then(|c| c.popup.as_ref())
-                        .map(|popup| popup.state.pane)
-                });
-                if let Some(pane) = pane {
-                    shared.publish_to_client(
-                        client,
-                        EventPayload::Clipboard {
-                            pane,
-                            request_id: 0,
-                            target,
-                            text,
-                            producer: ClipboardProducer::Application,
-                        },
-                    );
-                }
-            }
-            TerminalEvent::OpenUri(open) if open.view == TerminalViewId(client.0) => {
-                let pane = shared.read_client(client, |c| {
-                    c.and_then(|c| c.popup.as_ref())
-                        .map(|popup| popup.state.pane)
-                });
-                if let Some(pane) = pane {
-                    shared.publish_to_client(
-                        client,
-                        EventPayload::OpenUri {
-                            pane,
-                            uri: open.uri,
-                        },
-                    );
-                }
-            }
-            TerminalEvent::CopyReady { view, copy } if view == TerminalViewId(client.0) => {
-                let copy = *copy;
-                if let Some(buffer) = copy.buffer {
-                    shared.store_copy_buffer(copy.text.clone(), buffer);
-                }
-                if let Some(target) = copy.clipboard
-                    && let Some(pane) = shared.read_client(client, |c| {
-                        c.and_then(|c| c.popup.as_ref())
-                            .map(|popup| popup.state.pane)
-                    })
-                {
-                    shared.publish_to_client(
-                        client,
-                        EventPayload::Clipboard {
-                            pane,
-                            request_id: copy.request_id,
-                            target,
-                            text: copy.text,
-                            producer: ClipboardProducer::Server,
-                        },
-                    );
-                }
-            }
-            TerminalEvent::ViewClosed(_)
-            | TerminalEvent::CopyReady { .. }
-            | TerminalEvent::OpenUri(_)
             | TerminalEvent::Bell
             | TerminalEvent::RenameWindow(_)
             | TerminalEvent::PlaceholderBound { .. }
@@ -797,10 +680,6 @@ impl LoopWatchers {
                 let pane = match &watcher.surface {
                     Surface::Terminal(surface) => Some(surface.pane),
                     Surface::Command(surface) => Some(surface.pane),
-                    Surface::Popup(surface) => shared.read_client(surface.client, |c| {
-                        c.and_then(|c| c.popup.as_ref())
-                            .map(|popup| popup.state.pane)
-                    }),
                 };
                 if let Some(pane) = pane {
                     let images = frame
@@ -872,12 +751,6 @@ impl LoopWatchers {
                     Some(Box::new(move |shared| {
                         shared.close_exited_terminal(pane, &terminal);
                     }))
-                }
-                Surface::Popup(surface) => {
-                    if let Some(code) = popup_exit_code(&terminal) {
-                        shared.finish_popup(surface.client, &terminal, code);
-                    }
-                    None
                 }
                 _ => None,
             };

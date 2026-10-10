@@ -82,7 +82,9 @@ const HELP_CUSTOMIZE: &[(&str, &str)] = &[
     ("          u", "Unset an %1"),
     ("          U", "Unset tagged %1s"),
     ("          a", "Change array key"),
+    ("          e", "Open %1 value in editor"),
     ("          f", "Enter a filter"),
+    ("          C", "Toggle only changed items"),
     ("          v", "Toggle information"),
 ];
 const HELP_CUSTOMIZE_WIDTH: u16 = 52;
@@ -260,6 +262,25 @@ impl Grid {
             height,
             cells: vec![blank; usize::from(width) * usize::from(height)],
         }
+    }
+
+    /// The `width` by `height` window of the grid from `left`, `top`: what a
+    /// float clipped by the window's left or top edge shows of its pane.
+    pub(super) fn cropped(&self, left: u16, top: u16, width: u16, height: u16) -> Self {
+        let mut cropped = Self::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                let (Some(from), Some(to)) = (self.index(x + left, y + top), cropped.index(x, y))
+                else {
+                    continue;
+                };
+                cropped.cells[to] = self.cells[from].clone();
+                if x == 0 && cropped.cells[to].width == 0 {
+                    cropped.blank_at(0, y);
+                }
+            }
+        }
+        cropped
     }
 
     fn index(&self, x: u16, y: u16) -> Option<usize> {
@@ -1024,7 +1045,7 @@ fn help(grid: &mut Grid, kind: HelpKind, border: &TmuxStyle, colours: &Colours) 
         HelpKind::Tree => (HELP_TREE_WIDTH, "item", HELP_TREE),
         HelpKind::Client => (HELP_CLIENT_WIDTH, "client", HELP_CLIENT),
         HelpKind::Buffer => (HELP_DEFAULT_WIDTH, "buffer", HELP_BUFFER),
-        HelpKind::Customize => (HELP_CUSTOMIZE_WIDTH, "option", HELP_CUSTOMIZE),
+        HelpKind::Customize => (HELP_CUSTOMIZE_WIDTH, "item", HELP_CUSTOMIZE),
     };
     let count = narrow(HELP_START.len() + lines.len() + HELP_END.len());
     let (box_width, box_height) = (width + 2, count + 2);
@@ -1152,6 +1173,21 @@ impl Renderer {
                     HelpKind::Buffer,
                 )
             };
+        let edited = !presentation.prompt_line.is_empty()
+            && model.choose_tree.as_ref().map_or_else(
+                || {
+                    model
+                        .choose_buffer
+                        .as_ref()
+                        .is_some_and(|state| !state.prompt.is_empty() || state.search.is_some())
+                },
+                |state| !state.prompt.is_empty() || state.search.is_some(),
+            );
+        let prompt = if edited {
+            Some(presentation.prompt_line.clone())
+        } else {
+            prompt
+        };
         let status_rows = model.status_block_rows();
         let sx = model.size.columns;
         let sy = model.size.rows.saturating_sub(status_rows);
@@ -1181,6 +1217,9 @@ impl Renderer {
             title: None,
         });
         self.mode_tree.offset = offset;
+        if edited {
+            cursor.0 = presentation.prompt_column.min(sx - 1);
+        }
         cursor.1 += top;
         grid.emit(
             &mut self.output,

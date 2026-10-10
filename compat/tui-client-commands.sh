@@ -348,8 +348,15 @@ active_pane() {
   side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active} #{pane_id}' |
     awk '$1 == 1 { print $2; exit }'
 }
+# Polled a varying number of times and on one side only in the needle cases,
+# so it runs no command that fires an after- hook: display-message and
+# list-panes both do (CMD_AFTERHOOK), if-shell does not. The false branch is a
+# command neither binary knows, so the exit status carries the answer.
 pane_in_mode() {
-  [ "$(side_command "$1" display-message -p -t "$(active_pane "$1")" '#{pane_in_mode}' 2>/dev/null)" = "$2" ]
+  local in_mode=0
+  side_command "$1" if-shell -F -t "=$INNER_SESSION:" '#{pane_in_mode}' '' zzcc-not-in-mode \
+    >/dev/null 2>&1 && in_mode=1
+  [ "$in_mode" = "$2" ]
 }
 
 write_attach() {
@@ -711,35 +718,16 @@ declare -A RECORD_OWNERS=([unattributed]=0)
 
 known_drift() {
   case "$1" in
-  customize-exit-* | customize-screen-right-expand | customize-screen-expand-all | \
-    customize-screen-tag-root | customize-screen-reset-tagged-* | customize-screen-unset-tagged-* | \
-    customize-screen-untag | customize-screen-tag-all | customize-screen-untag-all | \
-    customize-screen-tag-expand | customize-screen-section-unset | customize-screen-show-global | \
-    customize-screen-filter-prompt | customize-screen-filter-escape | customize-screen-filter-clear | \
-    customize-screen-array-search | customize-screen-array-expanded | \
-    customize-screen-array-unset-accept | customize-array-unset-values | \
-    customize-screen-array-root-* | customize-screen-array-left-child) ;;
-  customize-*-open | customize-screen-* | customize-long-* | customize-prompt-vi-* | \
-    customize-unbound-* | customize-retained-* | customize-interrupt-* | customize-sabotage | \
-    customize-array-screen-* | customize-right-sabotage | customize-preview-sabotage | \
-    customize-markup-sabotage | customize-prompt-sabotage | \
-    customize-array-key-values)
-    printf 'gap:pin.formats-options'
-    ;;
   esac
 }
 
 known_drift_reason() {
   case "$1" in
-  customize-*)
-    printf '%s' "PIN 3.8, gap:pin.formats-options: 3.8 rebuilt customize mode (window-customize.c: Session Hooks, Window & Pane Hooks, Global and Session Environment sections in the tree, e to edit, C for changed only, editable array keys); zz still draws the d77c9dc6 tree"
-    ;;
   esac
 }
 
 known_drift_channel() {
   case "$1" in
-  gap:pin.formats-options) printf 'screen' ;;
   esac
 }
 
@@ -1360,6 +1348,28 @@ customize_prompt_vi_cases() {
   CASE_GRID_CELLS=0
 }
 
+# 3.8 mode-tree prompts are server prompts. `prompt_key` walks the server's
+# history list for the prompt's type on Up and Down and Enter adds a non-empty
+# answer to it, and mode-tree.c raises its search and filter prompts as
+# PROMPT_TYPE_SEARCH, so a filter prompt recalls the search typed before it.
+# An answer an add prompt refuses is a status message (`status_message_set`)
+# on the status row, not a command.
+customize_prompt_history_cases() {
+  customize_scene
+  CASE_NEEDLE_MODE=1
+  case_run customize-history-open same '' -- customize-mode -t PANE
+  case_run customize-history-search same '' -- send-keys -t PANE / m o u s e Enter
+  case_run customize-history-filter-up same '' -- send-keys -t PANE f Up
+  case_run customize-history-filter-down same '' -- send-keys -t PANE Down
+  case_run customize-history-filter-again same '' -- send-keys -t PANE C-p
+  case_run customize-history-filter-escape same '' -- send-keys -t PANE Escape
+  case_run customize-history-top same '' -- send-keys -t PANE g
+  case_run customize-add-option-prompt same '' -- send-keys -t PANE Enter
+  case_run customize-add-option-refused same '' -- send-keys -t PANE x Enter
+  restore_case customize-history-closed
+  CASE_GRID_CELLS=0
+}
+
 # `prompt_set_options` copies `status-keys` ONCE, when the prompt is created, so
 # the sabotage has to change the option before the prompt is raised, not after.
 customize_prompt_vi_self_checks() {
@@ -1525,6 +1535,24 @@ customize_screen_cases() {
   customize_screen_case pane-array-escape Escape
   restore_case customize-pane-array-closed
   run_both set-option -pu -t PANE pane-colours
+
+  customize_screen_open changed
+  customize_screen_case changed-only C
+  customize_screen_case changed-window / automatic-rename Enter
+  customize_screen_case changed-all C
+  customize_screen_case hooks-search / after-new-window Enter
+  customize_screen_case hook-prompt Enter
+  customize_screen_case hook-accept 'display-message hooked' Enter
+  case_run customize-hook-values same '' -- show-hooks -g after-new-window
+  customize_screen_case hook-child Right Down
+  customize_screen_case hook-key-prompt a
+  customize_screen_case hook-key-accept C-u 4 Enter
+  case_run customize-hook-key-values same '' -- show-hooks -g after-new-window
+  customize_screen_case hook-unset u y
+  customize_screen_case section-add g Enter
+  customize_screen_case section-add-escape Escape
+  restore_case customize-changed-closed
+  run_on_both set-hook -gu after-new-window
   CASE_GRID_CELLS=0
 }
 
@@ -2026,9 +2054,13 @@ client_tool_cases() {
   done
   run_on_both set-option -gwu clock-mode-colour
   run_on_both set-option -gwu clock-mode-style
+  run_on_both set-hook -g after-display-message 'set -ga @zzcc-poll-hook x'
   CASE_NEEDLE_MODE=1
   case_run customize-mode-open same '' -- customize-mode -t PANE
   restore_case customize-mode-closed
+  case_run needle-poll-fires-no-hook same '' -- show-options -gqv @zzcc-poll-hook
+  run_on_both set-hook -gu after-display-message
+  run_on_both set-option -gqu @zzcc-poll-hook
   customize_fix_cases
   CASE_GRID_CELLS=1
   CASE_NEEDLE_MODE=1
@@ -2066,6 +2098,7 @@ client_tool_cases() {
   switch_key_cases
   customize_long_prompt_cases
   customize_prompt_vi_cases
+  customize_prompt_history_cases
   customize_screen_cases
   attach_both_at 80 24
   case_run server-access-bare same '' -- server-access
@@ -2142,7 +2175,19 @@ run_cases() {
   SUSPENDED_ZZ_PID="$(zz_command list-clients -F '#{client_pid}')"
   case_run suspend-client same '' -- suspend-client
   wait_for 'the raw client is stopped' client_process_stopped "$SUSPENDED_ZZ_PID"
+  report_cases
+}
 
+run_only_cases() {
+  local group
+  attach_both_at 80 24
+  for group in $ZZ_CLIENT_COMMANDS_ONLY; do
+    "$group"
+  done
+  report_cases
+}
+
+report_cases() {
   if [ "$FAILURES" -ne 0 ]; then
     printf '%s of %s asserted comparisons differ, %s recorded (%s for a sibling lane, %s)\n' \
       "$FAILURES" "$CHECKS" "$RECORDS" "$SIBLINGS" "$(owner_tally)"
@@ -2638,6 +2683,8 @@ wait_for "zz daemon socket" test -S "$ZZ_SOCKET"
 
 if [ "$SELF_CHECK" -eq 1 ]; then
   run_self_check
+elif [ -n "${ZZ_CLIENT_COMMANDS_ONLY:-}" ]; then
+  run_only_cases
 else
   run_cases
 fi

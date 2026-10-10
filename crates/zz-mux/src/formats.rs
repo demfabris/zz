@@ -214,7 +214,7 @@ pub struct StatusValues {
     pub pane_at_left: Option<bool>,
     pub pane_at_right: Option<bool>,
     pub pane_at_top: Option<bool>,
-    pub pane_bottom: Option<u16>,
+    pub pane_bottom: Option<i32>,
     pub pane_current_command: String,
     pub pane_current_path: String,
     pub pane_dead: Option<bool>,
@@ -230,23 +230,27 @@ pub struct StatusValues {
     pub pane_id: String,
     pub pane_index: u32,
     pub pane_last: Option<bool>,
-    pub pane_left: Option<u16>,
-    pub pane_right: Option<u16>,
+    pub pane_left: Option<i32>,
+    pub pane_right: Option<i32>,
     pub pane_pid: Option<u32>,
     pub pane_start_command: String,
     pub pane_start_command_list: String,
     pub pane_start_path: String,
     pub pane_synchronized: bool,
     pub pane_title: String,
-    pub pane_top: Option<u16>,
+    pub pane_top: Option<i32>,
     pub pane_tty: String,
     pub pane_unzoomed_height: Option<u16>,
     pub pane_unzoomed_width: Option<u16>,
     pub pane_width: Option<u16>,
-    pub pane_x: Option<u16>,
-    pub pane_y: Option<u16>,
+    pub pane_x: Option<i32>,
+    pub pane_y: Option<i32>,
     pub pane_z: Option<usize>,
     pub pane_zoomed: bool,
+    pub pane_floating: bool,
+    pub pane_over_zoom: bool,
+    pub pane_modal: bool,
+    pub window_modal_pane: String,
     pub pid: u32,
     pub server_sessions: usize,
     pub session_active: Option<bool>,
@@ -255,6 +259,8 @@ pub struct StatusValues {
     pub session_attached: usize,
     pub session_attached_list: String,
     pub session_bell: bool,
+    pub session_activity_flag: bool,
+    pub session_silence_flag: bool,
     pub session_activity: Option<i64>,
     pub session_created: Option<i64>,
     pub session_id: String,
@@ -533,6 +539,9 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         FormatBacking::PaneX => values.pane_x = value.parse().ok(),
         FormatBacking::PaneY => values.pane_y = value.parse().ok(),
         FormatBacking::PaneZ => values.pane_z = value.parse().ok(),
+        FormatBacking::PaneFloatingFlag => values.pane_floating = value == "1",
+        FormatBacking::PaneModalFlag => values.pane_modal = value == "1",
+        FormatBacking::WindowModalPane => value.clone_into(&mut values.window_modal_pane),
         FormatBacking::PaneZoomed => values.pane_zoomed = value == "1",
         FormatBacking::Pid => values.pid = value.parse().unwrap_or_default(),
         FormatBacking::ServerSessions => values.server_sessions = value.parse().unwrap_or_default(),
@@ -543,6 +552,8 @@ fn apply_context_value(values: &mut StatusValues, name: &str, value: &str) {
         }
         FormatBacking::SessionAttachedList => value.clone_into(&mut values.session_attached_list),
         FormatBacking::SessionBell => values.session_bell = value == "1",
+        FormatBacking::SessionActivityFlag => values.session_activity_flag = value == "1",
+        FormatBacking::SessionSilenceFlag => values.session_silence_flag = value == "1",
         FormatBacking::SessionActivity => values.session_activity = value.parse().ok(),
         FormatBacking::SessionActive => {
             values.session_active = (!value.is_empty()).then_some(value == "1");
@@ -1002,6 +1013,9 @@ enum FormatKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum FormatBacking {
     Empty,
+    PaneFloatingFlag,
+    PaneModalFlag,
+    WindowModalPane,
     StatusHook,
     Zero,
     One,
@@ -1058,6 +1072,8 @@ enum FormatBacking {
     SessionAttached,
     SessionAttachedList,
     SessionBell,
+    SessionActivityFlag,
+    SessionSilenceFlag,
     SessionActivity,
     SessionActive,
     SessionCreated,
@@ -1238,7 +1254,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("pane_dead_time", Pane, Time, PaneDeadTime),
     variable!("pane_fg", Pane, Empty),
     variable!("pane_flags", Pane, PaneFlags),
-    variable!("pane_floating_flag", Pane, Zero),
+    variable!("pane_floating_flag", Pane, PaneFloatingFlag),
     variable!("pane_format", Pane, PaneFormat),
     variable!("pane_height", Pane, PaneHeight),
     variable!("pane_id", Pane, PaneId),
@@ -1252,7 +1268,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("pane_left", Pane, PaneLeft),
     variable!("pane_marked", Pane, PaneMarked),
     variable!("pane_marked_set", Pane, PaneMarkedSet),
-    variable!("pane_modal_flag", Pane, Zero),
+    variable!("pane_modal_flag", Pane, PaneModalFlag),
     variable!("pane_mode", Pane, StatusHook),
     variable!("pane_output_generation", Pane, StatusHook),
     variable!("pane_path", Pane, PanePath),
@@ -1286,7 +1302,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("server_sessions", Server, ServerSessions),
     variable!("session_active", Session, SessionActive),
     variable!("session_activity", Session, Time, SessionActivity),
-    variable!("session_activity_flag", Session, WindowActivityFlag),
+    variable!("session_activity_flag", Session, SessionActivityFlag),
     variable!("session_alert", Session, SessionAlert),
     variable!("session_alerts", Session, SessionAlerts),
     variable!("session_attached", Session, SessionAttached),
@@ -1307,7 +1323,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("session_marked", Session, SessionMarked),
     variable!("session_name", Session, SessionName),
     variable!("session_path", Session, SessionPath),
-    variable!("session_silence_flag", Session, WindowSilenceFlag),
+    variable!("session_silence_flag", Session, SessionSilenceFlag),
     variable!("session_stack", Session, SessionStack),
     variable!("session_windows", Session, SessionWindows),
     variable!("sixel_support", Server, Zero),
@@ -1355,7 +1371,7 @@ const FORMAT_VARIABLES: [FormatVariableSpec; 214] = [
     variable!("window_manual_height", Window, WindowManualHeight),
     variable!("window_manual_width", Window, WindowManualWidth),
     variable!("window_marked_flag", Window, WindowMarkedFlag),
-    variable!("window_modal_pane", Window, Empty),
+    variable!("window_modal_pane", Window, WindowModalPane),
     variable!("window_name", Window, WindowName),
     variable!("window_offset_x", Window, StatusHook),
     variable!("window_offset_y", Window, StatusHook),
@@ -1469,6 +1485,9 @@ impl StatusValues {
             FormatBacking::PaneX => optional_display(self.pane_x),
             FormatBacking::PaneY => optional_display(self.pane_y),
             FormatBacking::PaneZ => optional_display(self.pane_z),
+            FormatBacking::PaneFloatingFlag => Cow::Borrowed(bool_string(self.pane_floating)),
+            FormatBacking::PaneModalFlag => Cow::Borrowed(bool_string(self.pane_modal)),
+            FormatBacking::WindowModalPane => Cow::Borrowed(self.window_modal_pane.as_str()),
             FormatBacking::PaneZoomed => Cow::Borrowed(bool_string(self.pane_zoomed)),
             FormatBacking::Pid => Cow::Owned(self.pid.to_string()),
             FormatBacking::ServerSessions => Cow::Owned(self.server_sessions.to_string()),
@@ -1479,6 +1498,12 @@ impl StatusValues {
                 Cow::Borrowed(self.session_attached_list.as_str())
             }
             FormatBacking::SessionBell => Cow::Borrowed(bool_string(self.session_bell)),
+            FormatBacking::SessionActivityFlag => {
+                Cow::Borrowed(bool_string(self.session_activity_flag))
+            }
+            FormatBacking::SessionSilenceFlag => {
+                Cow::Borrowed(bool_string(self.session_silence_flag))
+            }
             FormatBacking::SessionActivity => optional_display(self.session_activity),
             FormatBacking::SessionActive => optional_bool(self.session_active),
             FormatBacking::SessionCreated => optional_display(self.session_created),
@@ -1572,6 +1597,9 @@ impl StatusValues {
         }
         if self.window_marked_flag.unwrap_or(false) {
             flags.push('M');
+        }
+        if !self.window_modal_pane.is_empty() {
+            flags.push('O');
         }
         if self.window_zoomed {
             flags.push('Z');
@@ -2928,16 +2956,16 @@ impl MuxEngine {
         else {
             return geometry;
         };
-        geometry.pane_left = Some(cell.xoff);
-        geometry.pane_top = Some(cell.yoff);
+        let left = u16::try_from(cell.xoff.max(0)).unwrap_or(u16::MAX);
+        let top = u16::try_from(cell.yoff.max(0)).unwrap_or(u16::MAX);
+        geometry.pane_left = Some(left);
+        geometry.pane_top = Some(top);
         geometry.pane_width = Some(cell.sx);
         geometry.pane_height = Some(cell.sy);
-        geometry.pane_right = cell
-            .xoff
+        geometry.pane_right = left
             .checked_add(cell.sx)
             .and_then(|right| right.checked_sub(1));
-        geometry.pane_bottom = cell
-            .yoff
+        geometry.pane_bottom = top
             .checked_add(cell.sy)
             .and_then(|bottom| bottom.checked_sub(1));
         geometry
@@ -3099,7 +3127,10 @@ impl MuxEngine {
             pane_index: window
                 .and_then(|window| pane.and_then(|pane| self.pane_index(window.id, pane)))
                 .unwrap_or_default(),
-            pane_z: pane.map(|_| 1),
+            pane_z: window.and_then(|window| {
+                pane.and_then(|pane| window.pane_z(pane))
+                    .and_then(|z| usize::try_from(z).ok())
+            }),
         }
     }
 
@@ -3176,11 +3207,9 @@ impl MuxEngine {
             })
             .collect::<Vec<_>>();
         alert_windows.sort_unstable_by_key(|(index, ..)| *index);
-        context.session_bell = session
-            .windows
-            .first()
-            .and_then(|window| self.state.windows.get(window))
-            .is_some_and(|window| window.panes.values().any(|pane| pane.bell));
+        context.session_activity_flag = alert_windows.iter().any(|(_, activity, ..)| *activity);
+        context.session_bell = alert_windows.iter().any(|(_, _, bell, _)| *bell);
+        context.session_silence_flag = alert_windows.iter().any(|(.., silence)| *silence);
         for (_, activity, bell, silence) in &alert_windows {
             if *activity && !context.session_alert.contains('#') {
                 context.session_alert.push('#');
@@ -3245,6 +3274,10 @@ impl MuxEngine {
         context.window_layout.clone_from(&dumps.layout);
         context.window_active = Some(session.active_window == window.id);
         context.window_zoomed = window.zoomed_pane.is_some();
+        context.window_modal_pane = window
+            .modal_pane()
+            .map(|pane| pane.to_string())
+            .unwrap_or_default();
         context.window_visible_layout.clone_from(&dumps.visible);
         context.window_bell = window.panes.values().any(|pane| pane.bell);
         context.window_activity = window.activity_time;
@@ -3352,24 +3385,27 @@ impl MuxEngine {
             context.pane_top = Some(yoff);
             context.pane_x = Some(xoff);
             context.pane_y = Some(yoff);
-            context.pane_right = xoff.checked_add(sx).and_then(|right| right.checked_sub(1));
-            context.pane_bottom = yoff
-                .checked_add(sy)
-                .and_then(|bottom| bottom.checked_sub(1));
+            context.pane_right = Some(xoff + i32::from(sx) - 1);
+            context.pane_bottom = Some(yoff + i32::from(sy) - 1);
             context.pane_at_left = Some(xoff == 0);
             context.pane_at_top = Some(match border_status {
                 PaneBorderStatus::Top => yoff == 1,
                 PaneBorderStatus::Off | PaneBorderStatus::Bottom => yoff == 0,
             });
-            context.pane_at_right = Some(xoff.saturating_add(sx) == width);
+            context.pane_at_right = Some(xoff + i32::from(sx) == i32::from(width));
             context.pane_at_bottom = Some(match border_status {
                 PaneBorderStatus::Bottom => {
-                    yoff.saturating_add(sy) == height.saturating_sub(1) && height > 0
+                    yoff + i32::from(sy) == i32::from(height) - 1 && height > 0
                 }
-                PaneBorderStatus::Off | PaneBorderStatus::Top => yoff.saturating_add(sy) == height,
+                PaneBorderStatus::Off | PaneBorderStatus::Top => {
+                    yoff + i32::from(sy) == i32::from(height)
+                }
             });
         }
-        context.pane_z = Some(1);
+        context.pane_z = window.pane_z(pane.id).and_then(|z| usize::try_from(z).ok());
+        context.pane_floating = window.shows_floating(pane.id);
+        context.pane_over_zoom = pane.over_zoom;
+        context.pane_modal = window.modal_pane() == Some(pane.id);
         if context.pane_active == Some(true) {
             context.pane_flags.push('*');
         }
@@ -3378,6 +3414,15 @@ impl MuxEngine {
         }
         if context.pane_zoomed {
             context.pane_flags.push('Z');
+        }
+        if context.pane_floating {
+            context.pane_flags.push('F');
+        }
+        if context.pane_over_zoom {
+            context.pane_flags.push('A');
+        }
+        if context.pane_modal {
+            context.pane_flags.push('O');
         }
         context
     }
@@ -3779,9 +3824,13 @@ const LISTING_NEVER_ANSWERED: [&str; 14] = [
 ];
 
 /// `format_cb_session_attached_list` and `format_cb_window_active_clients_list`
-/// build an evbuffer and return NULL when nothing went into it.
-const LISTING_EMPTY_LIST_DECLINES: [&str; 2] =
-    ["session_attached_list", "window_active_clients_list"];
+/// build an evbuffer and return NULL when nothing went into it, and
+/// `format_cb_window_modal_pane` returns NULL for a window with no modal pane.
+const LISTING_EMPTY_LIST_DECLINES: [&str; 3] = [
+    "session_attached_list",
+    "window_active_clients_list",
+    "window_modal_pane",
+];
 
 /// `format_each` prints a `FORMAT_TABLE_TIME` entry as `tv->tv_sec`, so a zero
 /// time is `0` in the listing where `format_find` turns the same entry into
@@ -4355,7 +4404,11 @@ impl<V: FormatVariables + ?Sized, H: StatusHooks> Expander<'_, V, H> {
             };
             let after_next = next_index + next.len_utf8();
             match next {
-                '#' | '}' | ',' => {
+                '#' => {
+                    literal.push(next);
+                    index = after_next;
+                }
+                '}' | ',' => {
                     if self.tracing() {
                         self.log(depth + 1, &format!("found #{next}"));
                     }
@@ -7333,7 +7386,7 @@ fn format_time_value(value: &str, flags: &TimeFlags<'_>, now: Option<i64>) -> St
     format_datetime(&time, flags.format.unwrap_or("%a %b %e %H:%M:%S %Y"))
 }
 
-fn pretty_time(timestamp: i64, now: i64) -> String {
+pub(crate) fn pretty_time(timestamp: i64, now: i64) -> String {
     let effective_now = now.max(timestamp);
     let age = effective_now.saturating_sub(timestamp);
     let Some(time) = crate::localtime::local_time(timestamp) else {

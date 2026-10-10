@@ -73,8 +73,21 @@ impl FormatTree<'_> {
             | FormatBacking::SessionManyAttached
             | FormatBacking::WindowActiveClients
             | FormatBacking::WindowLinked => Cow::Borrowed("0"),
-            FormatBacking::One | FormatBacking::WindowLinkedSessions | FormatBacking::PaneZ => {
-                Cow::Borrowed("1")
+            FormatBacking::One | FormatBacking::WindowLinkedSessions => Cow::Borrowed("1"),
+            FormatBacking::PaneZ => optional_display(
+                window.and_then(|window| self.pane.and_then(|pane| window.pane_z(pane))),
+            ),
+            FormatBacking::PaneFloatingFlag => {
+                boolean(window.is_some_and(|window| {
+                    self.pane.is_some_and(|pane| window.shows_floating(pane))
+                }))
+            }
+            FormatBacking::PaneModalFlag => boolean(
+                window
+                    .is_some_and(|window| self.pane.is_some() && window.modal_pane() == self.pane),
+            ),
+            FormatBacking::WindowModalPane => {
+                optional_display(window.and_then(crate::model::Window::modal_pane))
             }
             FormatBacking::Host => Cow::Borrowed(engine.format_host()),
             FormatBacking::HostShort => Cow::Borrowed(engine.format_host_short()),
@@ -139,11 +152,18 @@ impl FormatTree<'_> {
                     .map(|window| window.session)
                     == self.session,
             ),
-            FormatBacking::SessionBell => boolean(
+            FormatBacking::SessionBell
+            | FormatBacking::SessionActivityFlag
+            | FormatBacking::SessionSilenceFlag => boolean(
                 session
-                    .and_then(|session| session.windows.first())
-                    .and_then(|id| state.windows.get(id))
-                    .is_some_and(|window| window.panes.values().any(|pane| pane.bell)),
+                    .into_iter()
+                    .flat_map(|session| &session.windows)
+                    .filter_map(|id| state.windows.get(id))
+                    .any(|window| match backing {
+                        FormatBacking::SessionActivityFlag => window.activity_flag,
+                        FormatBacking::SessionSilenceFlag => window.silence_flag,
+                        _ => window.panes.values().any(|pane| pane.bell),
+                    }),
             ),
             FormatBacking::SessionAlert | FormatBacking::SessionAlerts => {
                 let mut windows = session
@@ -321,6 +341,10 @@ impl FormatTree<'_> {
                             == self.window,
                     ),
                     (
+                        'O',
+                        window.is_some_and(|window| window.modal_pane().is_some()),
+                    ),
+                    (
                         'Z',
                         window.is_some_and(|window| window.zoomed_pane.is_some()),
                     ),
@@ -387,6 +411,19 @@ impl FormatTree<'_> {
                     (
                         'Z',
                         window.is_some_and(|window| window.zoomed_pane == self.pane),
+                    ),
+                    (
+                        'F',
+                        window.is_some_and(|window| {
+                            self.pane.is_some_and(|pane| window.shows_floating(pane))
+                        }),
+                    ),
+                    ('A', pane.is_some_and(|pane| pane.over_zoom)),
+                    (
+                        'O',
+                        window.is_some_and(|window| {
+                            self.pane.is_some() && window.modal_pane() == self.pane
+                        }),
                     ),
                 ] {
                     if present {
@@ -518,27 +555,23 @@ impl FormatTree<'_> {
                     FormatBacking::PaneTop | FormatBacking::PaneY => {
                         optional_display(Some(cell.yoff))
                     }
-                    FormatBacking::PaneRight => optional_display(
-                        cell.xoff
-                            .checked_add(cell.sx)
-                            .and_then(|right| right.checked_sub(1)),
-                    ),
-                    FormatBacking::PaneBottom => optional_display(
-                        cell.yoff
-                            .checked_add(cell.sy)
-                            .and_then(|bottom| bottom.checked_sub(1)),
-                    ),
+                    FormatBacking::PaneRight => {
+                        optional_display(Some(cell.xoff + i32::from(cell.sx) - 1))
+                    }
+                    FormatBacking::PaneBottom => {
+                        optional_display(Some(cell.yoff + i32::from(cell.sy) - 1))
+                    }
                     FormatBacking::PaneAtLeft => boolean(cell.xoff == 0),
                     FormatBacking::PaneAtTop => {
-                        boolean(cell.yoff == u16::from(border == PaneBorderStatus::Top))
+                        boolean(cell.yoff == i32::from(border == PaneBorderStatus::Top))
                     }
                     FormatBacking::PaneAtRight => {
-                        boolean(cell.xoff.saturating_add(cell.sx) == width)
+                        boolean(cell.xoff + i32::from(cell.sx) == i32::from(width))
                     }
                     FormatBacking::PaneAtBottom => boolean(if border == PaneBorderStatus::Bottom {
-                        cell.yoff.saturating_add(cell.sy) == height.saturating_sub(1) && height > 0
+                        cell.yoff + i32::from(cell.sy) == i32::from(height) - 1 && height > 0
                     } else {
-                        cell.yoff.saturating_add(cell.sy) == height
+                        cell.yoff + i32::from(cell.sy) == i32::from(height)
                     }),
                     _ => unreachable!(),
                 }

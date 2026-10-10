@@ -5,6 +5,7 @@ corpus: none
 # a real pty because the chooser only answers a client that is attached to it.
 stage: fixtures/chooser-kill-on-exit.sh ~/chooser-kill-on-exit.sh
 stage: fixtures/pty-drive.py ~/pty-drive.py
+stage: fixtures/pty_queries.py ~/pty_queries.py
 out: set-environment -gu CHOOSER_KILL_ON_EXIT
 run-shell 'sh ~/chooser-kill-on-exit.sh'
 out: show-environment -g CHOOSER_KILL_ON_EXIT

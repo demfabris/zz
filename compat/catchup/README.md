@@ -18,6 +18,17 @@ Work items, status, branches: `compat/catchup/ledger.json` through `ledger.py`.
 | `cargo.sh` | Every cargo call goes through this: memory cap, job count and two cargo slots sized from RAM. |
 | `wt.sh` | Lane worktrees `../zz-cu-<slot>` with a reflinked `target` and `compat/.cache`: `add`, `item` (refreshes a stale tmux cache), `cache`, `rm`, `list`, `prune`. |
 
+## Closed 2026-10-10
+
+Every item is merged except the two fabrico deferred (`later.share`, `later.menu-input`). The pin is the tmux 3.8
+tag; floating panes ship in the mux, daemon, wire and all four clients; display-popup is master's modal pane by
+ruling. The closing full suite on `fe2812e60` plus `fix.close-out` left `run.sh --attached-client`, every
+`tui-*.sh` fixture, clippy and `just compat check` green. Three `cargo ci-test` failures are outside the campaign
+(two `zz` agent::view timeline tests and the signal-disposition race in `zz-daemon-client`). The desktop and web
+float screenshots in float.clients' clause 4 were taken on 2026-10-10 after an alienware reboot; the three client
+bugs they turned up are in float.clients' last note. To reopen, add items to `ledger.json` and follow the steps
+below.
+
 ## Resuming (any machine)
 
 A fresh orchestrator session (or the same one after a stop) does this, in order:
@@ -156,7 +167,10 @@ Each rule cost a campaign real time. The source is in brackets
 
 ## Full suite: milestones only
 
-At M1, M2 and M3 (and before any release), the orchestrator runs once, on `main`, detached:
+At M1, M2 and M3 (and before any release), the orchestrator runs once, on `main`, detached, with
+`setsid nohup compat/catchup/full-suite.sh ~/.cache/zz-catchup/logs/<milestone> &`. It runs every step below in
+order and writes one line per step to `<dir>/summary.txt`, ending with `SUITE-DONE`; each step's log sits next to it.
+The harness binary must be named `zz_cli`: the launcher scenarios look for it by name.
 
 - `compat/catchup/cargo.sh test --workspace --all-features` (`timeout 9000`)
 - both CI clippy commands from AGENTS.md
@@ -276,3 +290,9 @@ check `pgrep -af codex` on resume.
 - 2026-10-09 orchestrator: a centred display-popup sits one row higher than 3.8's at an odd client
   height, because the modal pane is placed in window cells; recorded with the title column and the `O`
   flag as known drift under `display-popup.modal-pane` (fabrico's master-model ruling).
+- 2026-10-09 orchestrator: zz keeps tmux's option-name parsing (`set x[a]b] v` fails, as in tmux); a customize
+  rename to a key holding `]` is refused with "Bad array key" instead of loosening the parser to create the
+  key 3.8's customize can make. A tmux error stays an error rather than gaining a meaning in zz.
+- 2026-10-10 fabrico: zz's bash integration yields to the shell's own title. It writes its idle `bash` title only
+  when the shell did not set one at that prompt, so idle panes on Arch-like hosts read `user@host:dir` as in
+  tmux; running commands keep their command line.

@@ -1,0 +1,5 @@
+# A two-pane main-horizontal preset. tmux 3.8 sizes the lone other pane
+# (layout-set.c:285); the d77c9dc6 pin left it with stale geometry and this row
+# was the known differential layout.main-horizontal-upstream-bug.
+split-window -v -t w:0.0
+select-layout -t w:0 main-horizontal

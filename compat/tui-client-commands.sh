@@ -1341,6 +1341,28 @@ customize_prompt_vi_cases() {
   CASE_GRID_CELLS=0
 }
 
+# 3.8 mode-tree prompts are server prompts. `prompt_key` walks the server's
+# history list for the prompt's type on Up and Down and Enter adds a non-empty
+# answer to it, and mode-tree.c raises its search and filter prompts as
+# PROMPT_TYPE_SEARCH, so a filter prompt recalls the search typed before it.
+# An answer an add prompt refuses is a status message (`status_message_set`)
+# on the status row, not a command.
+customize_prompt_history_cases() {
+  customize_scene
+  CASE_NEEDLE_MODE=1
+  case_run customize-history-open same '' -- customize-mode -t PANE
+  case_run customize-history-search same '' -- send-keys -t PANE / m o u s e Enter
+  case_run customize-history-filter-up same '' -- send-keys -t PANE f Up
+  case_run customize-history-filter-down same '' -- send-keys -t PANE Down
+  case_run customize-history-filter-again same '' -- send-keys -t PANE C-p
+  case_run customize-history-filter-escape same '' -- send-keys -t PANE Escape
+  case_run customize-history-top same '' -- send-keys -t PANE g
+  case_run customize-add-option-prompt same '' -- send-keys -t PANE Enter
+  case_run customize-add-option-refused same '' -- send-keys -t PANE x Enter
+  restore_case customize-history-closed
+  CASE_GRID_CELLS=0
+}
+
 # `prompt_set_options` copies `status-keys` ONCE, when the prompt is created, so
 # the sabotage has to change the option before the prompt is raised, not after.
 customize_prompt_vi_self_checks() {
@@ -2065,6 +2087,7 @@ client_tool_cases() {
   switch_key_cases
   customize_long_prompt_cases
   customize_prompt_vi_cases
+  customize_prompt_history_cases
   customize_screen_cases
   attach_both_at 80 24
   case_run server-access-bare same '' -- server-access

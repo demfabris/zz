@@ -16356,6 +16356,51 @@ impl Shared {
         );
     }
 
+    /// The pin's `status_message_set(c, -1, 1, 0, 0, ...)` from a mode: logged
+    /// under the client's name, shown for the session's `display-time` until a
+    /// key clears it, with no command and so no `after-display-message`.
+    fn publish_status_message(
+        self: &Arc<Self>,
+        client: ClientId,
+        context: &ExecutionContext,
+        text: String,
+    ) {
+        let (publication, retired, deadline) = {
+            let mut inner = self.inner.lock();
+            let client_name = server_log_client_name(&inner, client);
+            push_server_message(&mut inner, format!("{client_name} message: {text}"));
+            let duration_ms = client_attached_session(&inner, client).map_or(750, |session| {
+                inner.engine.display_time_for_session(session)
+            });
+            let message_id = next_timed_message_id(&mut inner);
+            if duration_ms != 0 {
+                let _ = inner
+                    .client_mut(client)
+                    .is_some_and(|client| std::mem::take(&mut client.message_ignore_keys));
+            }
+            let (retired, deadline) =
+                arm_client_message(&mut inner, client, message_id, duration_ms, true);
+            let publication = OwnedClientMessagePublication {
+                client,
+                pane: context.pane,
+                kind: ClientMessageKind::Error,
+                text,
+                duration_ms,
+                message_id,
+            };
+            (publication, retired, deadline)
+        };
+        self.publish_owned_client_message(publication);
+        if let Some(retired) = retired {
+            self.retire_client_message(client, retired, true);
+        }
+        if let Some(deadline) = deadline {
+            let _ = self.timer_tx.send(timers::TimerInput::ClientMessage(
+                ClientMessageDeadlineCommand::Schedule(deadline),
+            ));
+        }
+    }
+
     fn spawn_delay(
         self: &Arc<Self>,
         delay: Duration,
@@ -23002,15 +23047,22 @@ impl Shared {
         };
         match mode {
             PaneModeRequest::Customize(mut mode) => {
+                if matches!(input, PaneModeInput::Key(_)) {
+                    self.ensure_prompt_history();
+                }
                 let result = {
                     let inner = self.inner.lock();
                     let facts = borrowed_format_hook_facts(&inner);
                     let mut expand = customize_expander(&inner, pane, &facts);
                     match input {
                         PaneModeInput::Key(key) => {
+                            let history = zz_mux::PromptHistories {
+                                command: &inner.command_history,
+                                search: &inner.search_history,
+                            };
                             inner
                                 .engine
-                                .customize_key(pane, &mut mode, key, &mut expand)
+                                .customize_key(pane, &mut mode, key, history, &mut expand)
                         }
                         PaneModeInput::Pointer { key, x, y } => {
                             inner
@@ -23221,13 +23273,20 @@ impl Shared {
                 modes.push(PaneModeRequest::Customize(mode));
             }
         }
+        if let Some((prompt_type, input)) = &result.remembered {
+            self.record_prompt_history(*prompt_type, input);
+        }
+        if let Some(message) = &result.message {
+            self.publish_status_message(client, context, message.clone());
+        }
         for command in &result.commands {
-            if self
-                .execute(client, ClientKind::Interactive, context, command)
-                .is_err()
-                && result.stop_on_error
-            {
-                break;
+            if let Err(error) = self.execute(client, ClientKind::Interactive, context, command) {
+                let mut message = daemon_error_text(&error);
+                uppercase_first(&mut message);
+                self.publish_status_message(client, context, message);
+                if result.stop_on_error {
+                    break;
+                }
             }
         }
         {
@@ -44296,6 +44355,7 @@ fn panes_mode_snapshot(
         border_style,
         copy: geometry.copy,
         format: !options.format.is_empty(),
+        clears: geometry.clears,
     }
 }
 
@@ -54272,11 +54332,100 @@ mod tests {
                 menu: None,
                 edit: None,
                 stop_on_error: false,
+                message: None,
+                remembered: None,
             },
         );
         let inner = shared.inner.lock();
         assert!(!inner.pane_modes.contains_key(&pane));
         assert!(inner.pane_mode_transitions.is_empty());
+    }
+
+    #[test]
+    fn customize_errors_are_status_messages_that_fire_no_display_hooks_and_answers_are_history() {
+        let shared = Arc::new(Shared::new(1));
+        let mailbox = OutboundMailbox::new();
+        let (client, _) =
+            shared.register_subscribed(ClientKind::Interactive, None, None, Arc::clone(&mailbox));
+        let (_, pane, _) = attached_message_fixture(&shared, "customize-error", &[client]);
+        let mut context = ExecutionContext::for_pane(&shared.inner.lock().engine.state, pane)
+            .expect("pane context");
+        for command in [
+            CommandInvocation::new(
+                "set-hook",
+                ["-g", "after-display-message", "set -g @shown y"],
+            ),
+            CommandInvocation::new("customize-mode", ["-t", &pane.to_string()]),
+        ] {
+            shared
+                .execute(client, ClientKind::Interactive, &mut context, &command)
+                .expect("setup");
+        }
+        let Some(PaneModeRequest::Customize(mode)) = shared
+            .inner
+            .lock()
+            .pane_modes
+            .get(&pane)
+            .and_then(|modes| modes.last())
+            .cloned()
+        else {
+            panic!("customize mode is on top");
+        };
+        take_reliable_messages(&mailbox);
+        shared.apply_customize_result(
+            client,
+            &mut context,
+            pane,
+            mode,
+            &CustomizeResult {
+                close: false,
+                commands: vec![CommandInvocation::new(
+                    "bind-key",
+                    ["-T", "root", "C-a", "nosuchcommand"],
+                )],
+                menu: None,
+                edit: None,
+                stop_on_error: false,
+                message: Some("Unknown key: Nope".to_owned()),
+                remembered: Some((CommandPromptType::Command, "C-a nosuchcommand".to_owned())),
+            },
+        );
+        assert_eq!(
+            shared.inner.lock().command_history,
+            ["C-a nosuchcommand".to_owned()]
+        );
+        let shown = take_reliable_messages(&mailbox)
+            .into_iter()
+            .filter_map(|message| match message {
+                ProtocolMessage::Event(Event {
+                    payload:
+                        EventPayload::TimedClientMessage {
+                            kind: ClientMessageKind::Error,
+                            text,
+                            duration_ms,
+                            ..
+                        },
+                    ..
+                }) => Some((text, duration_ms)),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shown,
+            [
+                ("Unknown key: Nope".to_owned(), 750),
+                ("Unknown command: nosuchcommand".to_owned(), 750)
+            ]
+        );
+        let hook = shared
+            .execute(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                &CommandInvocation::new("show-options", ["-gqv", "@shown"]),
+            )
+            .expect("show-options");
+        assert_eq!(hook.output, "");
     }
 
     #[test]
@@ -54325,6 +54474,8 @@ mod tests {
                     menu: None,
                     edit: None,
                     stop_on_error,
+                    message: None,
+                    remembered: None,
                 },
             );
             let output = shared

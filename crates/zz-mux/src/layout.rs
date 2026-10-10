@@ -270,6 +270,32 @@ impl CellLayout {
         pane_cell(&self.root, pane).is_some_and(|node| matches!(node, CellNode::Float { .. }))
     }
 
+    /// `layout_cell_is_top` and `layout_cell_is_bottom`: under every
+    /// top-bottom ancestor the cell has to be the first (or last) child that is
+    /// or holds a tiled pane. A float is never that child of its own parent, so
+    /// it is an edge cell only when no top-bottom node sits above it.
+    pub(crate) fn is_edge_cell(&self, pane: PaneId, top: bool) -> bool {
+        let Some(path) = pane_path(&self.root, pane) else {
+            return false;
+        };
+        (0..path.len()).all(|depth| {
+            let Some(CellNode::Node {
+                axis: Axis::Vertical,
+                children,
+                ..
+            }) = node_at_path(&self.root, &path[..depth])
+            else {
+                return true;
+            };
+            let edge = if top {
+                children.iter().position(|child| child.node.tiled())
+            } else {
+                children.iter().rposition(|child| child.node.tiled())
+            };
+            edge == Some(path[depth])
+        })
+    }
+
     pub(crate) fn floating_panes(&self) -> Vec<PaneId> {
         let mut panes = Vec::new();
         collect_panes(&self.root, &mut panes);

@@ -1,4 +1,5 @@
 use unicode_width::UnicodeWidthChar as _;
+use zz_protocol::CommandPromptType;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ModeKey {
@@ -150,6 +151,22 @@ impl ModeMouseKey {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct PromptHistories<'a> {
+    pub command: &'a [String],
+    pub search: &'a [String],
+}
+
+impl<'a> PromptHistories<'a> {
+    #[must_use]
+    pub const fn of(self, prompt_type: CommandPromptType) -> &'a [String] {
+        match prompt_type {
+            CommandPromptType::Command => self.command,
+            CommandPromptType::Search => self.search,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PromptOutcome {
     NotHandled,
@@ -206,6 +223,8 @@ pub struct ModePrompt {
     command_mode: bool,
     word_separators: String,
     copied: Option<Vec<char>>,
+    history_type: CommandPromptType,
+    history_index: usize,
 }
 
 impl ModePrompt {
@@ -250,6 +269,24 @@ impl ModePrompt {
         self
     }
 
+    #[must_use]
+    pub const fn with_history_type(mut self, history_type: CommandPromptType) -> Self {
+        self.history_type = history_type;
+        self
+    }
+
+    #[must_use]
+    pub const fn history_type(&self) -> CommandPromptType {
+        self.history_type
+    }
+
+    /// `prompt_add_history` runs on Enter for a non-empty buffer; a single-key
+    /// prompt finishes through `prompt_done` without it.
+    #[must_use]
+    pub fn remembered(&self) -> Option<(CommandPromptType, String)> {
+        (!self.single && !self.buffer.is_empty()).then(|| (self.history_type, self.input()))
+    }
+
     /// `PROMPT_COMMANDMODE`: `prompt_draw` paints the row with
     /// `message-command-style` while the vi prompt sits in command mode.
     #[must_use]
@@ -268,6 +305,12 @@ impl ModePrompt {
     }
 
     pub fn key(&mut self, key: ModeKey) -> PromptOutcome {
+        self.key_with_history(key, &[])
+    }
+
+    /// `prompt_up_history` and `prompt_down_history` walk the server's list for
+    /// this prompt's type, newest first, from an index the prompt owns.
+    pub fn key_with_history(&mut self, key: ModeKey, history: &[String]) -> PromptOutcome {
         let key = match key {
             ModeKey::Keypad(character) => ModeKey::Char(character),
             key => key,
@@ -318,7 +361,29 @@ impl ModePrompt {
             ModeKey::Right | ModeKey::Ctrl('f') => self.index = (self.index + 1).min(size),
             ModeKey::Home | ModeKey::Ctrl('a') => self.index = 0,
             ModeKey::End | ModeKey::Ctrl('e') => self.index = size,
-            ModeKey::Char('\t') | ModeKey::Up | ModeKey::Ctrl('p') => {}
+            ModeKey::Char('\t') => {}
+            ModeKey::Up | ModeKey::Ctrl('p') => {
+                if history.is_empty() || self.history_index >= history.len() {
+                    return PromptOutcome::Handled;
+                }
+                self.history_index += 1;
+                self.replace_buffer(&history[history.len() - self.history_index]);
+                return self.changed(prefix);
+            }
+            ModeKey::Down | ModeKey::Ctrl('n') => {
+                if history.is_empty() || self.history_index == 0 {
+                    self.replace_buffer("");
+                } else {
+                    self.history_index -= 1;
+                    let line = if self.history_index == 0 {
+                        ""
+                    } else {
+                        &history[history.len() - self.history_index]
+                    };
+                    self.replace_buffer(line);
+                }
+                return self.changed(prefix);
+            }
             ModeKey::Backspace | ModeKey::Ctrl('h') => {
                 if self.index == 0 {
                     return PromptOutcome::Handled;
@@ -334,7 +399,7 @@ impl ModePrompt {
                 self.buffer.remove(self.index);
                 return self.changed(prefix);
             }
-            ModeKey::Ctrl('u' | 'n') | ModeKey::Down => {
+            ModeKey::Ctrl('u') => {
                 self.buffer.clear();
                 self.index = 0;
                 return self.changed(prefix);
@@ -517,6 +582,11 @@ impl ModePrompt {
             };
         }
         self.changed('=')
+    }
+
+    fn replace_buffer(&mut self, line: &str) {
+        self.buffer = line.chars().collect();
+        self.index = self.buffer.len();
     }
 
     fn changed(&self, prefix: char) -> PromptOutcome {
@@ -804,5 +874,62 @@ mod tests {
         assert_eq!(prompt.key(ModeKey::End), PromptOutcome::Handled);
         assert_eq!(prompt.key(ModeKey::Backspace), PromptOutcome::Changed('='));
         assert_eq!(prompt.input(), "");
+    }
+
+    #[test]
+    fn up_and_down_walk_the_shared_history_from_the_newest_line() {
+        let history = ["first".to_owned(), "second".to_owned()];
+        let mut prompt = ModePrompt::new("(x) ", "typed", "");
+        prompt.key_with_history(ModeKey::Up, &history);
+        assert_eq!(prompt.input(), "second");
+        prompt.key_with_history(ModeKey::Ctrl('p'), &history);
+        assert_eq!(prompt.input(), "first");
+        prompt.key_with_history(ModeKey::Up, &history);
+        assert_eq!(prompt.input(), "first", "the oldest line is the end");
+        prompt.key_with_history(ModeKey::Down, &history);
+        assert_eq!(prompt.input(), "second");
+        prompt.key(ModeKey::Char('!'));
+        assert_eq!(prompt.input(), "second!");
+        prompt.key_with_history(ModeKey::Ctrl('n'), &history);
+        assert_eq!(prompt.input(), "", "back at index zero is an empty line");
+        prompt.key(ModeKey::Char('z'));
+        prompt.key_with_history(ModeKey::Down, &history);
+        assert_eq!(prompt.input(), "");
+
+        let mut empty = ModePrompt::new("(x) ", "kept", "");
+        empty.key_with_history(ModeKey::Up, &[]);
+        assert_eq!(empty.input(), "kept", "no history leaves the buffer");
+        empty.key_with_history(ModeKey::Down, &[]);
+        assert_eq!(
+            empty.input(),
+            "",
+            "prompt_down_history answers an empty line"
+        );
+    }
+
+    #[test]
+    fn the_vi_command_keys_k_and_j_walk_the_history_too() {
+        let history = ["one".to_owned()];
+        let mut prompt = ModePrompt::new("(x) ", "", "").with_status_keys(true);
+        prompt.key(ModeKey::Char('\u{1b}'));
+        prompt.key_with_history(ModeKey::Char('k'), &history);
+        assert_eq!(prompt.input(), "one");
+        prompt.key_with_history(ModeKey::Char('j'), &history);
+        assert_eq!(prompt.input(), "");
+    }
+
+    #[test]
+    fn only_a_non_empty_typed_answer_is_remembered() {
+        let mut prompt =
+            ModePrompt::new("(x) ", "", "").with_history_type(CommandPromptType::Search);
+        assert_eq!(prompt.remembered(), None);
+        prompt.key(ModeKey::Char('a'));
+        assert_eq!(
+            prompt.remembered(),
+            Some((CommandPromptType::Search, "a".to_owned()))
+        );
+        let mut single = ModePrompt::single("(y/n) ");
+        assert_eq!(single.key(ModeKey::Char('y')), PromptOutcome::Done);
+        assert_eq!(single.remembered(), None);
     }
 }

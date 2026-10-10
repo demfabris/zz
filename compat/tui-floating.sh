@@ -428,6 +428,73 @@ panes_floats_case() {
   COMPARE_FACTS=1
 }
 
+# window_panes_draw_screen blanks each float's frame (clipped to the screen)
+# before it draws the float, so a float pushed past the left or top edge, which
+# window_panes_get_geometry refuses to draw, still leaves a blank where it sits;
+# a float is a status-line edge cell only by layout_cell_is_top's tree walk; and
+# -Z keeps the window unzoomed, so the mode scales the window into the pane.
+panes_host_in_mode() {
+  [ "$(side_command "$1" display-message -p -t "=$INNER_SESSION:0.${PANES_HOST:-0}" '#{pane_in_mode}' 2>/dev/null)" = 1 ]
+}
+panes_mode_display() {
+  local side
+  for side in zz tmux; do
+    side_command "$side" display-panes "$@" -t "=$INNER_SESSION:0.${PANES_HOST:-0}" || die "$side refused display-panes"
+  done
+  wait_for 'the zz panes mode' panes_host_in_mode zz
+  wait_for 'the tmux panes mode' panes_host_in_mode tmux
+}
+panes_float_edge_cases() {
+  CASE_LABEL=panes-float-offscreen
+  attach_both
+  run_on_both split-window -h "$INNER_SHELL"
+  new_float_on_both FLOAT-E -x 30 -y 8 -X 10 -Y 3
+  run_on_both move-pane -X -12 -Y -2
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  panes_mode_display -d 0
+  COMPARE_FACTS=0
+  verdict panes-float-offscreen
+  COMPARE_FACTS=1
+  CASE_LABEL=panes-float-status
+  attach_both
+  run_on_both split-window -h "$INNER_SHELL"
+  set_on_both pane-border-status top
+  new_float_on_both FLOAT-S -x 30 -y 8 -X 10 -Y 3
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  panes_mode_display -d 0
+  COMPARE_FACTS=0
+  verdict panes-float-status
+  COMPARE_FACTS=1
+  CASE_LABEL=panes-float-status-single
+  attach_both
+  set_on_both pane-border-status top
+  new_float_on_both FLOAT-U -x 30 -y 8 -X 10 -Y 3
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  panes_mode_display -d 0
+  COMPARE_FACTS=0
+  verdict panes-float-status-single
+  COMPARE_FACTS=1
+  set_on_both pane-border-status off
+  CASE_LABEL=panes-float-unzoomed
+  attach_both
+  run_on_both split-window -h "$INNER_SHELL"
+  new_float_on_both FLOAT-Z -x 30 -y 8 -X 10 -Y 3
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  panes_mode_display -Z -d 0
+  COMPARE_FACTS=0
+  verdict panes-float-unzoomed
+  COMPARE_FACTS=1
+  CASE_LABEL=panes-float-unzoomed-odd
+  attach_both
+  run_on_both split-window -h -l 27 "$INNER_SHELL"
+  new_float_on_both FLOAT-O -x 33 -y 11 -X 13 -Y 5
+  run_on_both select-pane -t "=$INNER_SESSION:0.1"
+  PANES_HOST=1 panes_mode_display -Z -d 0
+  COMPARE_FACTS=0
+  verdict panes-float-unzoomed-odd
+  COMPARE_FACTS=1
+}
+
 titled_case() {
   CASE_LABEL=titled
   attach_both
@@ -781,20 +848,11 @@ cursor_covered_case() {
 
 printf 'floating pane differential at %sx%s (%s)\n' \
   "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$("$TMUX_BIN" -V)"
-overlap_cases
-panes_floats_case
-titled_case
-borderless_case
-popup_zoomed_case
-no_tiled_case
-modal_cases
-popup_titled_case
-clipped_case
-clipped_clock_case
-cursor_covered_case
-key_cases
-pane_menu_cases
-editor_cases
+for group in ${ZZ_FLOATING_ONLY:-overlap_cases panes_floats_case panes_float_edge_cases \
+  titled_case borderless_case popup_zoomed_case no_tiled_case modal_cases popup_titled_case \
+  clipped_case clipped_clock_case cursor_covered_case key_cases pane_menu_cases editor_cases}; do
+  "$group"
+done
 
 if [ "$FAILURES" -ne 0 ]; then
   printf '%s of %s comparisons differ\n' "$FAILURES" "$CHECKS"

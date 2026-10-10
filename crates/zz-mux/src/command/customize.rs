@@ -3181,7 +3181,10 @@ impl PreviewWriter {
     }
 
     fn value(&mut self, label: &str, value: &str) -> bool {
-        if self.y >= self.height || !self.text(true, "", label) || self.y >= self.height {
+        if self.y >= self.height || !self.text(true, "", label) {
+            return false;
+        }
+        if self.y >= self.height {
             return false;
         }
         self.text(false, "fg=themelightgrey", value)

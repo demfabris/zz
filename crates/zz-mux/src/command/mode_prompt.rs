@@ -318,11 +318,6 @@ impl ModePrompt {
             ModeKey::Right | ModeKey::Ctrl('f') => self.index = (self.index + 1).min(size),
             ModeKey::Home | ModeKey::Ctrl('a') => self.index = 0,
             ModeKey::End | ModeKey::Ctrl('e') => self.index = size,
-            ModeKey::Down | ModeKey::Ctrl('n') => {
-                self.buffer.clear();
-                self.index = 0;
-                return self.changed(prefix);
-            }
             ModeKey::Char('\t') | ModeKey::Up | ModeKey::Ctrl('p') => {}
             ModeKey::Backspace | ModeKey::Ctrl('h') => {
                 if self.index == 0 {
@@ -339,7 +334,7 @@ impl ModePrompt {
                 self.buffer.remove(self.index);
                 return self.changed(prefix);
             }
-            ModeKey::Ctrl('u') => {
+            ModeKey::Ctrl('u' | 'n') | ModeKey::Down => {
                 self.buffer.clear();
                 self.index = 0;
                 return self.changed(prefix);

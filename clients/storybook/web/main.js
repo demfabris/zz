@@ -56,6 +56,7 @@ const KNOBS = [
     "backdrop",
     "style",
     ...LOOK_KNOBS,
+    "icons",
     "glass",
     ...GLASS_KNOBS,
 ];
@@ -69,6 +70,7 @@ const DEFAULTS = {
     "pane-glow": "1",
     motion: "1",
     backdrop: "plain",
+    icons: "mac",
     glass: "style",
 };
 

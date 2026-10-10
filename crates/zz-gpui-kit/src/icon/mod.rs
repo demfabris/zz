@@ -22,8 +22,8 @@ mod assets;
 pub use assets::Assets;
 
 use zz_gpui::{
-    AnyElement, App, Hsla, IntoElement, RenderOnce, SharedString, StyleRefinement, Styled, Svg,
-    Transformation, Window, prelude::FluentBuilder as _, svg,
+    AnyElement, App, Global, Hsla, IntoElement, RenderOnce, SharedString, StyleRefinement, Styled,
+    Svg, Transformation, Window, prelude::FluentBuilder as _, svg,
 };
 
 use crate::{Sizable, Size};
@@ -89,8 +89,16 @@ impl Sizable for Icon {
     }
 }
 
+pub struct IconSource(pub fn(&str, &App) -> Option<SharedString>);
+
+impl Global for IconSource {}
+
 impl RenderOnce for Icon {
-    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let source = cx.try_global::<IconSource>().map(|source| source.0);
+        let path = source
+            .and_then(|source| source(&self.path, cx))
+            .unwrap_or(self.path);
         let color = self.text_color.unwrap_or_else(|| window.text_style().color);
         let ambient = window.text_style().font_size.to_pixels(window.rem_size());
         let styled_size = self.style.size.width.is_some() || self.style.size.height.is_some();
@@ -109,7 +117,7 @@ impl RenderOnce for Icon {
                 Size::Large => this.size_6(),
             })
             .when_some(self.transformation, Svg::with_transformation)
-            .path(self.path)
+            .path(path)
     }
 }
 

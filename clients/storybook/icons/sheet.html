@@ -1,0 +1,381 @@
+<title>zz Icon Set</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<style>
+@font-face {
+  font-family: "Lilex";
+  src: url("data:font/ttf;base64,/*LILEX*/") format("truetype");
+  font-weight: 400;
+  font-display: swap;
+}
+
+/* Layout: sticky control strip over grouped specimen cards, one card per glyph, 24-grid stage on the left, Tabler reference on the right. */
+:root {
+  --bg: #ffffff;
+  --raised: #f2f2f2;
+  --fg: #0a0a0a;
+  --muted: #535353;
+  --border: #d7d7d7;
+  --accent: #2563eb;
+  --grid: rgba(10, 10, 10, 0.07);
+  --grid-strong: rgba(37, 99, 235, 0.22);
+  --ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "Lilex", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0a0a0a;
+    --raised: #111111;
+    --fg: #fafafa;
+    --muted: #8c8c8c;
+    --border: #242424;
+    --accent: #60a5fa;
+    --grid: rgba(250, 250, 250, 0.06);
+    --grid-strong: rgba(96, 165, 250, 0.25);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0a0a0a;
+  --raised: #111111;
+  --fg: #fafafa;
+  --muted: #8c8c8c;
+  --border: #242424;
+  --accent: #60a5fa;
+  --grid: rgba(250, 250, 250, 0.06);
+  --grid-strong: rgba(96, 165, 250, 0.25);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--ui);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.page {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding-inline: 24px;
+  padding-block: 40px 64px;
+}
+header.intro {
+  display: grid;
+  gap: 10px;
+  max-width: 68ch;
+}
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+h1 {
+  margin: 0;
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  text-wrap: balance;
+}
+.intro p { margin: 0; color: var(--muted); }
+.intro strong { color: var(--fg); font-weight: 600; }
+
+.controls {
+  position: sticky;
+  top: env(safe-area-inset-top, 0px);
+  z-index: 2;
+  margin-top: 28px;
+  margin-inline: -24px;
+  padding: 12px 24px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 28px;
+}
+.control { display: grid; gap: 4px; min-width: 0; }
+.control label, .control .label {
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.control output { font-family: var(--mono); color: var(--fg); font-variant-numeric: tabular-nums; }
+.control input[type="range"] { width: 200px; max-width: 100%; accent-color: var(--accent); }
+.presets { display: flex; gap: 6px; flex-wrap: wrap; }
+.presets button, .toggle {
+  font: 500 12px/1 var(--ui);
+  color: var(--fg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.presets button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
+.presets button:focus-visible, .toggle:focus-within, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; }
+.toggle input { margin: 0; accent-color: var(--accent); }
+
+section.group { margin-top: 40px; }
+section.group > h2 {
+  margin: 0 0 14px;
+  font-size: 15px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+section.group > h2 span { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(232px, 1fr));
+  gap: 12px;
+}
+.card {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 1.5);
+  background: var(--raised);
+  min-width: 0;
+  align-content: start;
+}
+.stage { display: flex; gap: 12px; align-items: flex-end; }
+.frame {
+  width: 96px;
+  height: 96px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+}
+.frame svg { width: 96px; height: 96px; display: block; }
+body.grid .frame.ours {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(to right, var(--grid-strong) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-strong) 1px, transparent 1px),
+    linear-gradient(to right, var(--grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+  background-size: 48px 48px, 48px 48px, 8px 8px, 8px 8px;
+  background-position: -0.5px -0.5px;
+}
+.reference { display: grid; gap: 4px; justify-items: center; }
+.reference .frame { color: var(--muted); }
+.reference small { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+body:not(.compare) .reference { display: none; }
+.name {
+  font-family: var(--mono);
+  font-size: 13px;
+  margin: 0;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+.variant { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
+.chrome-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--muted);
+  font-size: 13px;
+  min-width: 0;
+}
+.chrome-row svg { width: 16px; height: 16px; flex: none; color: var(--fg); }
+.chrome-row .small svg { width: 12px; height: 12px; }
+.chrome-row .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.chip.unused { color: var(--accent); border-color: var(--accent); }
+.note { margin: 0; font-size: 12px; color: var(--muted); }
+footer { margin-top: 48px; color: var(--muted); font-size: 12px; max-width: 68ch; }
+
+@media (max-width: 520px) {
+  .page { padding-inline: 16px; }
+  .controls { margin-inline: -16px; padding-inline: 16px; }
+  .cards { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="page">
+  <header class="intro">
+    <div class="eyebrow">zz-gpui-kit · 24 grid · <span id="stroke-label">1.75px stroke</span></div>
+    <h1>zz Icon Set</h1>
+    <p>Every glyph zz ships, drawn from the theme instead of a fixed file. Corners take <strong>half the theme radius</strong> in grid units and zz's <strong>superellipse smoothing</strong>, capped at 0.45 of the shorter edge like every zz corner. Radius 0 is flat: sharp corners, square caps, mitered joins.</p>
+    <p id="school-copy"></p>
+    <p>Leave a comment on any icon you want redrawn and name it in the comment.</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="Drawing controls">
+    <div class="control">
+      <label for="radius">Theme radius <output id="radius-out"></output></label>
+      <input id="radius" type="range" min="0" max="25" step="1" value="6">
+    </div>
+    <div class="control">
+      <label for="smoothing">Corner smoothing <output id="smoothing-out"></output></label>
+      <input id="smoothing" type="range" min="2" max="6" step="0.5" value="4">
+    </div>
+    <div class="control">
+      <span class="label">Presets</span>
+      <div class="presets">
+        <button type="button" data-radius="0" id="preset-flat">Flat 0</button>
+        <button type="button" data-radius="6" id="preset-default">zz 6</button>
+        <button type="button" data-radius="12" id="preset-soft">Soft 12</button>
+        <button type="button" data-radius="25" id="preset-round">Round 25</button>
+      </div>
+    </div>
+    <div class="control">
+      <span class="label">Show</span>
+      <div class="presets">
+        <label class="toggle"><input type="checkbox" id="compare" checked> Tabler</label>
+        <label class="toggle"><input type="checkbox" id="grid" checked> Grid</label>
+      </div>
+    </div>
+  </div>
+
+  <main id="groups"></main>
+
+  <footer>
+    <p>The four brand marks (claude, openai, chrome, zz) keep their own artwork and are not listed. Usage counts the Rust files that name the icon, outside the icon module and the storybook; "site" means zzmux.sh ships it too.</p>
+  </footer>
+</div>
+
+<script>
+/*RENDERER*/
+</script>
+<script>
+const SETS = /*SETS*/;
+const SCHOOLS = {
+  mac: "Mac school: continuous corners everywhere, a lighter 1.75 stroke, wide Mac proportions, small filled parts (traffic lights, dog-ears, eyes, commits) and containers that show their content (sidebar rows, key caps, a tray). Our own drawings in that spirit; SF Symbols themselves may only be used on Apple platforms.",
+};
+const TABLER = /*TABLER*/;
+const USAGE = /*USAGE*/;
+
+const state = { radius: 6, smoothing: 4, set: "mac" };
+const bySet = Object.fromEntries(SETS.map((set) => [set.name, set]));
+const slots = [];
+
+function el(tag, attrs = {}, children = []) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "class") node.className = value;
+    else if (key === "text") node.textContent = value;
+    else node.setAttribute(key, value);
+  }
+  for (const child of children) node.append(child);
+  return node;
+}
+
+function build() {
+  const groups = document.getElementById("groups");
+  const order = [];
+  const byGroup = new Map();
+  for (const icon of SETS[0].icons) {
+    if (!byGroup.has(icon.group)) {
+      byGroup.set(icon.group, []);
+      order.push(icon.group);
+    }
+    byGroup.get(icon.group).push(icon);
+  }
+  for (const group of order) {
+    const icons = byGroup.get(group);
+    const cards = el("div", { class: "cards" });
+    const section = el("section", { class: "group", "aria-label": group }, [
+      el("h2", {}, [group, " ", el("span", { text: `${icons.length}` })]),
+      cards,
+    ]);
+    for (const icon of icons) {
+      const ours = el("div", { class: "frame ours", role: "img", "aria-label": `${icon.name}, zz` });
+      const reference = el("div", { class: "reference" }, [
+        el("div", { class: "frame", role: "img", "aria-label": `${icon.name}, Tabler today` }),
+        el("small", { text: "tabler today" }),
+      ]);
+      reference.firstChild.innerHTML = TABLER[icon.name] || "";
+      const row16 = el("span");
+      const row12 = el("span", { class: "small" });
+      const usage = USAGE[icon.variant] || { files: 0, site: false };
+      const chips = el("div", { class: "chips" }, [
+        el("span", { class: usage.files ? "chip" : "chip unused", text: usage.files ? `${usage.files} file${usage.files === 1 ? "" : "s"}` : "unused in Rust" }),
+      ]);
+      if (usage.site) chips.append(el("span", { class: "chip", text: "site" }));
+      const card = el("article", { class: "card", id: `icon-${icon.name}` }, [
+        el("div", { class: "stage" }, [ours, reference]),
+        el("div", {}, [el("h3", { class: "name", text: icon.name }), el("div", { class: "variant", text: `IconName::${icon.variant}` })]),
+        el("div", { class: "chrome-row" }, [row16, el("span", { class: "label", text: icon.name.replaceAll("-", " ") }), row12]),
+        chips,
+      ]);
+      const note = el("p", { class: "note" });
+      card.append(note);
+      cards.append(card);
+      slots.push({ name: icon.name, note, targets: [ours, row16, row12] });
+    }
+    groups.append(section);
+  }
+}
+
+function paint() {
+  const units = state.radius / 2;
+  document.getElementById("radius-out").textContent = `${state.radius}px → ${units}u`;
+  document.getElementById("smoothing-out").textContent = state.smoothing === 2 ? "2 circle" : `${state.smoothing}${state.smoothing === 4 ? " zz" : ""}`;
+  document.documentElement.style.setProperty("--radius", `${Math.min(state.radius, 14)}px`);
+  for (const button of document.querySelectorAll("[data-radius]")) {
+    button.setAttribute("aria-pressed", String(Number(button.dataset.radius) === state.radius));
+  }
+  const set = bySet[state.set];
+  document.getElementById("school-copy").textContent = SCHOOLS[state.set] || "";
+  document.getElementById("stroke-label").textContent = `${set.stroke}px stroke`;
+  for (const { name, note, targets } of slots) {
+    const icon = set.icons.find((candidate) => candidate.name === name);
+    const svg = icon ? zzGlyph.svg(set, icon, units, state.smoothing) : "";
+    for (const target of targets) target.innerHTML = svg;
+    note.textContent = icon?.note || "";
+    note.hidden = !icon?.note;
+  }
+}
+
+function setRadius(value) {
+  state.radius = value;
+  document.getElementById("radius").value = String(value);
+  paint();
+}
+
+build();
+document.getElementById("radius").addEventListener("input", (event) => setRadius(Number(event.target.value)));
+document.getElementById("smoothing").addEventListener("input", (event) => {
+  state.smoothing = Number(event.target.value);
+  paint();
+});
+for (const button of document.querySelectorAll("[data-radius]")) {
+  button.addEventListener("click", () => setRadius(Number(button.dataset.radius)));
+}
+
+for (const id of ["compare", "grid"]) {
+  const input = document.getElementById(id);
+  const sync = () => document.body.classList.toggle(id, input.checked);
+  input.addEventListener("change", sync);
+  sync();
+}
+paint();
+</script>

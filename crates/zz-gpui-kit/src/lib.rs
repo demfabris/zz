@@ -62,7 +62,7 @@ pub use foundation::{
     h_flex, oklab_lightness, parse_hex, rems_from_px, stacked_ring, surface_ring, to_hex, v_flex,
     window_border, window_paddings,
 };
-pub use icon::{Assets, Icon, IconName};
+pub use icon::{Assets, Icon, IconName, IconSource};
 pub use overlay::{ROOT_KEY_CONTEXT, Root, WindowExt};
 pub use title_bar::{
     MACOS_TRAFFIC_LIGHT_INSET, MACOS_TRAFFIC_LIGHT_SPAN, TITLE_BAR_HEIGHT, TitleBar,

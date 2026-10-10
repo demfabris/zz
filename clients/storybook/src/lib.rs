@@ -7,7 +7,9 @@
 //! sections' accessibility trees are mirrored into the page, and
 //! `globalThis.zzGpui` drives them.
 
+mod assets;
 mod backdrop;
+mod glyphs;
 mod host;
 mod knobs;
 mod stories;
@@ -58,6 +60,7 @@ fn launch(cx: &mut App) {
     let theme = Theme::global_mut(cx);
     theme.font_family = knobs::UI_FONT.into();
     theme.mono_font_family = "Lilex".into();
+    cx.set_global(zz_ui::IconSource(assets::icon_source));
     KNOBS.with(|knobs| knobs.borrow().apply(cx));
 }
 
@@ -284,7 +287,8 @@ mod web {
             return Err(JsValue::from_str("the storybook is already running"));
         }
         zz_gpui_platform::web_init();
-        let application = zz_gpui_platform::single_threaded_web().with_assets(zz_ui::Assets);
+        let application =
+            zz_gpui_platform::single_threaded_web().with_assets(super::assets::Assets);
         let handle = application.run_embedded(|cx| {
             super::launch(cx);
             READY.with(|ready| ready.set(true));

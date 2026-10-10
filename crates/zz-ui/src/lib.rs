@@ -16,7 +16,7 @@ pub use zz_gpui_kit::code_editor;
 
 pub use zz_gpui_kit::{
     ActiveTheme, Assets, BASE_UI_FONT_SIZE, CHROME_GAP, Colorize, Disableable, ElementExt, Icon,
-    IconName, IndexPath, InteractiveElementExt, MACOS_TRAFFIC_LIGHT_INSET,
+    IconName, IconSource, IndexPath, InteractiveElementExt, MACOS_TRAFFIC_LIGHT_INSET,
     MACOS_TRAFFIC_LIGHT_SPAN, ROOT_KEY_CONTEXT, Root, SURFACE_RING_OUTSET, ScrollbarShow,
     Selectable, SelectionStyle, Side, Sizable, Size, StyledExt, TITLE_BAR_HEIGHT, Theme,
     ThemeColor, ThemeMode, TitleBar, UiZoom, WindowControls, WindowExt, control_shadow, cubic_ease,

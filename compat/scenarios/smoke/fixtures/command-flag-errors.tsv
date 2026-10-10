@@ -41,6 +41,7 @@ lock-server	lock	-	@EMPTY@
 lock-session	locks	-t	[-t target-session]
 move-pane	movep	-P	[-bdfhMv] [-D lines] [-l size] [-L columns] [-P position] [-R columns] [-s src-pane] [-t dst-pane] [-U lines] [-X x-position] [-Y y-position] [-z z-index]
 move-window	movew	-s	[-abdkr] [-s src-window] [-t dst-window]
+new-pane	newp	-B	[-AbCDefhIkKLMOPvWZ] [-B border-lines] [-c start-directory] [-e environment] [-F format] [-l size] [-m message] [-p percentage] [-s style] [-S active-border-style] [-R inactive-border-style] [-T title] [-x width] [-y height] [-X x-position] [-Y y-position] [-t target-pane] [shell-command [argument ...]]
 new-session	new	-F	[-AdDEPX] [-c start-directory] [-e environment] [-F format] [-f flags] [-n window-name] [-s session-name] [-t target-session] [-x width] [-y height] [shell-command [argument ...]]
 new-window	neww	-F	[-abdEkPS] [-c start-directory] [-e environment] [-F format] [-n window-name] [-t target-window] [shell-command [argument ...]]
 next-layout	nextl	-t	[-t target-window]

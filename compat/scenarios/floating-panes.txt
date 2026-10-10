@@ -1,0 +1,253 @@
+# Floating panes as tmux 3.8 keeps them: flagged leaves of the window's layout
+# tree with their own geometry, z order and the v2 layout that carries them.
+new-pane
+new-pane
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+split-window -d -h -t w.0
+select-pane -t w.0
+new-pane
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+new-pane -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+break-pane -W -s w.1 -x 20 -y 6 -X 10 -Y 3
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+move-pane -P bottom-right -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+move-pane -L 2 -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+move-pane -z 1 -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+resize-pane -t w.1 -x 30 -y 8
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+resize-pane -t w.1 -L 3
+resize-pane -t w.1 -D 2
+resize-pane -t w.1 -U -D 1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+err: resize-pane -t w.1 -x 0
+err: resize-pane -t w.1 -D -200
+split-window -h -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+move-pane -P front -t w.2
+move-pane -P back -t w.2
+move-pane -P forward-loop -t w.3
+move-pane -P centre -t w.3
+move-pane -X 5 -Y 4 -t w.3
+move-pane -D 3 -R -t w.3
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+select-pane -t w.2
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+swap-pane -s w.2 -t w.0
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+swap-pane -s w.2 -t w.0
+join-pane -s w.1 -t w.1
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+select-layout -t w '{"V":2,"L":{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":24,"x":0,"y":0,"l":0,"i":0,"I":"%1"},{"t":"p","w":40,"h":6,"x":12,"y":6,"l":4,"i":4,"z":5,"I":"%4"},{"t":"p","w":31,"h":10,"x":56,"y":17,"l":2,"i":1,"z":3,"I":"%3"}]},{"t":"p","w":35,"h":6,"x":4,"y":2,"a":true,"i":2,"z":0,"I":"%0"},{"t":"p","w":35,"h":6,"x":41,"y":2,"l":1,"i":6,"z":1,"I":"%6"},{"t":"p","w":40,"h":6,"x":16,"y":8,"l":3,"i":5,"z":2,"I":"%5"},{"t":"p","w":40,"h":6,"x":7,"y":8,"l":5,"i":3,"z":4,"I":"%2"}]}}'
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+select-layout -t w '{"V":2,"L":{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":39,"h":24,"x":0,"y":0,"l":1,"i":0,"I":"%0"},{"t":"p","w":40,"h":6,"x":12,"y":6,"l":4,"i":4,"z":4,"I":"%4"},{"t":"p","w":40,"h":24,"x":40,"y":0,"a":true,"i":1,"I":"%3"}]},{"t":"p","w":35,"h":6,"x":4,"y":2,"l":0,"i":2,"z":0,"I":"%1"},{"t":"p","w":35,"h":6,"x":41,"y":2,"l":2,"i":6,"z":1,"I":"%6"},{"t":"p","w":40,"h":6,"x":16,"y":8,"l":3,"i":5,"z":2,"I":"%5"},{"t":"p","w":40,"h":6,"x":7,"y":8,"l":5,"i":3,"z":3,"I":"%2"}]}}'
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+kill-pane -t w.3
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+select-layout -t w even-horizontal
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+resize-window -t w -x 30 -y 10
+out: list-panes -t w -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t w #{window_layout}
+
+# Errors from the floating commands.
+new-session -d -s errs
+new-pane -t errs
+err: break-pane -W -s errs.1
+err: move-pane -P top-left -t errs.0
+err: move-pane -P sideways -t errs.1
+err: join-pane -s errs.0 -t errs.1
+err: split-window -L -t errs.1
+err: new-pane -L -t errs.1
+err: new-pane -L -O -t errs.0
+err: break-pane -W -s errs.0 -x 0
+err: join-pane -s errs.0 -t errs.0
+new-pane -O -t errs.0
+err: new-pane -O -t errs.0
+err: break-pane -s errs.2
+err: join-pane -s errs.2 -t errs.0
+out: list-panes -t errs -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t errs #{window_modal_pane}:#{window_flags}
+select-pane -t errs.0
+out: display-message -p -t errs #{pane_index}
+
+# A window loses its last tile and keeps living on its floats.
+new-session -d -s alone
+new-pane -t alone
+new-pane -t alone
+break-pane -W -s alone.0
+out: list-panes -t alone -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t alone #{window_layout}
+join-pane -s alone.0 -t alone.0
+out: list-panes -t alone -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t alone #{window_layout}
+kill-pane -t alone.0
+out: list-panes -t alone -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t alone #{window_layout}
+kill-pane -t alone.0
+kill-pane -t alone.0
+err: has-session -t alone
+
+# swap-pane -U/-D skip floats, directional select-pane and compass targets
+# see floats.
+new-session -d -s swaps
+split-window -h -t swaps.0
+new-pane -t swaps.0
+move-pane -X 40 -Y 5 -t swaps.2
+select-pane -L -t swaps.2
+out: display-message -p -t swaps #{pane_id}
+select-pane -R -t swaps.0
+out: display-message -p -t swaps #{pane_id}
+swap-pane -D -t swaps.1
+out: list-panes -t swaps -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+err: swap-pane -D -t swaps.2
+err: swap-pane -U -t swaps.2
+move-pane -P top-left -t swaps.2
+out: display-message -p -t swaps.{top-left} #{pane_id}
+out: display-message -p -t swaps.top-right #{pane_id}
+new-pane -O -t swaps.0
+err: swap-pane -s swaps.3 -t swaps.0
+err: swap-pane -s swaps.0 -t swaps.3
+
+# In [A, (B / C)] a floated A tiles back beside the whole column.
+new-session -d -s col
+split-window -h -t col.0
+split-window -v -t col.1
+break-pane -W -s col.0
+out: list-panes -t col -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t col #{window_layout}
+join-pane -s col.0 -t col.0
+out: list-panes -t col -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t col #{window_layout}
+select-layout -t col '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":6,"x":4,"y":2,"a":true,"i":0,"z":0,"I":"%17"},{"t":"v","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":80,"h":12,"x":0,"y":0,"l":1,"i":1,"I":"%18"},{"t":"p","w":80,"h":11,"x":0,"y":13,"l":0,"i":2,"I":"%19"}]}]}}'
+out: list-panes -t col -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t col #{window_layout}
+
+# A plain break-pane or join-pane of the last tile leaves a window of floats.
+new-session -d -s lone
+new-pane -t lone
+break-pane -d -s lone:0.0
+out: list-panes -t lone:0 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t lone:0 #{window_layout}
+new-session -d -s lone2
+new-pane -t lone2
+new-window -t lone2
+join-pane -s lone2:0.0 -t lone2:1.0
+out: list-panes -t lone2:0 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t lone2:0 #{window_layout}
+out: list-panes -t lone2:1 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# Plain move-pane moves tiled panes as join-pane does; placement flags need a float.
+new-session -d -s mv
+split-window -h -t mv.0
+split-window -v -t mv.1
+move-pane -s mv.0 -t mv.2
+out: list-panes -t mv -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+move-pane -h -s mv.2 -t mv.0
+out: list-panes -t mv -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+new-window -t mv
+move-pane -s mv:1.0 -t mv:0.0
+out: list-panes -t mv:0 -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+err: move-pane -P top-left -t mv:0.0
+new-pane -t mv:0.0
+out: list-panes -t mv:0 -O z -F #{pane_id}:#{pane_z}
+
+# One tile and one float: a preset lays out the tile and leaves the float.
+new-session -d -s sl
+new-pane -t sl
+select-layout -t sl even-horizontal
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t sl #{window_layout}
+
+# split-window on a float checks -E and -B before it shrinks the float.
+err: split-window -h -E -t sl.1 true
+err: split-window -h -B sideways -t sl.1
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# resize-pane -y on a float counts the pane-border-status row at the top or
+# bottom edge of the window.
+set -w -t sl pane-border-status top
+move-pane -P top-left -t sl.1
+resize-pane -t sl.1 -y 8
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+set -w -t sl pane-border-status bottom
+move-pane -P bottom-left -t sl.1
+resize-pane -t sl.1 -y 6
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+set -w -t sl pane-border-status off
+
+# A zoomed or hidden float is not floating: placement refuses it and resize
+# unzooms first.
+resize-pane -Z -t sl.1
+err: move-pane -X 10 -t sl.1
+err: move-pane -z 0 -t sl.1
+resize-pane -t sl.1 -x 30
+out: display-message -p -t sl #{window_zoomed_flag}
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+resize-pane -Z -t sl.0
+err: move-pane -P centre -t sl.1
+resize-pane -t sl.1 -y 5
+out: display-message -p -t sl #{window_zoomed_flag}
+out: list-panes -t sl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# split-window on a float ignores the tiled -l size, as tmux does.
+new-session -d -s fl
+new-pane -t fl
+split-window -h -l bad -t fl.1
+out: list-panes -t fl -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+
+# Layouts printed after a float resize, a float kill and the last tile's
+# removal restore the same panes through select-layout.
+new-session -d -s rt
+split-window -h -t rt.0
+new-pane -t rt.0
+new-pane -t rt.0
+resize-pane -t rt.2 -x 30 -y 8
+out: display-message -p -t rt #{window_layout}
+move-pane -X 0 -Y 0 -t rt.2
+resize-pane -t rt.0 -x 20
+select-layout -t rt '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"l":2,"i":0,"I":"%35"},{"t":"p","w":40,"h":6,"x":8,"y":4,"a":true,"i":3,"z":0,"I":"%38"},{"t":"p","w":28,"h":6,"x":4,"y":2,"l":0,"i":2,"z":1,"I":"%37"},{"t":"p","w":39,"h":24,"x":41,"y":0,"l":1,"i":1,"I":"%36"}]}}'
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}
+kill-pane -t rt.3
+out: display-message -p -t rt #{window_layout}
+move-pane -P centre -t rt.2
+select-layout -t rt '{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"l":1,"i":0,"I":"%35"},{"t":"p","w":28,"h":6,"x":4,"y":2,"a":true,"i":2,"z":0,"I":"%37"},{"t":"p","w":39,"h":24,"x":41,"y":0,"l":0,"i":1,"I":"%36"}]}}'
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}
+kill-pane -t rt.1
+kill-pane -t rt.0
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}
+move-pane -P top-left -t rt.0
+select-layout -t rt '{"V":2,"L":{"t":"p","w":28,"h":6,"x":4,"y":2,"a":true,"i":0,"z":0,"I":"%37"}}'
+out: list-panes -t rt -F #{pane_id}:#{pane_width}x#{pane_height}:#{pane_x},#{pane_y}:#{pane_z}:#{pane_floating_flag}#{pane_active}#{pane_modal_flag}:#{pane_flags}
+out: display-message -p -t rt #{window_layout}
+
+# select-layout -o puts the floats back in the z order the layout was saved with.
+new-session -d -s lz
+new-pane -x 30 -y 8 -X 2 -Y 2 -t lz.0
+new-pane -x 30 -y 8 -X 6 -Y 4 -t lz.0
+new-pane -x 30 -y 8 -X 10 -Y 6 -t lz.0
+select-layout -t lz tiled
+select-pane -t lz.1
+out: list-panes -t lz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}
+select-layout -o -t lz
+out: list-panes -t lz -F #{pane_index}:#{pane_z}:#{pane_active}:#{pane_floating_flag}
+out: display-message -p -t lz #{window_layout}

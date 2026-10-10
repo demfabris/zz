@@ -45,7 +45,8 @@
 #                        BOTH captures before they are compared. The divider
 #                        glyph itself, every column, the big digits, the
 #                        labels and every other cell's style are compared.
-# Nothing else is masked. Anything not in that list is compared.
+# Nothing else is masked, apart from the three popup differences KNOWN DRIFT
+# (above compare_rows) names. Anything not in that list is compared.
 #
 # SETTLED CHECKPOINTS, MARKED BEFORE THE STATE. Every surface here swallows the
 # keystroke a marker is typed with, so each case types its marker into the pane
@@ -556,10 +557,90 @@ mark_both() {
   settle_both "MARK-$name" "$name"
 }
 
+# KNOWN DRIFT, gap:display-popup.modal-pane. fabrico ruled on 2026-10-09 that
+# display-popup is upstream master's modal floating pane (34cd5da4 deleted
+# popup.c), so zz's popup is a pane where the 3.8 pin still draws popup.c's
+# client box. Exactly three things that model draws differ from the box, and
+# each popup case names the ones it shows:
+#   title   the -T title is the pane's border format on its top border, drawn
+#           after two horizontals (`┌──TITLE`) where popup_draw_cb draws it
+#           after one (`┌─TITLE─`)
+#   flag    the modal is a floating pane, so the status row's window list
+#           shows the window's O flag while it is up
+#   row     the modal is placed in window cells (knowledge/designs/
+#           floating-panes.md), so at an odd height a centred one sits a row
+#           above the client-centred box
+# For a case with known drift, compare_rows rewrites the zz capture by exactly
+# those differences (the title bytes, the `*O` of this window's entry, and the
+# box rows moved down one with the cursor) and then compares the whole screen
+# as usual: every other cell, every style and the cursor stay asserted, and a
+# rewrite that does not apply leaves the difference to fail the case.
+POPUP_DRIFT_OWNER=gap:display-popup.modal-pane
+POPUP_TITLES=(OVERLAY-POPUP CENTRE-POPUP)
+known_drift() {
+  case "$1" in
+  popup-opened | popup-typed) printf 'title flag' ;;
+  popup-under-message | popup-resized) printf 'title' ;;
+  centre-popup-fg | centre-popup-fg-typed | centre-popup-fgbg | centre-popup-fgbg-typed)
+    printf 'title flag row'
+    ;;
+  esac
+}
+declare -A DRIFT_OWNERS=()
+DRIFTS=0
+box_row() {
+  local glyph="$1" index
+  shift
+  local rows=("$@")
+  for index in "${!rows[@]}"; do
+    case "${rows[index]}" in
+    *"$glyph"*)
+      printf '%s' "$index"
+      return
+      ;;
+    esac
+  done
+}
+apply_known_drift() {
+  local drift="$1" index title top bottom pin_top last cursor_x cursor_y cursor_rest
+  if [[ " $drift " == *" title "* ]]; then
+    for index in "${!zz_rows[@]}"; do
+      for title in "${POPUP_TITLES[@]}"; do
+        zz_rows[index]="${zz_rows[index]/"┌──$title"/"┌─$title─"}"
+      done
+    done
+  fi
+  if [[ " $drift " == *" flag "* ]]; then
+    last=$((${#zz_rows[@]} - 1))
+    zz_rows[last]="${zz_rows[last]/":$WINDOW_NAME*O"/":$WINDOW_NAME*"}"
+  fi
+  if [[ " $drift " == *" row "* ]]; then
+    top="$(box_row '┌' "${zz_rows[@]}")"
+    pin_top="$(box_row '┌' "${tmux_rows[@]}")"
+    bottom="$(box_row '└' "${tmux_rows[@]}")"
+    if [ -n "$top" ] && [ -n "$pin_top" ] && [ -n "$bottom" ] && [ "$pin_top" -eq $((top + 1)) ]; then
+      local moved=("${zz_rows[bottom]}")
+      for ((index = top; index < bottom; index++)); do
+        moved+=("${zz_rows[index]}")
+      done
+      for ((index = top; index <= bottom; index++)); do
+        zz_rows[index]="${moved[index - top]}"
+      done
+      cursor_x="${zz_cursor%%,*}"
+      cursor_y="${zz_cursor#*,}"
+      cursor_rest="${cursor_y#* }"
+      cursor_y="${cursor_y%% *}"
+      if [ "$cursor_y" -ge "$top" ] && [ "$cursor_y" -lt "$bottom" ]; then
+        zz_cursor="$cursor_x,$((cursor_y + 1)) $cursor_rest"
+      fi
+    fi
+  fi
+}
+
 compare_rows() {
   local name="$1"
   local styled="$2"
-  local zz_rows tmux_rows zz_cursor tmux_cursor index differing total count
+  local zz_rows tmux_rows zz_cursor tmux_cursor index differing total count drift
   if [ "$styled" = styled ]; then
     mapfile -t zz_rows < <(capture_screen zz)
     mapfile -t tmux_rows < <(capture_screen tmux)
@@ -569,6 +650,8 @@ compare_rows() {
   fi
   zz_cursor="$(cursor_tuple zz)"
   tmux_cursor="$(cursor_tuple tmux)"
+  drift="$(known_drift "$name")"
+  [ -z "$drift" ] || apply_known_drift "$drift"
   total="$ROWS_UNDER_TEST"
   differing=-1
   count=0
@@ -607,11 +690,14 @@ compare_rows() {
 
 declare -A RECORD_OWNERS=([unattributed]=0)
 owner_tally() {
-  local key entries=()
+  local key entries=() drifts=()
   for key in $(printf '%s\n' "${!RECORD_OWNERS[@]}" | LC_ALL=C sort); do
     entries+=("$key=${RECORD_OWNERS[$key]}")
   done
-  printf 'owners %s' "${entries[*]}"
+  for key in $(printf '%s\n' "${!DRIFT_OWNERS[@]}" | LC_ALL=C sort); do
+    drifts+=("$key=${DRIFT_OWNERS[$key]}")
+  done
+  printf 'owners %s; %s asserted with known drift %s' "${entries[*]}" "$DRIFTS" "${drifts[*]:-none}"
 }
 verdict() {
   local name="$1"
@@ -625,6 +711,14 @@ verdict() {
     RECORD_OWNERS[$owner]=$((${RECORD_OWNERS[$owner]:-0} + 1))
   fi
   if compare_rows "$name" styled; then
+    local drift
+    drift="$(known_drift "$name")"
+    if [ -n "$drift" ]; then
+      DRIFTS=$((DRIFTS + 1))
+      DRIFT_OWNERS[$POPUP_DRIFT_OWNER]=$((${DRIFT_OWNERS[$POPUP_DRIFT_OWNER]:-0} + 1))
+      printf 'ok    %s, known drift %s: %s\n' "$name" "$POPUP_DRIFT_OWNER" "$drift"
+      return 0
+    fi
     printf 'ok    %s\n' "$name"
     return 0
   fi

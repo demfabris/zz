@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    LayoutNode, MuxSnapshot, PaneBorderIndicators, PaneBorderLines, PaneBorderStatus, PaneId,
-    PaneKindSnapshot, PaneMode, PaneSnapshot, PaneStatus, SessionId, SessionSnapshot,
-    SessionViewer, TmuxColour, WindowId, WindowSnapshot,
+    FloatingPaneSnapshot, LayoutNode, ModalPaneSnapshot, MuxSnapshot, PaneBorderIndicators,
+    PaneBorderLines, PaneBorderStatus, PaneId, PaneKindSnapshot, PaneMode, PaneSnapshot,
+    PaneStatus, SessionId, SessionSnapshot, SessionViewer, TmuxColour, WindowId, WindowSnapshot,
 };
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -49,6 +49,10 @@ pub enum TreeOp {
         visible_layout_dump: String,
         pane_order: Vec<PaneId>,
         pane_z_order: Vec<PaneId>,
+        floating: Vec<FloatingPaneSnapshot>,
+        modal: Option<ModalPaneSnapshot>,
+        sx: u16,
+        sy: u16,
     },
     WindowFlags {
         session: SessionId,
@@ -261,6 +265,10 @@ fn window_diff(
         || old.visible_layout_dump != next.visible_layout_dump
         || old.pane_order != next.pane_order
         || old.pane_z_order != next.pane_z_order
+        || old.floating != next.floating
+        || old.modal != next.modal
+        || old.sx != next.sx
+        || old.sy != next.sy
     {
         ops.push(TreeOp::WindowLayout {
             session,
@@ -271,6 +279,10 @@ fn window_diff(
             visible_layout_dump: next.visible_layout_dump.clone(),
             pane_order: next.pane_order.clone(),
             pane_z_order: next.pane_z_order.clone(),
+            floating: next.floating.clone(),
+            modal: next.modal,
+            sx: next.sx,
+            sy: next.sy,
         });
     }
     if old.index != next.index
@@ -463,6 +475,10 @@ fn apply_op(snapshot: &mut MuxSnapshot, op: &TreeOp) -> Result<(), TreeDeltaErro
             visible_layout_dump,
             pane_order,
             pane_z_order,
+            floating,
+            modal,
+            sx,
+            sy,
         } => {
             let window = window_mut(snapshot, *session, *window)?;
             window.layout.clone_from(layout);
@@ -471,6 +487,10 @@ fn apply_op(snapshot: &mut MuxSnapshot, op: &TreeOp) -> Result<(), TreeDeltaErro
             window.visible_layout_dump.clone_from(visible_layout_dump);
             window.pane_order.clone_from(pane_order);
             window.pane_z_order.clone_from(pane_z_order);
+            window.floating.clone_from(floating);
+            window.modal = *modal;
+            window.sx = *sx;
+            window.sy = *sy;
         }
         TreeOp::WindowFlags {
             session,

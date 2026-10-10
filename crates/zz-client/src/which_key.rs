@@ -162,6 +162,20 @@ fn classify(commands: &[CommandInvocation]) -> Option<Class> {
     let [command, rest @ ..] = commands else {
         return None;
     };
+    if let [.., last] = rest
+        && canonical_command(&command.name) == "new-pane"
+        && canonical_command(&last.name) == "switch-mode"
+    {
+        let windows = last.args.iter().any(|arg| {
+            let arg = arg.to_string();
+            arg.starts_with('-') && arg.contains('w')
+        });
+        return Some(if windows {
+            class(Windows, 11, false, "Switch to a window")
+        } else {
+            class(Sessions, 9, false, "Switch to a session")
+        });
+    }
     if !rest.iter().all(is_feedback) {
         return None;
     }
@@ -247,6 +261,11 @@ fn classify(commands: &[CommandInvocation]) -> Option<Class> {
             )
         }
         "display-panes" => class(Panes, 11, false, "Show pane numbers"),
+        "new-pane" => class(Panes, 20, false, "New floating pane"),
+        "if-shell" if args.iter().any(|arg| arg.contains("pane_floating_flag")) => {
+            class(Panes, 21, false, "Float or tile pane")
+        }
+        "switch-client" if has("-T") => class(Panes, 22, false, "Move a floating pane"),
         "rotate-window" if has("-D") => class(Panes, 13, false, "Rotate panes back"),
         "rotate-window" => class(Panes, 12, false, "Rotate panes"),
         "next-layout" => class(Panes, 14, false, "Next layout"),
@@ -619,7 +638,10 @@ mod tests {
         assert_eq!(find(&rows, "'").label, "Go to window by index");
         assert_eq!(find(&rows, "C-b").label, "Send the prefix");
         assert_eq!(find(&rows, "T").label, "Change the pane title");
-        assert_eq!(rows.len(), 51);
+        assert_eq!(find(&rows, "*").label, "New floating pane");
+        assert_eq!(find(&rows, "Tab").label, "Switch to a window");
+        assert_eq!(find(&rows, "BTab").label, "Switch to a session");
+        assert_eq!(rows.len(), 56);
     }
 
     #[test]

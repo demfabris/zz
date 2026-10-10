@@ -7,7 +7,11 @@ use super::{
     Renderer,
     chooser::{Grid, Paint, Trailing, acs_glyph, plain, segments_width},
 };
-use crate::{layout::Rect, mode_view::resolved_style, state::Model};
+use crate::{
+    layout::{PaneRect, Rect},
+    mode_view::resolved_style,
+    state::Model,
+};
 
 const CLOCK_TABLE: [[[bool; 5]; 5]; 14] = {
     const O: bool = false;
@@ -515,12 +519,21 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
 }
 
 impl Renderer {
-    pub(super) fn paint_pane_mode(&mut self, mode: &PaneMode, rect: Rect, model: &Model) {
+    pub(super) fn paint_pane_mode(&mut self, mode: &PaneMode, entry: &PaneRect, model: &Model) {
+        let rect = entry.content();
+        let source = entry.source;
         if rect.width == 0 || rect.height == 0 {
             return;
         }
         let reaches_edge = rect.x.saturating_add(rect.width) >= model.size.columns;
-        surface(mode, rect, &model.status.theme).grid.emit_into(
+        let whole = entry.mode_rect();
+        let grid = surface(mode, whole, &model.status.theme).grid;
+        let grid = if (whole.width, whole.height) == (rect.width, rect.height) {
+            grid
+        } else {
+            grid.cropped(source.0, source.1, rect.width, rect.height)
+        };
+        grid.emit_into(
             &mut self.output,
             rect.x,
             rect.y,

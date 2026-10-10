@@ -89,7 +89,7 @@ fn attaching_client_flag_values_reach_the_daemon_effect_without_mux_interpretati
 
 #[test]
 fn catalog_covers_the_options_the_handlers_read() {
-    assert_eq!(COMMAND_SPECS.len(), 80);
+    assert_eq!(COMMAND_SPECS.len(), 81);
     for name in ["kill-session", "kill-window", "kill-pane"] {
         let spec = COMMAND_SPECS
             .iter()
@@ -344,10 +344,13 @@ fn bind_key_validates_payloads_before_storing_them() {
     assert_eq!(engine.keys.get("prefix", "x"), original_x.as_ref());
 
     let error = engine
-        .execute(&mut context, &command("bind-key", &["y", "new-pane", "-h"]))
+        .execute(
+            &mut context,
+            &command("bind-key", &["y", "link-window", "-d"]),
+        )
         .unwrap_err();
     assert!(matches!(error, ServerError::UnsupportedCommand(message)
-        if message == "bind-key new-pane"));
+        if message == "bind-key link-window"));
 
     engine
         .execute(

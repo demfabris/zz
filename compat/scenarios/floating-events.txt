@@ -1,0 +1,42 @@
+# The 3.8 pane events and the after-split-window hook around floating panes:
+# new-pane fires pane-created and after-split-window, move-pane placement fires
+# no pane-moved, and a float's size change fires pane-resized.
+set -g @pc ''
+set -g @pr ''
+set -g @pm ''
+set -g @asw ''
+set-hook -g pane-created "set -gaF @pc '#{hook}/#{hook_pane}/#{hook_window}+'"
+set-hook -g pane-resized "set -gaF @pr '#{hook_pane}:#{hook_width}x#{hook_height}/#{hook_old_width}x#{hook_old_height}+'"
+set-hook -g pane-moved "set -gaF @pm '#{hook_pane}/#{hook_old_window}/#{hook_new_window}+'"
+set-hook -g after-split-window "set -gaF @asw '#{hook}/#{hook_pane}/#{pane_id}+'"
+new-pane -t w
+out: show -gv @pc
+out: show -gv @asw
+out: show -gv @pr
+set -g @pr ''
+move-pane -X 5 -Y 2 -t w.1
+move-pane -P bottom-right -t w.1
+move-pane -z 0 -t w.1
+out: show -gv @pm
+out: show -gv @pr
+resize-pane -t w.1 -x 30 -y 8
+out: show -gv @pr
+set -g @pr ''
+resize-pane -t w.1 -L 2
+resize-pane -t w.1 -D 1
+out: show -gv @pr
+set -g @pr ''
+break-pane -W -s w.0
+out: show -gv @pm
+out: show -gv @pr
+set -g @pr ''
+join-pane -s w.0 -t w.0
+out: show -gv @pm
+out: show -gv @pr
+split-window -h -t w.1
+out: show -gv @asw
+out: show -gv @pc
+set-hook -gu pane-created
+set-hook -gu pane-resized
+set-hook -gu pane-moved
+set-hook -gu after-split-window

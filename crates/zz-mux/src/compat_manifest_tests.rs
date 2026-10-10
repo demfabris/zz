@@ -159,8 +159,8 @@ const STRUCTURALLY_MATCHING_SHARED_BINDINGS_BY_TABLE: &[(&str, usize)] = &[
     ("copy-mode", 69),
     ("copy-mode-vi", 79),
     ("move", 19),
-    ("prefix", 58),
-    ("root", 17),
+    ("prefix", 63),
+    ("root", 22),
 ];
 
 fn root() -> PathBuf {
@@ -1099,7 +1099,7 @@ fn command_flag_fixture_matches_the_pin() {
         rows += 1;
     }
 
-    assert_eq!((rows, aliases, required), (89, 75, 85));
+    assert_eq!((rows, aliases, required), (90, 76, 86));
     assert_eq!(
         fs::read_to_string(root().join("compat/scenarios/smoke/fixtures/command-flag-errors.tsv"))
             .expect("command flag fixture corpus"),
@@ -1239,10 +1239,10 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         .iter()
         .copied()
         .collect::<BTreeSet<_>>();
-    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 166);
+    assert_eq!(TMUX_OPTION_CONSUMERS.len(), 167);
     assert_eq!(
         consumers.len(),
-        166,
+        167,
         "option consumer roster contains duplicates"
     );
     assert!(
@@ -1261,13 +1261,13 @@ fn tmux_option_consumer_partition_matches_pinned_inventory() {
         };
         scope_counts[index] += 1;
     }
-    assert_eq!(scope_counts, [40, 48, 57, 21]);
+    assert_eq!(scope_counts, [41, 48, 57, 21]);
 
     let tracked = items
         .keys()
         .filter_map(|item| item.strip_prefix("option:"))
         .collect::<BTreeSet<_>>();
-    assert_eq!(tracked.len(), 17, "active option gap count changed");
+    assert_eq!(tracked.len(), 16, "active option gap count changed");
     assert!(
         consumers.is_disjoint(&tracked),
         "consumed and tracked option names overlap"
@@ -1340,8 +1340,8 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     let direct_formats = direct_format_variable_names().collect::<BTreeSet<_>>();
     let delegated_formats = delegated_format_variable_names().collect::<BTreeSet<_>>();
     assert_eq!(formats.len(), 214, "pinned global format count changed");
-    assert_eq!(constant_formats.len(), 47, "tracked format count changed");
-    assert_eq!(direct_formats.len(), 101, "direct format count changed");
+    assert_eq!(constant_formats.len(), 44, "tracked format count changed");
+    assert_eq!(direct_formats.len(), 104, "direct format count changed");
     assert_eq!(
         delegated_formats.len(),
         66,
@@ -1365,7 +1365,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         .collect::<BTreeSet<_>>();
     assert_eq!(
         nonconstant_formats.len(),
-        167,
+        170,
         "nonconstant format registration count changed"
     );
     let tracked_formats = items
@@ -1530,20 +1530,20 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
         308,
         "pinned binding count changed"
     );
-    assert_eq!(zz_keys.len(), 371, "zz default binding count changed");
+    assert_eq!(zz_keys.len(), 382, "zz default binding count changed");
     assert_eq!(
         shared_keys.len(),
-        279,
+        289,
         "shared default binding count changed"
     );
     assert_eq!(
         missing_keys.len(),
-        29,
+        19,
         "missing default binding count changed"
     );
     assert_eq!(
         native_keys.len(),
-        92,
+        93,
         "native default binding count changed"
     );
     assert_eq!(
@@ -1553,7 +1553,7 @@ fn option_format_hook_and_default_key_items_match_pinned_inventories() {
     );
     assert_eq!(
         structurally_matching_bindings.len(),
-        242,
+        252,
         "structurally matching shared binding count changed"
     );
     assert_eq!(
@@ -1701,7 +1701,7 @@ fn shared_prefix_keys_carry_the_pinned_notes() {
         differing.is_empty(),
         "prefix notes differ from the pin: {differing:?}"
     );
-    assert_eq!(shared, 76, "shared prefix key count changed");
+    assert_eq!(shared, 81, "shared prefix key count changed");
     let unnoted = key_tables
         .list(Some("prefix"))
         .filter(|(_, _, binding)| binding.note.is_none())

@@ -514,7 +514,9 @@ fn completed_status_bytes_with_capture_bytes(
     for border in request.pane_borders.iter().chain(&status.pane_borders) {
         bytes = bytes
             .saturating_add(std::mem::size_of::<zz_protocol::PaneBorderPresentation>())
-            .saturating_add(border.style.capacity());
+            .saturating_add(border.style.capacity())
+            .saturating_add(border.window_style.capacity())
+            .saturating_add(border.window_active_style.capacity());
     }
     bytes.saturating_mul(2).saturating_add(4096)
 }

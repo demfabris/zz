@@ -843,6 +843,29 @@ The TUI raises its colour depth and arms extended keys from `features` and decod
 in `user_keys` before the built-in keys. `zz_terminal::KeyCode` appends `User(u16)`, which
 `input_key_name` spells `UserN`; a pane writes nothing for it.
 
+v108 also carries tmux 3.8's floating panes (catch-up item `float.core`,
+[design](/designs/floating-panes.md)). `WindowSnapshot` appends `floating:
+Vec<FloatingPaneSnapshot { pane, xoff: i32, yoff: i32, sx, sy, visible, border_lines,
+border_status }>`, front to back, and `modal: Option<ModalPaneSnapshot { pane, capture_keys,
+close_on_click, close_on_cancel }>`, both `#[serde(default)]`; a float's cell is its content box
+in window cells, offsets may be negative, and `visible` is false for a float hidden by zoom or
+zoomed itself. `TreeOp::WindowLayout` appends the same two fields. `LayoutNode` appends the unit
+variant `Empty`, which `WindowSnapshot.layout` holds when the window has no tiled pane.
+`WindowSnapshot` then appends the window's own size, `sx` and `sy` (`#[serde(default)]`, 0 from
+an older encoder), and `TreeOp::WindowLayout` appends the same two, so a client knows the window's
+height when no tiled pane's layout dump carries it (float.clients: a float drag's bottom-status
+row). `PaneBorderPresentation` appends `window_style` and `window_active_style`
+(`#[serde(default)]`, empty unless a `window-style` or `window-active-style` is set anywhere), the
+expanded options `tty_default_colours` takes a pane's grounds from, with `window_active_style`
+sent for the active pane only; the raw TUI resolves their theme colours through the status line's
+theme slots, so a `display-popup`'s `popup-style` paints the modal's default cells.
+`InputMessage::MouseKey` appends `press: Option<(u16, u16)>` (`#[serde(default)]`), the client cell
+of the button-down that latched the gesture. `float_wire_tests` pins the encodings.
+`display-popup` is now a modal floating pane, so `EventPayload::Popup` and `InputMessage::Popup`
+keep their tags but the daemon never sends the event and ignores the input; they go at the next
+version. In Rust both are named `RetiredPopup` with `#[serde(rename = "Popup")]`, so the tag and
+the encoding are unchanged and no client names the popup any more.
+
 v108 also carries tmux 3.8's copy-mode line numbers and refresh-now (catch-up item
 `pin.keys-copy`). `zz_terminal::CopyModeAction` appends `RefreshNow`, `LineNumbersOn { option_off }`,
 `LineNumbersOff` and `LineNumbersToggle { option_off }` after `RefreshToggle`; `option_off` is the

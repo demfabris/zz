@@ -792,7 +792,6 @@ impl AppShell {
             && core.command_prompt().is_none()
             && core.menu().is_none()
             && core.confirm().is_none()
-            && core.popup().is_none()
             && core.command_output().is_none()
     }
 

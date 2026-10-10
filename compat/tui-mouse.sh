@@ -1915,6 +1915,160 @@ case_customize_mouse_menu_outside() {
   check_screen MODE_POINTER customize-mouse-menu-outside-cancel/screen
 }
 
+# Floating panes under the pointer, tmux 3.8's bound drags: `C-MouseDrag1Pane`
+# and `C-MouseDrag1Empty` run `new-pane -M`, which creates a float spanning the
+# press to the pointer (`cmd_split_window_mouse_resize`); `M-MouseDrag1Pane`
+# runs `move-pane -M`; `MouseDrag1Border` on a float resizes it from the edge
+# or corner the press grabbed and moves it from the top border
+# (`cmd_resize_pane_mouse_resize_move_floating`). Each command arms
+# `c->tty.mouse_drag_update`, so every later report of the gesture drives the
+# same float until the release, whatever key it would name: each gesture's
+# last motion drops its modifier and runs over the float it drives. Channel:
+# every floating pane's size and position, and the active pane's id.
+# FLOAT_SABOTAGE_COLUMN moves zz's last motion of each gesture.
+FLOAT_SABOTAGE_COLUMN=""
+FLOAT_ROW_OFFSET=0
+FLOAT_PREFIX=""
+float_geometry() {
+  side_command "$1" list-panes -t "=$INNER_SESSION" \
+    -F '#{pane_floating_flag} #{pane_index} #{pane_width}x#{pane_height} #{pane_left},#{pane_top}' 2>/dev/null |
+    awk '$1 == 1 { printf "%s:%s@%s;", $2, $3, $4 }'
+}
+float_active() {
+  side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active} #{pane_index}:#{pane_floating_flag}' 2>/dev/null |
+    awk '$1 == 1 { print $2; exit }'
+}
+float_count_is() {
+  [ "$(side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_floating_flag}' 2>/dev/null | grep -c 1)" = "$2" ]
+}
+float_geometry_settled() {
+  local first second
+  first="$(float_geometry "$1")"
+  sleep 0.2
+  second="$(float_geometry "$1")"
+  [ -n "$first" ] && [ "$first" = "$second" ]
+}
+float_gesture() {
+  local press="$1" motion="$2" release_button="$3"
+  shift 3
+  local cells=("$@") index last side column
+  last=$((${#cells[@]} - 2))
+  for ((index = 1; index < ${#cells[@]}; index += 2)); do
+    cells[index]=$((cells[index] + FLOAT_ROW_OFFSET))
+  done
+  for side in zz tmux; do
+    send_mouse "$side" "$press" "${cells[0]}" "${cells[1]}" M
+    for ((index = 2; index <= last; index += 2)); do
+      column="${cells[index]}"
+      if [ "$side" = zz ] && [ "$index" -eq "$last" ] && [ -n "$FLOAT_SABOTAGE_COLUMN" ]; then
+        column=$((column + FLOAT_SABOTAGE_COLUMN))
+      fi
+      if [ "$index" -eq "$last" ]; then
+        send_mouse "$side" 32 "$column" "${cells[index + 1]}" M
+      else
+        send_mouse "$side" "$motion" "$column" "${cells[index + 1]}" M
+      fi
+      sleep 0.1
+    done
+    send_mouse "$side" "$release_button" "$column" "${cells[last + 1]}" m
+  done
+}
+float_verdict() {
+  local name="$FLOAT_PREFIX$1" floats="$2"
+  wait_for "the $name floats on zz" float_count_is zz "$floats"
+  wait_for "the $name floats on tmux" float_count_is tmux "$floats"
+  wait_for "the $name geometry settled on zz" float_geometry_settled zz
+  wait_for "the $name geometry settled on tmux" float_geometry_settled tmux
+  check_value FLOAT "$name/geometry" "$(float_geometry zz)" "$(float_geometry tmux)"
+  check_value FLOAT "$name/active" "$(float_active zz)" "$(float_active tmux)"
+}
+kill_floats_both() {
+  local side pane
+  for side in zz tmux; do
+    for pane in $(side_command "$side" list-panes -t "=$INNER_SESSION" \
+      -F '#{pane_floating_flag} #{pane_id}' | awk '$1 == 1 { print $2 }'); do
+      side_command "$side" kill-pane -t "$pane" >/dev/null 2>&1 || true
+    done
+  done
+  wait_for 'zz floats gone' float_count_is zz 0
+  wait_for 'tmux floats gone' float_count_is tmux 0
+}
+case_float_create_from_pane() {
+  CASE_LABEL=float-create-pane
+  mark_both floatcreate
+  float_gesture 16 48 0 11 5 21 9 46 16 51 17
+  float_verdict float-create-pane 1
+  kill_floats_both
+}
+case_float_move() {
+  CASE_LABEL=float-move
+  mark_both floatmove
+  run_on_both new-pane -d -x 30 -y 8 -X 10 -Y 3 "$INNER_SHELL"
+  wait_for 'the zz float to move' float_count_is zz 1
+  wait_for 'the tmux float to move' float_count_is tmux 1
+  float_gesture 8 40 0 21 8 26 10 23 9 31 13
+  float_verdict float-move 1
+  kill_floats_both
+}
+case_float_border_resize() {
+  CASE_LABEL=float-border-resize
+  mark_both floatresize
+  run_on_both new-pane -d -x 30 -y 8 -X 10 -Y 3 "$INNER_SHELL"
+  wait_for 'the zz float to resize' float_count_is zz 1
+  wait_for 'the tmux float to resize' float_count_is tmux 1
+  float_gesture 0 32 0 40 7 46 7 51 9
+  float_verdict float-border-resize 1
+  float_gesture 0 32 0 51 11 56 14 58 16
+  float_verdict float-corner-resize 1
+  kill_floats_both
+}
+case_float_top_border_move() {
+  CASE_LABEL=float-top-border-move
+  mark_both floattop
+  run_on_both new-pane -d -x 30 -y 8 -X 10 -Y 3 "$INNER_SHELL"
+  wait_for 'the zz float to drag' float_count_is zz 1
+  wait_for 'the tmux float to drag' float_count_is tmux 1
+  float_gesture 0 32 0 21 4 25 7 31 9
+  float_verdict float-top-border-move 1
+  kill_floats_both
+}
+case_float_create_from_empty() {
+  CASE_LABEL=float-create-empty
+  run_on_both new-window -t "=$INNER_SESSION:1" -n empty "$INNER_SHELL"
+  run_on_both new-pane -x 20 -y 6 -X 2 -Y 2 "$INNER_SHELL"
+  local side tiled
+  for side in zz tmux; do
+    tiled="$(side_command "$side" list-panes -t "=$INNER_SESSION:1" -F '#{pane_floating_flag} #{pane_id}' |
+      awk '$1 == 0 { print $2; exit }')"
+    side_command "$side" kill-pane -t "$tiled" >/dev/null || die "$side refused kill-pane"
+  done
+  wait_for 'zz down to its float' pane_count_is zz 1
+  wait_for 'tmux down to its float' pane_count_is tmux 1
+  float_gesture 16 48 0 41 11 50 14 56 17 61 19
+  float_verdict float-create-empty 2
+  run_on_both kill-window -t "=$INNER_SESSION:1"
+  wait_for 'zz back on window 0' pane_count_is zz 1
+  wait_for 'tmux back on window 0' pane_count_is tmux 1
+}
+case_float_status_top() {
+  set_on_both status-position top
+  FLOAT_ROW_OFFSET=1
+  FLOAT_PREFIX=status-top-
+  case_float_create_from_pane
+  case_float_top_border_move
+  FLOAT_ROW_OFFSET=0
+  FLOAT_PREFIX=""
+  set_on_both status-position bottom
+}
+run_float_cases() {
+  case_float_create_from_pane
+  case_float_move
+  case_float_border_resize
+  case_float_top_border_move
+  case_float_create_from_empty
+  case_float_status_top
+}
+
 # --- dispositions ----------------------------------------------------------
 #
 # Each mode below is `same` where the two binaries are measured to agree and
@@ -1922,6 +2076,8 @@ case_customize_mouse_menu_outside() {
 # sabotage can drive a recorded channel in a case where it asserts.
 USER_BINDING_MODE=same
 USER_BINDING_REASON=""
+FLOAT_MODE=same
+FLOAT_REASON=""
 MOUSE_CONTEXT_MODE=same
 MOUSE_CONTEXT_REASON=""
 WHEEL_MODE=same
@@ -1967,6 +2123,7 @@ run_cases() {
   case_mouse_context_formats
   case_border_drag
   case_border_click
+  run_float_cases
   case_status_clicks
   case_border_user_binding
   case_status_user_binding
@@ -2110,6 +2267,11 @@ sc_one_sided_border_drag() {
   BORDER_SABOTAGE_COLUMN=$((right + 2 - 4))
   case_border_drag
   BORDER_SABOTAGE_COLUMN=""
+}
+sc_one_sided_float_drag() {
+  FLOAT_SABOTAGE_COLUMN=3
+  case_float_move
+  FLOAT_SABOTAGE_COLUMN=""
 }
 # The pin's own `WheelDownStatus` unbound on zz only, so a wheel over the
 # status row steps the pin's window and leaves zz's where it was. Both wheel
@@ -2390,6 +2552,8 @@ run_self_check() {
     sc_one_sided_mouse_context
   self_check_case "zz's border drag released four cells short" catches \
     sc_one_sided_border_drag
+  self_check_case "zz's float drag released three cells further" catches \
+    sc_one_sided_float_drag
   self_check_case 'a longer paste under the menu on zz only' catches \
     sc_one_sided_menu_paste_tail
   self_check_case "zz's own pane marked and the pin's not" catches \

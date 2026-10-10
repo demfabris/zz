@@ -9,14 +9,14 @@ use zz_daemon_client::{Endpoint, HostEntry};
 use zz_protocol::{
     ChooseBufferState, ChooseTreeState, ChooserPresentation, CommandPromptState, ConfirmState,
     DisplayPanesState, InputMessage, MenuState, MuxSnapshot, PaneBorderIndicators, PaneBorderLines,
-    PaneBorderStatus, PaneId, PaneKindSnapshot, PaneSnapshot, PopupState, SessionId,
-    SessionSnapshot, StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
+    PaneBorderStatus, PaneId, PaneKindSnapshot, PaneSnapshot, SessionId, SessionSnapshot,
+    StatusLine, StatusPosition, TmuxColour, TmuxRange, WindowSnapshot,
 };
 use zz_terminal::{KeyCode, SearchQuery, TerminalAppearance, TerminalViewport};
 
 use crate::{
     layout::{
-        FloatingLayout, FloatingSpec, PaneRect, Rect, ResolvedLayout, resolve, resolve_floating,
+        FloatingSpec, PaneRect, Rect, ResolvedLayout, resolve, resolve_float, resolve_floating,
     },
     picker,
     sidebar::{
@@ -121,8 +121,6 @@ pub(crate) struct Model {
     pub choose_buffer: Option<ChooseBufferState>,
     pub chooser_presentation: Option<ChooserPresentation>,
     pub display_panes: Option<DisplayPanesState>,
-    pub popup: Option<PopupState>,
-    pub popup_keys_down: Vec<(PaneId, KeyCode)>,
     pub menu: Option<MenuState>,
     pub menu_selection: Option<usize>,
     pub menu_action_pending: bool,
@@ -226,15 +224,7 @@ impl Model {
             snapshot: Arc::clone(core.snapshot()),
             layout_generation: core.layout_generation(),
             attached_session: core.attached_session(),
-            viewports: core
-                .popup()
-                .and_then(|popup| {
-                    core.viewport(popup.pane)
-                        .cloned()
-                        .map(|viewport| (popup.pane, viewport))
-                })
-                .into_iter()
-                .collect(),
+            viewports: HashMap::default(),
             appearance: core.appearance().cloned().unwrap_or_default(),
             status: Arc::new(core.status().clone()),
             prefix_armed: core.prefix_armed(),
@@ -247,8 +237,6 @@ impl Model {
             choose_buffer: core.choose_buffer().cloned(),
             chooser_presentation: core.chooser_presentation().cloned(),
             display_panes: core.display_panes().cloned(),
-            popup: core.popup().cloned(),
-            popup_keys_down: Vec::new(),
             menu: core.menu().cloned(),
             menu_selection: core
                 .menu()
@@ -310,13 +298,6 @@ impl Model {
         self.choose_buffer = core.choose_buffer().cloned();
         self.chooser_presentation = core.chooser_presentation().cloned();
         self.display_panes = core.display_panes().cloned();
-        self.popup = core.popup().cloned();
-        self.popup_keys_down.clear();
-        if let Some(popup) = core.popup()
-            && let Some(viewport) = core.viewport(popup.pane)
-        {
-            self.viewports.insert(popup.pane, viewport.clone());
-        }
         self.set_menu(core.menu().cloned());
         self.menu_opened = core.menu_opened();
         self.menu_action_pending = false;
@@ -331,6 +312,7 @@ impl Model {
         self.last_sent_command_output_geometry = None;
         self.layout = ResolvedLayout::default();
         self.sync_input_pane();
+        self.sync_modal_capture();
         self.clamp_sidebar();
     }
 
@@ -424,6 +406,7 @@ impl Model {
     pub fn update_snapshot(&mut self, snapshot: Arc<MuxSnapshot>) {
         self.snapshot = snapshot;
         self.sync_input_pane();
+        self.sync_modal_capture();
         let active_picker = self.active_picker();
         if active_picker != self.picker_pane {
             self.picker_selection = 0;
@@ -431,6 +414,15 @@ impl Model {
         self.picker_pane = active_picker;
         self.clamp_sidebar();
         self.recompute_layout();
+    }
+
+    fn sync_modal_capture(&mut self) {
+        let capture = self
+            .window()
+            .and_then(|window| window.modal)
+            .filter(|modal| modal.capture_keys)
+            .map(|modal| modal.pane);
+        self.router.set_capture(capture);
     }
 
     pub fn set_size(&mut self, size: TerminalSize) {
@@ -484,17 +476,6 @@ impl Model {
         self.menu_action_pending = action_pending;
     }
 
-    pub fn set_popup(&mut self, popup: Option<PopupState>) -> Option<PaneId> {
-        let previous = self.popup.as_ref().map(|popup| popup.pane);
-        let next = popup.as_ref().map(|popup| popup.pane);
-        let evicted = previous.filter(|pane| Some(*pane) != next);
-        if let Some(pane) = evicted {
-            self.viewports.remove(&pane);
-        }
-        self.popup = popup;
-        evicted
-    }
-
     /// The box `menu_key_cb` measures a pointer report against: the origin and
     /// size `menu_draw_cb` gives `screen_write_box`, resolved against this
     /// client's own viewport.
@@ -525,35 +506,13 @@ impl Model {
         })
     }
 
-    pub fn popup_layout(&self) -> Option<FloatingLayout> {
-        let popup = self.popup.as_ref()?;
-        resolve_floating(
-            FloatingSpec {
-                left: popup.left,
-                top: popup.top,
-                width: popup.width,
-                height: popup.height,
-                client_columns: popup.client_columns,
-                client_rows: popup.client_rows,
-                border_lines: popup.border_lines,
-            },
-            Rect {
-                x: 0,
-                y: 0,
-                width: self.size.columns,
-                height: self.size.rows,
-            },
-        )
-    }
-
     pub fn accepts_viewport(&self, pane: PaneId) -> bool {
-        self.popup.as_ref().is_some_and(|popup| popup.pane == pane)
-            || self.snapshot.sessions.iter().any(|session| {
-                session
-                    .windows
-                    .iter()
-                    .any(|window| window.panes.contains_key(&pane))
-            })
+        self.snapshot.sessions.iter().any(|session| {
+            session
+                .windows
+                .iter()
+                .any(|window| window.panes.contains_key(&pane))
+        })
     }
 
     /// Adopts a fresh status publication. Returns whether the block's
@@ -954,6 +913,23 @@ impl Model {
             .map_or(PaneBorderStatus::Off, |window| window.pane_border_status)
     }
 
+    /// `window_pane_get_pane_lines`: a float reads its own value.
+    pub fn pane_lines(&self, pane: PaneId) -> PaneBorderLines {
+        self.layout
+            .float(pane)
+            .map_or_else(|| self.pane_border_lines(), |float| float.lines)
+    }
+
+    pub fn canvas(&self) -> Rect {
+        sidebar::canvas_rect(
+            self.size.columns,
+            self.size.rows,
+            self.sidebar_visible(),
+            self.status_block_rows(),
+            self.status_top(),
+        )
+    }
+
     pub fn pane_border_lines(&self) -> PaneBorderLines {
         self.window()
             .map_or(PaneBorderLines::Single, |window| window.pane_border_lines)
@@ -994,6 +970,32 @@ impl Model {
         crate::mode_view::resolved_style(&border.style, &self.status.theme)
     }
 
+    /// `tty_default_colours`: the pane's grounds from `window-style`, each
+    /// replaced by `window-active-style`'s where the active pane sets one.
+    pub fn pane_window_style(&self, pane: PaneId) -> zz_protocol::TmuxStyle {
+        let Some(border) = self
+            .status
+            .pane_borders
+            .iter()
+            .find(|border| border.pane == pane)
+        else {
+            return zz_protocol::TmuxStyle::default();
+        };
+        let resolve = |value: &str| {
+            crate::mode_view::resolved_style(value, &self.status.theme).unwrap_or_default()
+        };
+        let base = resolve(&border.window_style);
+        let active = resolve(&border.window_active_style);
+        let set = |colour: Option<zz_protocol::TmuxColour>| {
+            colour.filter(|colour| *colour != zz_protocol::TmuxColour::Default)
+        };
+        zz_protocol::TmuxStyle {
+            fg: set(active.fg).or(set(base.fg)),
+            bg: set(active.bg).or(set(base.bg)),
+            ..zz_protocol::TmuxStyle::default()
+        }
+    }
+
     pub fn pane_rect(&self, pane: PaneId) -> Option<PaneRect> {
         self.layout
             .panes
@@ -1002,12 +1004,54 @@ impl Model {
             .copied()
     }
 
+    /// `window_get_active_at`: with a modal only the modal answers; otherwise
+    /// visible floats front to back, their borders included, then the tiled
+    /// panes.
     pub fn pane_at(&self, column: u16, row: u16) -> Option<PaneRect> {
+        if let Some(modal) = self.window().and_then(|window| window.modal) {
+            return self
+                .layout
+                .float(modal.pane)
+                .filter(|float| float.hit_rect().contains(column, row))
+                .and_then(|float| self.pane_rect(float.pane));
+        }
+        if let Some(float) = self
+            .layout
+            .floats
+            .iter()
+            .rev()
+            .find(|float| float.hit_rect().contains(column, row))
+        {
+            return self.pane_rect(float.pane);
+        }
         self.layout
-            .panes
+            .tiled()
             .iter()
             .find(|entry| entry.rect.contains(column, row))
             .copied()
+    }
+
+    /// Whether a float drawn above `pane` covers the cell, which hides the
+    /// pane's cursor there as tmux 3.8's scene does.
+    pub fn covered_above(&self, pane: PaneId, column: u16, row: u16) -> bool {
+        let tiled = self.layout.tiled().len();
+        let front = self
+            .layout
+            .panes
+            .iter()
+            .position(|entry| entry.pane == pane)
+            .map_or(0, |index| {
+                index.saturating_sub(tiled) + usize::from(index >= tiled)
+            });
+        self.layout.floats.get(front..).is_some_and(|floats| {
+            floats
+                .iter()
+                .any(|float| float.hit_rect().contains(column, row))
+        })
+    }
+
+    pub fn is_float(&self, pane: PaneId) -> bool {
+        self.layout.float(pane).is_some()
     }
 
     pub fn terminal_geometries(&self) -> Vec<(PaneId, (u16, u16, u32, u32))> {
@@ -1019,7 +1063,7 @@ impl Model {
             .iter()
             .filter_map(|entry| {
                 let pane = window.panes.get(&entry.pane)?;
-                if !matches!(pane.kind, PaneKindSnapshot::Terminal) {
+                if !matches!(pane.kind, PaneKindSnapshot::Terminal) || self.is_float(entry.pane) {
                     return None;
                 }
                 let content = entry.content();
@@ -1078,25 +1122,22 @@ impl Model {
     }
 
     fn recompute_layout(&mut self) {
-        let canvas = sidebar::canvas_rect(
-            self.size.columns,
-            self.size.rows,
-            self.sidebar_visible(),
-            self.status_block_rows(),
-            self.status_top(),
-        );
+        let canvas = self.canvas();
         self.layout = self
             .window()
             .map_or_else(ResolvedLayout::default, |window| {
-                if let Some(pane) = window.zoomed_pane {
+                let mut layout = if let Some(pane) = window.zoomed_pane {
                     ResolvedLayout {
                         panes: vec![PaneRect {
                             pane,
                             rect: canvas,
                             border_status: window.pane_border_status,
                             status_on_border: false,
+                            source: (0, 0),
+                            whole: None,
                         }],
                         dividers: Vec::new(),
+                        floats: Vec::new(),
                     }
                 } else {
                     resolve(
@@ -1107,7 +1148,16 @@ impl Model {
                         &window.pane_z_order,
                         window.pane_border_indicators,
                     )
+                };
+                for float in window.floating.iter().rev().filter(|float| float.visible) {
+                    if let Some((rect, frame)) =
+                        resolve_float(float, canvas, float.pane == window.active_pane)
+                    {
+                        layout.panes.push(rect);
+                        layout.floats.push(frame);
+                    }
                 }
+                layout
             });
     }
 
@@ -1174,96 +1224,6 @@ mod tests {
             stay_open: false,
             mouse_keys: false,
         }
-    }
-
-    fn popup_state(pane: PaneId) -> PopupState {
-        PopupState {
-            pane,
-            left: 4,
-            top: 3,
-            width: 20,
-            height: 8,
-            client_columns: 80,
-            client_rows: 24,
-            cell_width_px: 8,
-            cell_height_px: 16,
-            title: "Popup".to_owned(),
-            style: "default".to_owned(),
-            border_style: "default".to_owned(),
-            border_lines: PopupBorderLines::Single,
-            close_on_exit: false,
-            close_on_exit_zero: false,
-            close_on_any_key: false,
-            dead: false,
-        }
-    }
-
-    #[test]
-    fn popup_state_seeds_updates_closes_replaces_and_resets_with_the_connection() {
-        let pane = PaneId(u64::MAX - 1);
-        let replacement = PaneId(u64::MAX - 2);
-        let initial = popup_state(pane);
-        let viewport = TerminalViewport::blank(18, 6, zz_terminal::SessionStatus::Running);
-        let mut core = ClientCore::new();
-        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
-            sequence: 1,
-            payload: zz_protocol::EventPayload::Popup {
-                state: Some(initial.clone()),
-            },
-        }));
-        core.handle_message(zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
-            sequence: 2,
-            payload: zz_protocol::EventPayload::TerminalViewport {
-                pane,
-                viewport: viewport.clone(),
-            },
-        }));
-        let endpoint = Endpoint::parse("unix:///tmp/zz-state-popup-test.sock").unwrap();
-        let mut model = Model::new(
-            &core,
-            TerminalSize {
-                columns: 80,
-                rows: 24,
-                cell_width_px: 8,
-                cell_height_px: 16,
-            },
-            "host".to_owned(),
-            "host".to_owned(),
-            endpoint.clone(),
-            endpoint,
-            Vec::new(),
-        );
-        assert_eq!(model.popup, Some(initial.clone()));
-        assert_eq!(model.viewports.get(&pane), Some(&viewport));
-        assert!(model.accepts_viewport(pane));
-
-        let mut updated = initial.clone();
-        updated.title = "Updated".to_owned();
-        assert_eq!(model.set_popup(Some(updated.clone())), None);
-        assert_eq!(model.popup, Some(updated));
-        assert_eq!(model.viewports.get(&pane), Some(&viewport));
-
-        model.popup_keys_down.push((pane, KeyCode::Escape));
-        assert_eq!(model.set_popup(None), Some(pane));
-        assert!(!model.viewports.contains_key(&pane));
-        assert_eq!(model.popup_keys_down, [(pane, KeyCode::Escape)]);
-
-        model.set_popup(Some(initial));
-        model.viewports.insert(pane, viewport);
-        assert_eq!(model.set_popup(Some(popup_state(replacement))), Some(pane));
-        assert!(!model.viewports.contains_key(&pane));
-        assert_eq!(
-            model.popup.as_ref().map(|popup| popup.pane),
-            Some(replacement)
-        );
-        assert!(!model.accepts_viewport(pane));
-        assert!(model.accepts_viewport(replacement));
-        assert_eq!(model.popup_keys_down, [(pane, KeyCode::Escape)]);
-
-        model.reset_connection(&ClientCore::new());
-        assert!(model.popup.is_none());
-        assert!(model.popup_keys_down.is_empty());
-        assert!(model.viewports.is_empty());
     }
 
     #[test]

@@ -613,6 +613,10 @@ pub struct PaneBorderPresentation {
     pub pane: PaneId,
     #[serde(deserialize_with = "deserialize_status_text")]
     pub style: String,
+    #[serde(default, deserialize_with = "deserialize_status_text")]
+    pub window_style: String,
+    #[serde(default, deserialize_with = "deserialize_status_text")]
+    pub window_active_style: String,
 }
 
 fn deserialize_pane_border_presentations<'de, D>(
@@ -710,10 +714,18 @@ impl StatusLine {
             return Err("status pane border presentations exceed the wire limit");
         }
         for border in &self.pane_borders {
-            if border.style.len() > MAX_STATUS_TEXT_BYTES {
+            let styles = [
+                &border.style,
+                &border.window_style,
+                &border.window_active_style,
+            ];
+            if styles
+                .iter()
+                .any(|style| style.len() > MAX_STATUS_TEXT_BYTES)
+            {
                 return Err("status pane border style exceeds the wire byte limit");
             }
-            if !style_or_empty_parses(&border.style) {
+            if !styles.iter().all(|style| style_or_empty_parses(style)) {
                 return Err("status pane border style does not parse as a style");
             }
         }
@@ -2260,7 +2272,10 @@ pub enum InputMessage {
     CancelPrefix {
         request_id: u64,
     },
-    Popup {
+    /// The v107 per-client popup's input. Kept for its tag, never sent; it
+    /// goes at the next protocol version.
+    #[serde(rename = "Popup")]
+    RetiredPopup {
         action: PopupAction,
     },
     Menu {
@@ -2311,6 +2326,8 @@ pub enum InputMessage {
         /// and owns its ranges, so the start travels with the event.
         #[serde(default)]
         status_range_start: Option<u16>,
+        #[serde(default)]
+        press: Option<(u16, u16)>,
     },
     ClientSuspendState {
         suspended: bool,
@@ -3624,7 +3641,10 @@ pub enum EventPayload {
     PrefixCancelled {
         request_id: u64,
     },
-    Popup {
+    /// The v107 per-client popup. Kept for its tag, never sent; it goes at
+    /// the next protocol version.
+    #[serde(rename = "Popup")]
+    RetiredPopup {
         state: Option<PopupState>,
     },
     Menu {
@@ -4758,7 +4778,7 @@ mod tests {
 
     #[test]
     fn popup_variants_hold_the_appended_wire_tails() {
-        let input = super::InputMessage::Popup {
+        let input = super::InputMessage::RetiredPopup {
             action: super::PopupAction::Close,
         };
         let input_bytes = postcard::to_stdvec(&input).expect("popup input encodes");
@@ -4770,7 +4790,7 @@ mod tests {
 
         let event = super::Event {
             sequence: 7,
-            payload: super::EventPayload::Popup { state: None },
+            payload: super::EventPayload::RetiredPopup { state: None },
         };
         let event_bytes = postcard::to_stdvec(&event).expect("popup event encodes");
         assert_eq!(event_bytes[1], 36);

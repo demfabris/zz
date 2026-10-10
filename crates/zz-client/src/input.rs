@@ -119,6 +119,7 @@ pub struct InputRouter {
     observed: InputOwner,
     restore: InputOwner,
     active: Option<(PaneId, SurfaceKind)>,
+    capture: Option<PaneId>,
     claim: PrefixClaim,
     effects: Vec<Effect>,
 }
@@ -133,9 +134,21 @@ impl InputRouter {
             observed: InputOwner::None,
             restore: InputOwner::None,
             active: None,
+            capture: None,
             claim: PrefixClaim::default(),
             effects: Vec::new(),
         }
+    }
+
+    /// A focused modal that captures keys takes every press unresolved: no
+    /// chrome binding, no prefix claim, straight to the pane.
+    pub fn set_capture(&mut self, pane: Option<PaneId>) {
+        self.capture = pane;
+    }
+
+    #[must_use]
+    pub const fn capture(&self) -> Option<PaneId> {
+        self.capture
     }
 
     pub fn unbind_action(&mut self, action: ChromeAction) -> usize {
@@ -254,6 +267,14 @@ impl InputRouter {
         if self.owner() == InputOwner::Overlay {
             return Disposition::Native;
         }
+        if let Some(pane) = self.capture {
+            self.claim.press(key, pane, false);
+            self.effects.push(Effect::ForwardKey {
+                pane,
+                input: input.clone(),
+            });
+            return Disposition::Consumed;
+        }
         if let Some(action) = self.keymap.resolve(UI_TABLE, input) {
             return self.chrome(key, action);
         }
@@ -305,7 +326,8 @@ impl InputRouter {
             InputOwner::Pane(_, SurfaceKind::Terminal) => Some(TERMINAL_TABLE),
             _ => return false,
         };
-        self.effects.is_empty()
+        self.capture.is_none()
+            && self.effects.is_empty()
             && (!releases || self.claim.local_releases.is_empty())
             && !self.keymap.binds(UI_TABLE)
             && table.is_none_or(|table| !self.keymap.binds(table))

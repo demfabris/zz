@@ -7,7 +7,11 @@ use zz_protocol::{
 use zz_terminal::{KeyAction, KeyCode, KeyInput, Modifiers, TerminalSession};
 
 /// The `send-keys -X <action>` name a chooser table resolves a key press to.
-fn overlay_key_action<'a>(keys: &'a KeyTables, table: &str, input: &KeyInput) -> Option<&'a str> {
+pub(crate) fn overlay_key_action<'a>(
+    keys: &'a KeyTables,
+    table: &str,
+    input: &KeyInput,
+) -> Option<&'a str> {
     let binding = keys.resolve_input(table, input)?;
     let [command] = binding.commands.as_slice() else {
         return None;

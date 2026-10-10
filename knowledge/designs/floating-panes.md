@@ -265,6 +265,99 @@ row from `xoff + 2`; `pane_at` (`state.rs:1005`) uses the hit order. Kitty place
 are withdrawn while covered. Delete the popup branch of `input::handle` (`input.rs:199`) and
 `popup_pointer_action` (`:1851`).
 
+# Where the float.core build differs
+
+Recorded by float.core (sessions 1 and 2, 2026-10-09); 3.8 wins where this plan and the tag disagree.
+
+- No `FloatCell`: `CellNode::Float { pane, geometry }` reuses `CellGeometry` with signed offsets,
+  and the window keeps its extent in `CellLayout` once no tile is left.
+- 3.8 counts a pane as floating only while its current layout cell is (`window_pane_is_floating`):
+  a zoomed float and a float hidden by zoom read as tiled in `pane_floating_flag`, the `F` flag and
+  `pane_z`. `Window::shows_floating` is that rule; `Window::is_floating` stays the tree's flag.
+- Select-pane while zoomed keeps the zoom when the target is visible (the zoom target or an
+  over-zoom float), as `cmd_select_pane_exec` pushes and pops only for hidden panes.
+- Directional `select-pane` uses `window_pane_find_*`'s cell arithmetic over every pane once the
+  window has a float; tiled-only windows keep the older normalized walk. Compass targets treat every
+  float as bordered, because the mux model does not see `pane-border-lines none`.
+- `display-popup` hands `remain-on-exit`, `remain-on-exit-format` and, with `-T`, the border status
+  and format to `new-pane` through `ExecutionContext::set_spawn_pane_options`, which sets them on
+  the new pane before the daemon spawns its process. A command client waits through `new-pane -W`,
+  so a signal exits 128+N and a popup killed by `kill-pane` or `-C` before its command exits answers
+  129, as `window_pane_wait_finish` does (`wait-pane --exit` keeps answering 0 for a killed pane).
+  Control clients still get nothing, and a popup still needs a target client. `-C` also clears the
+  target client's menus and other overlays, as 3.8's `server_client_clear_overlay` did, before it
+  kills the modal.
+- `new-pane -M` answers as an unsupported flag, as `move-pane -M` does: creating and sizing a float
+  from the drag needs the per-client drag float.keys builds, so `flag:new-pane:-M` is tracked there.
+- Modal `-D` and `-K` act in the daemon's key path before the key tables, and a click outside the
+  modal is dropped (or kills a `-C` modal) in its mouse path, both keyed on the pane the client
+  reports; drawing the modal and hit-testing floats on the client side is float.clients.
+- `PopupPointerState` went with the per-client popup, because it was keyed to the old `PopupPointer`
+  input; float.keys builds the per-client drag on `MouseKey.press` instead. The daemon ignores
+  `press` until then.
+- `pane-border-status top-floating` and `bottom-floating` reach a float's snapshot as `Top` and
+  `Bottom`; `PaneBorderStatus` has no floating variants.
+- `FloatingPaneSnapshot` lists every float in the tree, a zoomed one with `visible: false`.
+- zz back-solves the window extent from one pane's size report; while a float is active that pane is
+  the most recent tiled one.
+
+# Where the float.clients build differs
+
+Recorded by float.clients (2026-10-09).
+
+- `compat/tui-floating.sh` compares the decoded glyphs of every cell, the cursor and the pane list
+  against tmux 3.8; it does not compare colours. While `display-popup` is up it compares the screen
+  only, because 3.8's popup is a client overlay and zz's is a modal pane.
+- The drag commit `resize-pane -x -y ; move-pane -X -Y` is one request,
+  `run-shell -C "resize-pane ... ; move-pane ..."`, which zz parses as a tmux command list
+  (`zz_client::floating::float_drag_command`); the daemon still publishes a snapshot after each
+  command of the list. The height it sends takes back the row `resize-pane -y` adds for a float on
+  the row under a top pane status or above a bottom one.
+- `EventPayload::Popup` and `InputMessage::Popup` are renamed `RetiredPopup` in Rust with their serde
+  names kept, so clients match the retired tag without naming the popup.
+- The raw TUI fills a window with no tiled pane with the default `fill-character` inside cell
+  (`bg=themedarkgrey`); a user `fill-character` is not read.
+- `WindowSnapshot` and `TreeOp::WindowLayout` also append the window's `sx` and `sy`: with no tiled
+  pane the layout dump carries no window height, and the drag's bottom-status correction needs it.
+- `PaneBorderPresentation` also appends each pane's expanded `window-style` and, for the active
+  pane, `window-active-style`. The raw TUI paints a pane's default cells in them, per ground as
+  `tty_default_colours` takes them, with theme colours resolved through the status line's slots, so
+  a `display-popup`'s `popup-style` (`bg=themedarkgrey,fg=themewhite`) matches 3.8. The desktop and
+  the web/iOS clients keep drawing the daemon's pane appearance, where `window-style` is already
+  applied but a theme colour maps to zz's own terminal palette slot.
+- `compat/tui-overlays.sh` asserts its popup cases with three known differences rewritten out, each
+  from the modal-pane ruling (gap `display-popup.modal-pane`): the title one column right of 3.8's
+  box, the window's `O` flag on the status row, and a centred popup a row higher at an odd height.
+
+# Where the float.keys build differs
+
+Recorded by float.keys (2026-10-09).
+
+- `new-pane -M` and `move-pane -M` are supported flags now, which supersedes float.core's note
+  above that both answer as unsupported.
+- The per-client drag is `Client.mouse_drag` in the daemon, armed by `MuxEffect::ArmMouseDrag`
+  from `new-pane -M`, `move-pane -M` and `resize-pane -M`. A later drag report of the same client
+  runs `resize-pane -M -t <pane>` with the armed drag in the invoking mouse event and no hooks, which
+  dispatches to the update the arming command chose; any report that is not a drag or a wheel ends
+  it. The raw TUI keeps sending a gesture's drag and release reports once one of them was bound,
+  whatever key they name, and `MouseKey.press` carries the press cell on each.
+- A tiled border drag arms the drag too, so its later reports skip the key tables; the update is the
+  existing absolute resize to the pointer, which lands where 3.8's relative one does.
+- `new-pane` into a window whose root is a float wraps it in a node carrying the float's offsets, as
+  `layout_replace_with_node` does, so the layout check accepts a non-zero root offset when no tile is
+  left.
+- The editor modal is `new-pane -O -c /tmp` with outer `-x -y -X -Y` that give the 90% content box
+  and `remain-on-exit off`; `choose-buffer`'s `e` is the `edit` row of zz's `choose-buffer` table.
+- A `display-menu` run from a mouse binding takes mouse keys, as 3.8 does when the event is valid
+  (`MENU_NOMOUSE` only without one and without `-M`), so the pane menu's Move item is chosen by a
+  mouse release and its submenu opens.
+- Mouse rows reach the drag code in window cells: the top status lines are subtracted and a row on
+  a bottom status line is clamped to the window's last row, as `cmd_resize_pane_mouse_*`,
+  `cmd_join_pane_mouse_move` and `cmd_split_window_mouse_resize` adjust `m->y` and `m->ly`.
+- The buffer editor writes back only into the buffer it opened (same name and same data), emits
+  `paste-buffer-changed`, and input reaches the editor while the buffer chooser stays open on the
+  pane beneath it.
+
 # zz-only extensions
 
 - `new-pane --kind terminal|browser|picker|agent [--profile] [--provider]`, inherited from

@@ -262,6 +262,25 @@ impl Grid {
         }
     }
 
+    /// The `width` by `height` window of the grid from `left`, `top`: what a
+    /// float clipped by the window's left or top edge shows of its pane.
+    pub(super) fn cropped(&self, left: u16, top: u16, width: u16, height: u16) -> Self {
+        let mut cropped = Self::new(width, height);
+        for y in 0..height {
+            for x in 0..width {
+                let (Some(from), Some(to)) = (self.index(x + left, y + top), cropped.index(x, y))
+                else {
+                    continue;
+                };
+                cropped.cells[to] = self.cells[from].clone();
+                if x == 0 && cropped.cells[to].width == 0 {
+                    cropped.blank_at(0, y);
+                }
+            }
+        }
+        cropped
+    }
+
     fn index(&self, x: u16, y: u16) -> Option<usize> {
         (x < self.width && y < self.height)
             .then(|| usize::from(y) * usize::from(self.width) + usize::from(x))

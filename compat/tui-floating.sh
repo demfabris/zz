@@ -405,6 +405,29 @@ overlap_cases() {
   verdict click-overlap
 }
 
+pane_in_mode() {
+  [ "$(side_command "$1" display-message -p -t "=$INNER_SESSION:0.0" '#{pane_in_mode}' 2>/dev/null)" = 1 ]
+}
+
+panes_floats_case() {
+  CASE_LABEL=panes-floats
+  attach_both
+  run_on_both split-window -h "$INNER_SHELL"
+  new_float_on_both FLOAT-A -x 30 -y 8 -X 10 -Y 3
+  new_float_on_both FLOAT-B -x 30 -y 8 -X 24 -Y 7
+  run_on_both select-pane -t "$(float_pane zz 2)"
+  run_on_both select-pane -t "=$INNER_SESSION:0.0"
+  local side
+  for side in zz tmux; do
+    side_command "$side" display-panes -d 0 -t "=$INNER_SESSION:0.0" || die "$side refused display-panes"
+  done
+  wait_for 'the zz panes mode' pane_in_mode zz
+  wait_for 'the tmux panes mode' pane_in_mode tmux
+  COMPARE_FACTS=0
+  verdict panes-floats
+  COMPARE_FACTS=1
+}
+
 titled_case() {
   CASE_LABEL=titled
   attach_both
@@ -759,6 +782,7 @@ cursor_covered_case() {
 printf 'floating pane differential at %sx%s (%s)\n' \
   "$COLUMNS_UNDER_TEST" "$ROWS_UNDER_TEST" "$("$TMUX_BIN" -V)"
 overlap_cases
+panes_floats_case
 titled_case
 borderless_case
 popup_zoomed_case

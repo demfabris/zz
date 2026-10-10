@@ -68,6 +68,37 @@ impl BorderMap {
         }
     }
 
+    fn clear(&mut self, (x, y, x2, y2): (i32, i32, i32, i32)) {
+        let (x, y) = (x.max(0), y.max(0));
+        let x2 = x2.min(self.width as i32 - 1);
+        let y2 = y2.min(self.height as i32 - 1);
+        for row in y..=y2 {
+            for column in x..=x2 {
+                self.cells[(row as u32 * self.width + column as u32) as usize] = 0;
+            }
+        }
+    }
+
+    fn frame(&mut self, (x, y, x2, y2): (i32, i32, i32, i32)) -> Option<usize> {
+        let mut frame = Self {
+            width: self.width,
+            height: self.height,
+            cells: vec![0; self.cells.len()],
+        };
+        frame.hline(x, x2 + 1, y);
+        frame.hline(x, x2 + 1, y2);
+        frame.vline(x, y, y2 + 1);
+        frame.vline(x2, y, y2 + 1);
+        let mut last = None;
+        for (index, (cell, mask)) in self.cells.iter_mut().zip(frame.cells).enumerate() {
+            if mask != 0 {
+                *cell = mask;
+                last = Some(index);
+            }
+        }
+        last
+    }
+
     fn get(&self, x: i32, y: i32) -> u8 {
         if x >= 0 && y >= 0 && (x as u32) < self.width && (y as u32) < self.height {
             self.cells[(y as u32 * self.width + x as u32) as usize]
@@ -203,6 +234,32 @@ fn at(offset: i32) -> u32 {
     u32::try_from(offset).unwrap_or(0)
 }
 
+fn float_frame(cell: CellGeometry, scale: Scale) -> (i32, i32, i32, i32) {
+    let map = |offset: i32, original: u32, display: u32| {
+        if original <= display {
+            offset
+        } else {
+            offset * display as i32 / original as i32
+        }
+    };
+    let x = if cell.xoff == 0 {
+        -1
+    } else {
+        map(cell.xoff - 1, scale.osx, scale.dsx)
+    };
+    let y = if cell.yoff == 0 {
+        -1
+    } else {
+        map(cell.yoff - 1, scale.osy, scale.dsy)
+    };
+    (
+        x,
+        y,
+        map(cell.xoff + i32::from(cell.sx), scale.osx, scale.dsx),
+        map(cell.yoff + i32::from(cell.sy), scale.osy, scale.dsy),
+    )
+}
+
 fn carves(cell: CellGeometry, root: CellGeometry, status: PaneBorderStatus) -> bool {
     match status {
         PaneBorderStatus::Off => false,
@@ -261,6 +318,10 @@ impl MuxEngine {
             let Some(cell) = state.layout.pane_geometry(*pane) else {
                 continue;
             };
+            let floating = state.layout.is_floating(*pane);
+            if floating && (cell.xoff < 0 || cell.yoff < 0) {
+                continue;
+            }
             let Some(number) = self.pane_index(window, *pane) else {
                 continue;
             };
@@ -288,14 +349,38 @@ impl MuxEngine {
             if y2 <= y {
                 y2 = y + 1;
             }
-            let width = x2.min(scale.dsx) - x;
+            let mut width = x2.min(scale.dsx) - x;
             let mut height = y2.min(scale.dsy) - y;
-            let mut y = y;
+            let (mut x, mut y) = (x, y);
             if carves(cell, extent, status) && height > 1 {
                 if status == PaneBorderStatus::Top {
                     y += 1;
                 }
                 height -= 1;
+            }
+            if floating {
+                let (left, top, right, bottom) = float_frame(cell, scale);
+                let (mut bx, mut by) = (x as i32, y as i32);
+                let mut bx2 = bx + width as i32 - 1;
+                let mut by2 = by + height as i32 - 1;
+                if left >= 0 && bx <= left {
+                    bx = left + 1;
+                }
+                if top >= 0 && by <= top {
+                    by = top + 1;
+                }
+                if right < scale.dsx as i32 && bx2 >= right {
+                    bx2 = right - 1;
+                }
+                if bottom < scale.dsy as i32 && by2 >= bottom {
+                    by2 = bottom - 1;
+                }
+                if bx2 < bx || by2 < by {
+                    continue;
+                }
+                (x, y) = (bx as u32, by as u32);
+                width = (bx2 - bx + 1) as u32;
+                height = (by2 - by + 1) as u32;
             }
             geometry.areas.push(PanesModeAreaGeometry {
                 pane: *pane,
@@ -331,14 +416,33 @@ impl MuxEngine {
             }
         }
         split_lines(root, scale, &mut map, true);
+        let mut last_drawn = None;
+        for pane in painted
+            .iter()
+            .filter(|pane| state.layout.is_floating(**pane))
+        {
+            if let Some(cell) = state.layout.pane_geometry(*pane) {
+                let frame = float_frame(cell, scale);
+                map.clear(frame);
+                last_drawn = map.frame(frame).or(last_drawn);
+            }
+        }
+        let mut last = None;
         for row in 0..dsy {
             for column in 0..dsx {
                 let mask = map.get(i32::from(column), i32::from(row));
-                if mask != 0 {
-                    geometry.borders.push((column, row, cell_type(mask)));
+                if mask == 0 {
+                    continue;
+                }
+                let border = (column, row, cell_type(mask));
+                if last_drawn == Some(usize::from(row) * usize::from(dsx) + usize::from(column)) {
+                    last = Some(border);
+                } else {
+                    geometry.borders.push(border);
                 }
             }
         }
+        geometry.borders.extend(last);
         Some(geometry)
     }
 }
@@ -467,5 +571,53 @@ mod tests {
             )
             .unwrap();
         assert_eq!(painted(&engine), vec![tiled, newer, older]);
+    }
+
+    #[test]
+    fn panes_mode_frames_each_float_over_the_split_lines_it_covers() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "df", "-x", "80", "-y", "23"]),
+            )
+            .unwrap();
+        let window = context.window.unwrap();
+        engine
+            .execute(&mut context, &command("split-window", &["-h"]))
+            .unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-pane", &["-x", "30", "-y", "8", "-X", "30", "-Y", "3"]),
+            )
+            .unwrap();
+        let float = context.pane.unwrap();
+        let geometry = engine.panes_mode_geometry(window, 80, 23).unwrap();
+        let cell = |x: u16, y: u16| {
+            geometry
+                .borders
+                .iter()
+                .find(|(bx, by, _)| (*bx, *by) == (x, y))
+                .map(|(_, _, cell)| *cell)
+        };
+        assert_eq!(cell(40, 2), Some(1));
+        assert_eq!(cell(30, 3), Some(3));
+        assert_eq!(cell(40, 3), Some(2));
+        assert_eq!(cell(59, 3), Some(4));
+        assert_eq!(cell(30, 6), Some(1));
+        assert_eq!(cell(40, 6), None);
+        assert_eq!(cell(59, 6), Some(1));
+        assert_eq!(cell(30, 10), Some(5));
+        assert_eq!(cell(40, 10), Some(2));
+        assert_eq!(cell(59, 10), Some(6));
+        assert_eq!(cell(40, 11), Some(1));
+        assert_eq!(geometry.borders.last(), Some(&(59, 10, 6)));
+        let area = geometry.areas.last().unwrap();
+        assert_eq!(
+            (area.pane, area.x, area.y, area.width, area.height),
+            (float, 31, 4, 28, 6)
+        );
     }
 }

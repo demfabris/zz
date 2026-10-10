@@ -28,6 +28,7 @@ kill-session	-	-f	[-aCg] [-f filter] [-t target-session]
 kill-window	killw	-f	[-a] [-f filter] [-t target-window]
 last-pane	lastp	-t	[-deZ] [-t target-window]
 last-window	last	-t	[-t target-session]
+link-window	linkw	-s	[-abdk] [-s src-window] [-t dst-window]
 list-buffers	lsb	-F	[-F format] [-f filter] [-O order]
 list-clients	lsc	-F	[-F format] [-f filter] [-O order][-t target-session]
 list-commands	lscm	-F	[-F format] [command]
@@ -87,4 +88,5 @@ swap-window	swapw	-s	[-d] [-s src-window] [-t dst-window]
 switch-client	switchc	-O	[-ElnprZ] [-c target-client] [-t target-session] [-T key-table] [-O order]
 switch-mode	-	-F	[-kswZ] [-F format] [-t target-pane] [command]
 unbind-key	unbind	-T	[-anq] [-T key-table] key
+unlink-window	unlinkw	-t	[-k] [-t target-window]
 wait-for	wait	-F	[-ELSUlv] [-F format] [-w waiter] name

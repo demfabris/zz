@@ -292,8 +292,10 @@ the pin's alphabetic-option lookahead. The parser finishes syntax validation bef
 catalogued unsupported capability. `CommandSpec::pinned_tmux_usage` carries 24 diagnostic-only
 overrides so `list-commands` and completion continue to describe zz's implemented surface.
 
-The strict three-step `smoke/command-flag-errors` fixture compares 516 probes on each server. It
-contains 513 exact failures and three required-value absorption successes, then checks pane,
+The strict three-step `smoke/command-flag-errors` fixture compares 565 probes on each server. It
+contains 562 exact failures and three required-value absorption successes over 92 commands (the
+two refused ones, `link-window` and `unlink-window`, included: their flag grammar is the pin's
+even though the commands are not), then checks pane,
 buffer, file, binding, and hook sentinels. Positional bounds now run after that option grammar and
 before recognized parked capabilities, so direct and stored commands return the pin's arity error
 for the combined case. All implemented custom `args_parse` command items have since closed.

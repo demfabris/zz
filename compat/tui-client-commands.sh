@@ -348,8 +348,15 @@ active_pane() {
   side_command "$1" list-panes -t "=$INNER_SESSION" -F '#{pane_active} #{pane_id}' |
     awk '$1 == 1 { print $2; exit }'
 }
+# Polled a varying number of times and on one side only in the needle cases,
+# so it runs no command that fires an after- hook: display-message and
+# list-panes both do (CMD_AFTERHOOK), if-shell does not. The false branch is a
+# command neither binary knows, so the exit status carries the answer.
 pane_in_mode() {
-  [ "$(side_command "$1" display-message -p -t "$(active_pane "$1")" '#{pane_in_mode}' 2>/dev/null)" = "$2" ]
+  local in_mode=0
+  side_command "$1" if-shell -F -t "=$INNER_SESSION:" '#{pane_in_mode}' '' zzcc-not-in-mode \
+    >/dev/null 2>&1 && in_mode=1
+  [ "$in_mode" = "$2" ]
 }
 
 write_attach() {
@@ -2047,9 +2054,13 @@ client_tool_cases() {
   done
   run_on_both set-option -gwu clock-mode-colour
   run_on_both set-option -gwu clock-mode-style
+  run_on_both set-hook -g after-display-message 'set -ga @zzcc-poll-hook x'
   CASE_NEEDLE_MODE=1
   case_run customize-mode-open same '' -- customize-mode -t PANE
   restore_case customize-mode-closed
+  case_run needle-poll-fires-no-hook same '' -- show-options -gqv @zzcc-poll-hook
+  run_on_both set-hook -gu after-display-message
+  run_on_both set-option -gqu @zzcc-poll-hook
   customize_fix_cases
   CASE_GRID_CELLS=1
   CASE_NEEDLE_MODE=1

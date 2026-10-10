@@ -1772,6 +1772,12 @@ client_session() {
 client_session_is() {
   [ "$(client_session "$1")" = "$2" ]
 }
+# The tree menu opens with its top border on the press row, so its items start
+# one row lower: Select, Edit (3.8's window_customize_menu_items), Expand, a
+# separator, Tag, Tag All, Tag None, a separator, Changed Only, a separator and
+# Cancel. Tag is the press row plus five and Tag All plus six; a release on a
+# separator closes the menu as quietly as a release on the press cell, so the
+# drag sabotage could only be caught by a gesture aimed at a real item.
 MENU_RELEASE_SABOTAGE_SIDE=""
 MENU_DRAG_SABOTAGE=""
 MENU_TAGALL_SABOTAGE=""
@@ -1847,8 +1853,8 @@ case_customize_mouse_menu() {
   menu_press_both 2 "$column" "$row"
   both_screen_has 'Tag All' 'the tree menu for Tag'
   settle_pointer
-  menu_drag_both "$column" "$row" "$((column - 1))" "$((row + 4))"
-  menu_drag_release_both "$column" "$row" "$((column - 1))" "$((row + 4))"
+  menu_drag_both "$column" "$row" "$((column - 1))" "$((row + 5))"
+  menu_drag_release_both "$column" "$row" "$((column - 1))" "$((row + 5))"
   both_screen_lacks 'Tag All' 'the tree menu after Tag'
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag/screen
@@ -1874,14 +1880,14 @@ case_customize_mouse_menu() {
   both_screen_has 'Tag All' 'the tree menu for Tag All'
   settle_pointer
   if [ -n "$MENU_TAGALL_SABOTAGE" ]; then
-    send_mouse zz 34 "$((column - 1))" "$((row + 4))" M
-    send_mouse zz 2 "$((column - 1))" "$((row + 4))" m
-  else
     send_mouse zz 34 "$((column - 1))" "$((row + 5))" M
     send_mouse zz 2 "$((column - 1))" "$((row + 5))" m
+  else
+    send_mouse zz 34 "$((column - 1))" "$((row + 6))" M
+    send_mouse zz 2 "$((column - 1))" "$((row + 6))" m
   fi
-  send_mouse tmux 34 "$((column - 1))" "$((row + 5))" M
-  send_mouse tmux 2 "$((column - 1))" "$((row + 5))" m
+  send_mouse tmux 34 "$((column - 1))" "$((row + 6))" M
+  send_mouse tmux 2 "$((column - 1))" "$((row + 6))" m
   both_screen_lacks 'Tag All' 'the tree menu after Tag All'
   settle_pointer
   check_screen CUSTOMIZE_POINTER customize-mouse-menu-tag-all/screen

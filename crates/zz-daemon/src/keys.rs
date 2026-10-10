@@ -98,6 +98,27 @@ pub(crate) enum ChooserPromptEdit {
     Key(ModeKey),
 }
 
+/// A key the chooser's `(search) ` prompt edits its line with: everything
+/// `choose_tree_key_action` and `choose_buffer_key_action` leave alone while a
+/// search is open, which is neither typed text nor a closer, `BSpace`, `Up` or
+/// `Down`.
+pub(crate) fn chooser_search_edit_key(input: &KeyInput) -> Option<ModeKey> {
+    if input_typed_text(input).is_some() {
+        return None;
+    }
+    let name = input_key_name(input);
+    if matches!(
+        name.as_str(),
+        "Escape" | "C-g" | "C-c" | "C-[" | "Enter" | "BSpace" | "Up" | "Down"
+    ) {
+        return None;
+    }
+    match ModeKey::parse(&name) {
+        ModeKey::Other | ModeKey::Char(_) => None,
+        key => Some(key),
+    }
+}
+
 pub(crate) fn chooser_prompt_edit(input: &KeyInput) -> Option<ChooserPromptEdit> {
     if let Some(text) = input_typed_text(input) {
         return Some(ChooserPromptEdit::Append(text.to_owned()));

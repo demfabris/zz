@@ -6234,6 +6234,7 @@ mod tests {
             preview: None,
             prompt_cursor: zz_protocol::PromptCursor::default(),
             prompt_column: 0,
+            prompt_line: String::new(),
         };
         let (send, receive) = std::sync::mpsc::channel();
         let mut renderer = Renderer::with_sink(Box::new(move |bytes| {

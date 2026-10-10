@@ -741,3 +741,57 @@ fn chooser_prompts_take_the_sessions_vi_status_keys() {
     scene.press(key('q', Modifiers::default()), false);
     assert_eq!(line(&scene).0, None);
 }
+
+#[test]
+fn chooser_search_prompts_edit_at_a_cursor_too() {
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zw"]);
+    scene.press(key('/', Modifiers::default()), false);
+    for character in "abcd".chars() {
+        scene.press(key(character, Modifiers::default()), false);
+    }
+    scene.press(key('a', control()), false);
+    scene.press(key('X', Modifiers::default()), false);
+    let inner = scene.shared.inner.lock();
+    let query = inner.clients[&scene.client]
+        .choose_tree
+        .as_ref()
+        .and_then(|chooser| chooser.search.as_ref())
+        .map(|search| search.query.clone());
+    assert_eq!(query.as_deref(), Some("Xabcd"));
+    let presentation =
+        chooser_presentation::chooser_presentation(&inner, scene.client).expect("shown");
+    assert_eq!(
+        (
+            presentation.prompt_line.as_str(),
+            presentation.prompt_column
+        ),
+        ("(search) Xabcd", 10)
+    );
+}
+
+#[test]
+fn a_long_chooser_prompt_scrolls_around_its_cursor() {
+    let named = |code| tests::test_key(code, Modifiers::default(), None);
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zw"]);
+    scene.press(key('f', Modifiers::default()), false);
+    let digits = (0..100)
+        .map(|index| char::from(b'0' + (index % 10) as u8))
+        .collect::<String>();
+    for character in digits.chars() {
+        scene.press(key(character, Modifiers::default()), false);
+    }
+    let shown = |scene: &Scene| {
+        let inner = scene.shared.inner.lock();
+        let presentation =
+            chooser_presentation::chooser_presentation(&inner, scene.client).expect("shown");
+        (presentation.prompt_line, presentation.prompt_column)
+    };
+    assert_eq!(shown(&scene), (format!("(filter) {}", &digits[30..]), 79));
+    scene.press(named(KeyCode::ArrowLeft), false);
+    assert_eq!(shown(&scene), (format!("(filter) {}", &digits[29..]), 79));
+    scene.press(named(KeyCode::Backspace), false);
+    let edited = format!("{}{}", &digits[..98], &digits[99..]);
+    assert_eq!(shown(&scene), (format!("(filter) {}", &edited[28..]), 79));
+}

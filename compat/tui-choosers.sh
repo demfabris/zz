@@ -825,8 +825,12 @@ tall_case() {
 # session's word-separators) and C-u. prompt_set_options also hands it the
 # session's status-keys, so with vi Escape takes the line into command mode
 # (drawn in message-command-style), h, x, 0 and i are vi commands there, and q
-# closes the prompt.
+# closes the prompt. A line wider than the screen scrolls so the cursor stays
+# on it, the way prompt_draw offsets it, and the search prompt edits the same
+# way.
 FILTER_FORMAT='#{==:#{window_name},two}'
+LONG_FILTER=0123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789
+LONG_FILTER_EDITED="${LONG_FILTER:0:98}${LONG_FILTER:99}"
 filter_case() {
   CASE_LABEL=filter
   mark_both filter
@@ -874,6 +878,20 @@ filter_case() {
   verdict filter-edit-word-separator same
   step '0: win' C-c
   verdict filter-edit-cancelled same
+  step '(filter) ' f
+  step "${LONG_FILTER:30}" -l "$LONG_FILTER"
+  verdict filter-long-typed same
+  step "${LONG_FILTER:29}" Left
+  verdict filter-long-left same
+  step "${LONG_FILTER_EDITED:28}" BSpace
+  verdict filter-long-backspace same
+  step '0: win' C-c
+  verdict filter-long-cancelled same
+  step '(search) abcd' / a b c d
+  step '(search) Xabcd' C-a X
+  verdict search-edit-start same
+  step '0: win' C-c
+  verdict search-edit-cancelled same
   set_on_both status-keys vi
   step '(filter) abcd' f a b c d
   verdict filter-vi-typed same

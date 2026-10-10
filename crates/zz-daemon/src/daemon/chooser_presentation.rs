@@ -806,6 +806,12 @@ pub(super) fn chooser_presentation(
             chooser.search.as_ref().map(|search| search.query.as_str()),
             chooser.prompt_accept,
         );
+        let (prompt_line, prompt_column) = edited_prompt_line(
+            inner,
+            client,
+            chooser.prompt.as_ref(),
+            chooser.search_editor.as_ref(),
+        );
         let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
         let preview = chooser
             .rendered
@@ -829,10 +835,8 @@ pub(super) fn chooser_presentation(
             preview_size: chooser.preview_size,
             preview,
             prompt_cursor,
-            prompt_column: chooser
-                .prompt
-                .as_ref()
-                .map_or(0, super::ChooserPrompt::cursor),
+            prompt_column,
+            prompt_line,
         });
     }
     let chooser = inner
@@ -844,6 +848,12 @@ pub(super) fn chooser_presentation(
         chooser.prompt.as_ref(),
         chooser.search.as_ref().map(|search| search.query.as_str()),
         false,
+    );
+    let (prompt_line, prompt_column) = edited_prompt_line(
+        inner,
+        client,
+        chooser.prompt.as_ref(),
+        chooser.search_editor.as_ref(),
     );
     let selected = usize::try_from(chooser.rendered.selected).unwrap_or(usize::MAX);
     let preview = chooser
@@ -876,11 +886,32 @@ pub(super) fn chooser_presentation(
         preview_size: chooser.preview_size,
         preview,
         prompt_cursor,
-        prompt_column: chooser
-            .prompt
-            .as_ref()
-            .map_or(0, super::ChooserPrompt::cursor),
+        prompt_column,
+        prompt_line,
     })
+}
+
+fn edited_prompt_line(
+    inner: &ServerState,
+    client: ClientId,
+    prompt: Option<&super::ChooserPrompt>,
+    search: Option<&ModePrompt>,
+) -> (String, u16) {
+    let editor = match prompt {
+        Some(prompt) if matches!(prompt.kind, super::ChooserPromptKind::Kill) => {
+            return (String::new(), 0);
+        }
+        Some(prompt) => &prompt.editor,
+        None => match search {
+            Some(editor) => editor,
+            None => return (String::new(), 0),
+        },
+    };
+    let columns = inner
+        .client(client)
+        .and_then(|c| c.size)
+        .map_or(80, |(columns, _)| columns);
+    editor.draw(columns)
 }
 
 fn tree_preview(

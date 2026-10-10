@@ -2945,6 +2945,8 @@ pub struct ChooserPresentation {
     pub prompt_cursor: PromptCursor,
     #[serde(default)]
     pub prompt_column: u16,
+    #[serde(default)]
+    pub prompt_line: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]

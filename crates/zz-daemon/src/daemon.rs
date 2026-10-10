@@ -23295,7 +23295,7 @@ impl Shared {
             if modal.close_on_click
                 && ["MouseDown", "SecondClick", "TripleClick"]
                     .iter()
-                    .any(|prefix| key.starts_with(prefix))
+                    .any(|prefix| base.starts_with(prefix))
             {
                 let target = modal.pane.to_string();
                 self.execute_gesture(
@@ -46560,7 +46560,8 @@ fn terminal_geometry_for_mode_from(
 ) -> Option<TerminalGeometry> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let window_state = inner.engine.state.windows.get(&window)?;
-    if window_state.is_floating(pane) {
+    let floating = window_state.is_floating(pane);
+    if floating && (source == GeometrySource::LaidOut || window_state.zoomed_pane != Some(pane)) {
         return floating_terminal_geometry(inner, window_state, pane);
     }
     if window_state
@@ -46592,8 +46593,15 @@ fn terminal_geometry_for_mode_from(
         })
         .filter_map(|client| {
             let geometry = client_terminal_geometry(inner, *client, pane)?;
+            let reported = inner
+                .reported_pane_places
+                .get(&pane)
+                .and_then(|places| places.get(client));
+            if floating && reported.map(|reported| &reported.place) != place.as_ref() {
+                return None;
+            }
             let Some((columns, rows)) = place.as_ref().and_then(|place| {
-                let reported = inner.reported_pane_places.get(&pane)?.get(client)?;
+                let reported = reported?;
                 (reported.place != *place).then_some(reported.extent)
             }) else {
                 return Some((*client, geometry));
@@ -46755,6 +46763,12 @@ fn record_report_place(
 fn pane_place(inner: &ServerState, pane: PaneId) -> Option<PanePlace> {
     let window = inner.engine.state.window_for_pane(pane)?;
     let window = inner.engine.state.windows.get(&window)?;
+    if window.is_floating(pane) {
+        return Some(PanePlace {
+            path: Vec::new(),
+            zoomed: window.zoomed_pane == Some(pane),
+        });
+    }
     let mut node = window.layout.project();
     let mut path = Vec::new();
     loop {
@@ -120778,20 +120792,36 @@ bind - split-window -v -c "#{pane_current_path}"
         assert_eq!(window_extent(&shared), (Some(80), Some(24)));
         wait_for_terminal_size(&shared, float, (20, 6));
 
-        for (args, size) in [(vec!["-Z", "-t"], (80, 24)), (vec!["-Z", "-t"], (20, 6))] {
-            let mut args = args;
-            let float_target = float.to_string();
-            args.push(&float_target);
+        let toggle_zoom = |context: &mut ExecutionContext| {
             shared
                 .execute(
                     client,
                     ClientKind::Interactive,
-                    &mut context,
-                    &CommandInvocation::new("resize-pane", args),
+                    context,
+                    &CommandInvocation::new("resize-pane", ["-Z", "-t", &float.to_string()]),
                 )
                 .expect("toggle the float's zoom");
-            wait_for_terminal_size(&shared, float, size);
-        }
+        };
+        toggle_zoom(&mut context);
+        wait_for_terminal_size(&shared, float, (80, 24));
+        shared
+            .input(
+                client,
+                ClientKind::Interactive,
+                &mut context,
+                InputMessage::ResizeTerminal {
+                    pane: float,
+                    columns: 60,
+                    rows: 20,
+                    cell_width_px: 8,
+                    cell_height_px: 18,
+                },
+            )
+            .expect("a client size report for the zoomed float");
+        assert_eq!(window_extent(&shared), (Some(60), Some(20)));
+        wait_for_terminal_size(&shared, float, (60, 20));
+        toggle_zoom(&mut context);
+        wait_for_terminal_size(&shared, float, (20, 6));
 
         shared
             .execute(

@@ -244,7 +244,20 @@ impl MuxEngine {
             return Some(geometry);
         }
         let status = self.pane_border_status(window);
-        for pane in state.pane_order() {
+        let painted = state
+            .pane_order()
+            .iter()
+            .filter(|pane| !state.layout.is_floating(**pane))
+            .chain(
+                state
+                    .z_order()
+                    .iter()
+                    .rev()
+                    .filter(|pane| state.layout.is_floating(**pane)),
+            )
+            .copied()
+            .collect::<Vec<_>>();
+        for pane in &painted {
             let Some(cell) = state.layout.pane_geometry(*pane) else {
                 continue;
             };
@@ -409,5 +422,50 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(0, 0, 20, 11), (20, 0, 20, 5), (20, 5, 20, 6)]
         );
+    }
+
+    #[test]
+    fn panes_mode_paints_floats_bottom_to_top_in_z_order_like_window_panes_draw_screen() {
+        let mut engine = MuxEngine::default();
+        let mut context = ExecutionContext::default();
+        engine
+            .execute(
+                &mut context,
+                &command("new-session", &["-s", "dz", "-x", "80", "-y", "23"]),
+            )
+            .unwrap();
+        let window = context.window.unwrap();
+        let tiled = context.pane.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-pane", &["-x", "30", "-y", "8", "-X", "10", "-Y", "3"]),
+            )
+            .unwrap();
+        let older = context.pane.unwrap();
+        engine
+            .execute(
+                &mut context,
+                &command("new-pane", &["-x", "30", "-y", "8", "-X", "24", "-Y", "7"]),
+            )
+            .unwrap();
+        let newer = context.pane.unwrap();
+        let painted = |engine: &MuxEngine| {
+            engine
+                .panes_mode_geometry(window, 80, 23)
+                .unwrap()
+                .areas
+                .iter()
+                .map(|area| area.pane)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(painted(&engine), vec![tiled, older, newer]);
+        engine
+            .execute(
+                &mut context,
+                &command("select-pane", &["-t", &older.to_string()]),
+            )
+            .unwrap();
+        assert_eq!(painted(&engine), vec![tiled, newer, older]);
     }
 }

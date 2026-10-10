@@ -2360,7 +2360,10 @@ impl AppView {
                     if let Some(terminal) = self.terminals.get(pane) {
                         terminal.update(cx, |terminal, cx| {
                             terminal.set_visible(visible, cx);
-                            terminal.set_floating(float.is_some(), cx);
+                            terminal.set_floating(
+                                float.is_some() && mux_window.zoomed_pane != Some(*pane),
+                                cx,
+                            );
                         });
                     }
                     if let Some(browser) = self.browsers.get(pane) {
@@ -3585,6 +3588,7 @@ impl AppView {
             TERMINAL_FONT,
             cx,
         )
+        .debug_selector(move || format!("pane-indicator-{}", pane.0))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_mouse_up(MouseButton::Left, move |_, _, cx| {
             mux.read(cx)
@@ -3761,6 +3765,11 @@ impl AppView {
                         .bordered(bordered),
                 )
                 .children(grips)
+                .children(
+                    self.pane_indicators
+                        .get(&pane)
+                        .map(|indicator| self.pane_indicator(indicator, cx)),
+                )
                 .into_any_element(),
         )
     }
@@ -7057,6 +7066,171 @@ mod tests {
                 "a window with no tiled pane judges the bottom status row on the daemon's height"
             );
         });
+    }
+
+    fn float_workspace_for_test(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<AppView>,
+        Entity<MuxClient>,
+        &mut zz_gpui::VisualTestContext,
+    ) {
+        cx.update(zz_ui::init);
+        let mux_slot = Rc::new(RefCell::new(None));
+        let captured_mux = Rc::clone(&mux_slot);
+        let (workspace, cx) = cx.add_window_view(move |window, cx| {
+            let controller = cx.new(|cx| {
+                crate::browser::controller::BrowserController::new(
+                    Err(zz_browser::BrowserError::AlreadyShutdown),
+                    cx,
+                )
+            });
+            let agent_controller = cx.new(|_| AgentController::new(AgentConfig::default()));
+            let mux = cx.new(|cx| {
+                MuxClient::new(
+                    Err(zz_daemon_client::DaemonError::Thread(
+                        "test client".to_owned(),
+                    )),
+                    zz_daemon_client::default_socket_path(),
+                    cx,
+                )
+            });
+            captured_mux.replace(Some(mux.clone()));
+            AppView::new(controller, agent_controller, mux, window, cx)
+        });
+        let mux: Entity<MuxClient> = mux_slot.borrow().clone().expect("captured mux");
+        (workspace, mux, cx)
+    }
+
+    fn tile_and_float_snapshot(generation: u64, zoomed: bool) -> MuxSnapshot {
+        let tiled = PaneId(0);
+        let floating = PaneId(1);
+        let mut snapshot = one_pane_snapshot(generation);
+        let window = &mut snapshot.sessions[0].windows[0];
+        let mut float_pane = window.panes[&tiled].clone();
+        float_pane.id = floating;
+        window.panes.insert(floating, float_pane);
+        window.floating = vec![FloatingPaneSnapshot {
+            pane: floating,
+            xoff: 4,
+            yoff: 2,
+            sx: 20,
+            sy: 6,
+            visible: !zoomed,
+            border_lines: PaneBorderLines::Single,
+            border_status: PaneBorderStatus::Off,
+        }];
+        window.active_pane = floating;
+        window.zoomed_pane = zoomed.then_some(floating);
+        snapshot
+    }
+
+    #[zz_gpui::test]
+    fn a_zoomed_float_reports_its_grid_like_a_tile(cx: &mut TestAppContext) {
+        let (workspace, mux, cx) = float_workspace_for_test(cx);
+        let floating = PaneId(1);
+        let report = |cx: &mut zz_gpui::VisualTestContext| {
+            let terminal =
+                workspace.read_with(cx, |workspace, _| workspace.terminals[&floating].clone());
+            let sent = mux.update(cx, |mux, _| mux.record_input_for_test());
+            terminal.update(cx, |terminal, cx| {
+                terminal.update_geometry(
+                    GridSize {
+                        columns: 120,
+                        rows: 24,
+                        cell_width_px: 8,
+                        cell_height_px: 16,
+                    },
+                    Bounds::new(point(px(0.0), px(0.0)), zz_gpui::size(px(960.0), px(384.0))),
+                    Bounds::new(point(px(0.0), px(0.0)), zz_gpui::size(px(960.0), px(384.0))),
+                    px(8.0),
+                    px(16.0),
+                    px(0.0),
+                    None,
+                    None,
+                    cx,
+                );
+            });
+            sent.borrow()
+                .iter()
+                .filter_map(|message| match message {
+                    InputMessage::ResizeTerminalV2 {
+                        pane,
+                        columns,
+                        rows,
+                        ..
+                    } => Some((*pane, *columns, *rows)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), tile_and_float_snapshot(1, false), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(report(cx), Vec::new(), "a float's PTY follows its cells");
+
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), tile_and_float_snapshot(2, true), cx);
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            report(cx),
+            vec![(floating, 120, 24)],
+            "a zoomed float fills the window, so its size drives the window extent"
+        );
+    }
+
+    #[zz_gpui::test]
+    fn display_panes_labels_a_float_in_its_own_frame(cx: &mut TestAppContext) {
+        let (_workspace, mux, cx) = float_workspace_for_test(cx);
+        let mut snapshot = tile_and_float_snapshot(1, false);
+        snapshot.sessions[0].windows[0].active_pane = PaneId(0);
+        mux.update(cx, |mux, cx| {
+            mux.attach_snapshot_for_test(SessionId(0), snapshot, cx);
+        });
+        cx.run_until_parked();
+        let indicator = |pane: u64, index: u32| zz_protocol::PaneIndicator {
+            pane: PaneId(pane),
+            index,
+            select_key: b'0' + u8::try_from(index).unwrap(),
+            flags: if pane == 0 {
+                zz_protocol::PaneIndicator::ACTIVE
+            } else {
+                0
+            },
+            label: index.to_string(),
+        };
+        mux.update(cx, |mux, cx| {
+            mux.handle_message_for_test(
+                zz_protocol::ProtocolMessage::Event(zz_protocol::Event {
+                    sequence: 1,
+                    payload: zz_protocol::EventPayload::DisplayPanes {
+                        state: Some(zz_protocol::DisplayPanesState {
+                            indicators: vec![indicator(0, 0), indicator(1, 1)],
+                            ..display_panes_state_for_test()
+                        }),
+                    },
+                }),
+                cx,
+            );
+        });
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            _ = window.draw(cx);
+        });
+        assert!(cx.debug_bounds("pane-indicator-0").is_some());
+        let frame = cx
+            .debug_bounds("floating-pane-1")
+            .expect("a visible float is drawn");
+        let label = cx
+            .debug_bounds("pane-indicator-1")
+            .expect("the float carries its display-panes label");
+        assert!(
+            frame.contains(&label.origin) && frame.contains(&label.bottom_right()),
+            "the label {label:?} sits inside the float {frame:?}"
+        );
     }
 
     /// `rendering.geometry-residue`'s probe. The desktop client measures its

@@ -100,6 +100,7 @@ pub(crate) struct PaneRect {
     /// The pane's own cell at the rect's top-left: a float clipped by the
     /// window's left or top edge starts that many columns or rows in.
     pub source: (u16, u16),
+    pub whole: Option<(u16, u16)>,
 }
 
 impl PaneRect {
@@ -114,6 +115,18 @@ impl PaneRect {
                 ..self.rect
             },
             PaneBorderStatus::Top => self.rect.content(),
+        }
+    }
+
+    pub const fn mode_rect(self) -> Rect {
+        let content = self.content();
+        match self.whole {
+            Some((width, height)) => Rect {
+                width,
+                height,
+                ..content
+            },
+            None => content,
         }
     }
 
@@ -437,6 +450,7 @@ pub(crate) fn resolve_float(
                 u16::try_from(-xoff).unwrap_or(0),
                 u16::try_from(-yoff).unwrap_or(0),
             ),
+            whole: Some((float.sx, float.sy)),
         },
         FloatFrame {
             pane: float.pane,
@@ -607,6 +621,7 @@ fn collect(
             border_status,
             status_on_border: false,
             source: (0, 0),
+            whole: None,
         }),
         LayoutNode::Empty => {}
         LayoutNode::Split {
@@ -732,6 +747,7 @@ mod tests {
             border_status: PaneBorderStatus::Off,
             status_on_border: false,
             source: (0, 0),
+            whole: None,
         };
         let top = PaneRect {
             pane: PaneId(0),
@@ -739,6 +755,7 @@ mod tests {
             border_status: PaneBorderStatus::Top,
             status_on_border: false,
             source: (0, 0),
+            whole: None,
         };
         let bottom = PaneRect {
             pane: PaneId(0),
@@ -746,6 +763,7 @@ mod tests {
             border_status: PaneBorderStatus::Bottom,
             status_on_border: false,
             source: (0, 0),
+            whole: None,
         };
         assert_eq!(off.content(), rect);
         assert_eq!(off.status_row().height, 0);

@@ -472,6 +472,20 @@ modal_cases() {
   wait_for 'zz modal killed by the click' pane_count_is zz 2
   wait_for 'tmux modal killed by the click' pane_count_is tmux 2
   verdict modal-close
+  local button label
+  for button in 16 8; do
+    label=ctrl
+    [ "$button" = 8 ] && label=alt
+    CASE_LABEL=modal-close-$label
+    new_float_on_both "MODAL-$label" -O -C -x 30 -y 8 -X 20 -Y 5
+    for side in zz tmux; do
+      send_bytes "$side" "$(printf '\033[<%s;3;3M' "$button")"
+      send_bytes "$side" "$(printf '\033[<%s;3;3m' "$button")"
+    done
+    wait_for "zz modal killed by the $label click" pane_count_is zz 2
+    wait_for "tmux modal killed by the $label click" pane_count_is tmux 2
+    verdict "modal-close-$label"
+  done
 }
 
 floating_count_is() {
@@ -727,6 +741,9 @@ clipped_clock_case() {
   done
   both_screen_lacks CLOCKF 'the float under clock-mode'
   verdict clipped-clock
+  CASE_LABEL=clipped-clock-far
+  run_on_both move-pane -t "=$INNER_SESSION:0.1" -X 66 -Y 18
+  verdict clipped-clock-far
 }
 
 cursor_covered_case() {

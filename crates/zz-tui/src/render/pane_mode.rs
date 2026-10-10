@@ -7,7 +7,11 @@ use super::{
     Renderer,
     chooser::{Grid, Paint, Trailing, acs_glyph, plain, segments_width},
 };
-use crate::{layout::Rect, mode_view::resolved_style, state::Model};
+use crate::{
+    layout::{PaneRect, Rect},
+    mode_view::resolved_style,
+    state::Model,
+};
 
 const CLOCK_TABLE: [[[bool; 5]; 5]; 14] = {
     const O: bool = false;
@@ -283,15 +287,6 @@ fn switch_surface(view: &SwitchView<'_>, rect: Rect, theme: &ThemeColours) -> Mo
     }
 }
 
-/// The pane's whole box for a rect a clipped float shows from `source` on.
-pub(super) const fn full_rect(rect: Rect, source: (u16, u16)) -> Rect {
-    Rect {
-        width: rect.width.saturating_add(source.0),
-        height: rect.height.saturating_add(source.1),
-        ..rect
-    }
-}
-
 const CELL_BORDERS: [char; 13] = [
     ' ', 'x', 'q', 'l', 'k', 'm', 'j', 'w', 'v', 't', 'u', 'n', '~',
 ];
@@ -524,19 +519,16 @@ pub(super) fn surface(mode: &PaneMode, rect: Rect, theme: &ThemeColours) -> Mode
 }
 
 impl Renderer {
-    pub(super) fn paint_pane_mode(
-        &mut self,
-        mode: &PaneMode,
-        rect: Rect,
-        source: (u16, u16),
-        model: &Model,
-    ) {
+    pub(super) fn paint_pane_mode(&mut self, mode: &PaneMode, entry: &PaneRect, model: &Model) {
+        let rect = entry.content();
+        let source = entry.source;
         if rect.width == 0 || rect.height == 0 {
             return;
         }
         let reaches_edge = rect.x.saturating_add(rect.width) >= model.size.columns;
-        let grid = surface(mode, full_rect(rect, source), &model.status.theme).grid;
-        let grid = if source == (0, 0) {
+        let whole = entry.mode_rect();
+        let grid = surface(mode, whole, &model.status.theme).grid;
+        let grid = if (whole.width, whole.height) == (rect.width, rect.height) {
             grid
         } else {
             grid.cropped(source.0, source.1, rect.width, rect.height)

@@ -957,7 +957,7 @@ impl Renderer {
                 if let Some(pane_mode) = pane.mode.as_ref() {
                     self.damage.remove(&entry.pane);
                     self.painted.remove(&entry.pane);
-                    self.paint_pane_mode(pane_mode, content, entry.source, model);
+                    self.paint_pane_mode(pane_mode, entry, model);
                     return;
                 }
                 let force = force || pane_mode_changed;
@@ -2491,14 +2491,18 @@ impl Renderer {
             .and_then(|pane| pane.mode.as_ref())
         {
             let content = entry.content();
-            let surface = pane_mode::surface(
-                mode,
-                pane_mode::full_rect(content, entry.source),
-                &model.status.theme,
-            );
+            let surface = pane_mode::surface(mode, entry.mode_rect(), &model.status.theme);
             let (Some(column), Some(row)) = (
-                surface.cursor.0.checked_sub(entry.source.0),
-                surface.cursor.1.checked_sub(entry.source.1),
+                surface
+                    .cursor
+                    .0
+                    .checked_sub(entry.source.0)
+                    .filter(|column| entry.whole.is_none() || *column < content.width),
+                surface
+                    .cursor
+                    .1
+                    .checked_sub(entry.source.1)
+                    .filter(|row| entry.whole.is_none() || *row < content.height),
             ) else {
                 self.move_to(0, 0);
                 self.hide_cursor();
@@ -6014,6 +6018,67 @@ mod tests {
         let (style, _) = paint("fg=blue,bg=red", "bg=green,fg=default");
         assert_eq!(style.fg, Some(TmuxColour::Basic(4)));
         assert_eq!(style.bg, Some(TmuxColour::Basic(2)));
+    }
+
+    #[test]
+    fn a_float_clipped_at_the_right_or_bottom_crops_its_pane_mode_instead_of_reflowing_it() {
+        let clock = |float: zz_protocol::FloatingPaneSnapshot| {
+            let mut model = tiled_under_float(float, None);
+            let mut snapshot = (*model.snapshot).clone();
+            snapshot.sessions[0].windows[0]
+                .panes
+                .get_mut(&PaneId(8))
+                .unwrap()
+                .mode = Some(zz_protocol::PaneMode::Clock {
+                time: "12:00".to_owned(),
+                colour: "blue".to_owned(),
+            });
+            model.update_snapshot(std::sync::Arc::new(snapshot));
+            let entry = model.pane_rect(PaneId(8)).expect("the float's rect");
+            let mut renderer = Renderer::new();
+            renderer.paint_entry(&model, &entry, true, false);
+            (
+                entry.content(),
+                entry.mode_rect(),
+                String::from_utf8_lossy(&renderer.output).into_owned(),
+            )
+        };
+
+        let right = zz_protocol::FloatingPaneSnapshot {
+            xoff: 34,
+            yoff: 2,
+            sx: 10,
+            sy: 5,
+            ..CLIPPED
+        };
+        let (content, whole, output) = clock(right);
+        assert_eq!((content.width, content.height), (6, 5));
+        assert_eq!((whole.width, whole.height), (10, 5));
+        assert!(output.contains("12:"), "{output:?}");
+        assert!(
+            !output.contains("12:00"),
+            "the 10-column clock centres on the whole pane and loses its last columns: {output:?}"
+        );
+
+        let rows = tiled_under_float(right, None)
+            .pane_rect(PaneId(7))
+            .unwrap()
+            .rect
+            .height;
+        let bottom = zz_protocol::FloatingPaneSnapshot {
+            xoff: 4,
+            yoff: i32::from(rows) - 2,
+            sx: 10,
+            sy: 5,
+            ..CLIPPED
+        };
+        let (content, whole, output) = clock(bottom);
+        assert_eq!(content.height, 2, "{content:?}");
+        assert_eq!((whole.width, whole.height), (10, 5));
+        assert!(
+            !output.contains("12:00"),
+            "the clock's row is below the window's last row: {output:?}"
+        );
     }
 
     #[test]

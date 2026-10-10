@@ -730,6 +730,36 @@ message_case() {
   set_on_both display-time "$MESSAGE_HOLD_MS"
 }
 
+# A KEY BINDING THAT FAILS. cmd-queue.c cmdq_error gives a client with a
+# session the uppercased error through status_message_set(c, -1, 1, 0, 0): a
+# message like any other, timed by display-time, and the next key clears it
+# (server_client_handle_key) and still reaches the pane. Three rows are
+# compared: the message held up, the row a key cleared, and the row once
+# display-time expired.
+binding_error_case() {
+  CASE_LABEL=binding-error
+  mark_both binderror
+  run_on_both bind-key -n F5 kill-pane -t zzind-missing
+  set_on_both display-time "$MESSAGE_HOLD_MS"
+  type_on_both F5
+  both_last_row_has "find pane: zzind-missing" 'the binding error'
+  settle_both MARK-binderror 'the binding error'
+  verdict binding-error-shown same
+  type_on_both x
+  both_last_row_lacks "find pane: zzind-missing" 'the binding error a key cleared'
+  type_on_both BSpace
+  settle_both MARK-binderror 'the binding error a key cleared'
+  verdict binding-error-key-cleared same
+  set_on_both display-time 1500
+  type_on_both F5
+  both_last_row_has "find pane: zzind-missing" 'the timed binding error'
+  both_last_row_lacks "find pane: zzind-missing" 'the expired binding error'
+  settle_both MARK-binderror 'the expired binding error'
+  verdict binding-error-expired same
+  run_on_both unbind-key -n F5
+  set_on_both display-time "$MESSAGE_HOLD_MS"
+}
+
 # THE COMMAND PROMPT. Opened through the client's own keys - prefix then `:`,
 # which is bind-key -T prefix : command-prompt on both sides - because
 # `command-prompt -t <client>` from a one-shot client does not return until the
@@ -963,6 +993,7 @@ run_cases() {
   view_long_case
   prefix_case
   message_case
+  binding_error_case
   prompt_case
   selection_case emacs emacs ''
   selection_case vi vi ''

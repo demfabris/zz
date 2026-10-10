@@ -1202,6 +1202,18 @@ impl Renderer {
             title: None,
         });
         self.mode_tree.offset = offset;
+        let edited = model.choose_tree.as_ref().map_or_else(
+            || {
+                model
+                    .choose_buffer
+                    .as_ref()
+                    .is_some_and(|state| !state.prompt.is_empty())
+            },
+            |state| !state.prompt.is_empty(),
+        );
+        if edited && presentation.prompt_column > 0 {
+            cursor.0 = presentation.prompt_column.min(sx - 1);
+        }
         cursor.1 += top;
         grid.emit(
             &mut self.output,

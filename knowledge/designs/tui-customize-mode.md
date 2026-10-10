@@ -119,7 +119,10 @@ Customize prompts share the server's prompt history since 2026-10-10 (`fix.follo
 `Up`/`C-p` and `Down`/`C-n` walk the command list, or the search list for the search and
 filter prompts (mode-tree.c raises those as `PROMPT_TYPE_SEARCH`), and Enter adds a typed
 non-empty answer to it; a single-key prompt adds nothing. The choosers' filter prompts and
-the window tree's `:` prompt (`ChooserPrompt` in the daemon) walk and feed the same lists. An answer the mode refuses, or a
+the window tree's `:` prompt (`ChooserPrompt` in the daemon) walk and feed the same lists, and
+since `fix.followups-4` they edit through the same `ModePrompt` (cursor keys, C-a, C-e, C-k, C-u,
+C-w, and the vi table under `status-keys vi`), with the cursor column in
+`ChooserPresentation.prompt_column`. An answer the mode refuses, or a
 command it runs that fails, is a status message for `display-time` with no command behind it,
 so no `after-display-message` hook sees it.
 

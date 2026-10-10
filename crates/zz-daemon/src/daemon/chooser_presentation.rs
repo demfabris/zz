@@ -758,20 +758,21 @@ fn chooser_prompt_look(
     let session = super::client_attached_session(inner, client);
     let (prompt_type, flags, input): (_, &[&str], _) = match prompt {
         Some(prompt) => match prompt.kind {
-            super::ChooserPromptKind::Kill if accept => (
-                "command",
-                &["SINGLE", "NOFORMAT", "ACCEPT"],
-                prompt.input.as_str(),
-            ),
-            super::ChooserPromptKind::Kill => {
-                ("command", &["SINGLE", "NOFORMAT"], prompt.input.as_str())
+            super::ChooserPromptKind::Kill if accept => {
+                ("command", &["SINGLE", "NOFORMAT", "ACCEPT"], prompt.input())
             }
-            super::ChooserPromptKind::Command => ("command", &["NOFORMAT"], prompt.input.as_str()),
-            super::ChooserPromptKind::Filter => ("search", &["NOFORMAT"], prompt.input.as_str()),
+            super::ChooserPromptKind::Kill => ("command", &["SINGLE", "NOFORMAT"], prompt.input()),
+            super::ChooserPromptKind::Command => ("command", &["NOFORMAT"], prompt.input()),
+            super::ChooserPromptKind::Filter => ("search", &["NOFORMAT"], prompt.input()),
         },
-        None => ("search", &["NOFORMAT"], search.unwrap_or_default()),
+        None => (
+            "search",
+            &["NOFORMAT"],
+            search.unwrap_or_default().to_owned(),
+        ),
     };
-    mode_prompt_look(inner, session, prompt_type, flags, input, false)
+    let command_mode = prompt.is_some_and(|prompt| prompt.editor.command_mode());
+    mode_prompt_look(inner, session, prompt_type, flags, &input, command_mode)
 }
 
 pub(super) fn pane_session(inner: &ServerState, pane: PaneId) -> Option<SessionId> {
@@ -828,6 +829,10 @@ pub(super) fn chooser_presentation(
             preview_size: chooser.preview_size,
             preview,
             prompt_cursor,
+            prompt_column: chooser
+                .prompt
+                .as_ref()
+                .map_or(0, super::ChooserPrompt::cursor),
         });
     }
     let chooser = inner
@@ -871,6 +876,10 @@ pub(super) fn chooser_presentation(
         preview_size: chooser.preview_size,
         preview,
         prompt_cursor,
+        prompt_column: chooser
+            .prompt
+            .as_ref()
+            .map_or(0, super::ChooserPrompt::cursor),
     })
 }
 

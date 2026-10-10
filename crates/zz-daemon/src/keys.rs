@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use zz_mux::ModeKey;
 pub(crate) use zz_protocol::input_key_name;
 use zz_protocol::{
     ChooseBufferAction, ChooseTreeAction, KeyTables, KeyToken, RawText, input_typed_text,
@@ -90,27 +91,21 @@ pub(crate) fn client_mode_key_action(input: &KeyInput) -> Option<ChooseTreeActio
 }
 
 /// `prompt_key` under `PROMPT_TYPE_COMMAND` without `PROMPT_SINGLE`: the line
-/// is edited until an explicit close, so a key is either a character to append,
-/// one of the two closers, or nothing at all.
+/// is edited until the prompt itself closes, so a key is typed text or a key
+/// the prompt's own table (`status-keys`) interprets.
 pub(crate) enum ChooserPromptEdit {
     Append(String),
-    Backspace,
-    Accept,
-    Cancel,
-    HistoryUp,
-    HistoryDown,
+    Key(ModeKey),
 }
 
 pub(crate) fn chooser_prompt_edit(input: &KeyInput) -> Option<ChooserPromptEdit> {
-    match input_key_name(input).as_str() {
-        "Escape" | "C-g" | "C-c" | "C-[" => return Some(ChooserPromptEdit::Cancel),
-        "Enter" => return Some(ChooserPromptEdit::Accept),
-        "BSpace" => return Some(ChooserPromptEdit::Backspace),
-        "Up" | "C-p" => return Some(ChooserPromptEdit::HistoryUp),
-        "Down" | "C-n" => return Some(ChooserPromptEdit::HistoryDown),
-        _ => {}
+    if let Some(text) = input_typed_text(input) {
+        return Some(ChooserPromptEdit::Append(text.to_owned()));
     }
-    input_typed_text(input).map(|text| ChooserPromptEdit::Append(text.to_owned()))
+    match ModeKey::parse(&input_key_name(input)) {
+        ModeKey::Other => None,
+        key => Some(ChooserPromptEdit::Key(key)),
+    }
 }
 
 /// `prompt_key` under `PROMPT_SINGLE` takes one character as the whole answer;

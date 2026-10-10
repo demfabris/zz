@@ -565,7 +565,7 @@ fn chooser_filter_prompts_walk_and_feed_the_search_history() {
             .choose_tree
             .as_ref()
             .and_then(|chooser| chooser.prompt.as_ref())
-            .map(|prompt| prompt.input.clone())
+            .map(ChooserPrompt::input)
     };
     scene.open("choose-tree", &["-Zw"]);
     scene.press(key('f', Modifiers::default()), false);
@@ -594,7 +594,7 @@ fn chooser_filter_prompts_walk_and_feed_the_search_history() {
         .choose_tree
         .as_ref()
         .and_then(|chooser| chooser.prompt.as_ref())
-        .map(|prompt| (prompt.kind, prompt.input.clone()));
+        .map(|prompt| (prompt.kind, prompt.input()));
     assert_eq!(command, Some((ChooserPromptKind::Command, String::new())));
 }
 
@@ -615,34 +615,129 @@ fn a_chooser_search_answer_is_search_history_the_filter_prompt_recalls() {
         .choose_tree
         .as_ref()
         .and_then(|chooser| chooser.prompt.as_ref())
-        .map(|prompt| prompt.input.clone());
+        .map(ChooserPrompt::input);
     assert_eq!(input.as_deref(), Some("two"));
 }
 
 #[test]
 fn a_chooser_prompt_clamps_its_walk_when_the_history_shrank() {
     let full = ["one".to_owned(), "two".to_owned(), "three".to_owned()];
-    let mut prompt = ChooserPrompt {
-        kind: ChooserPromptKind::Filter,
-        text: "(filter) ".to_owned(),
-        input: String::new(),
-        targets: Vec::new(),
-        history_index: 0,
-    };
+    let mut prompt = ChooserPrompt::new(
+        ChooserPromptKind::Filter,
+        "(filter) ".to_owned(),
+        "",
+        Vec::new(),
+    );
     for _ in 0..3 {
-        prompt.walk_history(&full, true);
+        prompt.edit(&ChooserPromptEdit::Key(ModeKey::Up), &full, (false, ""));
     }
-    assert_eq!(prompt.input, "one");
+    assert_eq!(prompt.input(), "one");
     let shrunk = ["new".to_owned()];
-    prompt.walk_history(&shrunk, false);
-    assert_eq!(prompt.input, "");
-    prompt.walk_history(&shrunk, true);
-    assert_eq!(prompt.input, "new");
+    prompt.edit(&ChooserPromptEdit::Key(ModeKey::Down), &shrunk, (false, ""));
+    assert_eq!(prompt.input(), "");
+    prompt.edit(&ChooserPromptEdit::Key(ModeKey::Up), &shrunk, (false, ""));
+    assert_eq!(prompt.input(), "new");
     for _ in 0..3 {
-        prompt.walk_history(&full, true);
+        prompt.edit(&ChooserPromptEdit::Key(ModeKey::Up), &full, (false, ""));
     }
-    prompt.walk_history(&shrunk, true);
-    assert_eq!(prompt.input, "one");
-    prompt.walk_history(&[], false);
-    assert_eq!(prompt.input, "");
+    prompt.edit(&ChooserPromptEdit::Key(ModeKey::Up), &shrunk, (false, ""));
+    assert_eq!(prompt.input(), "one");
+    prompt.edit(&ChooserPromptEdit::Key(ModeKey::Down), &[], (false, ""));
+    assert_eq!(prompt.input(), "");
+}
+
+#[test]
+fn chooser_prompts_edit_at_a_cursor_like_the_pins_prompt() {
+    let named = |code| tests::test_key(code, Modifiers::default(), None);
+    let mut scene = attached_scene();
+    scene.open("choose-tree", &["-Zw"]);
+    scene.press(key('f', Modifiers::default()), false);
+    let line = |scene: &Scene| {
+        let inner = scene.shared.inner.lock();
+        let input = inner.clients[&scene.client]
+            .choose_tree
+            .as_ref()
+            .and_then(|chooser| chooser.prompt.as_ref())
+            .map(ChooserPrompt::input)
+            .expect("the filter prompt is open");
+        let column = chooser_presentation::chooser_presentation(&inner, scene.client)
+            .expect("the chooser is shown")
+            .prompt_column;
+        (input, column)
+    };
+    assert_eq!(line(&scene), (String::new(), 9));
+    for character in "abcd".chars() {
+        scene.press(key(character, Modifiers::default()), false);
+    }
+    scene.press(named(KeyCode::ArrowLeft), false);
+    scene.press(named(KeyCode::ArrowLeft), false);
+    scene.press(key('X', Modifiers::default()), false);
+    assert_eq!(line(&scene), ("abXcd".to_owned(), 12));
+    scene.press(key('a', control()), false);
+    scene.press(key('Y', Modifiers::default()), false);
+    scene.press(key('e', control()), false);
+    scene.press(key('Z', Modifiers::default()), false);
+    assert_eq!(line(&scene), ("YabXcdZ".to_owned(), 16));
+    scene.press(named(KeyCode::ArrowLeft), false);
+    scene.press(key('k', control()), false);
+    assert_eq!(line(&scene), ("YabXcd".to_owned(), 15));
+    scene.press(key('a', control()), false);
+    scene.press(key('d', control()), false);
+    assert_eq!(line(&scene), ("abXcd".to_owned(), 9));
+    scene.press(named(KeyCode::End), false);
+    scene.press(named(KeyCode::Backspace), false);
+    assert_eq!(line(&scene), ("abXc".to_owned(), 13));
+    scene.press(named(KeyCode::Home), false);
+    scene.press(named(KeyCode::ArrowRight), false);
+    scene.press(named(KeyCode::Delete), false);
+    assert_eq!(line(&scene), ("aXc".to_owned(), 10));
+    scene.press(key('w', control()), false);
+    assert_eq!(line(&scene), ("Xc".to_owned(), 9));
+    scene.press(key('u', control()), false);
+    assert_eq!(line(&scene), (String::new(), 9));
+    for character in "ab cd-ef".chars() {
+        scene.press(key(character, Modifiers::default()), false);
+    }
+    scene.press(key('w', control()), false);
+    assert_eq!(line(&scene), ("ab cd-".to_owned(), 15));
+    scene.press(key('w', control()), false);
+    assert_eq!(line(&scene), ("ab cd".to_owned(), 14));
+    scene.press(key('w', control()), false);
+    assert_eq!(line(&scene), ("ab ".to_owned(), 12));
+}
+
+#[test]
+fn chooser_prompts_take_the_sessions_vi_status_keys() {
+    let named = |code| tests::test_key(code, Modifiers::default(), None);
+    let mut scene = attached_scene();
+    scene.open("set-option", &["-g", "status-keys", "vi"]);
+    scene.open("choose-tree", &["-Zw"]);
+    scene.press(key('f', Modifiers::default()), false);
+    let line = |scene: &Scene| {
+        let inner = scene.shared.inner.lock();
+        let chooser = inner.clients[&scene.client].choose_tree.as_ref();
+        let input = chooser
+            .and_then(|chooser| chooser.prompt.as_ref())
+            .map(ChooserPrompt::input);
+        let column = chooser_presentation::chooser_presentation(&inner, scene.client)
+            .map_or(0, |presentation| presentation.prompt_column);
+        (input, column)
+    };
+    for character in "abcd".chars() {
+        scene.press(key(character, Modifiers::default()), false);
+    }
+    assert_eq!(line(&scene), (Some("abcd".to_owned()), 13));
+    scene.press(named(KeyCode::Escape), false);
+    assert_eq!(line(&scene), (Some("abcd".to_owned()), 12));
+    scene.press(key('h', Modifiers::default()), false);
+    scene.press(key('x', Modifiers::default()), false);
+    assert_eq!(line(&scene), (Some("abd".to_owned()), 11));
+    scene.press(key('0', Modifiers::default()), false);
+    scene.press(key('i', Modifiers::default()), false);
+    scene.press(key('Z', Modifiers::default()), false);
+    assert_eq!(line(&scene), (Some("Zabd".to_owned()), 10));
+    scene.press(named(KeyCode::Escape), false);
+    assert_eq!(line(&scene), (Some("Zabd".to_owned()), 9));
+    scene.press(key('q', Modifiers::default()), false);
+    assert_eq!(line(&scene).0, None);
 }

@@ -219,8 +219,8 @@
 }
 
 /* ── icons ───────────────────────────────────────────────────────────────── */
-/* Tabler outline at 24px with stroke-width 2 — at 14px the effective stroke
-   is 1.17px, at 16px 1.33px. */
+/* zz's set on a 24 grid with stroke-width 1.75: at 14px the effective stroke
+   is 1.02px, at 16px 1.17px. */
 .zz-icon {
 	display: inline-flex;
 	flex: none;

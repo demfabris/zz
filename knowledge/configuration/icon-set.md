@@ -1,22 +1,20 @@
 ---
 type: Configuration
 title: zz icon set
-description: zz's own icons, drawn from skeletons in the Mac school so their corners follow the theme radius and superellipse smoothing, and how to draw, preview and review a new one.
-resource: clients/storybook/icons/sets/mac.json
-tags: [ui, icons, zz-gpui-kit, storybook, theme]
-timestamp: 2026-10-10T00:00:00Z
+description: zz's own icons, drawn from skeletons in the Mac school so their corners follow the theme radius and superellipse smoothing, how the app and the site get them, and how to draw, preview and review a new one.
+resource: crates/zz-gpui-kit/src/icon/mac.json
+tags: [ui, icons, zz-gpui-kit, storybook, site, theme]
+timestamp: 2026-10-10T12:00:00Z
 ---
 
 # Overview
 
 zz has its own icon set: 69 glyphs, every icon zz ships except the four brand marks (`claude`, `openai`,
-`brand-chrome`, `zz`), which keep their own artwork. They live as skeletons in
-`clients/storybook/icons/sets/mac.json`, not as SVG files, and are drawn at paint time for the current
-theme, so radius 0 gives flat icons and higher radii round them the way zz rounds panes.
-
-The app still ships the Tabler SVGs in `crates/zz-gpui-kit/assets/icons`. The storybook shows the new
-set everywhere through its Icons knob; wiring it into the app is the step described under
-[Shipping](#shipping).
+`brand-chrome`, `zz`), which keep their own artwork as files in `crates/zz-gpui-kit/assets/icons`. The
+set lives as skeletons in `crates/zz-gpui-kit/src/icon/mac.json`, not as SVG files, and is drawn at
+paint time for the current theme, so radius 0 gives flat icons and higher radii round them the way zz
+rounds panes. The desktop app, the web and iOS clients and the storybook all draw it; Tabler, which zz
+shipped before, is gone except for the `brand-chrome` mark.
 
 The set went through two rounds on 2026-10-10. The first followed Tabler's skeletons on a 2px stroke and
 was dropped as too close to Tabler. The second, the one kept, follows the Mac school. These are our own
@@ -35,10 +33,29 @@ JSON, 1.75). Corners are the only thing the theme changes:
 - **Radius 0 is flat**: sharp corners, square caps, mitered joins. Above 0, caps and joins are round.
 
 Two renderers implement the same math and must stay in step when a part kind changes:
-`clients/storybook/src/glyphs.rs` (Rust, the storybook's asset source) and
-`clients/storybook/icons/glyph.js` (the review page). The radius and smoothing travel in the asset
-path, `icon-drafts/mac/<radius>-<smoothing>/<name>.svg`, because gpui's sprite atlas caches rasters by
-path and size; a new radius has to be a new path or the old raster stays on screen.
+`crates/zz-gpui-kit/src/icon/glyphs.rs` (Rust, what the app draws) and
+`clients/storybook/icons/glyph.js` (the review page).
+
+# How it ships
+
+`IconName::path` stays `icons/<name>.svg`. When it renders, `Icon` rewrites a path the set draws to
+`icons/<theme radius>-<corner smoothing>/<name>.svg` from `cx.theme()`, and the kit's `Assets` draws
+that path on load. The radius and smoothing travel in the path because gpui's sprite atlas caches
+rasters by path and size; a new radius has to be a new path or the old raster stays on screen. Changing
+the radius or the interface style refreshes the windows, so every icon redraws. A plain
+`icons/<name>.svg` load, outside any theme, draws at radius 6 and smoothing 4. Nothing has to be wired
+per client: every app that uses the kit's `Assets` and `Icon` gets the set.
+
+The bijection tests in `crates/zz-gpui-kit/src/icon/mod.rs` hold `IconName` to the set plus the brand
+files: every variant loads, every file in `assets/icons` has a variant, and every icon in `mac.json`
+names its variant and has no file shadowing it.
+
+The site inlines static copies from `site/src/icons`, exported at the app's default look (Modern,
+radius 24, smoothing 4) next to the brand marks. Re-export after changing the set:
+
+```sh
+cargo run -p zz-gpui-kit --example export_icons -- site/src/icons 24 4
+```
 
 ## Part kinds
 
@@ -79,28 +96,18 @@ a missing scale means a sharp vertex.
 
 # Adding or changing an icon
 
-1. If zz needs a new `IconName`, add the variant and an SVG file in `crates/zz-gpui-kit/assets/icons`
-   as before. The bijection tests in `crates/zz-gpui-kit/src/icon/mod.rs` still require both while the
-   app ships files.
-2. Add one line to `sets/mac.json` with `name` equal to the file stem, its `variant`, a `group` and its
+1. If zz needs a new `IconName`, add the variant and its `icons/<name>.svg` path in
+   `crates/zz-gpui-kit/src/icon/mod.rs`. Only brand marks get a file in `assets/icons`.
+2. Add one line to `mac.json` with `name` equal to the path's stem, its `variant`, a `group` and its
    `parts`. Draw it with the rules above.
-3. Preview it with `just storybook run`: Foundation › Icon drafts shows the set at the current Radius and
-   Corner smoothing knobs, a radius ramp, chrome sizes and 48px construction, next to Tabler. The Icons
-   knob (zz or Tabler) swaps the icons in every story. Check radius 0, 6 and 25, and 12 to 16px.
-   `include_str!` reads the JSON, so touch a file under `clients/storybook/src` if the watcher does not
-   rebuild after a JSON edit.
-4. `cargo test --manifest-path clients/storybook/Cargo.toml` draws every icon at radius 0, 3 and 12.5.
-5. For review, `node clients/storybook/icons/build-sheet.mjs` writes `target/icon-sheet/zz-icons.html`:
-   every icon with radius and smoothing sliders, the 24 grid, the Tabler icon it replaces and how many
-   Rust files use it. The review artifact from 2026-10-10 is
-   `https://claude.ai/artifact/A4dypJQa9Nqs8puPXPiBjS`; republish to that URL so comments stay with it.
-
-# Shipping
-
-The hook is already in the kit: `zz_gpui_kit::IconSource(fn(&str, &App) -> Option<SharedString>)`, a
-global that `Icon::render` consults to rewrite an icon's asset path. Without it nothing changes. The
-storybook's `assets::icon_source` is the reference: it maps `icons/<name>.svg` to the generated path for
-the theme radius and smoothing.
-
-To ship, the app sets the global, the generator and `mac.json` move into the kit, and
-`site/src/icons` gets SVGs exported at the default radius.
+3. Preview it with `just storybook run`: Foundation › Icon set shows the set at the current Radius and
+   Corner smoothing knobs, a radius ramp, chrome sizes and 48px construction. Check radius 0, 6 and 25,
+   and 12 to 16px. `include_str!` reads the JSON, so touch a file under `crates/zz-gpui-kit/src` if the
+   watcher does not rebuild after a JSON edit.
+4. `cargo test -p zz-gpui-kit --lib icon` draws every icon at radius 0, 6 and 25 and checks the
+   bijection.
+5. Re-export the site copies (see [How it ships](#how-it-ships)).
+6. For review, `node clients/storybook/icons/build-sheet.mjs` writes `target/icon-sheet/zz-icons.html`:
+   every icon with radius and smoothing sliders, the 24 grid and how many Rust files use it. The review
+   artifact from 2026-10-10 is `https://claude.ai/artifact/A4dypJQa9Nqs8puPXPiBjS`; republish to that
+   URL so comments stay with it.

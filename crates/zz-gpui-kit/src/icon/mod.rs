@@ -1,32 +1,24 @@
 //! Icons: the glyph set, and the element that draws one.
 //!
-//! The artwork in `assets/icons/` is [Tabler Icons](https://tabler.io/icons)
-//! outline (MIT, `assets/icons/LICENSE-TABLER`): 2px stroke on a 24 grid. File
-//! names stay on the old Lucide/Iconoir paths so no call site moves. The
-//! `openai` and `claude` brand marks are [Simple Icons](https://simpleicons.org)
-//! (CC0-1.0). Names that differ from the file stem: `bot` is `robot`,
-//! `case-sensitive` is `letter-case`, `chat-plus` is `message-plus`,
-//! `circle-user` is `user-circle`, `ellipsis`/`ellipsis-vertical` are `dots`/
-//! `dots-vertical`, `gallery-vertical-end` is `columns-3`, `hard-drive` is
-//! `server`, `info` is `info-circle`, `inspector` is `click`, `layers` is
-//! `stack-2`, `loader` is `loader-2`, `panel-left`/`panels-top-left` are
-//! `layout-sidebar`, `panel-right`/`panel-bottom` are `layout-sidebar-right`/
-//! `layout-bottombar`, `redo-2`/`undo-2` are
-//! `arrow-forward-up`/`arrow-back-up`, `square-terminal` is `terminal-2`,
-//! `triangle-alert` is `alert-triangle`, `window-close` and `xmark` are `x`,
-//! `window-maximize` is `square`, `window-minimize` is `minus`,
-//! `window-restore` is `copy`.
+//! Every glyph but the brand marks is zz's own, drawn by [`glyphs`] from the
+//! skeletons in `mac.json` so its corners follow the theme radius and corner
+//! smoothing (`knowledge/configuration/icon-set.md`). The brand marks are
+//! files in `assets/icons/`: `openai` and `claude` are
+//! [Simple Icons](https://simpleicons.org) (CC0-1.0), `brand-chrome` is
+//! [Tabler Icons](https://tabler.io/icons) (MIT, `assets/icons/LICENSE-TABLER`),
+//! and `zz` is the zz mark.
 
 mod assets;
+pub mod glyphs;
 
 pub use assets::Assets;
 
 use zz_gpui::{
-    AnyElement, App, Global, Hsla, IntoElement, RenderOnce, SharedString, StyleRefinement, Styled,
-    Svg, Transformation, Window, prelude::FluentBuilder as _, svg,
+    AnyElement, App, Hsla, IntoElement, RenderOnce, SharedString, StyleRefinement, Styled, Svg,
+    Transformation, Window, prelude::FluentBuilder as _, svg,
 };
 
-use crate::{Sizable, Size};
+use crate::{Sizable, Size, Theme};
 
 /// A single SVG glyph, sized and tinted like the text around it.
 ///
@@ -89,15 +81,11 @@ impl Sizable for Icon {
     }
 }
 
-pub struct IconSource(pub fn(&str, &App) -> Option<SharedString>);
-
-impl Global for IconSource {}
-
 impl RenderOnce for Icon {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let source = cx.try_global::<IconSource>().map(|source| source.0);
-        let path = source
-            .and_then(|source| source(&self.path, cx))
+        let path = cx
+            .try_global::<Theme>()
+            .and_then(|theme| glyphs::path(&self.path, theme.radius.into(), theme.corner_smoothing))
             .unwrap_or(self.path);
         let color = self.text_color.unwrap_or_else(|| window.text_style().color);
         let ambient = window.text_style().font_size.to_pixels(window.rem_size());
@@ -127,7 +115,7 @@ impl From<Icon> for AnyElement {
     }
 }
 
-/// Every icon shipped in `assets/icons/`, one variant per file.
+/// Every icon zz ships, drawn by [`glyphs`] or a brand mark in `assets/icons/`.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, IntoElement)]
 pub enum IconName {
     ArrowDown,
@@ -420,6 +408,28 @@ mod tests {
             assert!(
                 named.contains(format!("icons/{file_name}").as_str()),
                 "assets/icons/{file_name} has no IconName variant"
+            );
+        }
+    }
+
+    #[test]
+    fn every_drawn_icon_names_its_variant_and_ships_no_file() {
+        let set: serde_json::Value =
+            serde_json::from_str(include_str!("mac.json")).expect("the icon set parses");
+        for icon in set["icons"].as_array().expect("the set lists icons") {
+            let name = icon["name"].as_str().expect("every icon has a name");
+            let path = format!("icons/{name}.svg");
+            let variant = IconName::ALL
+                .iter()
+                .find(|variant| variant.path() == path)
+                .unwrap_or_else(|| panic!("{name} has no IconName variant"));
+            assert_eq!(
+                Some(format!("{variant:?}").as_str()),
+                icon["variant"].as_str()
+            );
+            assert!(
+                !icons_dir().join(format!("{name}.svg")).exists(),
+                "assets/icons/{name}.svg shadows the drawn {name}"
             );
         }
     }

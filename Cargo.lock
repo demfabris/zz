@@ -11445,6 +11445,7 @@ dependencies = [
  "ropey",
  "rust-embed",
  "serde",
+ "serde_json",
  "smallvec",
  "tree-sitter",
  "tree-sitter-json",

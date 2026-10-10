@@ -10,7 +10,7 @@
   font-display: swap;
 }
 
-/* Layout: sticky control strip over grouped specimen cards, one card per glyph, 24-grid stage on the left, Tabler reference on the right. */
+/* Layout: sticky control strip over grouped specimen cards, one card per glyph on its 24-grid stage. */
 :root {
   --bg: #ffffff;
   --raised: #f2f2f2;
@@ -171,10 +171,6 @@ body.grid .frame.ours {
   background-size: 48px 48px, 48px 48px, 8px 8px, 8px 8px;
   background-position: -0.5px -0.5px;
 }
-.reference { display: grid; gap: 4px; justify-items: center; }
-.reference .frame { color: var(--muted); }
-.reference small { font-family: var(--mono); font-size: 11px; color: var(--muted); }
-body:not(.compare) .reference { display: none; }
 .name {
   font-family: var(--mono);
   font-size: 13px;
@@ -249,7 +245,6 @@ footer { margin-top: 48px; color: var(--muted); font-size: 12px; max-width: 68ch
     <div class="control">
       <span class="label">Show</span>
       <div class="presets">
-        <label class="toggle"><input type="checkbox" id="compare" checked> Tabler</label>
         <label class="toggle"><input type="checkbox" id="grid" checked> Grid</label>
       </div>
     </div>
@@ -270,7 +265,6 @@ const SETS = /*SETS*/;
 const SCHOOLS = {
   mac: "Mac school: continuous corners everywhere, a lighter 1.75 stroke, wide Mac proportions, small filled parts (traffic lights, dog-ears, eyes, commits) and containers that show their content (sidebar rows, key caps, a tray). Our own drawings in that spirit; SF Symbols themselves may only be used on Apple platforms.",
 };
-const TABLER = /*TABLER*/;
 const USAGE = /*USAGE*/;
 
 const state = { radius: 6, smoothing: 4, set: "mac" };
@@ -308,11 +302,6 @@ function build() {
     ]);
     for (const icon of icons) {
       const ours = el("div", { class: "frame ours", role: "img", "aria-label": `${icon.name}, zz` });
-      const reference = el("div", { class: "reference" }, [
-        el("div", { class: "frame", role: "img", "aria-label": `${icon.name}, Tabler today` }),
-        el("small", { text: "tabler today" }),
-      ]);
-      reference.firstChild.innerHTML = TABLER[icon.name] || "";
       const row16 = el("span");
       const row12 = el("span", { class: "small" });
       const usage = USAGE[icon.variant] || { files: 0, site: false };
@@ -321,7 +310,7 @@ function build() {
       ]);
       if (usage.site) chips.append(el("span", { class: "chip", text: "site" }));
       const card = el("article", { class: "card", id: `icon-${icon.name}` }, [
-        el("div", { class: "stage" }, [ours, reference]),
+        el("div", { class: "stage" }, [ours]),
         el("div", {}, [el("h3", { class: "name", text: icon.name }), el("div", { class: "variant", text: `IconName::${icon.variant}` })]),
         el("div", { class: "chrome-row" }, [row16, el("span", { class: "label", text: icon.name.replaceAll("-", " ") }), row12]),
         chips,
@@ -371,7 +360,7 @@ for (const button of document.querySelectorAll("[data-radius]")) {
   button.addEventListener("click", () => setRadius(Number(button.dataset.radius)));
 }
 
-for (const id of ["compare", "grid"]) {
+for (const id of ["grid"]) {
   const input = document.getElementById(id);
   const sync = () => document.body.classList.toggle(id, input.checked);
   input.addEventListener("change", sync);

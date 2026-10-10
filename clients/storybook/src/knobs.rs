@@ -22,23 +22,6 @@ pub struct Knobs {
     pub pane_glow: f32,
     pub motion: bool,
     pub backdrop: Backdrop,
-    pub icons: Icons,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Icons {
-    #[default]
-    Mac,
-    Tabler,
-}
-
-impl Icons {
-    pub fn set(self) -> Option<&'static str> {
-        match self {
-            Self::Mac => Some("mac"),
-            Self::Tabler => None,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -141,7 +124,6 @@ impl Default for Knobs {
             pane_glow: 1.0,
             motion: true,
             backdrop: Backdrop::Plain,
-            icons: Icons::Mac,
         }
     }
 }
@@ -225,13 +207,6 @@ impl Knobs {
                                 "backdrop must be plain, code or color, not {value}"
                             ));
                         }
-                    }
-                }
-                "icons" => {
-                    knobs.icons = match value {
-                        "mac" => Icons::Mac,
-                        "tabler" => Icons::Tabler,
-                        _ => return Err(format!("icons must be mac or tabler, not {value}")),
                     }
                 }
                 _ => {

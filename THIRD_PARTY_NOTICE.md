@@ -75,7 +75,7 @@ The desktop clients ship no fonts; they render with the system text stack.
 
 | Set | Used for | License |
 | --- | --- | --- |
-| [Tabler Icons](https://tabler.io/icons) | Every glyph in the app and the site. Two copies: `crates/zz-gpui-kit/assets/icons` for the app and `site/src/icons`, which the Astro site inlines at build time. A handful are locally redrawn, noted in the zz-gpui-kit port table. | MIT, © 2020–2026 Paweł Kuna. Retained as `LICENSE-TABLER` beside each copy. |
+| [Tabler Icons](https://tabler.io/icons) | The Chrome brand mark, `crates/zz-gpui-kit/assets/icons/brand-chrome.svg`. Every other glyph in the app and the site is zz's own. | MIT, © 2020–2026 Paweł Kuna. Retained as `LICENSE-TABLER` beside it. |
 | [Simple Icons](https://simpleicons.org) | The vendor brand marks `openai.svg` and `claude.svg`. | CC0-1.0 |
 
 ## Color schemes

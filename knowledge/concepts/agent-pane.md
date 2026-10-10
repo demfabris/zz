@@ -786,8 +786,8 @@ finds, text before images, so an image copied from a browser (which also offers 
 pastes as that text. Screenshots and image-only boards are unaffected.
 
 The combined vendor/model/effort picker lives in the composer. It offers Codex and Claude Code under their vendors'
-marks (the OpenAI and Claude glyphs, Simple Icons artwork beside the Tabler set that `zz-ui`
-otherwise ships, since Tabler draws no vendor logos), is disabled during an active turn, and starts
+marks (the OpenAI and Claude glyphs, Simple Icons artwork beside zz's own icon set, which draws
+no vendor logos), is disabled during an active turn, and starts
 a fresh provider-bound thread when the picker closes with a different vendor selected. The mux persists the choice via `set-agent-provider`,
 clears the old opaque session ID, and replaces the daemon-owned ACP child. Retry uses the same
 restart effect. Each replacement receives a new runtime generation, which prevents late output from

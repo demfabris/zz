@@ -9,11 +9,11 @@ a dependency of this workspace**; nothing outside zz-gpui (our gpui) is left.
 - Forked from: `longbridge/gpui-component`, now [longbridge/gpui-kit][upstream]
 - Original source revision: `b004e595cf5de98a73b6b561394a559a94ae1e2a`
 - Upstream license: Apache-2.0, retained here as `LICENSE-APACHE`
-  (© 2024–2025 Longbridge). Bundled icon artwork in `assets/icons` is
-  [Tabler Icons][tabler] outline, MIT, retained as `assets/icons/LICENSE-TABLER`
-  (© 2020–2026 Paweł Kuna); it replaced the Iconoir set.
-  The vendor brand marks (`openai`, `claude`) are [Simple Icons][simple-icons],
-  CC0-1.0.
+  (© 2024–2025 Longbridge). The icons are zz's own, drawn by `src/icon/glyphs.rs`
+  from `src/icon/mac.json`; they replaced Tabler, which replaced Iconoir. The brand
+  marks are files in `assets/icons`: `brand-chrome` is [Tabler Icons][tabler]
+  outline, MIT, retained as `assets/icons/LICENSE-TABLER` (© 2020–2026 Paweł Kuna),
+  and the vendor marks (`openai`, `claude`) are [Simple Icons][simple-icons], CC0-1.0.
 - `zz-gpui-kit`'s own code is `MIT OR Apache-2.0` like the rest of the workspace;
   the ported portions remain under upstream's Apache-2.0 terms.
 
@@ -49,7 +49,7 @@ Everything is reached through `zz_gpui_kit::<widget>`, mirroring upstream's name
 | `kbd` | trimmed | one muted pill: upstream's `appearance(false)` plain-text mode and its outline/primary treatments are dropped, since every hint reads as a caption beside its label. Added `lowercase()` for hints that read as prose (`t`, `b`, `a`) rather than as a keycap legend. |
 | `switch` | trimmed | dropped inline label/`Side`/custom color; kept the animated thumb. The thumb uses `foreground` for visibility against the track. The checked track is the `accent` root, the only chromatic fill a neutral control gets |
 | `menu` | close-to-source | Owns its actions (`zz_menu`), key context (`ZzPopupMenu`) and `init()`; upstream's native `AppMenuBar` not carried over. Local rows use 12px text, 26px height (20px Small), 4px surface gutters, inset half-pixel separators, and the inset menu radius. Open submenu parents highlight in neutral gray; selected shortcut labels and icons brighten to full foreground. `PopupMenuItem::stepper` supports live values, pointer adjustments and Left/Right/Enter without dismissing; the browser menu uses it for page zoom. |
-| `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; SVGs live in `assets/icons` and are embedded by our own `Assets`, replacing `gpui-component-assets`; `Globe` uses Tabler’s round `world` artwork. The dedicated `window-close` glyph extends the Tabler X to the same 18-unit span as maximize, keeping its 2-unit stroke and the general-purpose `xmark` unchanged |
+| `icon` | trimmed | `IconName` is a **hand-written** enum instead of upstream's build-time proc-macro codegen; our own `Assets` replaces `gpui-component-assets`, drawing zz's set (`glyphs`, `mac.json`) for the theme radius and corner smoothing and embedding the brand marks from `assets/icons` |
 | `tooltip` | trimmed | hangs off gpui's `.tooltip()` rather than upstream's `Root`-owned overlay; dropped `ComponentTooltip` after nothing adopted it |
 | `popover` | trimmed | owns its `Cancel` action and `ZzPopover` context; `on_dismiss` runs once for every close path, including trigger toggles; the panel stays inside `fully_visible_bounds` (safe areas and a soft keyboard), using the size it measured the frame before |
 | `slider` | **zz-original** | `DiscreteSlider` displays compact pills filled through the selected step, per-pill tooltips, a trailing selected value, keyboard navigation, and a slider accessibility value |

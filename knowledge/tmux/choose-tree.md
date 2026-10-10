@@ -108,7 +108,7 @@ uses the stronger foreground. Row labels ellipsis-truncate inside a reserved act
 revealing a row's hover actions never reflows the text. Host rows reveal one plus button for a new
 session. The final muted Add host row opens the host dialog and highlights only its label on hover.
 Window rows expose one overflow menu with Split right, Split bottom, and Delete; destructive actions
-use the same Tabler Xmark as the rest of the application.
+use the same Xmark as the rest of the application.
 
 The settings and sidebar-toggle controls share the leading titlebar cluster. The toggle changes
 between the full-height tree without a status bar and the full-width workspace with a status bar

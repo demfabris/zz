@@ -1,13 +1,1 @@
-<svg
-  xmlns="http://www.w3.org/2000/svg"
-  width="24"
-  height="24"
-  viewBox="0 0 24 24"
-  fill="none"
-  stroke="currentColor"
-  stroke-width="2"
-  stroke-linecap="round"
-  stroke-linejoin="round"
->
-  <path d="M12 3a9 9 0 1 0 9 9" />
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12 7.5L12 3" opacity="1"/><path d="M15.18 8.82L18.36 5.64" opacity="0.89"/><path d="M16.5 12L21 12" opacity="0.78"/><path d="M15.18 15.18L18.36 18.36" opacity="0.67"/><path d="M12 16.5L12 21" opacity="0.56"/><path d="M8.82 15.18L5.64 18.36" opacity="0.45"/><path d="M7.5 12L3 12" opacity="0.34"/><path d="M8.82 8.82L5.64 5.64" opacity="0.23"/></svg>

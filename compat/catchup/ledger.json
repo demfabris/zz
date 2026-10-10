@@ -1040,7 +1040,7 @@
       "id": "fix.followups-4",
       "track": "fix",
       "title": "Follow-ups, fourth batch (harness robustness at the 3.8 pin)",
-      "status": "review",
+      "status": "active",
       "deps": [
         "fix.corpus-3-8"
       ],
@@ -1065,7 +1065,8 @@
         "(fix.followups-3) key-binding and choose-tree errors (publish_background_command_error) use an untimed message the raw TUI keeps; tmux clears it after display-time or on a key (customize errors now use the timed path).",
         "(fix.followups-3) chooser prompts have no cursor editing (Left/Right, C-a, C-u...), only history.",
         "2026-10-10: Lane done at 6787854ee: 7 of 8 notes fixed (shared CSI 14 t answerer for all pty drivers, Arch title race in 3 scenarios, link/unlink-window probes 565 clean, tui-mouse drag sabotage caught, needle polls fire no hooks, timed uppercased binding errors (now also shown on the desktop), chooser prompt editing via ModePrompt; wire append prompt_column under 108). Note 3 (zz's bash integration overriding the distro title) waits on fabrico. Review 1 running.",
-        "2026-10-10: fabrico ruled note 3: zz's bash integration yields to a title the shell set at that prompt (idle panes read user@host:dir like tmux). Goes into the fix pass with review 1's findings."
+        "2026-10-10: fabrico ruled note 3: zz's bash integration yields to a title the shell set at that prompt (idle panes read user@host:dir like tmux). Goes into the fix pass with review 1's findings.",
+        "2026-10-10: Codex review 1: 2 P1 (binding errors freeze desktop repaint under display-time 0, chooser prompt cursor clamped instead of scrolling) + P2 (search prompt editing); final pass sent with the bash title ruling."
       ]
     }
   ]

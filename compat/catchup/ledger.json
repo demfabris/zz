@@ -1069,6 +1069,30 @@
         "2026-10-10: Codex review 1: 2 P1 (binding errors freeze desktop repaint under display-time 0, chooser prompt cursor clamped instead of scrolling) + P2 (search prompt editing); final pass sent with the bash title ruling.",
         "2026-10-10: Merged after the final pass (d8e6a1ef4: desktop keeps painting through binding errors, long prompts scroll, search prompt editing, bash/zsh integration yields to the prompt's title per fabrico); merge checks green (clippy 8 crates incl. zz and zz-app, zz-protocol 296, zz-client 225, zz-cli, zz-terminal 458, zz-tui 267, zz-daemon 1599, zz-mux 731, compat check)."
       ]
+    },
+    {
+      "id": "fix.close-out",
+      "track": "fix",
+      "title": "Reds in the closing full suite",
+      "status": "active",
+      "deps": [],
+      "zones": [
+        "crates/zz-mux/src",
+        "crates/zz-daemon/src",
+        "compat/tui-superset.sh",
+        "compat/scenarios/hooks-events-structure.txt"
+      ],
+      "gaps": [],
+      "accept": [
+        "hooks-events-structure is clean against tmux 3.8: after fabrico's title ruling the pane title is the distro's user@host:dir, and zz names a broken-out window from it (6:demfabris@alienware:... where tmux says 6:bash). Window names and #{pane_current_command} come from the foreground process, never from the pane title, as in tmux; find where zz falls back to the title (fix.small-semantics added a pane_current_command fallback) and fix it.",
+        "compat/tui-superset.sh passes: its 10 'bindings' cases expect the old lowercase error text; fix.followups-4 made binding errors timed status messages with the first letter uppercased as tmux's cmdq_error does. Update the expectations (and check the timing still lets the fixture see the row).",
+        "compat/tui-client-commands.sh clock-mode-open is confirmed a clock-tick flake (rerun alone) or fixed."
+      ],
+      "branch": "catchup/fix.close-out",
+      "sha": null,
+      "notes": [
+        "2026-10-10: closing full suite on fe2812e60 (log ~/.cache/zz-catchup/logs/close/). Everything else green except the three ci-test failures outside the campaign (two zz agent::view tests, the signal-disposition race)."
+      ]
     }
   ]
 }

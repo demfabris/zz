@@ -241,7 +241,11 @@ one (`floating panes are not supported`), which is the branch that places them.
 front after `render_layout` and before `overlays`: an absolute `FloatingSurface`
 (`crates/zz-ui/src/pane.rs:279`) around the pane's normal surface (terminal, browser, agent) at
 `xoff * cell_w, yoff * cell_h` from the canvas origin with this client's cell metrics, clipped,
-titled from `border_status_text`, borderless for `None`. `render_layout` draws `LayoutNode::Empty` as
+titled from `border_status_text` split by `zz_client::floating::float_title` (the `#[align=right]`
+part, 3.8's `[t][z][x]`, sits at the header's right edge; web drops it), borderless for `None`.
+The surface's insets count from its outer edge, hairline border included, so the content box is
+exactly `sx` by `sy` cells: floats skip the PTY size writeback, and a box one pixel short measures a
+row less and bottom-anchors the grid, blanking row 0. `render_layout` draws `LayoutNode::Empty` as
 the bare canvas, with no drop targets. Title-bar and edge drags preview locally and on release send
 `move-pane -t %N -X x -Y y` for a move and `resize-pane -t %N -x w -y h` for a resize (outer cells).
 `resize-pane` keeps the offsets (`layout.c:907-935`), so when a resize also moved the origin (left or

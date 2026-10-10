@@ -18,6 +18,7 @@ use zz_client::{
     drop_zone_at,
     floating::{
         FloatCells, FloatGrip, FloatWindow, float_drag_command, float_drag_preview, float_pixels,
+        float_title,
     },
     pane_drop_command, pane_rects, predicted_drop_layout,
 };
@@ -3724,12 +3725,7 @@ impl AppView {
             );
         let title = snapshot
             .filter(|_| float.border_status.is_on())
-            .map(|pane| {
-                zz_protocol::parse_styled_segments(&pane.border_status_text)
-                    .into_iter()
-                    .map(|segment| segment.text)
-                    .collect::<String>()
-            })
+            .map(|pane| float_title(&pane.border_status_text))
             .unwrap_or_default();
         let inset = if bordered { cell } else { Size::default() };
         let grips = if bordered {
@@ -3755,7 +3751,8 @@ impl AppView {
                 .key_context(pane_key_context(pane))
                 .child(
                     FloatingSurface::new(("floating-pane", pane.0), content, cx)
-                        .title(title)
+                        .title(title.left)
+                        .title_right(title.right)
                         .content_inset(inset.width, inset.height)
                         .colors(
                             cx.theme().background.raised(1).opaque(),

@@ -280,6 +280,7 @@ fn floating_surface_shadow(cx: &App) -> Vec<BoxShadow> {
 pub struct FloatingSurface {
     id: ElementId,
     title: SharedString,
+    title_right: SharedString,
     content: AnyElement,
     inset_x: Pixels,
     inset_y: Pixels,
@@ -294,6 +295,7 @@ impl FloatingSurface {
         Self {
             id: id.into(),
             title: SharedString::default(),
+            title_right: SharedString::default(),
             content: content.into_any_element(),
             inset_x: Pixels::ZERO,
             inset_y: Pixels::ZERO,
@@ -307,6 +309,12 @@ impl FloatingSurface {
     #[must_use]
     pub fn title(mut self, title: impl Into<SharedString>) -> Self {
         self.title = title.into();
+        self
+    }
+
+    #[must_use]
+    pub fn title_right(mut self, title: impl Into<SharedString>) -> Self {
+        self.title_right = title.into();
         self
     }
 
@@ -338,6 +346,11 @@ impl RenderOnce for FloatingSurface {
         if cx.theme().shadow {
             shadows.extend(floating_surface_shadow(cx));
         }
+        let border = if self.bordered { px(1.0) } else { Pixels::ZERO };
+        let inset_x = (self.inset_x - border).max(Pixels::ZERO);
+        let inset_y = (self.inset_y - border).max(Pixels::ZERO);
+        let title_inset = self.inset_x.max(px(8.0)) - border;
+        let titled = self.bordered && !(self.title.is_empty() && self.title_right.is_empty());
         div()
             .id(self.id)
             .relative()
@@ -355,29 +368,39 @@ impl RenderOnce for FloatingSurface {
             .child(
                 div()
                     .absolute()
-                    .left(self.inset_x)
-                    .right(self.inset_x)
-                    .top(self.inset_y)
-                    .bottom(self.inset_y)
+                    .left(inset_x)
+                    .right(inset_x)
+                    .top(inset_y)
+                    .bottom(inset_y)
                     .overflow_hidden()
                     .child(self.content),
             )
-            .when(self.bordered && !self.title.is_empty(), |surface| {
-                surface.child(
+            .when(titled, |surface| {
+                let label = |text: SharedString| {
                     div()
-                        .absolute()
-                        .top(px(1.0))
-                        .left(self.inset_x.max(px(8.0)))
-                        .max_w_full()
                         .px(px(4.0))
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
+                        .bg(self.background)
+                        .child(text)
+                };
+                surface.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left(title_inset)
+                        .right(title_inset)
+                        .flex()
+                        .justify_between()
+                        .gap(px(8.0))
                         .font_family(cx.theme().mono_font_family.clone())
                         .text_size(crate::rems_from_px(11.0))
-                        .line_height(self.inset_y.max(px(14.0)))
-                        .bg(self.background)
-                        .child(self.title),
+                        .line_height(inset_y.max(px(14.0)))
+                        .child(label(self.title).min_w_0())
+                        .when(!self.title_right.is_empty(), |row| {
+                            row.child(label(self.title_right).flex_none())
+                        }),
                 )
             })
     }
@@ -982,6 +1005,79 @@ mod tests {
         assert_eq!(chrome.dimmed(true, 1.0).inactive_opacity, 1.0);
         assert_eq!(chrome.dimmed(false, 0.0).inactive_opacity, 1.0);
         assert_eq!(chrome.dimmed(true, 0.7).inactive_opacity, 0.7);
+    }
+
+    struct FloatHost {
+        cell: zz_gpui::Size<Pixels>,
+        columns: u16,
+        rows: u16,
+        bordered: bool,
+    }
+
+    impl Render for FloatHost {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let pad = f32::from(u8::from(self.bordered));
+            let inset = if self.bordered {
+                self.cell
+            } else {
+                zz_gpui::Size::default()
+            };
+            div().size_full().child(
+                div()
+                    .absolute()
+                    .left(px(40.0))
+                    .top(px(60.0))
+                    .w(self.cell.width * (f32::from(self.columns) + 2.0 * pad))
+                    .h(self.cell.height * (f32::from(self.rows) + 2.0 * pad))
+                    .child(
+                        FloatingSurface::new(
+                            "float",
+                            div().size_full().debug_selector(|| "float-content".into()),
+                            cx,
+                        )
+                        .title("0 \"sh\"")
+                        .title_right("[t][z][x]")
+                        .content_inset(inset.width, inset.height)
+                        .bordered(self.bordered),
+                    ),
+            )
+        }
+    }
+
+    #[zz_gpui::test]
+    fn a_floating_surface_gives_its_content_every_cell_of_the_float(
+        cx: &mut zz_gpui::TestAppContext,
+    ) {
+        cx.update(crate::init);
+        let cell = size(px(9.0), px(19.0));
+        for bordered in [true, false] {
+            let (_, cx) = cx.add_window_view(|_, _| FloatHost {
+                cell,
+                columns: 30,
+                rows: 4,
+                bordered,
+            });
+            cx.update(|window, cx| {
+                _ = window.draw(cx);
+            });
+            let content = cx.debug_bounds("float-content").expect("float content");
+            let pad = if bordered {
+                cell
+            } else {
+                size(px(0.0), px(0.0))
+            };
+            assert_eq!(
+                content,
+                Bounds::new(
+                    point(px(40.0) + pad.width, px(60.0) + pad.height),
+                    size(cell.width * 30.0, cell.height * 4.0),
+                ),
+                "bordered: {bordered}"
+            );
+            let grid =
+                crate::terminal::terminal_grid_size(content.size, cell.width, cell.height, 1.0);
+            assert_eq!((grid.columns, grid.rows), (30, 4), "bordered: {bordered}");
+        }
     }
 
     #[zz_gpui::test]

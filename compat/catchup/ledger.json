@@ -1074,7 +1074,7 @@
       "id": "fix.close-out",
       "track": "fix",
       "title": "Reds in the closing full suite",
-      "status": "review",
+      "status": "merged",
       "deps": [],
       "zones": [
         "crates/zz-mux/src",
@@ -1089,10 +1089,11 @@
         "compat/tui-client-commands.sh clock-mode-open is confirmed a clock-tick flake (rerun alone) or fixed."
       ],
       "branch": "catchup/fix.close-out",
-      "sha": null,
+      "sha": "bd65bd9a0",
       "notes": [
         "2026-10-10: closing full suite on fe2812e60 (log ~/.cache/zz-catchup/logs/close/). Everything else green except the three ci-test failures outside the campaign (two zz agent::view tests, the signal-disposition race).",
-        "2026-10-10: Lane done at 5ff922c70: break-pane names the window like tmux's default_window_name (not the pane title), tui-superset expects the uppercased timed messages, clock-mode-open confirmed a minute-boundary flake; hooks-events-structure 88 clean, tui-superset 186/186, tui-client-commands 567/567 alone, zz-mux and zz-daemon packages pass."
+        "2026-10-10: Lane done at 5ff922c70: break-pane names the window like tmux's default_window_name (not the pane title), tui-superset expects the uppercased timed messages, clock-mode-open confirmed a minute-boundary flake; hooks-events-structure 88 clean, tui-superset 186/186, tui-client-commands 567/567 alone, zz-mux and zz-daemon packages pass.",
+        "2026-10-10: Merged after the final fix (4bb6f68d9: automatic rename after break-pane); merge checks green (clippy, zz-mux 732+, zz-cli, zz-daemon 1599, compat check)."
       ]
     }
   ]

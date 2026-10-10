@@ -18,6 +18,16 @@ Work items, status, branches: `compat/catchup/ledger.json` through `ledger.py`.
 | `cargo.sh` | Every cargo call goes through this: memory cap, job count and two cargo slots sized from RAM. |
 | `wt.sh` | Lane worktrees `../zz-cu-<slot>` with a reflinked `target` and `compat/.cache`: `add`, `item` (refreshes a stale tmux cache), `cache`, `rm`, `list`, `prune`. |
 
+## Closed 2026-10-10
+
+Every item is merged except the two fabrico deferred (`later.share`, `later.menu-input`). The pin is the tmux 3.8
+tag; floating panes ship in the mux, daemon, wire and all four clients; display-popup is master's modal pane by
+ruling. The closing full suite on `fe2812e60` plus `fix.close-out` left `run.sh --attached-client`, every
+`tui-*.sh` fixture, clippy and `just compat check` green. Three `cargo ci-test` failures are outside the campaign
+(two `zz` agent::view timeline tests and the signal-disposition race in `zz-daemon-client`). The desktop float
+screenshots in float.clients' clause 4 are still owed: alienware's NVIDIA GPU dropped off the bus, so headless
+gamescope could not start. To reopen, add items to `ledger.json` and follow the steps below.
+
 ## Resuming (any machine)
 
 A fresh orchestrator session (or the same one after a stop) does this, in order:

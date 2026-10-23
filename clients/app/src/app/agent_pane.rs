@@ -2526,7 +2526,7 @@ impl Render for AgentPane {
                 .on_click(cx.listener(|this, _, window, cx| this.choose_images(window, cx)))
                 .into_any_element(),
         ];
-        if cfg!(target_os = "ios") {
+        if cfg!(any(target_os = "ios", target_os = "android")) {
             settings.clear();
         }
         settings.extend(self.render_config_controls(&state, cx));

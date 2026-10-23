@@ -1,0 +1,25 @@
+[package]
+name = "zz-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "zz for Android phones and tablets: the entry point around zz-app and zz-gpui-platform"
+publish = false
+
+[lib]
+name = "zz_android"
+path = "src/lib.rs"
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+futures.workspace = true
+libc.workspace = true
+log.workspace = true
+zz-gpui = { workspace = true, features = ["default"] }
+zz-gpui-platform.workspace = true
+zz-app.workspace = true
+zz-ui = { workspace = true, features = ["agent", "tree-sitter"] }
+
+[lints]
+workspace = true

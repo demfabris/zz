@@ -18,7 +18,7 @@ went from 22 crates to three:
 | --- | --- |
 | `crates/zz-gpui` | gpui core, plus the Zed utility crates it needed, now modules: `collections`, `util` (merged with gpui's own), `shared_string`, `refineable`, `scheduler`, `sum_tree`, `http_client` |
 | `crates/zz-gpui-macros` | gpui's proc macros and the `Refineable` derive |
-| `crates/zz-gpui-platform` | `current_platform` and every backend as a module built only for its target: `macos` with the Metal renderer in `apple`, `linux` (Wayland, X11), `windows` (DirectX), `web`, `ios` (UIKit), and `wgpu`, the renderer Linux, web and iOS share. One build script compiles the Metal shaders on macOS and the HLSL ones on Windows |
+| `crates/zz-gpui-platform` | `current_platform` and every backend as a module built only for its target: `macos` with the Metal renderer in `apple`, `linux` (Wayland, X11), `windows` (DirectX), `web`, `ios` (UIKit), `android` (JNI and the NDK), and `wgpu`, the renderer Linux, web, iOS and Android share. One build script compiles the Metal shaders on macOS and the HLSL ones on Windows |
 
 zz never depended on the utility crates directly, and each target only ever compiled one
 backend, so the split bought nothing: the utility crates sat on the build's critical path before

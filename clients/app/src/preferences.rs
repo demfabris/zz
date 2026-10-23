@@ -333,7 +333,7 @@ impl Preferences {
         Ok(preferences.sanitized())
     }
 
-    #[cfg(any(target_os = "ios", test))]
+    #[cfg(any(target_os = "ios", target_os = "android", test))]
     pub fn load_path(path: &std::path::Path) -> std::io::Result<Self> {
         match std::fs::read_to_string(path) {
             Ok(value) => Self::decode(&value)
@@ -343,7 +343,7 @@ impl Preferences {
         }
     }
 
-    #[cfg(any(target_os = "ios", test))]
+    #[cfg(any(target_os = "ios", target_os = "android", test))]
     pub fn save_path(&self, path: &std::path::Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -354,10 +354,9 @@ impl Preferences {
         std::fs::rename(temporary, path)
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     fn path() -> std::path::PathBuf {
-        std::path::PathBuf::from(std::env::var_os("HOME").expect("iOS application home directory"))
-            .join("Library/Application Support/zz-gpui/preferences.json")
+        support_directory().join("preferences.json")
     }
 
     #[must_use]
@@ -370,11 +369,11 @@ impl Preferences {
         {
             return value;
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         {
             Self::load_path(&Self::path()).unwrap_or_default()
         }
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         Self::default().sanitized()
     }
 
@@ -386,7 +385,7 @@ impl Preferences {
         {
             let _ = storage.set_item(Self::STORAGE_KEY, &value);
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Err(error) = self.save_path(&Self::path()) {
             log::warn!("Could not save preferences: {error}");
         }
@@ -419,6 +418,19 @@ fn bounded(value: f32, min: f32, max: f32, fallback: f32) -> f32 {
     } else {
         fallback
     }
+}
+
+/// Where the native clients keep their preferences and saved hosts: Application
+/// Support in the iOS app container, the app's private files directory on Android.
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub(crate) fn support_directory() -> std::path::PathBuf {
+    #[cfg(target_os = "ios")]
+    let base =
+        std::path::PathBuf::from(std::env::var_os("HOME").expect("iOS application home directory"))
+            .join("Library/Application Support");
+    #[cfg(target_os = "android")]
+    let base = zz_gpui_platform::android::files_dir().expect("Android files directory");
+    base.join("zz-gpui")
 }
 
 #[cfg(test)]

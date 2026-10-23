@@ -283,7 +283,7 @@ impl SshPrompts {
     }
 
     // Only the in-process ssh tier (iOS) asks directly; every other tier goes through the helper.
-    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
     pub(crate) fn respond(&self, prompt: &AskpassPrompt) -> AskpassReply {
         (self.responder)(prompt)
     }

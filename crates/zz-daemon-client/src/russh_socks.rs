@@ -97,7 +97,7 @@ impl<H: client::Handler + 'static> LoopbackForward<H> {
         Ok(())
     }
 
-    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
     pub(crate) fn clear(&mut self) {
         self.explicit.clear();
         self.reconcile(&BTreeSet::new());

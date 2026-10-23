@@ -1,6 +1,6 @@
 use std::{collections::VecDeque, rc::Rc, sync::Arc, time::Duration};
 
-use crate::ios_browser::{
+use crate::native_browser::{
     BrowserEvent, BrowserMount, BrowserProfile, BrowserView, ElementPickerAppearance,
 };
 use futures::StreamExt as _;

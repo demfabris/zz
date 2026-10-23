@@ -36,11 +36,14 @@ impl KeyContext {
         context.set("os", "linux");
         #[cfg(target_os = "windows")]
         context.set("os", "windows");
+        #[cfg(target_os = "android")]
+        context.set("os", "android");
         #[cfg(not(any(
             target_os = "macos",
             target_os = "linux",
             target_os = "freebsd",
-            target_os = "windows"
+            target_os = "windows",
+            target_os = "android"
         )))]
         context.set("os", "unknown");
         context

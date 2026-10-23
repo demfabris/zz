@@ -13,7 +13,7 @@ use zz_protocol::{
     ServerError, SessionId,
 };
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 fn launch_endpoint() -> Option<String> {
     std::env::var("ZZ_GPUI_ENDPOINT")
         .or_else(|_| std::env::var("ZZ_SOCKET"))
@@ -189,7 +189,7 @@ impl AgentCursor {
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 #[derive(Clone)]
 pub struct AuthenticationPrompt {
     pub id: u64,
@@ -199,24 +199,24 @@ pub struct AuthenticationPrompt {
 }
 
 pub struct Connection {
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     endpoint: Option<String>,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     native: Option<crate::transport::Connection>,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     client: Option<Arc<zz_daemon_client::InteractiveClient>>,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     reader: Option<zz_gpui::Task<()>>,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     auth_prompt: Option<(
         AuthenticationPrompt,
         std::sync::mpsc::Sender<zz_daemon_client::AskpassReply>,
     )>,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     resume: bool,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pending_session: Option<String>,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     retry: Option<zz_gpui::Task<()>>,
     pub core: ClientCore,
     history: HistoryPacer,
@@ -253,21 +253,21 @@ impl Connection {
     #[must_use]
     pub fn new(_: &mut Context<Self>) -> Self {
         Self {
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             endpoint: None,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             native: None,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             client: None,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             reader: None,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             auth_prompt: None,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             resume: false,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             pending_session: None,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             retry: None,
             core: history_core(),
             history: HistoryPacer::default(),
@@ -467,37 +467,37 @@ impl Connection {
     }
 
     pub fn start(&mut self, cx: &mut Context<Self>) {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         {
             self.endpoint = launch_endpoint();
         }
         self.reconnect(cx);
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     #[must_use]
     pub fn endpoint(&self) -> Option<&str> {
         self.endpoint.as_deref()
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     #[must_use]
     pub fn browser_client(&self) -> Option<Arc<zz_daemon_client::InteractiveClient>> {
         self.connected.then(|| self.client.clone()).flatten()
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     #[must_use]
     pub fn busy(&self) -> bool {
         !self.connected && (self.native.is_some() || self.retry.is_some())
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub fn connect_to(&mut self, endpoint: String, cx: &mut Context<Self>) {
         self.dial(endpoint, false, cx);
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     fn dial(&mut self, endpoint: String, background: bool, cx: &mut Context<Self>) {
         if self.endpoint.as_deref() != Some(endpoint.as_str()) {
             self.remembered_session = None;
@@ -511,7 +511,7 @@ impl Connection {
     /// Connects to `endpoint` without attaching: the host's sessions,
     /// windows and panes arrive, but no terminal output, until
     /// [`Self::bring_forward`].
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub fn connect_background(&mut self, endpoint: String, cx: &mut Context<Self>) {
         self.dial(endpoint, true, cx);
     }
@@ -519,11 +519,11 @@ impl Connection {
     /// Whether a connection is on its way: signing in, or waiting to retry.
     #[must_use]
     pub fn busy_or_connecting(&self) -> bool {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         {
             self.busy()
         }
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         {
             !self.connected
         }
@@ -552,7 +552,7 @@ impl Connection {
             return;
         }
         self.background = true;
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(client) = &self.client {
             client.set_loopback_discovery(false);
         }
@@ -567,7 +567,7 @@ impl Connection {
     /// Attaches to `session`, or to the session it was last on.
     pub fn bring_forward(&mut self, session: Option<SessionId>, cx: &mut Context<Self>) {
         let was_background = std::mem::replace(&mut self.background, false);
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(client) = &self.client {
             client.set_loopback_discovery(true);
         }
@@ -583,7 +583,7 @@ impl Connection {
         cx.notify();
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub fn disconnect(&mut self, cx: &mut Context<Self>) {
         self.endpoint = None;
         self.resume = false;
@@ -597,13 +597,13 @@ impl Connection {
         {
             self.core.hello_received().then(browser::instance_id)
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         {
             self.client
                 .as_ref()
                 .map(|client| client.client_instance_id())
         }
-        #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
+        #[cfg(not(any(target_family = "wasm", target_os = "ios", target_os = "android")))]
         {
             None
         }
@@ -652,7 +652,7 @@ impl Connection {
                 Err(error) => self.disconnected(error, cx),
             }
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         {
             self.retry = None;
             self.reader = None;
@@ -699,7 +699,7 @@ impl Connection {
                 self.status = "Not connected".into();
             }
         }
-        #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
+        #[cfg(not(any(target_family = "wasm", target_os = "ios", target_os = "android")))]
         {
             self.status = "Open the browser client through zz-web to connect.".into();
         }
@@ -766,13 +766,13 @@ impl Connection {
                 cx.notify();
             }
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(client) = &self.client
             && let Err(error) = client.send(&message)
         {
             self.disconnect_native(error.to_string(), cx);
         }
-        #[cfg(not(any(target_family = "wasm", target_os = "ios")))]
+        #[cfg(not(any(target_family = "wasm", target_os = "ios", target_os = "android")))]
         let _ = (message, cx);
     }
 
@@ -798,7 +798,7 @@ impl Connection {
         self.attach_target(session.to_string(), cx);
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub fn open_session(&mut self, session: String, cx: &mut Context<Self>) {
         if self.connected {
             self.attach_target(session, cx);
@@ -836,7 +836,7 @@ impl Connection {
     }
 
     pub fn set_focused(&mut self, focused: bool, cx: &mut Context<Self>) {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if focused && !self.focused && self.resume && self.native.is_none() {
             self.focused = true;
             self.reconnect(cx);
@@ -894,18 +894,18 @@ impl Connection {
                     self.agent_cursors.clear();
                     let target = self.remembered_session.map_or_else(
                         || {
-                            #[cfg(target_os = "ios")]
+                            #[cfg(any(target_os = "ios", target_os = "android"))]
                             {
                                 std::env::var("ZZ_GPUI_SESSION").unwrap_or_default()
                             }
-                            #[cfg(not(target_os = "ios"))]
+                            #[cfg(not(any(target_os = "ios", target_os = "android")))]
                             {
                                 String::new()
                             }
                         },
                         |id| id.to_string(),
                     );
-                    #[cfg(target_os = "ios")]
+                    #[cfg(any(target_os = "ios", target_os = "android"))]
                     let target = self.pending_session.take().unwrap_or(target);
                     if self.background {
                         self.status = "Connected".into();
@@ -1080,7 +1080,7 @@ impl Connection {
         }
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     fn poll_native(&mut self, cx: &mut Context<Self>) -> bool {
         for _ in 0..128 {
             let Some(event) = self
@@ -1118,13 +1118,13 @@ impl Connection {
         true
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     #[must_use]
     pub fn pending_auth_prompt(&self) -> Option<&AuthenticationPrompt> {
         self.auth_prompt.as_ref().map(|(prompt, _)| prompt)
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub fn answer_auth_prompt(&mut self, id: u64, answer: Option<String>, cx: &mut Context<Self>) {
         if self
             .auth_prompt
@@ -1150,7 +1150,7 @@ impl Connection {
         }
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     fn disconnect_native(&mut self, status: String, cx: &mut Context<Self>) {
         self.connected = false;
         self.client = None;

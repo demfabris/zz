@@ -7,7 +7,7 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 ## Project map
 
 - `crates/zz-gpui` - zz-gpui, our GPUI: the gpui core split out of Zed, with the Zed utility code it needs as modules (`zz_gpui::collections`, `sum_tree`, `scheduler`, `util`, `http_client`, `refineable`)
-- `crates/zz-gpui-platform` - zz-gpui's backends, one module per target, each compiled only there: `macos` (with the Metal renderer in `apple`), `linux` (Wayland, X11), `windows`, `web`, `ios` (UIKit), and the `wgpu` renderer Linux, web and iOS share
+- `crates/zz-gpui-platform` - zz-gpui's backends, one module per target, each compiled only there: `macos` (with the Metal renderer in `apple`), `linux` (Wayland, X11), `windows`, `web`, `ios` (UIKit), `android` (JNI and the NDK), and the `wgpu` renderer Linux, web, iOS and Android share
 - `crates/zz-gpui-macros` - zz-gpui's proc macros, including the `Refineable` derive
 - `crates/zz-gpui-kit` - widget kit on zz-gpui (theme, primitives, widgets, icons): a maintained fork of gpui-component with no zz dependencies, usable by other apps
 - `crates/zz` - desktop client: zz-gpui shell, terminal/browser/agent panes, settings, daemon client
@@ -26,9 +26,10 @@ Rust edition 2024, MSRV 1.97. Release builds on mac/windows require Zig 0.16.0 (
 - `crates/zz-tui` — raw-terminal attach client as a library (the binary lives in `zz-cli`)
 - `crates/zz-web` - local HTTP/WebSocket gateway for browser clients
 - `crates/zz-hotreload` - Subsecond hot-reload launcher for `just hot linux`
-- `clients/app` - `zz-app`: the thin-client app web and iOS share (shell, sidebar, status bar, settings, palette, overlays, panes, connection reducer, image cache, iOS transport and browser pane)
+- `clients/app` - `zz-app`: the thin-client app web, iOS and Android share (shell, sidebar, status bar, settings, palette, overlays, panes, connection reducer, image cache, the native transport and the iOS and Android browser panes)
 - `clients/web` - `zz-web-client`: the WASM entry point around zz-app, with its own Cargo workspace
 - `clients/ios` - `zz-ios`: the iOS entry point around zz-app and zz-gpui-platform's iOS backend, the bundle files, and a terminal example (`ZZ_GPUI_DEMO=terminal`); `just ios`
+- `clients/android` - `zz-android`: the Android entry point around zz-app and zz-gpui-platform's Android backend, the Java glue (activity, surface view, input connection, web view), the manifest and resources; `just android`
 - `crates/zz-xtask` — build tooling: CEF bundling, packaging (`cargo xtask`)
 - `compat/` — tmux compat campaign: differential harness (`run.sh`), gap registry (`tmux-gaps.json`), dispatch-board client (`board.py`), progress meter, orchestration handoff (`orchestration/`)
 - `compat/tui/` — TUI parity campaign: proof ledger (`campaign.json`), validator and report generator (`tracker.py`), cycle runners (`run-N.js`); closed 2026-09-20 at 18/18
@@ -66,6 +67,7 @@ Recipes live in `Justfile` and `scripts/just/*.just` and run from the repo root.
 | `just watch <platform>` | Rebuild and relaunch on source change |
 | `just build <platform>` | Release bundle into `dist/zz` (wraps `cargo xtask bundle-cef`) |
 | `just install mac` | Build and swap `/Applications/zz.app`; the daemon survives the swap |
+| `just android <setup\|emulator\|run\|build\|device\|logs>` / `android rig [stop]` | GPUI Android app: install the SDK, NDK, emulator and `zz-phone` AVD, boot it, build and launch on it attached to the rig through `adb reverse`, build the APK, install a release arm64 build on a USB or wireless device, or follow its logcat |
 | `just ios <run\|build\|device\|bench> [iPhone\|iPad]` / `ios rig [stop]` / `ios testflight` | GPUI iOS app (iPhone by default): simulator, a paired device (release, signed, installed), a hands-free frame benchmark on the device, a throwaway daemon that `ios run` attaches to, or a signed `dev.zz.ios` TestFlight upload; `ZZ_GPUI_DEMO=terminal` selects the terminal example |
 | `just site` | Docs site dev server with live reload |
 | `just web run` / `web setup` / `web build [--release]` / `web serve` | Browser client dev loop / toolchain / assets / local gateway |
@@ -97,7 +99,7 @@ A few `zz-daemon` tests are timing-sensitive and only fail under full-workspace 
 
 - The daemon outlives the app: after installing a new build, existing sessions keep running the old daemon binary until it restarts. Don't chase "missing" behavior in a stale daemon.
 - `just run` / `just watch` build zz Dev with `ZZ_DEV_BUILD=1`, clear inherited daemon/pane context, and use `zz-dev` config/data/socket paths. The macOS bundle is `dist/zz-dev/zz Dev.app` (`dev.zz.app.dev`); Linux launches `target/debug/zz-dev`. Installed and beta packages keep their existing behavior.
-- `just web run` / `web build` / `web serve` use dev assets and port 8081. Dev SSH selects `zz-dev`, linked by desktop dev runs into `~/.local/bin`. `web build --release` retains production identity. `just ios run iPad` opens the session sidebar and daemon-backed terminal/agent panes; `just ios run` (iPhone) opens the phone shell, one pane per screen, paged by the bar's pill, with the card overview (drag the bar up) as its navigator; the gear (in the overview on iPhone) opens the thin-client settings (iPhone hides Panes and Status bar); set `ZZ_GPUI_DEMO=terminal` for the terminal example. See `clients/ios/README.md` for endpoint selection.
+- `just web run` / `web build` / `web serve` use dev assets and port 8081. Dev SSH selects `zz-dev`, linked by desktop dev runs into `~/.local/bin`. `web build --release` retains production identity. `just ios run iPad` opens the session sidebar and daemon-backed terminal/agent panes; `just ios run` (iPhone) opens the phone shell, one pane per screen, paged by the bar's pill, with the card overview (drag the bar up) as its navigator; the gear (in the overview on iPhone) opens the thin-client settings (iPhone hides Panes and Status bar); set `ZZ_GPUI_DEMO=terminal` for the terminal example. See `clients/ios/README.md` for endpoint selection. `just android run` installs the same app on the `zz-phone` emulator and attaches it to `just android rig` (the iOS rig) through `adb reverse`; see `clients/android/README.md`.
 - `ZZ_SOCKET` overrides the socket the app dials. Unix socket paths have a low length cap (`sun_path`); put test sockets directly under `/tmp`.
 - Recipes live in `knowledge/playbooks/running-zz.md`.
 </important>

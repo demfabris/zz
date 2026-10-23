@@ -23,37 +23,37 @@ pub const FLOW_WINDOW_ENVIRONMENT_VARIABLE: &str = "ZZ_FLOW_WINDOW";
 pub const SSH_BATCH_ENVIRONMENT_VARIABLE: &str = "ZZ_SSH_BATCH";
 pub const COLD_START_PREPARE_ABORT_COMMAND: &str = "__zz-cold-start-prepare-abort";
 
-// iOS uses the in-process russh tunnel, leaving the spawned-ssh and askpass halves unreachable.
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+// iOS and Android use the in-process russh tunnel, leaving the spawned-ssh and askpass halves unreachable.
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod askpass;
 mod client;
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod endpoint;
 mod fleet_hosts;
 #[cfg(any(unix, windows))]
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod fleet_sync;
 #[cfg(any(unix, windows))]
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod host_probe;
 #[cfg(target_os = "ios")]
 mod ios_keychain;
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod lifecycle;
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod paths;
 pub mod process_info;
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 mod russh_client;
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 mod russh_prompt;
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 mod russh_socks;
 #[cfg(test)]
 mod solo_tests;
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod ssh_key;
-#[cfg_attr(target_os = "ios", allow(dead_code))]
+#[cfg_attr(any(target_os = "ios", target_os = "android"), allow(dead_code))]
 mod terminal_features;
 pub mod transport;
 pub mod unmasked;
@@ -95,8 +95,8 @@ pub use paths::{
     default_mux_config, discover_tmux_config, home_directory, mux_config_candidates,
     mux_config_write_path,
 };
-#[cfg(target_os = "ios")]
-pub use russh_client::ios_ssh_public_key;
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub use russh_client::app_ssh_public_key;
 pub use ssh_key::{ssh_key_path, ssh_public_key};
 pub use terminal_features::{
     TERMINAL_FEATURES, terminal_colour_count, terminal_default_features, terminal_feature_mask,

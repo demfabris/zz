@@ -338,7 +338,7 @@ xim = { git = "https://github.com/zed-industries/xim-rs.git", rev = "16f35a2c881
 ], package = "zed-xim", version = "0.4.0-zed", optional = true }
 x11-clipboard = { version = "0.9.3", optional = true }
 
-[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_family = "wasm", target_os = "ios"))'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_family = "wasm", target_os = "ios", target_os = "android"))'.dependencies]
 bytemuck = "1"
 naga = { version = "30.0.1", features = ["wgsl-in"] }
 cosmic-text = { path = "../../third_party/rust/cosmic-text", version = "0.19.0" }
@@ -480,6 +480,19 @@ image = { workspace = true, features = [
 log = { workspace = true, features = ["kv_unstable_serde", "serde"] }
 memmap2 = "0.9.11"
 objc.workspace = true
+parking_lot.workspace = true
+raw-window-handle.workspace = true
+uuid.workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+accesskit_android = { version = "0.7.5", features = ["embedded-dex"] }
+anyhow.workspace = true
+futures.workspace = true
+jni = "0.21.1"
+libc.workspace = true
+log = { workspace = true, features = ["kv_unstable_serde", "serde"] }
+memmap2 = "0.9.11"
+ndk-sys = { version = "0.6.0", features = ["nativewindow"] }
 parking_lot.workspace = true
 raw-window-handle.workspace = true
 uuid.workspace = true

@@ -17,7 +17,8 @@
 Workspace members without a crate page here: `zz-gpui` and the `zz-gpui-*` crates (our GPUI, see
 [zz-gpui](/references/zz-gpui.md)), `zz-gpui-kit` (widget kit, a maintained gpui-component fork),
 `zz-ui` (zz's application UI), `zz-tui` (the library behind `zz attach`), `zz-app` (the thin-client app
-web and iOS share, in `clients/app`), and `zz-ios` (the iOS entry point, in `clients/ios`).
+web, iOS and Android share, in `clients/app`), `zz-ios` (the iOS entry point, in `clients/ios`), and
+`zz-android` (the Android entry point, in `clients/android`).
 `zz-web` serves the [browser client](/playbooks/browser-client.md), whose GPUI/WASM frontend lives
 in the separate `clients/web` workspace.
 The map in

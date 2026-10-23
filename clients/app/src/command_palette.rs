@@ -116,7 +116,7 @@ impl PaletteBackend for ConnectionPalette {
 
     fn availability(&self, cx: &App) -> PaneKindAvailability {
         PaneKindAvailability {
-            browser: cfg!(target_os = "ios"),
+            browser: cfg!(any(target_os = "ios", target_os = "android")),
             agent: self.agent_enabled && agent_pane_available(&self.connection.read(cx).core),
             editor: false,
         }

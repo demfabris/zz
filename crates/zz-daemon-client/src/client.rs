@@ -68,9 +68,9 @@ fn client_instance_id() -> ClientInstanceId {
 use zz_terminal::TerminalColorScheme;
 
 // iOS cannot run ssh, so it tunnels in-process instead of forwarding a socket.
-#[cfg(all(any(unix, windows), not(target_os = "ios")))]
+#[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
 use crate::endpoint::{SshForward, connect_kept};
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 use crate::russh_client::{RusshForward, RusshStream};
 use crate::{
     DaemonError, diagnostic_elapsed_us, diagnostic_timer,
@@ -80,7 +80,7 @@ use crate::{
 
 pub(crate) enum ClientStream {
     Local(LocalStream),
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     Ssh(RusshStream),
 }
 
@@ -88,7 +88,7 @@ impl Read for ClientStream {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Local(stream) => stream.read(buffer),
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Ssh(stream) => stream.read(buffer),
         }
     }
@@ -98,7 +98,7 @@ impl Write for ClientStream {
     fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
         match self {
             Self::Local(stream) => stream.write(buffer),
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Ssh(stream) => stream.write(buffer),
         }
     }
@@ -106,7 +106,7 @@ impl Write for ClientStream {
     fn flush(&mut self) -> io::Result<()> {
         match self {
             Self::Local(stream) => stream.flush(),
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Ssh(stream) => stream.flush(),
         }
     }
@@ -117,7 +117,7 @@ impl ClientStream {
     fn shutdown(&self) -> io::Result<()> {
         match self {
             Self::Local(stream) => stream.shutdown(),
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Ssh(_) => Ok(()),
         }
     }
@@ -128,7 +128,7 @@ impl TransportStream for ClientStream {
     fn receive_fd(&self) -> io::Result<std::os::fd::OwnedFd> {
         match self {
             Self::Local(stream) => stream.receive_fd(),
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Ssh(_) => Err(io::Error::from(io::ErrorKind::Unsupported)),
         }
     }
@@ -137,7 +137,7 @@ impl TransportStream for ClientStream {
     fn read_ready(&self, buffer: &mut [u8]) -> io::Result<usize> {
         match self {
             Self::Local(stream) => stream.read_ready(buffer),
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Ssh(_) => Err(io::Error::from(io::ErrorKind::Unsupported)),
         }
     }
@@ -145,7 +145,7 @@ impl TransportStream for ClientStream {
     fn try_clone(&self) -> io::Result<Self> {
         match self {
             Self::Local(stream) => stream.try_clone().map(Self::Local),
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             Self::Ssh(stream) => stream.try_clone().map(Self::Ssh),
         }
     }
@@ -211,11 +211,11 @@ pub struct CommandClient {
     link: CommandLink,
     route: CommandRoute,
     server_id: Option<u64>,
-    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+    #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
     _ssh_forward: Option<SshForward>,
-    #[cfg(all(unix, not(target_os = "ios")))]
+    #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
     unverified: Option<crate::endpoint::SshEndpoint>,
-    #[cfg(all(unix, not(target_os = "ios")))]
+    #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
     read_only: bool,
 }
 
@@ -436,12 +436,12 @@ impl CommandRoute {
         CommandLink::exec(LocalTransport::connect(&self.socket)?)
     }
 
-    #[cfg(all(unix, not(target_os = "ios")))]
+    #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
     fn probe(&self) -> ProtocolMessage {
         ProtocolMessage::Exec(self.exec_request(Vec::new(), ExecFlags::default(), None, None))
     }
 
-    #[cfg(all(unix, not(target_os = "ios")))]
+    #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
     fn answers_at(&self, socket: &Path) -> bool {
         let Ok(stream) = LocalTransport::connect(socket) else {
             return false;
@@ -504,7 +504,7 @@ impl CommandClient {
             Some(attach),
         )?;
         let client = InteractiveClient::from_connected(connected);
-        #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+        #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
         let client = {
             let mut client = client;
             client.ssh_forward = self._ssh_forward;
@@ -540,18 +540,18 @@ impl CommandClient {
             link,
             route,
             server_id,
-            #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+            #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
             _ssh_forward: None,
-            #[cfg(all(unix, not(target_os = "ios")))]
+            #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
             unverified: None,
-            #[cfg(all(unix, not(target_os = "ios")))]
+            #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
             read_only: false,
         }
     }
 
     /// Connect a short-lived command client to a configured fleet endpoint.
     pub fn connect_endpoint(endpoint: &Endpoint, read_only: bool) -> Result<Self, DaemonError> {
-        #[cfg(not(all(unix, not(target_os = "ios"))))]
+        #[cfg(not(all(unix, not(any(target_os = "ios", target_os = "android")))))]
         let _ = read_only;
         match endpoint {
             Endpoint::Local(path) => Self::connect_route(CommandRoute {
@@ -561,12 +561,12 @@ impl CommandClient {
                 send_origin: false,
             }),
             Endpoint::Ssh(endpoint) => {
-                #[cfg(target_os = "ios")]
+                #[cfg(any(target_os = "ios", target_os = "android"))]
                 {
                     let _ = endpoint;
                     Err(crate::EndpointError::UnsupportedPlatform.into())
                 }
-                #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+                #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
                 {
                     let (mut client, ssh_forward) =
                         connect_kept(endpoint, None, true, |socket, stream| {
@@ -722,9 +722,9 @@ impl CommandClient {
             spawned_server_id,
             expect_server_id,
         ));
-        #[cfg(all(unix, not(target_os = "ios")))]
+        #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
         let verified = self.verify_kept_link(&request)?;
-        #[cfg(not(all(unix, not(target_os = "ios"))))]
+        #[cfg(not(all(unix, not(any(target_os = "ios", target_os = "android")))))]
         let verified = false;
         let CommandLink::Exec {
             reader,
@@ -889,7 +889,7 @@ impl CommandClient {
         }
     }
 
-    #[cfg(all(unix, not(target_os = "ios")))]
+    #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
     fn verify_kept_link(&mut self, request: &ProtocolMessage) -> Result<bool, DaemonError> {
         self.verify_kept_link_within(
             request,
@@ -898,7 +898,7 @@ impl CommandClient {
         )
     }
 
-    #[cfg(all(unix, not(target_os = "ios")))]
+    #[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
     fn verify_kept_link_within(
         &mut self,
         request: &ProtocolMessage,
@@ -1214,9 +1214,9 @@ pub struct InteractiveClient {
     reader: Mutex<ProtocolReceiver<ClientStream>>,
     writer: Arc<Mutex<ProtocolSender<ClientStream>>>,
     hello: ServerHello,
-    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+    #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
     ssh_forward: Option<SshForward>,
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     russh_forward: Option<RusshForward>,
 }
 
@@ -1271,7 +1271,7 @@ impl InteractiveClient {
                 Ok(Self::from_connected(connected))
             }
             Endpoint::Ssh(endpoint) => {
-                #[cfg(target_os = "ios")]
+                #[cfg(any(target_os = "ios", target_os = "android"))]
                 {
                     let (forward, stream) = RusshForward::start(endpoint, prompts)?;
                     let connected = connect_stream_hello(
@@ -1295,7 +1295,7 @@ impl InteractiveClient {
                     client.russh_forward = Some(forward);
                     Ok(client)
                 }
-                #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+                #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
                 {
                     let resendable = attach_resendable(attach.as_ref());
                     let (connected, forward) =
@@ -1456,7 +1456,7 @@ impl InteractiveClient {
         match endpoint {
             Endpoint::Local(path) => Self::connect_control(path),
             Endpoint::Ssh(endpoint) => {
-                #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+                #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
                 {
                     let (connected, forward) = connect_kept(endpoint, None, true, |_, stream| {
                         connect_stream_with_startup_owner(
@@ -1474,7 +1474,10 @@ impl InteractiveClient {
                     })?;
                     Ok(Self::from_connected_with_ssh(connected, forward))
                 }
-                #[cfg(not(all(any(unix, windows), not(target_os = "ios"))))]
+                #[cfg(not(all(
+                    any(unix, windows),
+                    not(any(target_os = "ios", target_os = "android"))
+                )))]
                 {
                     let _ = endpoint;
                     Err(crate::EndpointError::UnsupportedPlatform.into())
@@ -1731,7 +1734,7 @@ impl InteractiveClient {
                 Ok(Self::from_connected(connected))
             }
             Endpoint::Ssh(endpoint) => {
-                #[cfg(target_os = "ios")]
+                #[cfg(any(target_os = "ios", target_os = "android"))]
                 {
                     let _ = socks;
                     let (russh_forward, stream) = RusshForward::start(endpoint, prompts)?;
@@ -1755,7 +1758,7 @@ impl InteractiveClient {
                     client.russh_forward = Some(russh_forward);
                     Ok(client)
                 }
-                #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+                #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
                 {
                     let connect = |stream: LocalStream| {
                         connect_stream_with_startup_owner(
@@ -1800,14 +1803,14 @@ impl InteractiveClient {
             reader: Mutex::new(reader),
             writer,
             hello,
-            #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+            #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
             ssh_forward: None,
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             russh_forward: None,
         }
     }
 
-    #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+    #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
     fn from_connected_with_ssh(
         connected: Connected<ClientStream>,
         ssh_forward: Option<SshForward>,
@@ -1825,13 +1828,13 @@ impl InteractiveClient {
     /// The loopback SOCKS5 port this client's ssh forward opened, if it has one.
     #[must_use]
     pub fn socks_port(&self) -> Option<u16> {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         {
             self.russh_forward
                 .as_ref()
                 .and_then(RusshForward::socks_port)
         }
-        #[cfg(all(any(unix, windows), not(target_os = "ios")))]
+        #[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
         {
             self.ssh_forward.as_ref().and_then(SshForward::socks_port)
         }
@@ -1845,11 +1848,11 @@ impl InteractiveClient {
     /// localhost ports onto this device. Off until turned on, so a client
     /// holding several hosts forwards only the one on screen.
     pub fn set_loopback_discovery(&self, enabled: bool) {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(forward) = &self.russh_forward {
             forward.set_loopback_discovery(enabled);
         }
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         let _ = enabled;
     }
 
@@ -1860,7 +1863,7 @@ impl InteractiveClient {
                 "A nonzero localhost port is required.",
             ));
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(forward) = &self.russh_forward {
             return forward.forward_loopback(port);
         }
@@ -2205,7 +2208,7 @@ impl InteractiveClient {
 
     #[cfg(unix)]
     pub fn shutdown(&self) -> Result<(), DaemonError> {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(forward) = &self.russh_forward {
             forward.shutdown();
             return Ok(());
@@ -2387,7 +2390,7 @@ struct ProtocolReceiver<S> {
     skipped_decode: bool,
 }
 
-#[cfg(all(test, unix, not(target_os = "ios")))]
+#[cfg(all(test, unix, not(any(target_os = "ios", target_os = "android"))))]
 #[path = "ctrl_client_tests.rs"]
 mod ctrl_client_tests;
 
@@ -3120,7 +3123,7 @@ fn connect_stream<S: TransportStream>(
     )
 }
 
-#[cfg(all(any(unix, windows), not(target_os = "ios")))]
+#[cfg(all(any(unix, windows), not(any(target_os = "ios", target_os = "android"))))]
 fn attach_resendable(attach: Option<&zz_protocol::AttachOperation>) -> bool {
     let Some(zz_protocol::AttachOperation::Commands(commands)) = attach else {
         return true;

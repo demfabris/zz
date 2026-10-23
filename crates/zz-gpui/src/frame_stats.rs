@@ -522,13 +522,13 @@ fn nanos(duration: Duration) -> u64 {
     duration.as_nanos().min(u64::MAX as u128) as u64
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn thread_id() -> Option<u64> {
     // SAFETY: gettid has no arguments and does not access caller-owned memory.
     Some(unsafe { libc::gettid() } as u64)
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn thread_id() -> Option<u64> {
     None
 }

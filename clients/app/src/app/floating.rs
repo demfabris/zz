@@ -616,9 +616,10 @@ impl AppShell {
 }
 
 pub(super) fn draws_own_header(kind: &zz_protocol::PaneKindSnapshot) -> bool {
+    const NATIVE_BROWSER: bool = cfg!(any(target_os = "ios", target_os = "android"));
     match kind {
         zz_protocol::PaneKindSnapshot::Agent(_) => true,
-        zz_protocol::PaneKindSnapshot::Browser(_) => cfg!(target_os = "ios"),
+        zz_protocol::PaneKindSnapshot::Browser(_) => NATIVE_BROWSER,
         _ => false,
     }
 }
@@ -695,7 +696,7 @@ pub(super) fn float_placement(
     })
 }
 
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 pub(super) fn native_panes_shown(
     tiled: impl IntoIterator<Item = (zz_protocol::PaneId, Option<Bounds<Pixels>>)>,
     floats: &[(zz_protocol::PaneId, FloatPlacement)],

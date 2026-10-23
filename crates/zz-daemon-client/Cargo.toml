@@ -26,6 +26,11 @@ getrandom = { workspace = true, features = ["sys_rng"] }
 core-foundation.workspace = true
 security-framework-sys = "2.17"
 
+[target.'cfg(target_os = "android")'.dependencies]
+russh = { version = "0.63.3", default-features = false, features = ["ring", "flate2", "rsa"] }
+tokio = { version = "1", default-features = false, features = ["rt", "net", "io-util", "time", "sync"] }
+getrandom = { workspace = true, features = ["sys_rng"] }
+
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["fs", "net"] }
 

@@ -14,7 +14,7 @@ use zz_ui::{
 const CHOICES: &[(&str, &str, IconName, &str)] = &[
     ("Terminal", "terminal", IconName::SquareTerminal, "t"),
     ("Agent", "agent", IconName::RobotFace, "a"),
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     ("Browser", "browser", IconName::Globe, "b"),
 ];
 

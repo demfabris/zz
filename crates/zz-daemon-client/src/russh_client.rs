@@ -1,4 +1,4 @@
-//! In-process ssh attach for iOS.
+//! In-process ssh attach for iOS and Android, which cannot spawn ssh.
 
 use std::{
     io::{self, Read, Write},
@@ -36,13 +36,20 @@ use crate::{
         SshEndpoint, authorized_key_script, parse_remote_probe_output, remote_daemon_start_script,
         remote_proxy_script, remote_socket_probe, shell_quote, ssh_failure_hint,
     },
-    ios_keychain::{self, KeychainError},
     russh_prompt::{AsyncSshPrompts, HandshakeDeadline},
     russh_socks::{LoopbackForward, SocksForward, discover_loopback_ports},
     transport::TransportStream,
 };
 
+#[cfg(target_os = "ios")]
+use crate::ios_keychain::{self, KeychainError};
+
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_mins(1);
+const KEY_COMMENT: &str = if cfg!(target_os = "android") {
+    "zz-android"
+} else {
+    "zz-iphone"
+};
 const OUTBOUND_QUEUE: usize = 64;
 const READ_CHUNK: usize = 32 * 1024;
 static SSH_IDENTITY_LOCK: Mutex<()> = Mutex::new(());
@@ -387,7 +394,7 @@ async fn establish(
     let user = endpoint
         .user
         .clone()
-        .ok_or_else(|| ssh_failed("ssh endpoints need an explicit user on iOS".to_owned()))?;
+        .ok_or_else(|| ssh_failed("ssh endpoints need an explicit user".to_owned()))?;
 
     let directory = ssh_directory().map_err(|error| ssh_failed(error.to_string()))?;
     let config = Arc::new(client::Config::default());
@@ -620,7 +627,7 @@ async fn offer_key(
     ) {
         return;
     }
-    let script = authorized_key_script(public_key, &format!("{public_key} zz-iphone"));
+    let script = authorized_key_script(public_key, &format!("{public_key} {KEY_COMMENT}"));
     match exec_capture(session, format!("sh -c {}", shell_quote(&script))).await {
         Ok((Some(0), ..)) => {}
         Ok((status, _, stderr)) => log::warn!(
@@ -955,24 +962,29 @@ fn ssh_directory() -> io::Result<PathBuf> {
     } else {
         let home = std::env::var_os("HOME")
             .ok_or_else(|| io::Error::other("HOME is unset; cannot store ssh state"))?;
-        PathBuf::from(home)
-            .join("Library")
-            .join("Application Support")
-            .join("zz")
-            .join("ssh")
+        let home = PathBuf::from(home);
+        if cfg!(target_os = "android") {
+            home.join("zz").join("ssh")
+        } else {
+            home.join("Library")
+                .join("Application Support")
+                .join("zz")
+                .join("ssh")
+        }
     };
     std::fs::create_dir_all(&directory)?;
     Ok(directory)
 }
 
-pub fn ios_ssh_public_key() -> io::Result<String> {
+/// The app's own ssh public key, in `authorized_keys` form.
+pub fn app_ssh_public_key() -> io::Result<String> {
     let directory = ssh_directory()?;
     let key = load_or_generate_key(&directory.join("id_ed25519"))?;
     let public = key
         .public_key()
         .to_openssh()
         .map_err(|error| io::Error::other(format!("encoding the public half: {error}")))?;
-    Ok(format!("{public} zz-iphone"))
+    Ok(format!("{public} {KEY_COMMENT}"))
 }
 
 fn load_or_generate_key(path: &Path) -> io::Result<PrivateKey> {
@@ -980,6 +992,14 @@ fn load_or_generate_key(path: &Path) -> io::Result<PrivateKey> {
     load_or_generate_key_locked(path)
 }
 
+/// Android keeps the identity in the app's private files directory, which only
+/// this app can read.
+#[cfg(target_os = "android")]
+fn load_or_generate_key_locked(path: &Path) -> io::Result<PrivateKey> {
+    file_identity(path)
+}
+
+#[cfg(target_os = "ios")]
 fn load_or_generate_key_locked(path: &Path) -> io::Result<PrivateKey> {
     let stored = match ios_keychain::load_identity() {
         Ok(stored) => stored,
@@ -1092,7 +1112,7 @@ fn write_public_half(path: &Path, key: &PrivateKey) -> io::Result<()> {
         .public_key()
         .to_openssh()
         .map_err(|error| io::Error::other(format!("encoding the public half: {error}")))?;
-    let line = format!("{public} zz-iphone\n");
+    let line = format!("{public} {KEY_COMMENT}\n");
     let path = path.with_extension("pub");
     if std::fs::read_to_string(&path).is_ok_and(|current| current == line) {
         return Ok(());

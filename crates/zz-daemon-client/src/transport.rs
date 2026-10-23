@@ -127,6 +127,14 @@ impl Transport for LocalTransport {
     }
 
     fn connect(endpoint: &Self::Endpoint) -> io::Result<Self::Stream> {
+        // Android reaches a host daemon through `adb reverse`, which listens on an
+        // abstract socket; `@name` names one.
+        #[cfg(target_os = "android")]
+        if let Some(name) = endpoint.to_str().and_then(|path| path.strip_prefix('@')) {
+            use interprocess::local_socket::GenericNamespaced;
+            return LocalSocketStream::connect(name.to_ns_name::<GenericNamespaced>()?)
+                .map(LocalStream);
+        }
         let name = endpoint.as_os_str().to_fs_name::<GenericFilePath>()?;
         LocalSocketStream::connect(name).map(LocalStream)
     }

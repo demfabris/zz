@@ -36,6 +36,13 @@ raw-window-handle.workspace = true
 zz-gpui-platform.workspace = true
 zz-daemon-client.workspace = true
 
+[target.'cfg(target_os = "android")'.dependencies]
+futures.workspace = true
+percent-encoding = "2.3.2"
+url.workspace = true
+zz-gpui-platform.workspace = true
+zz-daemon-client.workspace = true
+
 [dev-dependencies]
 zz-gpui = { workspace = true, features = ["test-support"] }
 zz-gpui-platform.workspace = true

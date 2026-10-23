@@ -965,7 +965,7 @@ fn daemon_was_not_running(message: &str) -> bool {
 }
 
 /// The remote half of an attach that cannot forward a Unix socket: `zz proxy` on its stdio.
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 pub(crate) fn remote_proxy_script(remote_socket: &Path) -> String {
     format!(
         "{fallback}exec \"$zz_cli\" proxy --socket {socket}",
@@ -2116,7 +2116,7 @@ pub(crate) fn stopped_answering(endpoint: &SshEndpoint) -> EndpointError {
     }
 }
 
-#[cfg(all(unix, not(target_os = "ios")))]
+#[cfg(all(unix, not(any(target_os = "ios", target_os = "android"))))]
 pub(crate) fn remake_kept_forward(
     endpoint: &SshEndpoint,
     stalled: bool,
@@ -2578,7 +2578,7 @@ pub(crate) fn accept_until_stopped(
 
 /// `Path::is_absolute` asks the local platform's question, which a Windows client would answer
 /// wrongly about a remote POSIX path.
-#[cfg(any(windows, target_os = "ios"))]
+#[cfg(any(windows, target_os = "ios", target_os = "android"))]
 pub(crate) fn remote_socket_is_absolute(path: &Path) -> bool {
     path.as_os_str().as_encoded_bytes().starts_with(b"/")
 }

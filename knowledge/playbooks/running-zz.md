@@ -4,7 +4,7 @@ title: Building and running zz
 description: How to build and run the zz GPUI client and its daemon, what the first build downloads, and how to exercise the browser pane with the loopback fixture.
 resource: crates/zz/src/lib.rs
 tags: [running, cargo, cef-download, daemon, browser-fixture, pacman, profiling, instruments]
-timestamp: 2026-09-23T00:00:00Z
+timestamp: 2026-10-22T00:00:00Z
 ---
 
 # Overview
@@ -120,6 +120,12 @@ The other development recipes share this identity:
 It attaches to the throwaway daemon from `just ios rig` when that is up, then to an existing dev
 socket, or to `ZZ_GPUI_ENDPOINT` / `ZZ_DEV_SOCKET`; `just ios device` installs it on a paired
 phone. See `clients/ios/README.md`.
+
+`just android run` builds the same thin client as an APK and runs it on the `zz-phone` emulator
+(`just android setup` installs the SDK, NDK, emulator and AVD). It reaches the daemon from
+`just android rig`, which is the iOS rig, through `adb reverse` onto an abstract socket (endpoint
+`@zz-rig`), or `ZZ_GPUI_ENDPOINT`; `just android device` installs a release arm64 build on a phone.
+See `clients/android/README.md`.
 
 `just build` and package installation keep their existing identity and destinations. Brew/AUR
 beta selection is independent of development isolation. Plain Cargo builds do not enable the

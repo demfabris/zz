@@ -41,7 +41,7 @@ const SCRIM_ALPHA: f32 = 0.8;
 const SCRIM_FADE: f32 = 12.0;
 const PINCH_STEPS: f32 = 20.0;
 const SCALE_HUD_LINGER: Duration = Duration::from_secs(1);
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 const NOTICE_LINGER: Duration = Duration::from_secs(2);
 const LANDING_WAIT: Duration = Duration::from_secs(1);
 const BAR_DROP: f32 = 15.0;
@@ -95,7 +95,7 @@ pub(super) struct CompactState {
 }
 
 impl CompactState {
-    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
     pub(super) fn forget_panes(&mut self) {
         self.notice = None;
         self.landing = None;
@@ -120,7 +120,7 @@ impl CompactState {
         self.add_host = false;
     }
 
-    #[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
     pub(super) fn close_add_host(&mut self) {
         self.add_host = false;
     }
@@ -142,7 +142,7 @@ fn prefix_menu() -> (Vec<PopoverKeyItem>, PopoverKeyItem) {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "ios", target_os = "android")), allow(dead_code))]
 pub(super) enum PillNotice {
     Done,
     Hint,
@@ -304,9 +304,9 @@ fn key_row_top(zone: Pixels, overlap: Pixels) -> Pixels {
 }
 
 fn screen_radius(window: &Window) -> Option<Pixels> {
-    #[cfg(target_os = "ios")]
-    if zz_gpui_platform::ios::phone() {
-        return zz_gpui_platform::ios::display_corner_radius()
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    if zz_gpui_platform::mobile::phone() {
+        return zz_gpui_platform::mobile::display_corner_radius()
             .map(|radius| px(radius / window.zoom()));
     }
     let _ = window;
@@ -380,12 +380,12 @@ impl AppShell {
         }
         if self.compact.compact_keyboard != Some(compact) {
             self.compact.compact_keyboard = Some(compact);
-            #[cfg(target_os = "ios")]
-            zz_gpui_platform::ios::set_compact_keyboard(compact);
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            zz_gpui_platform::mobile::set_compact_keyboard(compact);
         }
         if !compact {
-            #[cfg(target_os = "ios")]
-            zz_gpui_platform::ios::set_status_bar_on_dark(None);
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            zz_gpui_platform::mobile::set_status_bar_on_dark(None);
             zz_ui::compact::StickyModifiers::take(cx);
             if self.compact.pinch.take().is_some() {
                 self.terminal_resize_suppressed.set(false);
@@ -675,7 +675,7 @@ impl AppShell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         let _ = hole;
         let radius = cx.theme().layer(roles::PANE, PaintState::Rest).radius * motion;
         let pane_id = slot.pane;
@@ -743,7 +743,7 @@ impl AppShell {
                 }
                 agent.into_any_element()
             }
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             PaneKindSnapshot::Browser(descriptor) => {
                 let browser = self.browser_entity(pane_id, descriptor, window, cx);
                 browser.update(cx, |browser, cx| {
@@ -764,7 +764,7 @@ impl AppShell {
                 }
                 browser.into_any_element()
             }
-            #[cfg(not(target_os = "ios"))]
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             PaneKindSnapshot::Browser(descriptor) => super::unsupported_pane(
                 "Browser",
                 IconName::Globe,
@@ -812,9 +812,9 @@ impl AppShell {
         if current {
             self.compact.page_background = Some(background);
         }
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if current {
-            zz_gpui_platform::ios::set_status_bar_on_dark(Some(background.l < 0.5));
+            zz_gpui_platform::mobile::set_status_bar_on_dark(Some(background.l < 0.5));
         }
         let browser = matches!(pane.kind, PaneKindSnapshot::Browser(_));
         div()
@@ -879,7 +879,7 @@ impl AppShell {
         }
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub(super) fn show_pill_notice(
         &mut self,
         pane: PaneId,
@@ -984,7 +984,7 @@ impl AppShell {
         cx.notify();
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub(super) fn compact_visible_panes(&self, cx: &App) -> BTreeSet<PaneId> {
         if self.compact.pager.is_moving() || self.compact_lifted() {
             return BTreeSet::new();
@@ -1012,7 +1012,7 @@ impl AppShell {
         }
         self.compact.last_current = current_pane;
         self.reconcile_compact_zoom(cx);
-        let width = f32::from(window.viewport_size().width);
+        let width = f32::from(window.fully_visible_bounds().size.width);
         self.compact.width = width;
         self.compact.pager.sync(current, pages.len());
         if cx.reduce_motion() {
@@ -1376,7 +1376,7 @@ impl AppShell {
             if self.compact.new_sheet {
                 sheets.push(self.overview_new_sheet(safe_bottom, cx));
             }
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             if self.compact.add_host {
                 sheets.push(self.overview_add_host_sheet(safe_bottom, cx));
             }
@@ -1476,7 +1476,7 @@ impl AppShell {
     }
 
     fn browser_backdrop(&self, page: &Page, cx: &App) -> Option<zz_gpui::Hsla> {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(browser) = self.browsers.get(&page.pane) {
             return browser.read(cx).backdrop_color();
         }
@@ -1485,7 +1485,7 @@ impl AppShell {
     }
 
     pub(super) fn browser_page(&self, page: &Page, cx: &App) -> Option<(SharedString, String)> {
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         if let Some(browser) = self.browsers.get(&page.pane) {
             let (title, url) = browser.read(cx).shown_page();
             let title = if title.is_empty() {
@@ -1544,6 +1544,93 @@ impl AppShell {
         .surface_role(roles::BINDINGS_DRAWER)
         .header_role(roles::PHONE_BAR)
         .into_any_element()
+    }
+}
+
+/// What Android's system back closes: the iPhone closes the same things with a
+/// swipe or their close control, and with nothing open the system takes it.
+#[cfg(target_os = "android")]
+enum BackTarget {
+    Sheet(&'static str),
+    Overlay,
+    Settings,
+    Overview,
+}
+
+#[cfg(target_os = "android")]
+impl AppShell {
+    fn back_target(&self, dialog: bool, window: &Window, cx: &App) -> Option<BackTarget> {
+        if self.compact.bindings {
+            return Some(BackTarget::Sheet(BINDINGS_SHEET));
+        }
+        if self.compact.add_host {
+            return Some(BackTarget::Sheet(overview::ADD_HOST_SHEET));
+        }
+        if self.compact.new_sheet {
+            return Some(BackTarget::Sheet(overview::NEW_SHEET));
+        }
+        if self.compact.hosts_sheet {
+            return Some(BackTarget::Sheet(overview::HOSTS_SHEET));
+        }
+        let core = &self.connection.read(cx).core;
+        let menu = window.focused(cx).is_some_and(|focus| {
+            cx.build_action("zz_menu::Cancel", None)
+                .ok()
+                .is_some_and(|action| {
+                    window
+                        .highest_precedence_binding_for_action_in(action.as_ref(), &focus)
+                        .is_some()
+                })
+        });
+        if dialog
+            || menu
+            || self.prompt.is_some()
+            || self.slideover
+            || core.choose_tree().is_some()
+            || core.choose_buffer().is_some()
+            || core.command_prompt().is_some()
+            || core.menu().is_some()
+            || core.confirm().is_some()
+            || core.command_output().is_some()
+            || core.display_panes().is_some()
+        {
+            return Some(BackTarget::Overlay);
+        }
+        if self.settings.is_some() {
+            return Some(BackTarget::Settings);
+        }
+        self.compact.overview.then_some(BackTarget::Overview)
+    }
+
+    pub(super) fn sync_system_back(
+        &mut self,
+        dialog: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let enabled = self.back_target(dialog, window, cx).is_some();
+        if self.system_back != Some(enabled) {
+            self.system_back = Some(enabled);
+            window.set_system_back_enabled(enabled);
+        }
+    }
+
+    pub(super) fn system_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = window
+            .root::<zz_ui::Root>()
+            .flatten()
+            .is_some_and(|root| root.read(cx).has_active_dialog());
+        match self.back_target(dialog, window, cx) {
+            Some(BackTarget::Sheet(id)) => close_sheet(id, cx),
+            Some(BackTarget::Overlay) => {
+                if let Ok(escape) = zz_gpui::Keystroke::parse("escape") {
+                    window.dispatch_keystroke(escape, cx);
+                }
+            }
+            Some(BackTarget::Settings) => self.settings_back(window, cx),
+            Some(BackTarget::Overview) => self.close_overview(cx),
+            None => {}
+        }
     }
 }
 

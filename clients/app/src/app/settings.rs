@@ -75,9 +75,9 @@ pub(super) fn shown(setting: Setting, phone: bool) -> bool {
 }
 
 pub(crate) fn phone() -> bool {
-    #[cfg(target_os = "ios")]
-    return zz_gpui_platform::ios::phone();
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    return zz_gpui_platform::mobile::phone();
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     false
 }
 
@@ -105,9 +105,9 @@ impl zz_gpui::Global for PlatformReduceMotion {}
 
 impl Preferences {
     pub(super) fn apply(&self, connection: &Entity<Connection>, window: &mut Window, cx: &mut App) {
-        #[cfg(target_os = "ios")]
-        let system = zz_gpui_platform::ios::accessibility();
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
+        let system = zz_gpui_platform::mobile::accessibility();
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         cx.set_global(PlatformReduceMotion(system.reduce_motion));
         if !cx.has_global::<PlatformReduceMotion>() {
             cx.set_global(PlatformReduceMotion(cx.reduce_motion()));
@@ -115,16 +115,16 @@ impl Preferences {
         cx.set_reduce_motion(cx.global::<PlatformReduceMotion>().0 || !self.animations);
         cx.set_animation_speed(self.animation_speed);
         cx.set_global(zz_ui::program::ProgramColors(self.program_colors));
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         let (contrast, text_scale) = (
             self.contrast * if system.increase_contrast { 1.25 } else { 1.0 },
             system.text_scale,
         );
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         let (contrast, text_scale) = (self.contrast, 1.0);
         let zoom = interface_zoom(self, text_scale, phone());
         let pinned = interface_theme::pinned_theme_mode(self.theme_mode());
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         {
             cx.set_window_appearance(pinned.map(|mode| {
                 if mode.is_dark() {
@@ -141,7 +141,7 @@ impl Preferences {
             });
             Theme::change(mode, Some(window), cx);
         }
-        #[cfg(not(target_os = "ios"))]
+        #[cfg(not(any(target_os = "ios", target_os = "android")))]
         if let Some(mode) = pinned {
             Theme::change(mode, Some(window), cx);
         } else {
@@ -165,7 +165,11 @@ impl Preferences {
             .any(|family| family.eq_ignore_ascii_case(wanted_font))
         {
             wanted_font.to_owned()
-        } else if cfg!(any(target_family = "wasm", target_os = "ios")) {
+        } else if cfg!(any(
+            target_family = "wasm",
+            target_os = "ios",
+            target_os = "android"
+        )) {
             "Inter Variable".to_owned()
         } else {
             ".SystemUIFont".to_owned()
@@ -498,7 +502,7 @@ impl AppShell {
         .into_any_element()
     }
 
-    fn settings_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn settings_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.settings_leaving = false;
         if self.settings_picked {
             self.settings_picked = false;
@@ -519,13 +523,13 @@ impl AppShell {
         let content = if picked {
             self.settings_page(section, true, cx)
         } else {
-            #[cfg(target_os = "ios")]
+            #[cfg(any(target_os = "ios", target_os = "android"))]
             let host = self
                 .connection
                 .read(cx)
                 .endpoint()
                 .map(super::hosts::host_title);
-            #[cfg(not(target_os = "ios"))]
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
             let host: Option<String> = None;
             zz_ui::settings::settings_section_index(
                 &sections(),
@@ -784,8 +788,10 @@ impl AppShell {
                             )
                         },
                     )
-                    .when(cfg!(target_os = "ios"), |page| {
-                        page.child(
+                    .when(
+                        cfg!(any(target_os = "ios", target_os = "android")),
+                        |page| {
+                            page.child(
                             SettingsStack::titled("Display").child(SettingEntry::new(
                                     "Draw under the home indicator",
                                     "Extend the workspace and settings into the bottom safe area.",
@@ -832,7 +838,8 @@ impl AppShell {
                                         cx.notify();
                                     })))),
                         )
-                    })
+                        },
+                    )
                     .into_any_element();
             }
             SettingsSection::About => return about_page(cx),

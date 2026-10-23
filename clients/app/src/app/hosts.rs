@@ -1,5 +1,5 @@
 use zz_gpui::{AnyElement, Context, IntoElement, div, prelude::*};
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 use zz_gpui::{Entity, SharedString, Subscription, Window, px};
 use zz_ui::{
     ActiveTheme as _, Colorize as _, Icon, IconName,
@@ -10,23 +10,23 @@ use zz_ui::{
         settings_scroll_column,
     },
 };
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 use zz_ui::{
     button::ButtonVariants as _,
     input::{Input, InputEvent, InputState},
 };
 
 use super::{AppShell, settings::with_control};
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 use crate::connection::Connection;
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 const DESCRIPTION: &str = "Pick a machine running zz. The app signs in over ssh, so the machine needs Remote Login and zz on its PATH.";
-#[cfg(not(target_os = "ios"))]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 const DESCRIPTION: &str =
     "The browser client reaches the daemon through the zz web gateway on this computer.";
 
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub(super) struct SavedHosts {
@@ -34,7 +34,7 @@ pub(super) struct SavedHosts {
     connected: Vec<String>,
 }
 
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 impl SavedHosts {
     pub(super) fn endpoints(&self) -> &[String] {
         &self.endpoints
@@ -100,11 +100,10 @@ impl SavedHosts {
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 impl SavedHosts {
     fn directory() -> std::path::PathBuf {
-        std::path::PathBuf::from(std::env::var_os("HOME").expect("iOS application home directory"))
-            .join("Library/Application Support/zz-gpui")
+        crate::preferences::support_directory()
     }
 
     pub(super) fn load() -> Self {
@@ -118,7 +117,7 @@ impl SavedHosts {
     }
 }
 
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 pub(super) fn destination_endpoint(input: &str) -> Result<String, String> {
     let destination = input.trim();
     if destination.is_empty() {
@@ -136,7 +135,7 @@ pub(super) fn destination_endpoint(input: &str) -> Result<String, String> {
     )
 }
 
-#[cfg(any(target_os = "ios", test))]
+#[cfg(any(target_os = "ios", target_os = "android", test))]
 pub(super) fn host_title(endpoint: &str) -> String {
     let Some(rest) = endpoint.strip_prefix("ssh://") else {
         return "Local socket".into();
@@ -152,7 +151,7 @@ pub(super) fn host_title(endpoint: &str) -> String {
     .to_owned()
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 pub(super) struct Hosts {
     pub(super) saved: SavedHosts,
     pub(super) destination: Entity<InputState>,
@@ -160,7 +159,7 @@ pub(super) struct Hosts {
     _destination_events: Subscription,
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 impl Hosts {
     pub(super) fn new(window: &mut Window, cx: &mut Context<AppShell>) -> Self {
         let destination = cx.new(|cx| InputState::new(window, cx).placeholder("user@my-mac.local"));
@@ -196,12 +195,12 @@ impl AppShell {
             .when(!entries.is_empty(), |page| {
                 page.child(SettingsStack::titled("Hosts").children(entries))
             });
-        #[cfg(target_os = "ios")]
+        #[cfg(any(target_os = "ios", target_os = "android"))]
         let page = page.child(self.add_host_stack(narrow, cx));
         page.into_any_element()
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub(super) fn remember_host(&mut self, cx: &mut Context<Self>) {
         if let Some(endpoint) = self.connection.read(cx).endpoint() {
             let endpoint = endpoint.to_owned();
@@ -210,7 +209,7 @@ impl AppShell {
         }
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub(super) fn connect_recent_host(&mut self, cx: &mut Context<Self>) {
         let connection = self.connection.read(cx);
         if !connection.connected
@@ -223,7 +222,7 @@ impl AppShell {
         }
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     pub(super) fn add_host(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         let value = self.hosts.destination.read(cx).value().to_string();
         let endpoint = destination_endpoint(&value).and_then(|endpoint| {
@@ -251,7 +250,7 @@ impl AppShell {
         }
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     fn host_entries(&self, narrow: bool, cx: &mut Context<Self>) -> Vec<SettingEntry> {
         let muted = cx.theme().foreground.muted();
         let nothing_attached = self.connection.read(cx).endpoint().is_none();
@@ -352,7 +351,7 @@ impl AppShell {
             .collect()
     }
 
-    #[cfg(not(target_os = "ios"))]
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     fn host_entries(&self, narrow: bool, cx: &mut Context<Self>) -> Vec<SettingEntry> {
         let connection = self.connection.read(cx);
         let connected = connection.connected;
@@ -393,7 +392,7 @@ impl AppShell {
         )]
     }
 
-    #[cfg(target_os = "ios")]
+    #[cfg(any(target_os = "ios", target_os = "android"))]
     fn add_host_stack(&self, narrow: bool, cx: &mut Context<Self>) -> SettingsStack {
         let destination = SettingEntry::new(
             "Destination",
@@ -446,10 +445,10 @@ impl AppShell {
     }
 }
 
-#[cfg(target_os = "ios")]
+#[cfg(any(target_os = "ios", target_os = "android"))]
 pub(super) fn copy_ssh_key(window: &mut Window, cx: &mut zz_gpui::App) {
     use zz_ui::{WindowExt as _, notification::Notification};
-    let notification = match zz_daemon_client::ios_ssh_public_key() {
+    let notification = match zz_daemon_client::app_ssh_public_key() {
         Ok(key) => {
             cx.write_to_clipboard(zz_gpui::ClipboardItem::new_string(key));
             Notification::success("SSH key copied.")
@@ -473,7 +472,7 @@ fn gateway_address() -> String {
         .unwrap_or_default()
 }
 
-#[cfg(not(any(target_family = "wasm", target_os = "ios")))]
+#[cfg(not(any(target_family = "wasm", target_os = "ios", target_os = "android")))]
 fn gateway_address() -> String {
     String::new()
 }

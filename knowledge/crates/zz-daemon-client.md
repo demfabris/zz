@@ -63,7 +63,7 @@ only the event loop uses it.
 | `process_info.rs` | the `process_info` module | Per-OS process facts: start time, command name, cwd, parent, process group, samples, host name |
 | `unmasked.rs` | `unmasked::SpawnUnmasked` | The only way zz starts a `std::process::Command`: `spawn_unmasked`, `output_unmasked` and `status_unmasked` clear the calling thread's signal mask for the spawn and put it back after. Since Rust 1.97 a child inherits the mask of the thread that spawned it, and GPUI's background threads block nearly every signal, so a plain spawn from the desktop app starts ssh, shells and helpers with SIGINT, SIGTERM, SIGCHLD and SIGWINCH blocked. `clippy.toml` disallows the plain `spawn`, `output` and `status`; tests and `zz-xtask` are exempt. Children the daemon's job registry owns start through `daemon::jobs::spawn` in `zz-daemon` instead |
 | `user_data.rs` | `platform_data_dir`, `restrict_to_current_user`, `restrict_directory_to_current_user` | Where user-owned application data lives and how it is permission-hardened; `crates/zz/src/user_data.rs` re-exports it and the daemon's agent journal answers to it too |
-| `russh_client.rs`, `russh_prompt.rs`, `russh_socks.rs`, `ios_keychain.rs` (iOS) | `ios_ssh_public_key` | iOS cannot spawn ssh, so it tunnels in process with `russh`, keeps its identity in the Keychain, and runs browser egress through an in-process SOCKS forward |
+| `russh_client.rs`, `russh_prompt.rs`, `russh_socks.rs`, `ios_keychain.rs` (iOS) | `app_ssh_public_key` | iOS and Android cannot spawn ssh, so they tunnel in process with `russh` and run browser egress through an in-process SOCKS forward; iOS keeps its identity in the Keychain, Android in the app's private files directory |
 
 # Logging
 
